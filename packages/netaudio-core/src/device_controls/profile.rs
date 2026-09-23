@@ -26,7 +26,7 @@ pub struct PanelProfile {
     pub write_unavailable_reason: Option<&'static str>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct PanelProfileRequest {

@@ -194,6 +194,62 @@ pub struct FlowCreatePreflight {
     reason: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct FlowDeletePreflightRequest {
+    inventory: Value,
+    flow_id: NonZeroU16,
+    protocol_id: u16,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FlowDeletePreflight {
+    state: FlowPreflightOutcome,
+    reason: Option<String>,
+    specification: Option<ObservedTransmitFlowSpecification>,
+}
+
+pub fn delete_preflight(request: FlowDeletePreflightRequest) -> FlowDeletePreflight {
+    let inventory = serde_json::from_value::<FlowInventoryEvidence>(request.inventory).ok();
+    let Some(inventory) = inventory.filter(FlowInventoryEvidence::unambiguous) else {
+        return FlowDeletePreflight {
+            state: FlowPreflightOutcome::Unavailable,
+            reason: Some("fresh preflight inventory was unavailable".into()),
+            specification: None,
+        };
+    };
+    let rejected = |reason| FlowDeletePreflight {
+        state: FlowPreflightOutcome::Rejected,
+        reason: Some(reason),
+        specification: None,
+    };
+    let Some(record) = inventory
+        .flows
+        .into_iter()
+        .find(|record| record_identity(record) == Some(request.flow_id.get()))
+    else {
+        return rejected(format!("flow {} is not active", request.flow_id));
+    };
+
+    if record.get("flow_type").and_then(Value::as_str) != Some("multicast") {
+        return rejected("only multicast transmit-flow deletion is supported".into());
+    }
+
+    match transmit_flow_specification(&FlowReadbackRequest {
+        protocol_id: request.protocol_id,
+        record: Value::Object(record),
+    }) {
+        Ok(specification) => FlowDeletePreflight {
+            state: FlowPreflightOutcome::Ready,
+            reason: None,
+            specification: Some(specification),
+        },
+        Err(reason) => rejected(reason),
+    }
+}
+
 pub fn create_preflight(request: FlowCreatePreflightRequest) -> FlowCreatePreflight {
     let capacity = request
         .inventory
@@ -436,8 +492,13 @@ fn comparison_value(specification: &serde_json::Map<String, Value>, field: &str)
     }
 
     if field == "channel_slots" {
-        let slots: Vec<ChannelSlot> = serde_json::from_value(value.clone()).ok()?;
+        let mut slots: Vec<ChannelSlot> = serde_json::from_value(value.clone()).ok()?;
         validate_slots(&slots).ok()?;
+
+        for slot in &mut slots {
+            slot.extra.clear();
+        }
+
         return serde_json::to_value(slots).ok();
     }
 
@@ -702,6 +763,7 @@ pub fn transmit_flow_specification(
         populated.push(ChannelSlot {
             slot: NonZeroU16::new(slot).ok_or("invalid flow channel slot")?,
             transmitter_channel: channel,
+            extra: Default::default(),
         });
     }
 
@@ -777,15 +839,18 @@ pub fn transmit_flow_specification(
             global_flow_id: global_identifier,
             media_type_code: record.media_type_code,
             media_local_flow_id: record.media_local_flow_id,
+            extra: Default::default(),
         },
         protocol: ProtocolRequirements {
             protocol_id: Some(request.protocol_id),
             protocol_version: None,
             cohort: Some(cohort.into()),
             required_capabilities: Vec::new(),
+            extra: Default::default(),
         },
         raw_fields: serde_json::from_value(request.record.clone())
             .map_err(|error| error.to_string())?,
+        extra: Default::default(),
     };
     specification.validate()?;
     Ok(ObservedTransmitFlowSpecification {

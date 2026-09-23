@@ -198,7 +198,7 @@ test("channel cell reports subscription severity", () => {
   assert.ok(transmitter);
   assert.equal(matrix.cellState(receiver, transmitter, subscriptionIndex, {}).kind, "ok");
   const tooltip = matrix.describeHover({ rowIndex: rows.indexOf(receiver), columnIndex: columns.indexOf(transmitter) }, rows, columns, subscriptionIndex, {}, false);
-  assert.match(tooltip, /Connected/);
+  assert.ok(tooltip.endsWith(`\n${receiver.subscription.status.label}`));
   assert.ok(tooltip.includes(receiver.name));
   assert.ok(tooltip.includes(transmitter.name));
   assert.ok(tooltip.startsWith(`${receiver.name}@${receiver.label} ← ${transmitter.name}@${transmitter.label}\n`));

@@ -39,6 +39,15 @@ from netaudio.core._abi import (
     RESULT_CODE_SUCCESS,
 )
 from netaudio.core._protocols import (
+    SERVICE_ARC,
+    SERVICE_CHAN,
+    SERVICE_CMC,
+    SERVICE_DBC,
+    SERVICE_VIDEO,
+    SERVICES,
+    MEDIA_SERVICE_TYPES,
+    MULTICAST_GROUP_HEARTBEAT,
+    MULTICAST_GROUP_CONTROL_MONITORING,
     ARC_PROTOCOL_IDS,
     CAPTURE_PROTOCOL_IDS,
     MODERN_ARC_PROTOCOL_IDS,
@@ -46,6 +55,15 @@ from netaudio.core._protocols import (
 )
 
 __all__ = [
+    "SERVICE_ARC",
+    "SERVICE_CHAN",
+    "SERVICE_CMC",
+    "SERVICE_DBC",
+    "SERVICE_VIDEO",
+    "SERVICES",
+    "MEDIA_SERVICE_TYPES",
+    "MULTICAST_GROUP_HEARTBEAT",
+    "MULTICAST_GROUP_CONTROL_MONITORING",
     "ARC_PROTOCOL_IDS",
     "CAPTURE_PROTOCOL_IDS",
     "MODERN_ARC_PROTOCOL_IDS",
@@ -87,15 +105,3 @@ __all__ = [
     "RESULT_CODE_REQUEST",
     "RESULT_CODE_SUCCESS",
 ]
-
-SERVICE_ARC: str = "_netaudio-arc._udp.local."
-SERVICE_CHAN: str = "_netaudio-chan._udp.local."
-SERVICE_CMC: str = "_netaudio-cmc._udp.local."
-SERVICE_DBC: str = "_netaudio-dbc._udp.local."
-SERVICE_VIDEO: str = "_dantevideo._udp.local."
-MEDIA_SERVICE_TYPES = frozenset({SERVICE_CHAN, SERVICE_VIDEO})
-
-MULTICAST_GROUP_HEARTBEAT = "224.0.0.233"
-MULTICAST_GROUP_CONTROL_MONITORING = "224.0.0.231"
-
-SERVICES = [SERVICE_ARC, SERVICE_CHAN, SERVICE_CMC, SERVICE_DBC, SERVICE_VIDEO]

@@ -105,6 +105,14 @@ class ChannelSlot(_extensions.TypedDict):
     transmitter_channel: int
 
 
+class ClockControlAvailability(_extensions.TypedDict):
+    aggregate_ptpv1_unicast_delay_requests: bool
+    clock_source: bool
+    global_unicast_delay_requests: bool
+    preferred_leader: bool
+    subdomain: bool
+
+
 class ClockPlan(_extensions.TypedDict):
     before: dict[str, JsonValue]
     changes: dict[str, JsonValue]
@@ -120,6 +128,11 @@ class ClockSourceChoice(_extensions.TypedDict):
 class ClockSources(_extensions.TypedDict):
     choices: list[ClockSourceChoice]
     current: _typing.Union[str, None]
+
+
+class ClockSubdomainPresentation(_extensions.TypedDict):
+    label: str
+    text: _typing.Union[str, None]
 
 
 class CodecFormat(_extensions.TypedDict):
@@ -175,6 +188,25 @@ class ConnectionHealthUpdate(_extensions.TypedDict):
     latency: _typing.Union[LatencyUpdate, None]
 
 
+class ControllerApiRoutes(_extensions.TypedDict):
+    endpoints: str
+    login: str
+
+
+class ControllerEndpoints(_extensions.TypedDict):
+    device_port: int
+    graphql_url: str
+    service_port: int
+
+
+class ControllerLogin(_extensions.TypedDict):
+    auth_token: str
+    endpoints: ControllerEndpoints
+
+
+ControllerLoginResult = _typing.Union[ControllerLogin, None]
+
+
 DanteRedundancyMode = _typing.Literal["switched", "redundant", "split_redundant"]
 
 
@@ -184,9 +216,36 @@ class Destination(_extensions.TypedDict):
     port: int
 
 
+class DiagnosticAudioCapabilities(_extensions.TypedDict):
+    channel_capacities: list[ChannelCapacity]
+    current_sample_rate_hertz: _typing.Union[int, None]
+    default_sample_rate_hertz: _typing.Union[int, None]
+    license_signature_length_bytes: _typing.Union[int, None]
+    licensed_receive_channel_count: _typing.Union[int, None]
+    licensed_redundancy_enabled: _typing.Union[bool, None]
+    licensed_transmit_channel_count: _typing.Union[int, None]
+
+
 class Endpoint(_extensions.TypedDict):
     ipv4_address: str
     udp_port: int
+
+
+ExportKind = _typing.Literal["diagnostic_logs", "capability_partition"]
+
+
+class ExportResult(_extensions.TypedDict):
+    echoed_tag_hexadecimal: str
+    encoded_payload_hexadecimal: str
+    fragment_count: int
+    kind: ExportKind
+    record_protocol_identifier: int
+    selector_value: int
+
+
+class ExportProgress(_extensions.TypedDict):
+    matched: bool
+    result: _typing.Union[ExportResult, None]
 
 
 class Identity(_extensions.TypedDict):
@@ -253,13 +312,50 @@ class FlowCreatePreflight(_extensions.TypedDict):
     state: FlowPreflightOutcome
 
 
+FlowType = _typing.Literal["unicast", "multicast"]
+
+
 class FlowIdentity(_extensions.TypedDict):
     global_flow_id: _typing.Union[int, None]
     media_local_flow_id: _typing.Union[int, None]
     media_type_code: _typing.Union[int, None]
 
 
-FlowType = _typing.Literal["unicast", "multicast"]
+MediaMode = _typing.Literal["unknown", "native_dante", "rtp_aes67"]
+
+
+class ProtocolRequirements(_extensions.TypedDict):
+    cohort: _typing.Union[str, None]
+    protocol_id: _typing.Union[int, None]
+    protocol_version: _typing.Union[str, None]
+    required_capabilities: list[str]
+
+
+RedundancyConstraint = _typing.Literal["device_default", "none", "optional", "required"]
+
+
+class ObservedTransmitFlowSpecification(_extensions.TypedDict):
+    channel_slots: list[ChannelSlot]
+    encoding_bits: _typing.Union[int, None]
+    flow_type: FlowType
+    frames_per_packet: _typing.Union[int, None]
+    identity: FlowIdentity
+    media_mode: MediaMode
+    name: _typing.Union[str, None]
+    observed_fields: list[str]
+    primary_destination: _typing.Union[Destination, None]
+    protocol: ProtocolRequirements
+    raw_fields: dict[str, JsonValue]
+    redundancy: RedundancyConstraint
+    sample_rate_hz: _typing.Union[int, None]
+    schema_version: int
+    secondary_destination: _typing.Union[Destination, None]
+
+
+class FlowDeletePreflight(_extensions.TypedDict):
+    reason: _typing.Union[str, None]
+    specification: _typing.Union[ObservedTransmitFlowSpecification, None]
+    state: FlowPreflightOutcome
 
 
 class FlowMembershipLoss(_extensions.TypedDict):
@@ -453,6 +549,44 @@ class ManagedCommand(_extensions.TypedDict):
     transport: Target
 
 
+class ManagedOperationMonitorSignals(_extensions.TypedDict):
+    kind: _typing.Literal["monitor_signals"]
+
+
+class ManagedOperationIdentify(_extensions.TypedDict):
+    device_id: str
+    host_mac: list[int]
+    kind: _typing.Literal["identify"]
+
+
+class ManagedOperationArc(_extensions.TypedDict):
+    device_id: str
+    kind: _typing.Literal["arc"]
+    packet: list[int]
+
+
+class ManagedOperationSettings(_extensions.TypedDict):
+    device_id: str
+    kind: _typing.Literal["settings"]
+    packet: list[int]
+    response_opcode: int
+
+
+class ManagedOperationReboot(_extensions.TypedDict):
+    device_id: str
+    host_mac: list[int]
+    kind: _typing.Literal["reboot"]
+
+
+ManagedOperation = _typing.Union[
+    ManagedOperationMonitorSignals,
+    ManagedOperationIdentify,
+    ManagedOperationArc,
+    ManagedOperationSettings,
+    ManagedOperationReboot,
+]
+
+
 class SettingsExchange(_extensions.TypedDict):
     acknowledged: bool
     device_id: str
@@ -461,12 +595,65 @@ class SettingsExchange(_extensions.TypedDict):
     wrapper_id: int
 
 
+class ManagedSessionState(_extensions.TypedDict):
+    domain_id: _typing.Union[str, None]
+    expected_domain_id: _typing.Union[str, None]
+    frame: list[int]
+    local_ipv4: str
+    notification_port: int
+    operation: _typing.Union[ManagedOperation, None]
+    sent: bool
+    settings: _typing.Union[SettingsExchange, None]
+    target: str
+    targets: dict[str, int]
+    wrapper_id: int
+
+
+class SignalPresenceRecord(_extensions.TypedDict):
+    extension_length: int
+    level_vector_offset: int
+    padding_length: int
+    payload_length: int
+    record_length: int
+    rx_count: int
+    rx_first_channel_index: int
+    rx_levels: list[int]
+    sequence: int
+    tx_count: int
+    tx_first_channel_index: int
+    tx_levels: list[int]
+
+
+class SignalPresencePublication(_extensions.TypedDict):
+    device_id: str
+    records: list[SignalPresenceRecord]
+
+
+class ManagedSessionStep(_extensions.TypedDict):
+    complete: bool
+    outgoing: list[list[int]]
+    packet_hex: _typing.Union[str, None]
+    receive_bytes: int
+    signal_presence: _typing.Union[SignalPresencePublication, None]
+    state: ManagedSessionState
+
+
 class ManagedSettingsResult(_extensions.TypedDict):
     complete: bool
     state: SettingsExchange
 
 
-MediaMode = _typing.Literal["unknown", "native_dante", "rtp_aes67"]
+SubscriptionTransport = _typing.Literal["unicast", "multicast"]
+
+
+class ManagedSubscriptionStatus(_extensions.TypedDict):
+    detail: _typing.Union[str, None]
+    label: _typing.Union[str, None]
+    settled: bool
+    severity: str
+    state: str
+    status: _typing.Union[str, None]
+    transport: _typing.Union[SubscriptionTransport, None]
 
 
 class NetworkControlState(_extensions.TypedDict):
@@ -476,37 +663,37 @@ class NetworkControlState(_extensions.TypedDict):
     transport_available: bool
 
 
-class ProtocolRequirements(_extensions.TypedDict):
-    cohort: _typing.Union[str, None]
-    protocol_id: _typing.Union[int, None]
-    protocol_version: _typing.Union[str, None]
-    required_capabilities: list[str]
-
-
-RedundancyConstraint = _typing.Literal["device_default", "none", "optional", "required"]
-
-
-class ObservedTransmitFlowSpecification(_extensions.TypedDict):
-    channel_slots: list[ChannelSlot]
-    encoding_bits: _typing.Union[int, None]
-    flow_type: FlowType
-    frames_per_packet: _typing.Union[int, None]
-    identity: FlowIdentity
-    media_mode: MediaMode
-    name: _typing.Union[str, None]
-    observed_fields: list[str]
-    primary_destination: _typing.Union[Destination, None]
-    protocol: ProtocolRequirements
-    raw_fields: dict[str, JsonValue]
-    redundancy: RedundancyConstraint
-    sample_rate_hz: _typing.Union[int, None]
-    schema_version: int
-    secondary_destination: _typing.Union[Destination, None]
-
-
 class PacketPerformance(_extensions.TypedDict):
     frames_per_packet: int
     latency_microseconds: int
+
+
+class PanelBandwidth(_extensions.TypedDict):
+    disable: JsonValue
+    enable: JsonValue
+    maximum: int
+    minimum: int
+
+
+class PanelField(_extensions.TypedDict):
+    key: str
+    label: str
+
+
+class PanelVariant(_extensions.TypedDict):
+    fields: dict[str, PanelField]
+    requested: JsonValue
+
+
+class PanelEditor(_extensions.TypedDict):
+    bandwidth: _typing.Union[PanelBandwidth, None]
+    custom_name_limit: _typing.Union[int, None]
+    custom_name_source: _typing.Union[int, None]
+    details: dict[str, str]
+    initial: JsonValue
+    initial_fields: dict[str, PanelField]
+    reason: _typing.Union[str, None]
+    variants: list[PanelVariant]
 
 
 PanelFamily = _typing.Literal["bluetooth", "dante_av"]
@@ -625,6 +812,11 @@ class PanelPlan(_extensions.TypedDict):
     requests: list[PanelRequest]
 
 
+class PanelPresentation(_extensions.TypedDict):
+    editors: dict[str, PanelEditor]
+    summary: dict[str, str]
+
+
 class PanelQuery(_extensions.TypedDict):
     category: str
     prerequisites: list[str]
@@ -718,6 +910,12 @@ class SapAnnouncement(_extensions.TypedDict):
     version: int
 
 
+SapTransition = _typing.Literal["added", "refreshed", "replaced", "deleted"]
+
+
+SapTransitionResult = _typing.Union[SapTransition, None]
+
+
 class SdpConnection(_extensions.TypedDict):
     address: str
     address_count: _typing.Union[int, None]
@@ -807,6 +1005,7 @@ class SubscriptionClassification(_extensions.TypedDict):
     settled: bool
     severity: str
     state: str
+    transport: _typing.Union[SubscriptionTransport, None]
 
 
 class SubscriptionPlan(_extensions.TypedDict):
@@ -831,6 +1030,7 @@ class SubscriptionStatus(_extensions.TypedDict):
     severity: str
     state: str
     status: _typing.Union[str, None]
+    transport: _typing.Union[SubscriptionTransport, None]
 
 
 class UncharacterizedFlow(_extensions.TypedDict):

@@ -1,29 +1,26 @@
 from __future__ import annotations
 
 
-PTPV1_UUID_SIZE_BYTES = 6
+from netaudio import core
+from netaudio.core._requests import JsonValue
 
 
 def canonical_ptpv1_uuid(value: object) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        compact_value = value.replace(":", "").replace("-", "").lower()
-        if len(compact_value) != PTPV1_UUID_SIZE_BYTES * 2 or any(
-            character not in "0123456789abcdef" for character in compact_value
-        ):
-            return None
-        return compact_value
-    elif isinstance(value, (bytes, bytearray, memoryview)):
-        identity_bytes = bytes(value)
-    elif isinstance(value, (list, tuple)):
-        if len(value) != PTPV1_UUID_SIZE_BYTES or any(
-            type(item) is not int or item < 0 or item > 255 for item in value
-        ):
-            return None
-        identity_bytes = bytes(value)
+    supplied: JsonValue
+
+    if isinstance(value, (bytes, bytearray, memoryview, tuple)):
+        supplied = [item for item in value]
+    elif isinstance(value, (str, list)):
+        supplied = value
     else:
         return None
-    if len(identity_bytes) != PTPV1_UUID_SIZE_BYTES:
+
+    try:
+        return core.device_identity({"kind": "ptpv1", "value": supplied})
+    except core.NetaudioCoreJsonError:
         return None
-    return identity_bytes.hex()
+    except core.NetaudioCoreError as error:
+        if error.category != "json_input":
+            raise
+
+        return None

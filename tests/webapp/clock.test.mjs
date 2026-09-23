@@ -20,6 +20,7 @@ function device() {
       servo_state_code: 2,
       servo_state: "synchronizing",
       mute_flags: 3,
+      mute_state: "muted",
       mute_reasons: ["synchronization loss", "external-clock problem"],
       clock_capabilities: 0x204,
       preferred_leader_locked: true,
@@ -68,4 +69,26 @@ test("a MAC address cannot substitute for a reported PTPv1 UUID", () => {
   const clock = device();
   const candidate = { name: "Unrelated", mac_address: clock.ptpv1_master_uuid };
   assert.notEqual(clockLeaderName(clock, { candidate }), "Unrelated");
+});
+
+test("clock controls use native permissions, not raw capability guesses", () => {
+  const value = device();
+  value.clock_status.clock_capabilities = 0;
+  value.clock_status.record_revision = 0;
+  value.clock_control_availability = {
+    preferred_leader: true,
+    clock_source: true,
+    subdomain: false,
+    global_unicast_delay_requests: false,
+    aggregate_ptpv1_unicast_delay_requests: true,
+  };
+  const form = render(h(DeviceConfigSection, { device: value }));
+  assert.match(form, /Preferred leader[^]*?<select(?![^>]*disabled)/);
+  value.clock_control_availability.preferred_leader = false;
+  value.clock_status.clock_capabilities = 4;
+  value.clock_status.record_revision = 0x072d;
+  assert.match(
+    render(h(DeviceConfigSection, { device: value })),
+    /Preferred leader[^]*?<select[^>]*disabled/,
+  );
 });

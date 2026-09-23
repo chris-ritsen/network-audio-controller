@@ -119,9 +119,9 @@ export function flowEvidenceRows(result) {
   const acknowledgement = result?.request_acknowledgement;
   let acknowledgementLabel = "Not received";
   if (acknowledgement?.accepted === true) {
-    acknowledgementLabel = `Accepted${acknowledgement.result_code == null ? "" : ` (result ${acknowledgement.result_code})`}`;
+    acknowledgementLabel = "Accepted";
   } else if (acknowledgement?.parseable === true) {
-    acknowledgementLabel = `Rejected${acknowledgement.result_code == null ? "" : ` (result ${acknowledgement.result_code})`}`;
+    acknowledgementLabel = "Rejected";
   } else if (acknowledgement?.received === true) {
     acknowledgementLabel = "Received but unparseable";
   }
@@ -223,7 +223,6 @@ export function ReceiverFlows({ device }) {
                 <tr>
                   <th>Flow</th>
                   <th>Type / transport</th>
-                  <th>Status</th>
                   <th>Slot:receiver channels</th>
                   <th>Interface destinations</th>
                   <th>External identity</th>
@@ -239,20 +238,17 @@ export function ReceiverFlows({ device }) {
                         ${flow.flow_type || "unknown"} /
                         ${flow.transport ?? "unknown"}
                       </td>
-                      <td>
-                        ${flow.subscription_status_code ?? flow.status_code ?? "unknown"}
-                      </td>
                       <td>${receiverFlowChannels(flow)}</td>
                       <td>${receiverFlowEndpoints(flow) || "Not reported"}</td>
                       <td>${externalIdentityLabel(flow)}</td>
                       <td>
                         ${
-                      flow.sdp_correlation?.matched === true
-                        ? "Matched"
-                        : flow.external_identity
-                          ? "Not matched"
-                          : "Not applicable"
-                    }
+                          flow.sdp_correlation?.matched === true
+                            ? "Matched"
+                            : flow.external_identity
+                              ? "Not matched"
+                              : "Not applicable"
+                        }
                       </td>
                     </tr>`,
                 )}

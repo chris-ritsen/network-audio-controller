@@ -1,6 +1,26 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+pub fn control_availability(status: &Value) -> crate::commands::ClockControlAvailability {
+    if status.get("status_supported") != Some(&Value::Bool(true)) {
+        return Default::default();
+    }
+
+    let field = |name| {
+        status
+            .get(name)
+            .and_then(Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())
+    };
+    crate::commands::ClockControl {
+        record_revision: field("record_revision").unwrap_or(0),
+        clock_capabilities: field("clock_capabilities"),
+        extension_flags: field("extension_flags"),
+        ..Default::default()
+    }
+    .availability()
+}
+
 pub fn clock_source_name(source: u16) -> Option<&'static str> {
     match source {
         0 => Some("internal"),
@@ -110,6 +130,33 @@ fn normalized_value_valid(name: &str, value: &Value) -> bool {
         }),
         _ => value.is_boolean(),
     }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ClockSubdomainPresentation {
+    pub label: String,
+    pub text: Option<String>,
+}
+
+pub fn subdomain_presentation(value: &Value) -> ClockSubdomainPresentation {
+    let normalized = normalize_subdomain(value).ok();
+    let bytes = normalized.and_then(|value| serde_json::from_value::<Vec<u8>>(value).ok());
+    let text = bytes.and_then(|bytes| {
+        let content = &bytes[..bytes.iter().position(|byte| *byte == 0)?];
+        content
+            .iter()
+            .all(|byte| (0x20..=0x7e).contains(byte))
+            .then(|| String::from_utf8_lossy(content).into_owned())
+    });
+    let label = match text.as_deref() {
+        None => "unknown",
+        Some("") => "unset",
+        Some(text) => text,
+    }
+    .to_owned();
+
+    ClockSubdomainPresentation { label, text }
 }
 
 pub fn normalize_subdomain(value: &Value) -> Result<Value, &'static str> {

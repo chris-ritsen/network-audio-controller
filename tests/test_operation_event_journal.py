@@ -8,7 +8,7 @@ import pytest
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.channel import DanteChannel
-from netaudio.dante.transmit_flow import TransmitFlowSpecification
+from netaudio.dante.transmit_flow import parse_transmit_flow_specification
 from netaudio.monitoring import MonitoringEventJournal, MonitoringEventKind, MutationAuditRecorder, remote_recorder
 from netaudio.presets.loading import (
     PresetAction,
@@ -471,7 +471,7 @@ async def test_application_configuration_surfaces_delegate_to_one_recorder(monke
     ):
         monkeypatch.setattr(performance, name, AsyncMock(return_value=result))
 
-    specification = TransmitFlowSpecification.from_dict(
+    specification = parse_transmit_flow_specification(
         {
             "media_mode": "native_dante",
             "flow_type": "multicast",

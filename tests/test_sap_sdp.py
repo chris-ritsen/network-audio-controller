@@ -224,6 +224,27 @@ def test_sap_parser_rejects_authentication_length_beyond_packet():
         parse_sap_packet(bytes(packet))
 
 
+@pytest.mark.parametrize("same_hash,same_content", [(True, True), (True, False), (False, True), (False, False)])
+def test_inventory_refresh_requires_both_message_identity_and_content(same_hash, same_content):
+    inventory = SapFlowInventory()
+    transport = {"announcement_interface": "eth0", "packet_source_ipv4": "192.0.2.10"}
+    original = inventory.ingest(sap_packet(message_hash=123), **transport, received_monotonic=1, wall_time=1)
+    changed = inventory.ingest(
+        sap_packet(
+            ROUTABLE_SDP if same_content else ROUTABLE_SDP.replace("Studio Feed", "Replacement Feed"),
+            message_hash=123 if same_hash else 456,
+        ),
+        **transport,
+        received_monotonic=2,
+        wall_time=2,
+    )
+
+    assert original is not None and changed is not None
+    expected = SapInventoryChangeKind.REFRESHED if same_hash and same_content else SapInventoryChangeKind.REPLACED
+    assert changed.kind is expected
+    assert changed.flow.discovered_at == original.flow.discovered_at
+
+
 def test_inventory_add_refresh_replace_delete_and_expiry():
     inventory = SapFlowInventory(expiry_seconds=3600)
     packet = sap_packet()

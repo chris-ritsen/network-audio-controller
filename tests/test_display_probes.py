@@ -44,7 +44,7 @@ def _device(server_name, *, online=True, emulated=False, ipv4="192.0.2.10"):
     return device
 
 
-def test_probe_candidates_skip_offline_and_emulated_devices_unless_selected(caplog):
+def test_probe_candidates_use_reachability_not_identity_heuristics(caplog):
     devices = {
         "online.local.": _device("online.local."),
         "offline.local.": _device("offline.local.", online=False),
@@ -55,10 +55,9 @@ def test_probe_candidates_skip_offline_and_emulated_devices_unless_selected(capl
     with caplog.at_level("DEBUG", logger="netaudio"):
         candidates = common_module._probe_candidates(devices, "clock status")
 
-    assert list(candidates) == ["online.local."]
+    assert list(candidates) == ["online.local.", "emulated.local."]
     assert not [record for record in caplog.records if record.levelname == "WARNING"]
     assert "Skipping clock status probe for offline.local.: device is offline" in caplog.text
-    assert "Skipping clock status probe for emulated.local.: device is emulated" in caplog.text
 
     state.names = ["offline"]
     candidates = common_module._probe_candidates(devices, "clock status")

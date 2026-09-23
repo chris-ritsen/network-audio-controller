@@ -50,7 +50,7 @@ pub(super) fn parse_channel_type(text: &str) -> Result<ChannelType, SpecError> {
     }
 }
 
-pub(super) fn parse_gain_device_type(text: &str) -> Result<bool, SpecError> {
+pub(crate) fn parse_gain_device_type(text: &str) -> Result<bool, SpecError> {
     match text {
         "input" => Ok(true),
         "output" => Ok(false),

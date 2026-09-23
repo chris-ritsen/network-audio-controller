@@ -34,6 +34,60 @@ def device_and_app():
 
 
 @pytest.mark.parametrize(
+    "revision,caps,flags",
+    [
+        (0x0100, 0x204, 0),
+        (0x0101, 0x204, 0),
+        (0x0602, 8, 0),
+        (0x0603, 8, 0),
+        (0x071E, 0x200, 0),
+        (0x071F, 0x200, 0),
+        (0x072D, 0, None),
+        (0x072E, 0, None),
+        (0x073A, 0x204, 0),
+        (0x073A, 0x204, 0x1000),
+        (0x073A, 0x120, 0),
+        (0x073A, None, 0),
+    ],
+)
+def test_native_clock_permissions_match_command_acceptance(revision, caps, flags):
+    observed = status(record_revision=revision, clock_capabilities=caps, extension_flags=flags)
+    permissions = core.clock_control_availability(observed)
+
+    for field, value in {
+        "clock_source": 0,
+        "preferred_leader": True,
+        "subdomain": [0] * 16,
+        "global_unicast_delay_requests": True,
+        "aggregate_ptpv1_unicast_delay_requests": True,
+    }.items():
+        command = {
+            "command": "clock_control",
+            "host_mac": "020000000001",
+            "message_id": 1,
+            "control": {
+                "record_revision": revision,
+                "clock_capabilities": caps,
+                "extension_flags": flags,
+                field: value,
+            },
+        }
+
+        if permissions[field]:
+            assert core.build_command(command)
+        else:
+            with pytest.raises(core.NetaudioCoreError):
+                core.build_command(command)
+
+    assert not any(core.clock_control_availability({**observed, "status_supported": False}).values())
+
+
+def test_serialized_clock_permissions_are_derived_by_core():
+    _, device = device_and_app()
+    assert device.to_json()["clock_control_availability"] == core.clock_control_availability(device.clock_status)
+
+
+@pytest.mark.parametrize(
     "observed,requested,expected",
     [
         (status(), {}, True),

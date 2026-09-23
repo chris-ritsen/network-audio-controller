@@ -108,14 +108,14 @@ async def test_analog_avio_change_verifies_managed_channels_and_routes(monkeypat
     if model == "AVIO-DAI2":
         device.get_rx_channels.assert_not_awaited()
         assert query.await_count == 2
-        before = result.preflight.current_snapshot.transmitter_flows[0]
-        assert before.channel_members == (1, 2)
-        assert before.frames_per_packet is None
+        before = result.preflight.current_snapshot["transmitter_flows"][0]
+        assert before["channel_members"] == [1, 2]
+        assert before["frames_per_packet"] is None
     else:
         assert device.get_rx_channels.await_count == 2
         detect.assert_not_awaited()
         query.assert_not_awaited()
-        assert len(result.resulting_snapshot.receiver_subscriptions) == 2
+        assert len(result.resulting_snapshot["receiver_subscriptions"]) == 2
 
 
 @pytest.mark.asyncio
@@ -131,8 +131,8 @@ async def test_noncontracting_rate_change_allows_automatic_unicast_flow_retireme
     device, probe, mutate, _, _ = setup_adapter(monkeypatch, "AVIO-DAI2", retire_flow=True)
     result = await change_sample_rate_topology_safe(device, 96000, probe, mutate)
     assert result.changed is True
-    assert result.preflight.current_snapshot.transmitter_flows[0].flow_type == "unicast"
-    assert result.resulting_snapshot.transmitter_flows == ()
+    assert result.preflight.current_snapshot["transmitter_flows"][0]["flow_type"] == "unicast"
+    assert result.resulting_snapshot["transmitter_flows"] == []
 
 
 @pytest.mark.asyncio

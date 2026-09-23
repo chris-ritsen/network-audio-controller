@@ -32,7 +32,7 @@ def main() -> None:
     if abi_version != binding.ABI_VERSION:
         raise RuntimeError(f"wheel native ABI mismatch: library={abi_version}, Python={binding.ABI_VERSION}")
 
-    packet = core.build_command({"command": "channel_count", "transaction_id": 0x1234})
+    packet = core.build_command({"command": "channel_count", "message_id": 0x1234})
     expected = bytes.fromhex("27ff000a123410000000")
     if packet != expected:
         raise RuntimeError(f"installed native builder returned {packet.hex()}, expected {expected.hex()}")

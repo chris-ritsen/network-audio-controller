@@ -8,6 +8,7 @@ const SIGNAL_PRESENCE_FIXED_SIZE: usize = 0x18;
 const SIGNAL_PRESENCE_EXTENSION_LENGTH: u16 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SignalPresenceRecord {
     pub record_length: u16,
     pub extension_length: u16,

@@ -1,5 +1,37 @@
 use super::*;
 
+/// Require complete inventory and a supported, representable flow before deletion.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_flow_delete_preflight(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            let request = decode_json(c_string(json)?)?;
+            Ok(crate::flow_readback::delete_preflight(request))
+        })
+    }
+}
+
+/// Select advertised external RTP destinations and validate the resulting command.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_plan_external_subscription(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            let request = decode_json(c_string(json)?)?;
+            Ok(crate::spec::plan_external_subscription(request)?)
+        })
+    }
+}
+
 /// Check fresh transmitter inventory before allocating a flow slot.
 #[no_mangle]
 pub unsafe extern "C" fn netaudio_flow_create_preflight(
@@ -177,9 +209,9 @@ pub unsafe extern "C" fn netaudio_transmit_flow_topology(
     }
 }
 
-/// Validate the canonical transmit-flow specification, including cross-field constraints.
+/// Validate a transmit-flow specification and supply canonical defaults, preserving annotations.
 #[no_mangle]
-pub unsafe extern "C" fn netaudio_validate_transmit_flow_specification(
+pub unsafe extern "C" fn netaudio_normalize_transmit_flow_specification(
     json: *const c_char,
     out_buffer: *mut u8,
     out_capacity: usize,
@@ -194,7 +226,7 @@ pub unsafe extern "C" fn netaudio_validate_transmit_flow_specification(
                 .validate()
                 .map_err(|message| FfiError::new(NetaudioStatus::InvalidJson, message))?;
 
-            Ok(())
+            Ok(specification)
         })
     }
 }

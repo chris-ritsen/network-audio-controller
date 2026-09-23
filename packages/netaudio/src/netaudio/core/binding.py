@@ -237,6 +237,10 @@ def panel_profile(facts: _requests.PanelProfileRequest) -> _types.PanelProfile:
     return _call_json(require().netaudio_panel_profile, facts, "panel profile")
 
 
+def panel_presentation(request: _requests.PanelPresentationRequest) -> _types.PanelPresentation:
+    return _call_json(require().netaudio_panel_presentation, request, "panel presentation")
+
+
 def plan_panel(request: _requests.PanelPlanRequest) -> _types.PanelPlan:
     return _call_json(require().netaudio_plan_panel, request, "panel plan")
 
@@ -491,8 +495,12 @@ def transmit_flow_specification(record: dict, *, protocol_id: int) -> _types.Obs
     return _call_json(require().netaudio_transmit_flow_specification, request, "transmitter flow specification")
 
 
-def validate_transmit_flow_specification(specification: _requests.TransmitFlowSpecification) -> None:
-    _call_json(require().netaudio_validate_transmit_flow_specification, specification, "transmitter flow specification")
+def normalize_transmit_flow_specification(
+    specification: _requests.TransmitFlowSpecification,
+) -> _requests.TransmitFlowSpecification:
+    return _call_json(
+        require().netaudio_normalize_transmit_flow_specification, specification, "transmitter flow specification"
+    )
 
 
 def plan_transmit_flow_create(spec: _requests.FlowCreateRequest) -> _types.FlowCommandPlan:
@@ -500,7 +508,8 @@ def plan_transmit_flow_create(spec: _requests.FlowCreateRequest) -> _types.FlowC
 
 
 def compare_transmit_flows(
-    requested: _requests.TransmitFlowSpecification, effective: _requests.TransmitFlowSpecification
+    requested: _requests.TransmitFlowSpecification | _types.ObservedTransmitFlowSpecification,
+    effective: _requests.TransmitFlowSpecification | _types.ObservedTransmitFlowSpecification,
 ) -> _types.FlowComparison:
     return _call_json(
         require().netaudio_compare_transmit_flows,
@@ -521,6 +530,10 @@ def flow_create_preflight(request: _requests.FlowCreatePreflightRequest) -> _typ
     return _call_json(require().netaudio_flow_create_preflight, request, "flow creation preflight")
 
 
+def flow_delete_preflight(request: _requests.FlowDeletePreflightRequest) -> _types.FlowDeletePreflight:
+    return _call_json(require().netaudio_flow_delete_preflight, request, "flow deletion preflight")
+
+
 def flow_topology_change(request: _requests.FlowTopologyChangeRequest) -> _types.FlowTopologyChange | None:
     return _call_json(require().netaudio_flow_topology_change, request, "flow topology change")
 
@@ -530,15 +543,21 @@ def flow_verification(request: _requests.FlowVerificationRequest) -> _types.Flow
 
 
 def canonical_device_mac(value: str | None) -> str | None:
-    if not isinstance(value, str) or "\0" in value:
-        return None
+    return device_identity({"kind": "mac", "value": value if isinstance(value, str) else None})
 
-    status, data = _call_buffer(require().netaudio_canonical_device_mac, value.encode("utf-8"))
 
-    if status != STATUS_OK:
-        raise NetaudioCoreError(status, "canonical device MAC")
+def device_identity(request: _requests.DeviceIdentityRequest) -> str | None:
+    return _call_json(require().netaudio_device_identity, request, "device identity")
 
-    return _decode_json_output(data, "canonical device MAC")
+
+def validate_configuration(values: Mapping[str, _requests.JsonValue]) -> None:
+    request: _requests.ConfigurationRequest = {"kind": "validate", "values": dict(values)}
+    _call_json(require().netaudio_configuration, request, "configuration values")
+
+
+def capture_panel_configuration(fresh_values: dict[str, _requests.JsonValue]) -> dict[str, _types.JsonValue]:
+    request: _requests.ConfigurationRequest = {"kind": "capture_panel", "fresh_values": fresh_values}
+    return _call_json(require().netaudio_configuration, request, "panel configuration")
 
 
 def channel_audio_publication(spec: _requests.ChannelAudioConfiguration) -> _types.ChannelAudioPublication | None:
@@ -567,12 +586,32 @@ def parse_response(kind: str, data: bytes):
     return _decode_json_output(out, f"parse {kind}")
 
 
+def parse_diagnostic_audio(data: bytes) -> _types.DiagnosticAudioCapabilities | None:
+    return parse_response("diagnostic_audio_capabilities", data)
+
+
 def parse_connection_health(data: bytes) -> _requests.HeartbeatConnectionHealthRecords:
     return parse_response("heartbeat_connection_health", data)
 
 
 def parse_sap(data: bytes) -> _types.SapAnnouncement:
     return parse_response("sap", data)
+
+
+def controller_api_routes(data: bytes) -> _types.ControllerApiRoutes:
+    return parse_response("controller_api_routes", data)
+
+
+def controller_endpoints(data: bytes) -> _types.ControllerEndpoints:
+    return parse_response("controller_endpoints", data)
+
+
+def controller_login(data: bytes) -> _types.ControllerLoginResult:
+    return parse_response("controller_login", data)
+
+
+def sap_transition(request: _requests.SapTransitionRequest) -> _types.SapTransitionResult:
+    return _call_json(require().netaudio_sap_transition, request, "SAP announcement transition")
 
 
 def parse_sdp(text: str) -> _types.SdpDocument:
@@ -656,6 +695,24 @@ def correlate_managed_arc(request: _requests.ManagedArcCorrelationRequest) -> _t
 
 def advance_managed_settings(request: _requests.ManagedSettingsRequest) -> _types.ManagedSettingsResult:
     return _call_json(require().netaudio_dapi_advance_settings_exchange, request, "managed settings exchange")
+
+
+def advance_managed_session(request: _requests.ManagedSessionRequest) -> _types.ManagedSessionStep:
+    return _call_json(require().netaudio_dapi_advance_session, request, "managed session")
+
+
+def plan_external_subscription(
+    request: _requests.ExternalSubscriptionPlanRequest,
+) -> _requests.ExternalSubscriptionCommand:
+    return _call_json(require().netaudio_plan_external_subscription, request, "external subscription plan")
+
+
+def validate_managed_credential(request: _requests.ManagedCredential) -> None:
+    _call_json(require().netaudio_dapi_validate_credential, request, "managed credential")
+
+
+def clock_control_availability(status: Mapping[str, _types.JsonValue]) -> _types.ClockControlAvailability:
+    return _call_json(require().netaudio_clock_control_availability, dict(status), "clock control availability")
 
 
 def build_dapi_authentication(credential: str) -> bytes:
@@ -773,6 +830,46 @@ def arc_protocol(version: str | None, *, managed: bool = False) -> _types.ArcPro
         raise NetaudioCoreError(status, "ARC protocol")
 
     return _decode_json_output(data, "ARC protocol")
+
+
+class ConmonExportCollector:
+    def __init__(self, configuration: _requests.ExportConfiguration):
+        self._native_lock = threading.RLock()
+        self._handle = ctypes.c_void_p()
+        self._lib = require()
+        status = self._lib.netaudio_export_new(_encode_command_spec(dict(configuration)), ctypes.byref(self._handle))
+
+        if status != STATUS_OK:
+            raise NetaudioCoreError(status, "ConMon export")
+
+    def close(self):
+        with self._native_lock:
+            if self._handle:
+                self._lib.netaudio_export_free(self._handle)
+                self._handle = ctypes.c_void_p()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exception_information):
+        self.close()
+
+    def __del__(self):
+        self.close()
+
+    def accept(self, fragment: _requests.ConmonExportFragment) -> _types.ExportProgress:
+        with self._native_lock:
+            if not self._handle:
+                raise RuntimeError("ConMon export collector is closed")
+
+            status, data = _call_buffer(
+                self._lib.netaudio_export_accept, self._handle, _encode_command_spec(dict(fragment))
+            )
+
+            if status != STATUS_OK:
+                raise NetaudioCoreError(status, "ConMon export")
+
+            return _decode_json_output(data, "ConMon export")
 
 
 class _Inventory:
@@ -1095,8 +1192,23 @@ def normalize_clock_subdomain(value) -> bytes:
     return bytes(_call_json(require().netaudio_normalize_clock_subdomain, value, "clock subdomain"))
 
 
+def clock_subdomain_presentation(value) -> _types.ClockSubdomainPresentation:
+    if isinstance(value, (bytes, bytearray)):
+        value = list(value)
+
+    return _call_json(require().netaudio_clock_subdomain_presentation, value, "clock subdomain presentation")
+
+
+def managed_subscription_status(request: _requests.ManagedStatusRequest) -> _types.ManagedSubscriptionStatus:
+    return _call_json(require().netaudio_managed_subscription_status, request, "managed subscription status")
+
+
 def clock_record_revision(facts: dict) -> int:
     return _call_json(require().netaudio_clock_record_revision, facts, "clock record revision")
+
+
+def flow_inventory_protocol(facts: _requests.FlowInventoryProtocolFacts) -> int | None:
+    return _call_json(require().netaudio_flow_inventory_protocol, facts, "flow inventory protocol")
 
 
 def plan_subscription_commands(spec: dict) -> list[dict]:

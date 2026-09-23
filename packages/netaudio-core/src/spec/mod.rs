@@ -2,14 +2,12 @@ use std::net::Ipv4Addr;
 
 use serde::Deserialize;
 
-use crate::commands::{
-    self, ChannelType, ExternalFlowIdentity, ExternalReceiverSubscription, ExternalRtpDestination,
-    ReceiveChannelNamePageRecord, SubscriptionPageRecord,
-};
+use crate::commands::{self, ChannelType, ReceiveChannelNamePageRecord, SubscriptionPageRecord};
 use crate::protocol::NetaudioError;
 
 mod command_defaults;
 mod command_values;
+pub(crate) use command_values::parse_gain_device_type;
 mod external_subscription;
 mod managed;
 mod subscription_plan;
@@ -17,8 +15,10 @@ mod subscription_plan;
 pub use command_spec::plan_performance_command;
 pub(crate) use command_spec::SubscriptionPageEntry;
 pub use external_subscription::{
-    external_subscription_readback, ExternalReadbackRequest, ExternalSubscriptionReadback,
+    external_subscription_readback, plan_external_subscription, ExternalReadbackRequest,
+    ExternalSubscriptionCommand, ExternalSubscriptionPlanRequest, ExternalSubscriptionReadback,
 };
+use external_subscription::{ExternalRtpDestinationSpec, ExternalSubscriptionSpec};
 pub use managed::{build_managed_command, ManagedCommand, ManagedCommandRequest};
 pub use subscription_plan::{plan_subscription_commands, Receiver};
 pub(crate) use subscription_plan::{plan_subscription_request, SubscriptionPlanRequest};

@@ -3,6 +3,24 @@ use super::*;
 fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
     use crate::responses;
     match kind {
+        "diagnostic_audio_capabilities" => {
+            serialize_optional(kind, Some(crate::diagnostic_audio::parse(bytes)))
+        }
+        "controller_api_routes" => {
+            let routes = crate::controller_api::routes(bytes)
+                .map_err(|message| FfiError::new(NetaudioStatus::MalformedResponse, message))?;
+            serialize_optional(kind, Some(routes))
+        }
+        "controller_endpoints" => {
+            let endpoints = crate::controller_api::endpoints(bytes)
+                .map_err(|message| FfiError::new(NetaudioStatus::MalformedResponse, message))?;
+            serialize_optional(kind, Some(endpoints))
+        }
+        "controller_login" => {
+            let login = crate::controller_api::login(bytes)
+                .map_err(|message| FfiError::new(NetaudioStatus::MalformedResponse, message))?;
+            serialize_optional(kind, Some(login))
+        }
         "sdp" => {
             let text = std::str::from_utf8(bytes).map_err(|_| {
                 FfiError::new(NetaudioStatus::MalformedResponse, "SDP must be UTF-8 text")

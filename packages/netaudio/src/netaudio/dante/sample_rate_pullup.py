@@ -1,20 +1,9 @@
-SAMPLE_RATE_PULLUP_RATIO_LABELS = {
-    0: "none",
-    1: "+4.1667%",
-    2: "+0.1%",
-    3: "-0.1%",
-    4: "-4.0%",
-}
+from netaudio.core._audio_choices import SAMPLE_RATE_PULLUP_CHOICES
+
+SAMPLE_RATE_PULLUP_RATIO_LABELS = {choice["value"]: choice["label"] for choice in SAMPLE_RATE_PULLUP_CHOICES}
 
 _SAMPLE_RATE_PULLUP_SELECTION_ALIASES = {
-    "none": 0,
-    "+4.1667%": 1,
-    "4.1667%": 1,
-    "+0.1%": 2,
-    "0.1%": 2,
-    "-0.1%": 3,
-    "-4.0%": 4,
-    "-4%": 4,
+    alias: choice["value"] for choice in SAMPLE_RATE_PULLUP_CHOICES for alias in choice["aliases"]
 }
 
 
@@ -23,7 +12,7 @@ def sample_rate_pullup_label(raw_value) -> str:
         return "unknown"
     if isinstance(raw_value, bool) or not isinstance(raw_value, int):
         return "unknown"
-    return SAMPLE_RATE_PULLUP_RATIO_LABELS.get(raw_value, f"raw {raw_value}")
+    return SAMPLE_RATE_PULLUP_RATIO_LABELS.get(raw_value, "unknown")
 
 
 def format_supported_sample_rate_pullup_values(raw_values) -> str:

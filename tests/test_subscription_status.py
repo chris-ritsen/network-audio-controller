@@ -199,10 +199,35 @@ def test_managed_unknown_identifier_is_preserved_as_unknown():
             "settled": False,
             "label": None,
             "detail": None,
+            "transport": None,
         }
 
     with pytest.raises(ValueError):
         subscription_classification_for_identifier("DYNAMIC\0FUTURE_STATUS")
+
+
+@pytest.mark.parametrize(
+    "code,identifier,transport", [(9, "DYNAMIC", "unicast"), (10, "STATIC", "multicast"), (4, "SUBSCRIBE_SELF", None)]
+)
+def test_subscription_transport_is_shared_by_numeric_managed_and_serialized_status(code, identifier, transport):
+    from netaudio import core
+    from netaudio.dante.subscription import managed_subscription_status
+
+    assert core.subscription_status(code, 257)["transport"] == transport
+    assert core.subscription_classification_for_identifier(identifier)["transport"] == transport
+    assert managed_subscription_status(identifier, None, "CONNECTED")["transport"] == transport
+    assert DanteDeviceSerializer._status_to_json(code, 257)["transport"] == transport
+    assert core.subscription_status(1, None)["transport"] is None
+
+
+@pytest.mark.parametrize("summary", [None, "CONNECTED", "WARNING", "NEW_SUMMARY"])
+def test_managed_summary_cannot_hide_an_established_subscription_error(summary):
+    from netaudio.dante.subscription import managed_subscription_status
+
+    status = managed_subscription_status("CHANNEL_FORMAT", "Error: Details", summary)
+    assert status["state"] == "error"
+    assert status["severity"] == "error"
+    assert status["transport"] is None
 
 
 @pytest.mark.parametrize(

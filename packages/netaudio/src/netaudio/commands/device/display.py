@@ -397,49 +397,48 @@ def _format_channel_count(channels: dict, reported_count: int | None) -> str:
 
 def _diagnostic_audio_capabilities_data(capabilities) -> dict:
     return {
-        "current_sample_rate_hertz": capabilities.current_sample_rate_hertz,
-        "default_sample_rate_hertz": capabilities.default_sample_rate_hertz,
+        "current_sample_rate_hertz": capabilities["current_sample_rate_hertz"],
+        "default_sample_rate_hertz": capabilities["default_sample_rate_hertz"],
         "diagnostic_log_export_supported": True,
-        "license_signature_length_bytes": capabilities.license_signature_length_bytes,
-        "licensed_receive_channel_count": capabilities.licensed_receive_channel_count,
-        "licensed_redundancy_enabled": capabilities.licensed_redundancy_enabled,
-        "licensed_transmit_channel_count": capabilities.licensed_transmit_channel_count,
-        "sample_rate_channel_capacities": [
-            {
-                "receive_channel_count": capacity.receive_channel_count,
-                "sample_rate_hertz": capacity.sample_rate_hertz,
-                "transmit_channel_count": capacity.transmit_channel_count,
-            }
-            for capacity in capabilities.channel_capacities
-        ],
+        "license_signature_length_bytes": capabilities["license_signature_length_bytes"],
+        "licensed_receive_channel_count": capabilities["licensed_receive_channel_count"],
+        "licensed_redundancy_enabled": capabilities["licensed_redundancy_enabled"],
+        "licensed_transmit_channel_count": capabilities["licensed_transmit_channel_count"],
+        "sample_rate_channel_capacities": [dict(capacity) for capacity in capabilities["channel_capacities"]],
     }
 
 
 def _diagnostic_audio_capability_rows(capabilities) -> list[list[str]]:
     rows = [["Diagnostic Log Export", "supported"]]
-    if capabilities.license_signature_length_bytes is not None:
-        rows.append(["License Signature", f"{capabilities.license_signature_length_bytes} bytes"])
+
+    if capabilities["license_signature_length_bytes"] is not None:
+        rows.append(["License Signature", f"{capabilities['license_signature_length_bytes']} bytes"])
+
     if (
-        capabilities.licensed_transmit_channel_count is not None
-        and capabilities.licensed_receive_channel_count is not None
+        capabilities["licensed_transmit_channel_count"] is not None
+        and capabilities["licensed_receive_channel_count"] is not None
     ):
         rows.append(
             [
                 "Licensed Channels",
-                f"{capabilities.licensed_transmit_channel_count} TX / {capabilities.licensed_receive_channel_count} RX",
+                f"{capabilities['licensed_transmit_channel_count']} TX / {capabilities['licensed_receive_channel_count']} RX",
             ]
         )
-    if capabilities.licensed_redundancy_enabled is not None:
-        rows.append(["Licensed Redundancy", format_on_off(capabilities.licensed_redundancy_enabled)])
-    if capabilities.default_sample_rate_hertz is not None:
-        rows.append(["Default Sample Rate", format_sample_rate_hertz(capabilities.default_sample_rate_hertz)])
-    if capabilities.current_sample_rate_hertz is not None:
-        rows.append(["Current Sample Rate", format_sample_rate_hertz(capabilities.current_sample_rate_hertz)])
-    for capacity in capabilities.channel_capacities:
+
+    if capabilities["licensed_redundancy_enabled"] is not None:
+        rows.append(["Licensed Redundancy", format_on_off(capabilities["licensed_redundancy_enabled"])])
+
+    if capabilities["default_sample_rate_hertz"] is not None:
+        rows.append(["Default Sample Rate", format_sample_rate_hertz(capabilities["default_sample_rate_hertz"])])
+
+    if capabilities["current_sample_rate_hertz"] is not None:
+        rows.append(["Current Sample Rate", format_sample_rate_hertz(capabilities["current_sample_rate_hertz"])])
+
+    for capacity in capabilities["channel_capacities"]:
         rows.append(
             [
-                f"Channels at {format_sample_rate_hertz(capacity.sample_rate_hertz)}",
-                f"{capacity.transmit_channel_count} TX / {capacity.receive_channel_count} RX",
+                f"Channels at {format_sample_rate_hertz(capacity['sample_rate_hertz'])}",
+                f"{capacity['transmit_channel_count']} TX / {capacity['receive_channel_count']} RX",
             ]
         )
     return rows

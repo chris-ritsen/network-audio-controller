@@ -14,6 +14,19 @@ test("Bluetooth keeps link loss distinct and clearing is explicitly confirmed", 
       family: "bluetooth",
       readable: true,
       writable: true,
+      presentation: {
+        summary: { connection: "Link lost" },
+        editors: {
+          bluetooth_identification: {
+            initial: { name_source: 2, custom_name: "é" },
+            initial_fields: { name_source: { key: "2", label: "Custom name" } },
+            variants: [],
+            details: {},
+            custom_name_limit: 32,
+            custom_name_source: 2,
+          },
+        },
+      },
       observations: {
         bluetooth_connection: observation({ state: 3, peer_name: "" }),
         bluetooth_pairing: observation(2),
@@ -37,6 +50,28 @@ test("video keeps configured format, actual format and observed HDCP separate", 
       family: "dante_av",
       readable: true,
       writable: true,
+      presentation: {
+        summary: { signal: "Valid protected signal", observed_hdcp: "2.x" },
+        editors: {
+          video_format: {
+            initial: {},
+            initial_fields: {},
+            variants: [],
+            reason: "Receiver format settings are read-only.",
+            details: {
+              configured: "Unknown, 8-bit, RGB 4:4:4",
+              actual: "800×600 60 Hz, 10-bit, YCbCr 4:4:4",
+              direction: "Receiver",
+            },
+          },
+          hdcp: {
+            initial: { mode: 3 },
+            initial_fields: { mode: { key: "3", label: "Automatic" } },
+            variants: [],
+            details: {},
+          },
+        },
+      },
       observations: {
         video_channel: observation({
           direction: 1,
@@ -59,7 +94,7 @@ test("video keeps configured format, actual format and observed HDCP separate", 
     },
   };
   const html = render(h(DeviceControls, { device }));
-  assert.match(html, /Configured: Video mode 16/);
+  assert.match(html, /Configured: Unknown/);
   assert.match(html, /Actual: 800×600 60 Hz/);
   assert.match(html, /Observed HDCP: 2.x/);
   assert.match(html, /Automatic/);
@@ -74,6 +109,23 @@ test("bandwidth uses device limits and meaningful units", () => {
           family: "dante_av",
           readable: true,
           writable: true,
+          presentation: {
+            summary: {},
+            editors: {
+              bandwidth: {
+                initial: { target: 100, enabled: true },
+                initial_fields: {},
+                variants: [],
+                details: {},
+                bandwidth: {
+                  minimum: 50,
+                  maximum: 600,
+                  enable: { target: 100, enabled: true },
+                  disable: { target: 0, enabled: false },
+                },
+              },
+            },
+          },
           observations: {
             bandwidth: observation({
               target: 100,
@@ -86,6 +138,6 @@ test("bandwidth uses device limits and meaningful units", () => {
       },
     }),
   );
-  assert.match(html, /Mbit\/s \(50–700\)/);
-  assert.match(html, /max="700"/);
+  assert.match(html, /Mbit\/s \(50–600\)/);
+  assert.match(html, /max="600"/);
 });

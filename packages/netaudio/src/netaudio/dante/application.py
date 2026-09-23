@@ -372,8 +372,7 @@ class DanteApplication:
     async def _export_conmon_data(
         self,
         device_ip_address: str,
-        expected_echoed_tag: bytes,
-        expected_selector_value: int,
+        kind: _requests.ExportKind,
         request,
         timeout: float,
         operation_name: str,
@@ -382,8 +381,7 @@ class DanteApplication:
             result = await request_and_wait_for_conmon_export(
                 self.notifications,
                 device_ip_address,
-                expected_echoed_tag,
-                expected_selector_value,
+                kind,
                 request,
                 timeout,
             )
@@ -1189,8 +1187,7 @@ class DanteApplication:
 
         export = await self._export_conmon_data(
             device_ip_address,
-            b"CAP1",
-            2,
+            "capability_partition",
             request,
             timeout,
             "CAP1 partition export",
@@ -1210,8 +1207,7 @@ class DanteApplication:
         try:
             export = await self._export_conmon_data(
                 device_ip_address,
-                b"LOGS",
-                1,
+                "diagnostic_logs",
                 request,
                 timeout,
                 "device log export",
@@ -1825,11 +1821,9 @@ class DanteApplication:
     def plan_transmit_flow(self, device, specification):
         """Validate a canonical transmit-flow request without sending traffic."""
         from netaudio.dante.flow_lifecycle import plan_create_transmit_flow
-        from netaudio.dante.transmit_flow import TransmitFlowSpecification
+        from netaudio.dante.transmit_flow import parse_transmit_flow_specification
 
-        if isinstance(specification, dict):
-            specification = TransmitFlowSpecification.from_dict(specification)
-        return plan_create_transmit_flow(device, specification)
+        return plan_create_transmit_flow(device, parse_transmit_flow_specification(specification))
 
     async def inspect_transmit_flows(self, device) -> dict:
         """Return fresh transmitter inventory in the canonical flow schema."""
@@ -1840,14 +1834,10 @@ class DanteApplication:
     async def create_transmit_flow(self, device, specification):
         """Create one evidence-supported flow and preserve every completion phase."""
         from netaudio.dante.flow_lifecycle import create_transmit_flow
-        from netaudio.dante.transmit_flow import TransmitFlowSpecification
-
-        requested = specification if isinstance(specification, dict) else specification.to_dict()
+        from netaudio.dante.transmit_flow import parse_transmit_flow_specification
 
         async def create():
-            parsed = (
-                TransmitFlowSpecification.from_dict(specification) if isinstance(specification, dict) else specification
-            )
+            parsed = parse_transmit_flow_specification(specification)
             result = await create_transmit_flow(device, parsed)
             self._apply_transmit_flow_readback(device, result)
             return result
@@ -1855,7 +1845,7 @@ class DanteApplication:
         return await self._run_configuration_operation(
             device,
             "create_transmit_flow",
-            requested,
+            specification,
             create,
         )
 

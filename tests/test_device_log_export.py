@@ -104,11 +104,10 @@ def _parsed_fragments(**arguments) -> tuple[dict, dict, dict]:
 
 
 def _collect_export(
-    echoed_tag: bytes,
-    selector_value: int,
+    kind: str,
     fragments: tuple[dict, ...],
 ):
-    collector = ConmonExportCollector(echoed_tag, selector_value)
+    collector = ConmonExportCollector(kind)
     result = None
     for fragment in fragments:
         result = collector.observe(fragment)
@@ -141,7 +140,7 @@ def test_export_builders_match_observed_requests():
 
 def test_collector_reassembles_out_of_order_fragments_for_typed_decoders(tmp_path):
     log_fragments = _parsed_fragments()
-    log_export = _collect_export(b"LOGS", 1, tuple(reversed(log_fragments)))
+    log_export = _collect_export("diagnostic_logs", tuple(reversed(log_fragments)))
     log_result = parse_device_log_export(log_export)
     assert log_result.archive_payload == _archive_payload()
     assert log_result.fragment_count == 3
@@ -156,7 +155,7 @@ def test_collector_reassembles_out_of_order_fragments_for_typed_decoders(tmp_pat
         member_name="tmp/dante_data/capability.bin",
         member_payload=capability_payload,
     )
-    capability_export = _collect_export(b"CAP1", 2, capability_fragments)
+    capability_export = _collect_export("capability_partition", capability_fragments)
     capability_result = parse_capability_partition_export(capability_export)
     assert capability_result.capability_partition == capability_payload
 
@@ -176,27 +175,63 @@ def test_collector_reassembles_out_of_order_fragments_for_typed_decoders(tmp_pat
 
 def test_collector_rejects_conflicts_invalid_sequences_and_size_overflow():
     first_fragment, second_fragment, third_fragment = _parsed_fragments()
-    collector = ConmonExportCollector(b"LOGS", 1)
+    collector = ConmonExportCollector("diagnostic_logs")
     assert collector.observe(first_fragment) is None
     with pytest.raises(ConmonExportError, match="identifier conflicts"):
         collector.observe(first_fragment | {"data_hexadecimal": (b"x" * first_fragment["fragment_size"]).hex()})
 
-    collector = ConmonExportCollector(b"LOGS", 1)
+    collector = ConmonExportCollector("diagnostic_logs")
     assert collector.observe(third_fragment | {"has_more_fragments": True}) is None
     with pytest.raises(ConmonExportError, match="follows the terminal"):
         collector.observe(second_fragment | {"has_more_fragments": False})
 
     with pytest.raises(ConmonExportError, match="fields are invalid"):
-        ConmonExportCollector(b"LOGS", 1, maximum_encoded_size=7).observe(
+        ConmonExportCollector("diagnostic_logs", maximum_encoded_size=7).observe(
             first_fragment | {"total_encoded_size": 8, "fragment_size": 8}
         )
 
 
+def test_rejected_terminal_fragment_does_not_poison_a_valid_export():
+    fragments = _parsed_fragments()
+
+    with ConmonExportCollector("diagnostic_logs") as collector:
+        with pytest.raises(ConmonExportError):
+            collector.observe(fragments[0] | {"has_more_fragments": False})
+
+        assert collector.observe(fragments[0]) is None
+        assert collector.observe(fragments[0]) is None
+        assert collector.observe(fragments[2]) is None
+        result = collector.observe(fragments[1])
+        assert result is not None
+        assert parse_device_log_export(result).archive_payload == _archive_payload()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        collector.observe(fragments[0])
+
+
+@pytest.mark.parametrize("change", [{"selector_value": 2}, {"echoed_tag_hexadecimal": b"CAP1".hex()}])
+def test_collector_ignores_other_exports_without_changing_assembly(change):
+    fragments = _parsed_fragments()
+
+    with ConmonExportCollector("diagnostic_logs") as collector:
+        assert collector.observe(fragments[0] | change) is None
+        for fragment in fragments:
+            result = collector.observe(fragment)
+
+        assert result is not None
+        assert parse_device_log_export(result).archive_payload == _archive_payload()
+
+
+@pytest.mark.parametrize("maximum_encoded_size", [0, -1, True])
+def test_collector_rejects_invalid_resource_limits(maximum_encoded_size):
+    with pytest.raises((ValueError, core.NetaudioCoreError)):
+        ConmonExportCollector("diagnostic_logs", maximum_encoded_size=maximum_encoded_size)
+
+
 def test_typed_decoders_reject_the_other_export_type():
-    log_export = _collect_export(b"LOGS", 1, _parsed_fragments())
+    log_export = _collect_export("diagnostic_logs", _parsed_fragments())
     capability_export = _collect_export(
-        b"CAP1",
-        2,
+        "capability_partition",
         _parsed_fragments(
             echoed_tag=b"CAP1",
             selector_value=2,
@@ -223,25 +258,55 @@ MCLK = 4 sample_rate = 48000 TDM = 16
 """
     capabilities = parse_device_audio_capabilities(_archive_payload("tmp/dante_data/apec.log", audio_log))
     assert capabilities is not None
-    assert capabilities.license_signature_length_bytes == 128
-    assert capabilities.licensed_receive_channel_count == 64
-    assert capabilities.licensed_transmit_channel_count == 64
-    assert capabilities.licensed_redundancy_enabled is False
-    assert capabilities.default_sample_rate_hertz == 48000
-    assert capabilities.current_sample_rate_hertz == 48000
+    assert capabilities["license_signature_length_bytes"] == 128
+    assert capabilities["licensed_receive_channel_count"] == 64
+    assert capabilities["licensed_transmit_channel_count"] == 64
+    assert capabilities["licensed_redundancy_enabled"] is False
+    assert capabilities["default_sample_rate_hertz"] == 48000
+    assert capabilities["current_sample_rate_hertz"] == 48000
     assert [
         (
-            capacity.sample_rate_hertz,
-            capacity.receive_channel_count,
-            capacity.transmit_channel_count,
+            capacity["sample_rate_hertz"],
+            capacity["receive_channel_count"],
+            capacity["transmit_channel_count"],
         )
-        for capacity in capabilities.channel_capacities
+        for capacity in capabilities["channel_capacities"]
     ] == [(44100, 64, 64), (48000, 64, 64), (96000, 32, 32)]
+
+
+def test_diagnostic_audio_conflicting_observations_remain_unknown():
+    payload = b"""license rx chans 64 tx chans 32
+license rx chans 32 tx chans 64
+is redundant
+is non-redundant
+MCLK = 4 sample_rate = 48000 TDM = 16
+MCLK = 4 sample_rate = 96000 TDM = 16
+srate 48000 rxchan 64 txchan 64 mclk 4 tdm_chan 16
+srate 48000 rxchan 32 txchan 32 mclk 4 tdm_chan 16
+srate 96000 rxchan 32 txchan 32 mclk 4 tdm_chan 16
+"""
+    result = parse_device_audio_capabilities(_archive_payload("tmp/dante_data/apec.log", payload))
+    assert result == core.parse_response("diagnostic_audio_capabilities", payload)
+    assert result["licensed_receive_channel_count"] is None
+    assert result["licensed_transmit_channel_count"] is None
+    assert result["licensed_redundancy_enabled"] is None
+    assert result["current_sample_rate_hertz"] is None
+    assert result["channel_capacities"] == [
+        {"sample_rate_hertz": 96000, "receive_channel_count": 32, "transmit_channel_count": 32}
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload", [b"", b"unrecognized log", b"license rx chans -1 tx chans 4", b"rsa.len = 4294967296"]
+)
+def test_unknown_diagnostic_audio_has_no_invented_capabilities(payload):
+    assert core.parse_response("diagnostic_audio_capabilities", payload) is None
+    assert parse_device_audio_capabilities(_archive_payload("tmp/dante_data/apec.log", payload)) is None
 
 
 def test_notification_service_matches_source_tag_and_selector():
     notifications = DanteNotificationService(dispatcher=MagicMock())
-    waiter = notifications.register_conmon_export_waiter(DEVICE_IP_ADDRESS, b"CAP1", 2)
+    waiter = notifications.register_conmon_export_waiter(DEVICE_IP_ADDRESS, "capability_partition")
     packets = _fragment_packets(
         echoed_tag=b"CAP1",
         selector_value=2,
@@ -258,8 +323,7 @@ def test_notification_service_matches_source_tag_and_selector():
     assert waiter.event.is_set()
     assert waiter.error is None
     assert waiter.result is not None
-    assert waiter.result.echoed_tag == b"CAP1"
-    assert waiter.result.selector_value == 2
+    assert waiter.result.kind == "capability_partition"
     notifications.unregister_waiter(waiter)
     assert not notifications.is_waiting("conmon_export", DEVICE_IP_ADDRESS)
 

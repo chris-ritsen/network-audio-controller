@@ -195,6 +195,7 @@ async def test_receiver_inventory_family_follows_channel_count_capability_select
     }
     modern_query = AsyncMock(return_value=modern_page)
     legacy = SimpleNamespace(
+        flow_protocol_id=0x2729,
         application=SimpleNamespace(query_modern_arc_receiver_flow_status=modern_query, external_flows=None),
         receiver_flow_inventory_family="legacy",
         requires_managed_control=False,

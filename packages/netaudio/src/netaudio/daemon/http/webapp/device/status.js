@@ -123,16 +123,13 @@ export function StatusSection({ device }) {
               ],
               [
                 "Clock mute",
-                fresh && clock.mute_flags != null
-                  ? clock.mute_flags === 0
+                fresh && clock.mute_state != null
+                  ? clock.mute_state === "unmuted"
                     ? "none"
-                    : `${(clock.mute_reasons || []).join(", ")} (0x${clock.mute_flags.toString(16)})`
+                    : (clock.mute_reasons || []).join(", ") || "unknown reason"
                   : "unavailable",
               ],
-              [
-                "Servo",
-                clock.servo_state ?? clock.servo_state_code ?? "unavailable",
-              ],
+              ["Servo", clock.servo_state ?? "unavailable"],
               ["PTPv1 device UUID", device.ptpv1_device_uuid || "unavailable"],
               [
                 "PTPv1 current master UUID",
@@ -143,12 +140,7 @@ export function StatusSection({ device }) {
                 device.ptpv1_grandmaster_uuid || "unavailable",
               ],
               ["PTPv2 domain", String(clock.ptpv2_domain ?? "unavailable")],
-              [
-                "Word clock",
-                clock.word_clock_state ??
-                  clock.word_clock_state_code ??
-                  "unavailable",
-              ],
+              ["Word clock", clock.word_clock_state ?? "unavailable"],
               [
                 "Frequency offset",
                 clock.clock_frequency_offset_parts_per_billion == null
@@ -160,13 +152,10 @@ export function StatusSection({ device }) {
                 "Preferred leader",
                 format.preferredLeader(device.preferred_leader),
               ],
-              [
-                "Clock source",
-                format.text(device.clock_source || "Unknown"),
-              ],
+              ["Clock source", format.text(device.clock_source || "Unknown")],
               [
                 "Clock subdomain",
-                format.clockSubdomain(device.clock_subdomain),
+                device.clock_subdomain_presentation?.label || "Unavailable",
               ],
               ["AES67", aes67Status(device).label],
             ]}

@@ -12,10 +12,18 @@ OUTPUTS = {
     "inputs": ROOT / "packages/netaudio/src/netaudio/core/_requests.py",
     "outputs": ROOT / "packages/netaudio/src/netaudio/core/_types.py",
     "protocols": ROOT / "packages/netaudio/src/netaudio/core/_protocols.py",
+    "audio_choices": ROOT / "packages/netaudio/src/netaudio/core/_audio_choices.py",
 }
 
 
-def generate_protocols(records: list[dict]) -> str:
+def generate_audio_choices(choices: list[dict]) -> str:
+    return (
+        "# Generated from Rust audio metadata by scripts/generate_core_types.py. Do not edit.\n"
+        f"SAMPLE_RATE_PULLUP_CHOICES = {choices!r}\n"
+    )
+
+
+def generate_protocols(records: list[dict], discovery: dict | None = None) -> str:
     labels = {}
     arc = []
     modern = []
@@ -49,6 +57,7 @@ def generate_protocols(records: list[dict]) -> str:
         f"MODERN_ARC_PROTOCOL_IDS = {tuple(modern)!r}\n"
         f"CAPTURE_PROTOCOL_IDS = {tuple(labels)!r}\n"
         f"PROTOCOL_LABELS = {labels!r}\n"
+        + "".join(f"{name} = {value!r}\n" for name, value in sorted((discovery or {}).items()))
     )
 
 
@@ -234,9 +243,13 @@ def main():
         schemas = json.loads(result.stdout)
 
     for contract, output in OUTPUTS.items():
+        generator = {
+            "protocols": lambda records: generate_protocols(records, schemas["discovery"]),
+            "audio_choices": generate_audio_choices,
+        }.get(contract, generate)
         source = subprocess.run(
             [sys.executable, "-m", "ruff", "format", "--stdin-filename", str(output), "-"],
-            input=generate_protocols(schemas[contract]) if contract == "protocols" else generate(schemas[contract]),
+            input=generator(schemas[contract]),
             check=True,
             capture_output=True,
             text=True,
@@ -248,6 +261,18 @@ def main():
                 raise SystemExit(f"{output.name} is stale; run scripts/generate_core_types.py")
         else:
             output.write_text(source)
+
+    web_output = ROOT / "packages/netaudio/src/netaudio/daemon/http/webapp/core-metadata.js"
+    web_source = (
+        "// Generated from Rust metadata by scripts/generate_core_types.py. Do not edit.\n"
+        f"export const sampleRatePullupChoices = {json.dumps(schemas['audio_choices'], indent=2)};\n"
+    )
+
+    if args.check:
+        if not web_output.exists() or web_output.read_text() != web_source:
+            raise SystemExit(f"{web_output.name} is stale; run scripts/generate_core_types.py")
+    else:
+        web_output.write_text(web_source)
 
 
 if __name__ == "__main__":

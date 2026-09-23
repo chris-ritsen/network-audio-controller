@@ -283,6 +283,80 @@ def test_hdcp_modes_use_supported_list_and_presets_skip_noops():
     assert plan_panel(d, "hdcp", {"mode": 99})["action"] == "unsupported"
 
 
+def test_panel_editor_choices_are_accepted_by_the_real_command_planner():
+    _, d = device("dante_av")
+    video(d)
+    observation(
+        d,
+        "codec_format",
+        {
+            "current": {"codec_type": 1, "profile": 1, "level": 1},
+            "supported": [
+                {"codec_type": 1, "profile": 1, "level": 19},
+                {"codec_type": 99, "profile": 99, "level": 31},
+            ],
+        },
+    )
+    observation(d, "hdcp", {"configured_mode": 3, "supported_modes": [1, 3, 99]})
+    observation(
+        d,
+        "serial",
+        {
+            "baud_rate": 9600,
+            "hardware_flow_control": 0,
+            "software_flow_control": 0,
+            "data_bits": 8,
+            "parity": 0,
+            "stop_bits": 1,
+        },
+    )
+    editors = panel_snapshot(d)["presentation"]["editors"]
+
+    for category in ("video_format", "codec_format", "hdcp", "serial"):
+        assert editors[category]["variants"]
+        for variant in editors[category]["variants"]:
+            assert plan_panel(d, category, variant["requested"])["action"] in ("change", "unchanged")
+
+    assert [v["requested"]["mode"] for v in editors["hdcp"]["variants"]] == [1, 3]
+    assert {v["requested"]["level"] for v in editors["codec_format"]["variants"]} == {1, 2, 16}
+    assert editors["video_format"]["details"]["configured"].startswith("Unknown")
+
+
+def test_panel_presentation_uses_native_limits_and_unknown_labels():
+    _, d = device("dante_av")
+    video(d)
+    observation(d, "bandwidth", {"target": 100, "minimum": 50, "maximum": 800, "enabled": 1})
+    observation(d, "video_channel", {"direction": 99, "status_code": 999, "observed_hdcp_version": 99})
+    presentation = panel_snapshot(d)["presentation"]
+
+    assert presentation["editors"]["bandwidth"]["bandwidth"]["maximum"] == 700
+    assert presentation["summary"]["signal"] == "Unknown"
+    assert presentation["summary"]["observed_hdcp"] == "Unknown"
+
+    video(d, direction=1)
+    editors = panel_snapshot(d)["presentation"]["editors"]
+    assert editors["video_format"]["reason"]
+    assert not editors["video_format"]["variants"]
+    assert editors["bandwidth"]["reason"]
+
+
+def test_panel_presentation_never_offers_changes_from_stale_prerequisites():
+    _, d = device("dante_av")
+    video(d)
+    observation(d, "visca", {"capability": 1, "reply": []}, age=20)
+    editor = panel_snapshot(d)["presentation"]["editors"]["video_format"]
+
+    assert editor["reason"]
+    assert not editor["variants"]
+
+
+@pytest.mark.parametrize("status,expected", [(1, True), (2, False), (99, None), (True, None)])
+def test_native_panel_configuration_captures_only_known_discovery_states(status, expected):
+    captured = core.capture_panel_configuration({"bluetooth_discovery": status, "bluetooth_pairing": 2})
+
+    assert captured == ({"bluetooth_discovery": expected} if expected is not None else {})
+
+
 def test_malformed_observation_retains_raw_and_marks_existing_state_unavailable():
     _, d = device()
     observation(d, "bluetooth_connection", {"state": 3, "peer_name": "private"})

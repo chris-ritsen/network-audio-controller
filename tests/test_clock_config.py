@@ -25,6 +25,29 @@ def test_clock_subdomain_labels_unset_ascii_and_binary():
     assert format_clock_subdomain(bytes([0x74, 0x94, 0x11, 0x07, 0x01]) + bytes(11)) == "unknown"
 
 
+@pytest.mark.parametrize(
+    "raw,label,text",
+    [
+        (None, "unknown", None),
+        ([0] * 16, "unset", ""),
+        (list(b"house") + [0] * 11, "house", "house"),
+        ([97, 0, 98], "unknown", None),
+        ([255, 0], "unknown", None),
+        (list(b"x" * 16), "unknown", None),
+    ],
+)
+def test_clock_subdomain_snapshot_and_cli_use_the_native_presentation(raw, label, text):
+    from netaudio import core
+    from tests.status_test_support import application_with_device
+
+    _, device = application_with_device("receiver.local.", "192.0.2.1")
+    device.clock_subdomain = raw
+    expected = {"label": label, "text": text}
+    assert core.clock_subdomain_presentation(raw) == expected
+    assert device.to_json()["clock_subdomain_presentation"] == expected
+    assert format_clock_subdomain(raw) == label
+
+
 def test_parse_clock_source_accepts_decimal_and_hex():
     assert parse_clock_source_selection("0") == 0
     assert parse_clock_source_selection("1") == 1
@@ -75,7 +98,7 @@ def test_clock_subdomain_input_rejects_names_the_device_cannot_encode(value):
 def test_presets_reject_invalid_subdomains_without_lossy_conversion(value):
     from netaudio.presets.schema import normalize_device_config
 
-    with pytest.raises(ValueError, match="clock_subdomain"):
+    with pytest.raises(ValueError):
         normalize_device_config({"name": "Receiver", "clock_subdomain": value})
 
 

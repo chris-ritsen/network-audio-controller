@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from netaudio import core
-from netaudio.dante.transmit_flow import TransmitFlowSpecification, compare_transmit_flows
 
 
 def record():
@@ -31,7 +30,6 @@ def test_native_readback_preserves_slots_identity_unknown_media_and_extensions()
     assert result["protocol"]["cohort"] == "modern_2809"
     assert result["raw_fields"] == observed
     assert result["primary_destination"] == {"address": "239.69.1.10", "port": 5004, "interface": None}
-    assert TransmitFlowSpecification.from_inventory_record(observed, protocol_id=0x2809).to_dict() == result
 
 
 @pytest.mark.parametrize(
@@ -69,21 +67,18 @@ def test_native_readback_reports_which_semantic_fields_are_established(protocol,
 
 
 def test_matching_unknown_media_modes_cannot_confirm_effective_state():
-    effective = TransmitFlowSpecification.from_inventory_record(
-        {**record(), "media_mode": "unknown"}, protocol_id=0x2809
-    )
-    comparison = compare_transmit_flows(effective, effective)
-    assert not comparison.matches
-    assert "media_mode" in comparison.unavailable_fields
+    effective = core.transmit_flow_specification({**record(), "media_mode": "unknown"}, protocol_id=0x2809)
+    comparison = core.compare_transmit_flows(effective, effective)
+    assert not comparison["matches"]
+    assert "media_mode" in comparison["unavailable_fields"]
 
 
-def test_capture_readback_uses_the_same_specification_for_python_and_native_clients():
+def test_capture_readback_preserves_flow_identity_and_raw_observations():
     response = (Path(__file__).parent / "fixtures/transmit_flow_lifecycle/modern-2809-create-readback.bin").read_bytes()
     observed = core.parse_response("transmitter_flow_status_page", response)["flows"][0]
     native = core.transmit_flow_specification(observed, protocol_id=0x2809)
     assert native["identity"]["global_flow_id"] == 2
     assert native["raw_fields"] == observed
-    assert native == TransmitFlowSpecification.from_inventory_record(observed, protocol_id=0x2809).to_dict()
 
 
 @pytest.mark.parametrize("protocol", [0x2809, 0x280F])

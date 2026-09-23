@@ -20,14 +20,14 @@ from netaudio.commands.device.display import (
 )
 from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante import flows
-from netaudio.core import subscription_status
+from netaudio.core import _requests, subscription_status
 from netaudio.dante.flow_lifecycle import (
     create_transmit_flow,
     delete_transmit_flow,
     inspect_transmit_flows,
     plan_create_transmit_flow,
 )
-from netaudio.dante.transmit_flow import TransmitFlowSpecification
+from netaudio.dante.transmit_flow import parse_transmit_flow_specification
 
 app = typer.Typer(
     help="Inspect receiver flows and manage transmitter multicast flows on the selected device.",
@@ -87,11 +87,11 @@ def _selected_device(devices):
     return device, device._arc_port()
 
 
-def _read_specification(path: str) -> TransmitFlowSpecification:
+def _read_specification(path: str) -> _requests.TransmitFlowSpecification:
     try:
         content = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
         value = json.loads(content)
-        return TransmitFlowSpecification.from_dict(value)
+        return parse_transmit_flow_specification(value)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exception:
         _fail_validation(flows.FlowValidationError(f"invalid transmit-flow specification: {exception}"))
 
@@ -164,7 +164,7 @@ def flow_inspect():
     run_command(run_flow_inspect)
 
 
-async def run_flow_plan(application, devices, specification: TransmitFlowSpecification) -> None:
+async def run_flow_plan(application, devices, specification: _requests.TransmitFlowSpecification) -> None:
     device, _ = _selected_device(devices)
     output_single(plan_create_transmit_flow(device, specification).to_dict())
 
@@ -177,7 +177,7 @@ def flow_plan(
     run_command(run_flow_plan, _read_specification(specification_file))
 
 
-async def run_flow_apply(application, devices, specification: TransmitFlowSpecification) -> None:
+async def run_flow_apply(application, devices, specification: _requests.TransmitFlowSpecification) -> None:
     device, _ = _selected_device(devices)
     operation = getattr(application, "create_transmit_flow", None)
     result = (

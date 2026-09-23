@@ -270,6 +270,8 @@ class DanteDeviceSerializer:
         )
         as_json["clock_source"] = clock_sources["current"]
         as_json["clock_source_choices"] = clock_sources["choices"]
+        as_json["clock_control_availability"] = core.clock_control_availability(device.clock_status or {})
+        as_json["clock_subdomain_presentation"] = core.clock_subdomain_presentation(device.clock_subdomain)
 
         from netaudio.dante.panel_state import panel_snapshot
 
@@ -462,7 +464,7 @@ class DanteDeviceSerializer:
         return {
             "code": code,
             "detail": None,
-            "label": f"Receiver status 0x{code:04X}",
+            "label": "Unknown receiver status",
             "state": "uncharacterized",
         }
 

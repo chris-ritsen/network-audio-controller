@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Mapping
-from ipaddress import IPv4Address, IPv4Network
 from typing import Any
 
-from netaudio.dante.transmit_flow import TransmitFlowSpecification
+from netaudio import core
+from netaudio.dante.transmit_flow import parse_transmit_flow_specification
 
 
 PRESET_SCHEMA_VERSION = 3
@@ -30,33 +30,19 @@ class ParsedPresetDevices(dict[str, dict[str, Any]]):
         self.unknown_root_elements = unknown_root_elements or []
 
 
-def _positive_integer(value: Any, label: str, maximum: int = 0xFFFF) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
-        raise ValueError(f"{label} must be an integer from 1 through {maximum}")
-    return value
+def _channel_number(value: Any, existing: dict, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError(f"{label} channel identifiers must be integers")
 
+    try:
+        number = int(value)
+    except ValueError as exception:
+        raise ValueError(f"{label} channel identifiers must be integers") from exception
 
-def _optional_boolean(value: Any, label: str) -> bool | None:
-    if value is None or isinstance(value, bool):
-        return value
-    raise ValueError(f"{label} must be Boolean or null")
+    if number in existing:
+        raise ValueError(f"{label} contains duplicate channel identifier {number}")
 
-
-def _unsigned_integer(value: Any, label: str, maximum: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
-        raise ValueError(f"{label} must be an integer from 0 through {maximum}")
-    return value
-
-
-def _performance_pair(value: Any, label: str) -> dict[str, int]:
-    if not isinstance(value, Mapping) or set(value) != {"latency_microseconds", "frames_per_packet"}:
-        raise ValueError(f"{label} must contain latency_microseconds and frames_per_packet")
-    return {
-        "latency_microseconds": _unsigned_integer(
-            value["latency_microseconds"], f"{label}.latency_microseconds", 0xFFFFFFFF // 1_000
-        ),
-        "frames_per_packet": _unsigned_integer(value["frames_per_packet"], f"{label}.frames_per_packet", 0xFFFF),
-    }
+    return number
 
 
 def _name_map(value: Any, label: str) -> dict[int, str]:
@@ -66,11 +52,7 @@ def _name_map(value: Any, label: str) -> dict[int, str]:
         raise ValueError(f"{label} must be an object")
     result = {}
     for raw_number, raw_name in value.items():
-        try:
-            number = int(raw_number)
-        except (TypeError, ValueError) as exception:
-            raise ValueError(f"{label} channel identifiers must be integers") from exception
-        _positive_integer(number, f"{label} channel identifier")
+        number = _channel_number(raw_number, result, label)
         if not isinstance(raw_name, str):
             raise ValueError(f"{label} channel names must be strings")
         result[number] = raw_name
@@ -111,51 +93,13 @@ def _subscriptions(value: Any) -> dict[int, dict[str, Any] | None]:
         raise ValueError("rx_subscriptions must be an object")
     result = {}
     for raw_channel, raw_subscription in value.items():
-        try:
-            channel = int(raw_channel)
-        except (TypeError, ValueError) as exception:
-            raise ValueError("receiver subscription channel identifiers must be integers") from exception
-        _positive_integer(channel, "receiver subscription channel identifier")
+        channel = _channel_number(raw_channel, result, "receiver subscription")
         if raw_subscription is None:
             result[channel] = None
         elif isinstance(raw_subscription, Mapping):
             entry = copy.deepcopy(dict(raw_subscription))
             kind = entry.get("kind", "native_dante")
-            if kind not in ("native_dante", "external_rtp"):
-                raise ValueError("receiver subscription kind must be native_dante or external_rtp")
             entry["kind"] = kind
-            if kind == "native_dante":
-                if not isinstance(entry.get("tx_channel"), str) or not entry["tx_channel"]:
-                    raise ValueError("native receiver subscriptions require tx_channel")
-                if not isinstance(entry.get("tx_device"), str) or not entry["tx_device"]:
-                    raise ValueError("native receiver subscriptions require tx_device")
-            else:
-                identity = entry.get("flow_identity")
-                slot = entry.get("flow_slot")
-                if not isinstance(identity, Mapping):
-                    raise ValueError("external RTP subscriptions require flow_identity")
-                if not isinstance(identity.get("source_ipv4"), str):
-                    raise ValueError("external RTP flow identity requires source_ipv4")
-                IPv4Address(identity["source_ipv4"])
-                _positive_integer(identity.get("session_id"), "external RTP session_id", maximum=0xFFFFFFFFFFFFFFFF)
-                if isinstance(slot, bool) or not isinstance(slot, int) or not 1 <= slot <= 0xFFFF:
-                    raise ValueError("external RTP subscriptions require a positive 16-bit flow_slot")
-                endpoints = entry.get("interface_endpoints")
-                if endpoints is not None:
-                    if not isinstance(endpoints, list) or not 1 <= len(endpoints) <= 2:
-                        raise ValueError("external RTP interface_endpoints must contain one or two destinations")
-                    for endpoint in endpoints:
-                        if not isinstance(endpoint, Mapping):
-                            raise ValueError("external RTP interface endpoints must be objects")
-                        address = endpoint.get("ipv4_address")
-                        if address is not None:
-                            if not isinstance(address, str):
-                                raise ValueError("external RTP endpoint IPv4 address must be a string or null")
-                            IPv4Address(address)
-                        _positive_integer(endpoint.get("udp_port"), "external RTP endpoint UDP port")
-                multiple_interfaces = entry.get("receiver_supports_multiple_interfaces")
-                if multiple_interfaces is not None and not isinstance(multiple_interfaces, bool):
-                    raise ValueError("receiver_supports_multiple_interfaces must be Boolean")
             result[channel] = entry
         else:
             raise ValueError("receiver subscriptions must be objects or null")
@@ -178,26 +122,8 @@ def normalize_device_config(value: Mapping[str, Any]) -> dict[str, Any]:
         ):
             raise ValueError("device_identity must contain server_name, mac_address, or inventory_id")
         result["device_identity"] = copy.deepcopy(dict(identity))
-    for field_name in (
-        "preferred_leader",
-        "external_word_clock",
-        "global_unicast_delay_requests",
-        "aggregate_ptpv1_unicast_delay_requests",
-    ):
-        if field_name in result:
-            result[field_name] = _optional_boolean(result[field_name], field_name)
     if "interfaces" in result:
         result["interfaces"] = _interfaces(result["interfaces"])
-        for interface in result["interfaces"]:
-            if interface["mode"] == "static":
-                try:
-                    for field_name in ("ip_address", "netmask", "gateway", "dns_server"):
-                        IPv4Address(interface[field_name])
-                    IPv4Network(f"{interface['ip_address']}/{interface['netmask']}", strict=False)
-                except ValueError as exception:
-                    raise ValueError(
-                        f"interface {interface['identity']}: invalid static IPv4 configuration"
-                    ) from exception
     for field_name in ("transmitter_channel_names", "receiver_channel_names"):
         if field_name in result:
             result[field_name] = _name_map(result[field_name], field_name)
@@ -207,63 +133,24 @@ def normalize_device_config(value: Mapping[str, Any]) -> dict[str, Any]:
         raw_flows = result["transmit_flows"]
         if not isinstance(raw_flows, list):
             raise ValueError("transmit_flows must be a list")
-        result["transmit_flows"] = [TransmitFlowSpecification.from_dict(item).to_dict() for item in raw_flows]
-    if "codec_gain" in result:
-        gains = result["codec_gain"]
-        if not isinstance(gains, list):
-            raise ValueError("codec_gain must be a list")
-        normalized_gains = []
-        for gain in gains:
-            if not isinstance(gain, Mapping):
-                raise ValueError("codec_gain entries must be objects")
-            entry = copy.deepcopy(dict(gain))
-            _positive_integer(entry.get("channel"), "codec gain channel")
-            _positive_integer(entry.get("level"), "codec gain level", maximum=255)
-            if entry.get("device_type") not in ("input", "output"):
-                raise ValueError("codec gain device_type must be input or output")
-            normalized_gains.append(entry)
-        result["codec_gain"] = normalized_gains
-    if "sample_rate_pullup" in result:
-        pullup = result["sample_rate_pullup"]
-        if isinstance(pullup, bool) or not isinstance(pullup, int) or not 0 <= pullup <= 0xFFFFFFFF:
-            raise ValueError("sample_rate_pullup must be an unsigned 32-bit integer")
-    for field_name in (
-        "receive_flow_performance",
-        "transmit_flow_performance",
-        "unicast_performance",
-    ):
-        if field_name in result:
-            result[field_name] = _performance_pair(result[field_name], field_name)
-    if "receive_flow_default_slots" in result:
-        result["receive_flow_default_slots"] = _unsigned_integer(
-            result["receive_flow_default_slots"], "receive_flow_default_slots", 0xFFFF
-        )
+        result["transmit_flows"] = [parse_transmit_flow_specification(item) for item in raw_flows]
     if "device_controls" in result:
         from netaudio.presets.device_controls import validate_device_controls
 
         result["device_controls"] = validate_device_controls(result["device_controls"])
     if "clock_subdomain" in result:
-        from netaudio.dante.clock_config import clock_subdomain_bytes
-
-        name = clock_subdomain_bytes(result["clock_subdomain"])
-        if name is None:
-            raise ValueError("clock_subdomain must contain at most 15 bytes followed by a NUL")
-        result["clock_subdomain"] = list(name)
-    if "clock_source_code" in result:
-        value = result["clock_source_code"]
-        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 0xFFFF:
-            raise ValueError("clock_source_code must be an unsigned 16-bit integer")
-    if "redundancy_mode" in result and result["redundancy_mode"] not in (
-        "switched",
-        "redundant",
-        "split_redundant",
-    ):
-        raise ValueError("redundancy_mode must be switched, redundant, or split_redundant")
-    for numeric_name in ("sample_rate", "encoding"):
-        if numeric_name in result:
-            _positive_integer(result[numeric_name], numeric_name, maximum=0xFFFFFFFF)
+        try:
+            result["clock_subdomain"] = list(core.normalize_clock_subdomain(result["clock_subdomain"]))
+        except core.NetaudioCoreError as error:
+            raise ValueError(error.detail or str(error)) from error
     if "unknown_fields" in result and not isinstance(result["unknown_fields"], Mapping):
         raise ValueError("unknown_fields must be an object")
+
+    try:
+        core.validate_configuration(result)
+    except core.NetaudioCoreError as error:
+        raise ValueError(error.detail or str(error)) from error
+
     return result
 
 

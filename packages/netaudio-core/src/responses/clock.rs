@@ -80,6 +80,7 @@ pub struct PtpClockStatus {
     pub aggregate_ptpv1_unicast_delay_requests: Option<bool>,
     pub clock_subdomain: Option<[u8; 16]>,
     pub mute_flags: Option<u16>,
+    pub mute_state: Option<&'static str>,
     pub mute_reasons: Vec<String>,
     pub word_clock_state_code: Option<u16>,
     pub word_clock_state: Option<String>,
@@ -211,6 +212,7 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
         aggregate_ptpv1_unicast_delay_requests: None,
         clock_subdomain: None,
         mute_flags: None,
+        mute_state: None,
         mute_reasons: vec![],
         word_clock_state_code: None,
         word_clock_state: None,
@@ -300,6 +302,8 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
     if rev >= 0x0704 {
         let mute = read_u16(r, e + 28)?;
         s.mute_flags = Some(mute);
+        s.mute_state = Some(if mute == 0 { "unmuted" } else { "muted" });
+        let mut unknown = mute;
         for (bit, name) in [
             (1, "synchronization loss"),
             (2, "external-clock problem"),
@@ -310,6 +314,11 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
             if mute & bit != 0 {
                 s.mute_reasons.push(name.into());
             }
+            unknown &= !bit;
+        }
+
+        if unknown != 0 {
+            s.mute_reasons.push("unknown reason".into());
         }
     }
     if rev >= 0x0705 {

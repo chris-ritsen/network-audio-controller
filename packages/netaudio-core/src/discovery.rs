@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, net::Ipv4Addr};
 use serde::{Deserialize, Serialize};
 
 use crate::parser::{channel_audio_publication, ChannelAudioConfiguration};
-use crate::protocol::{NetaudioPort, SERVICE_ARC};
+use crate::protocol::{NetaudioPort, SERVICE_ARC, SERVICE_CHAN, SERVICE_CMC};
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -63,7 +63,7 @@ pub fn virtual_device(config: VirtualDeviceAdvertisement) -> Vec<ServiceAdvertis
             ]),
         ),
         service(
-            "_netaudio-cmc._udp.local.",
+            SERVICE_CMC,
             config.name.clone(),
             NetaudioPort::Control as u16,
             properties(&[
@@ -103,7 +103,7 @@ pub fn virtual_device(config: VirtualDeviceAdvertisement) -> Vec<ServiceAdvertis
         }
 
         services.push(service(
-            "_netaudio-chan._udp.local.",
+            SERVICE_CHAN,
             format!("{name}@{}", config.name),
             NetaudioPort::ArcSecondary as u16,
             channel,

@@ -1,4 +1,5 @@
 import * as format from "./format.js";
+import { sampleRatePullupChoices } from "./core-metadata.js";
 import { aes67Status } from "./aes67.js";
 import { signal } from "./lib/preact.js";
 
@@ -33,7 +34,8 @@ export const DEVICE_FILTERS = [
   { id: "aes67", label: "AES67", values: (device) => [aes67Status(device).label] },
   { id: "sample-rate-pullup", label: "Sample rate pull-up", values: (device) => {
     const raw = device.sample_rate_pullup_raw_value;
-    return [Number.isInteger(raw) ? ["None", "+4.1667%", "+0.1%", "-0.1%", "-4.0%"][raw] || UNKNOWN : UNKNOWN];
+    const label = sampleRatePullupChoices.find((choice) => choice.value === raw)?.label;
+    return [label ? label.charAt(0).toUpperCase() + label.slice(1) : UNKNOWN];
   } },
   { id: "media", label: "Media type", values: (device) => {
     const types = new Set();

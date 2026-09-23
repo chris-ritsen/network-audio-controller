@@ -263,9 +263,6 @@ def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[
             if not device.online:
                 logger.debug(f"Skipping {probe_name} probe for {_device_label(device)}: device is offline")
                 continue
-            if device.kind == "emulated":
-                logger.debug(f"Skipping {probe_name} probe for {_device_label(device)}: device is emulated")
-                continue
         candidates[server_name] = device
     return candidates
 

@@ -373,7 +373,7 @@ impl NetaudioClient {
     }
 }
 
-pub const NETAUDIO_ABI_VERSION: u32 = 9;
+pub const NETAUDIO_ABI_VERSION: u32 = 10;
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
@@ -547,6 +547,8 @@ mod capabilities;
 mod client_actions;
 mod client_queries;
 mod clock;
+mod configuration;
+mod conmon_export;
 mod dapi;
 mod encoding;
 mod flows;
@@ -565,6 +567,7 @@ pub use capabilities::*;
 pub use client_actions::*;
 pub use client_queries::*;
 pub use clock::*;
+pub use conmon_export::*;
 pub use dapi::*;
 pub use encoding::*;
 pub use flows::*;

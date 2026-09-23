@@ -227,8 +227,8 @@ def _parse_transmitter_channel_names(device_element: ET.Element) -> dict[int, st
         label = transmitter_element.findtext("label", "")
         if dante_identifier and label:
             identifier = int(dante_identifier)
-            if not 1 <= identifier <= 65535 or identifier in transmitter_channel_names:
-                raise ValueError("transmitter channel danteId must be unique and from 1 through 65535")
+            if identifier in transmitter_channel_names:
+                raise ValueError("transmitter channel danteId must be unique")
             transmitter_channel_names[identifier] = label
     return transmitter_channel_names
 
@@ -300,6 +300,4 @@ def _parse_receiver_channel_number(receiver_channel_element: ET.Element, device_
         receiver_channel_number = int(dante_identifier)
     except ValueError as exception:
         raise ValueError(f"{device_name}: receiver channel danteId must be an integer") from exception
-    if not 1 <= receiver_channel_number <= 0xFFFF:
-        raise ValueError(f"{device_name}: receiver channel danteId must be from 1 through 65535")
     return receiver_channel_number

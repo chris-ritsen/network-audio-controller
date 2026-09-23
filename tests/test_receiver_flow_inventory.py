@@ -144,7 +144,7 @@ async def test_receiver_flow_inventory_uses_the_controller_query(monkeypatch):
 
     monkeypatch.setattr(flows, "_request", request)
 
-    inventory = await flows.query_receiver_flow_inventory("192.0.2.10", 4440)
+    inventory = await flows.query_receiver_flow_inventory("192.0.2.10", 4440, protocol_id=0x2729)
 
     expected = core.parse_response("receiver_flow_page", _packet(0x3200, 8172))
     assert inventory == {**expected, "pages": [expected]}

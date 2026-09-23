@@ -105,14 +105,6 @@ pub(super) struct TransmitterChannelNameReconciliationEntry {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct ExternalRtpDestinationSpec {
-    pub(super) address: String,
-    #[serde(default)]
-    pub(super) port: u16,
-}
-
-#[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum MulticastFlowTransportSpec {
     Native,
@@ -563,24 +555,7 @@ pub(super) enum CommandSpec {
         message_id: u16,
         negotiated_protocol_id: u16,
     },
-    SubscribeExternalRtp {
-        advertised_flow_slot_count: u16,
-        #[serde(default)]
-        advertisement_supports_multiple_interfaces: bool,
-        clock_offset: u32,
-        device_protocol: u16,
-        flow_slot_assignments: Vec<u16>,
-        #[serde(default)]
-        message_id: u16,
-        primary_destination: ExternalRtpDestinationSpec,
-        receiver_channel_ids: Vec<u16>,
-        #[serde(default)]
-        receiver_supports_multiple_interfaces: bool,
-        #[serde(default)]
-        secondary_destination: Option<ExternalRtpDestinationSpec>,
-        session_id: u64,
-        source_address: String,
-    },
+    SubscribeExternalRtp(ExternalSubscriptionSpec),
     #[serde(rename = "subscription_page_2729")]
     SubscriptionPage2729 {
         #[serde(default)]
@@ -695,12 +670,14 @@ impl CommandSpec {
             | CommandSpec::SetSampleRate { message_id, .. }
             | CommandSpec::SetSampleRatePullup { message_id, .. }
             | CommandSpec::StoreCurrentConfiguration { message_id, .. }
-            | CommandSpec::SubscribeExternalRtp { message_id, .. }
             | CommandSpec::SubscriptionPage2729 { message_id, .. }
             | CommandSpec::ModernArcSubscriptionPage { message_id, .. }
             | CommandSpec::TransmitterNames { message_id, .. }
             | CommandSpec::Transmitters { message_id, .. }
             | CommandSpec::VolumeStart { message_id, .. } => Some(message_id),
+            CommandSpec::SubscribeExternalRtp(specification) => {
+                Some(&mut specification.parameters.message_id)
+            }
             CommandSpec::DanteModel { .. }
             | CommandSpec::MakeModel { .. }
             | CommandSpec::MeteringStop { .. }
@@ -745,7 +722,7 @@ impl CommandSpec {
             | CommandSpec::SetUnicastPerformance { .. }
             | CommandSpec::SetName { .. }
             | CommandSpec::StoreCurrentConfiguration { .. }
-            | CommandSpec::SubscribeExternalRtp { .. }
+            | CommandSpec::SubscribeExternalRtp(..)
             | CommandSpec::SubscriptionPage2729 { .. }
             | CommandSpec::ModernArcSubscriptionPage { .. }
             | CommandSpec::TransmitterNames { .. }
@@ -1306,51 +1283,7 @@ pub(super) fn build_command(
             message_id,
             negotiated_protocol_id,
         } => commands::build_store_current_configuration(negotiated_protocol_id, message_id)?,
-        CommandSpec::SubscribeExternalRtp {
-            advertised_flow_slot_count,
-            advertisement_supports_multiple_interfaces,
-            clock_offset,
-            device_protocol,
-            flow_slot_assignments,
-            message_id,
-            primary_destination,
-            receiver_channel_ids,
-            receiver_supports_multiple_interfaces,
-            secondary_destination,
-            session_id,
-            source_address,
-        } => {
-            let destination =
-                |value: ExternalRtpDestinationSpec| -> Result<ExternalRtpDestination, SpecError> {
-                    Ok(ExternalRtpDestination {
-                        address: value
-                            .address
-                            .parse::<Ipv4Addr>()
-                            .map_err(|_| SpecError::InvalidIp)?,
-                        port: value.port,
-                    })
-                };
-            commands::build_external_receiver_subscription(
-                &ExternalReceiverSubscription {
-                    device_protocol,
-                    receiver_channel_ids: &receiver_channel_ids,
-                    flow_slot_assignments: &flow_slot_assignments,
-                    advertised_flow_slot_count,
-                    flow_identity: ExternalFlowIdentity {
-                        source_address: source_address
-                            .parse::<Ipv4Addr>()
-                            .map_err(|_| SpecError::InvalidIp)?,
-                        session_id,
-                    },
-                    clock_offset,
-                    primary_destination: destination(primary_destination)?,
-                    secondary_destination: secondary_destination.map(destination).transpose()?,
-                    advertisement_supports_multiple_interfaces,
-                    receiver_supports_multiple_interfaces,
-                },
-                message_id,
-            )?
-        }
+        CommandSpec::SubscribeExternalRtp(specification) => specification.build()?,
         CommandSpec::SubscriptionPage2729 {
             records,
             message_id,

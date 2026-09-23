@@ -1,10 +1,12 @@
 use std::net::{Ipv4Addr, UdpSocket};
 
-const DANTE_CLOCK_MULTICAST: &str = "224.0.0.231";
+use crate::protocol::MULTICAST_GROUP_CONTROL_MONITORING;
 
 pub fn local_ipv4() -> Option<Ipv4Addr> {
     let socket = UdpSocket::bind(("0.0.0.0", 0)).ok()?;
-    socket.connect((DANTE_CLOCK_MULTICAST, 1)).ok()?;
+    socket
+        .connect((MULTICAST_GROUP_CONTROL_MONITORING, 1))
+        .ok()?;
     match socket.local_addr().ok()?.ip() {
         std::net::IpAddr::V4(address) => Some(address),
         _ => None,

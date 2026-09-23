@@ -146,6 +146,8 @@ typedef uint16_t NetaudioNotification;
 
 typedef struct NetaudioClient NetaudioClient;
 
+typedef struct NetaudioExportCollector NetaudioExportCollector;
+
 typedef struct NetaudioInventory NetaudioInventory;
 
 #ifdef __cplusplus
@@ -385,6 +387,22 @@ NetaudioStatus netaudio_parse_page(const char *kind,
                                    uintptr_t *out_length);
 
 /**
+ * Present a validated subdomain without exposing unrecognized bytes as a name.
+ */
+NetaudioStatus netaudio_clock_subdomain_presentation(const char *json,
+                                                     uint8_t *out_buffer,
+                                                     uintptr_t out_capacity,
+                                                     uintptr_t *out_length);
+
+/**
+ * Derive allowed clock controls using the command encoder's capability rules.
+ */
+NetaudioStatus netaudio_clock_control_availability(const char *json,
+                                                   uint8_t *out_buffer,
+                                                   uintptr_t out_capacity,
+                                                   uintptr_t *out_length);
+
+/**
  * Resolve current clock-source name and advertised choices from current and supported JSON facts.
  * Unknown sources have no label and are not offered as choices. Internal clock is always a choice.
  */
@@ -434,6 +452,53 @@ NetaudioStatus netaudio_clock_configuration_matches(const char *json,
                                                     uint8_t *out_buffer,
                                                     uintptr_t out_capacity,
                                                     uintptr_t *out_length);
+
+/**
+ * Validate configuration intent or derive restorable settings from fresh panel observations.
+ * No device revision is selected and no commands are sent.
+ */
+NetaudioStatus netaudio_configuration(const char *json,
+                                      uint8_t *out_buffer,
+                                      uintptr_t out_capacity,
+                                      uintptr_t *out_length);
+
+/**
+ * Create a bounded collector. The caller owns the handle and must free it once.
+ */
+NetaudioStatus netaudio_export_new(const char *configuration,
+                                   NetaudioExportCollector **out_collector);
+
+/**
+ * Free a collector. No concurrent calls may use it. Passing null is allowed.
+ */
+void netaudio_export_free(NetaudioExportCollector *collector);
+
+/**
+ * Accept a parsed fragment and return match/completion state. Repeating an
+ * accepted fragment is idempotent, including output-buffer size retries.
+ */
+NetaudioStatus netaudio_export_accept(NetaudioExportCollector *collector,
+                                      const char *fragment,
+                                      uint8_t *out_buffer,
+                                      uintptr_t out_capacity,
+                                      uintptr_t *out_length);
+
+/**
+ * Validate a credential without echoing its contents in error messages.
+ */
+NetaudioStatus netaudio_dapi_validate_credential(const char *json,
+                                                 uint8_t *out_buffer,
+                                                 uintptr_t out_capacity,
+                                                 uintptr_t *out_length);
+
+/**
+ * Advance a transport-independent managed operation. The input state is not mutated,
+ * so output buffer sizing and retries do not send or consume protocol messages.
+ */
+NetaudioStatus netaudio_dapi_advance_session(const char *json,
+                                             uint8_t *out_buffer,
+                                             uintptr_t out_capacity,
+                                             uintptr_t *out_length);
 
 /**
  * Advance a session-local wrapper ID. Pass zero for the first command after initialization.
@@ -570,6 +635,22 @@ NetaudioStatus netaudio_build_command(const char *json,
                                       uintptr_t *out_length);
 
 /**
+ * Require complete inventory and a supported, representable flow before deletion.
+ */
+NetaudioStatus netaudio_flow_delete_preflight(const char *json,
+                                              uint8_t *out_buffer,
+                                              uintptr_t out_capacity,
+                                              uintptr_t *out_length);
+
+/**
+ * Select advertised external RTP destinations and validate the resulting command.
+ */
+NetaudioStatus netaudio_plan_external_subscription(const char *json,
+                                                   uint8_t *out_buffer,
+                                                   uintptr_t out_capacity,
+                                                   uintptr_t *out_length);
+
+/**
  * Check fresh transmitter inventory before allocating a flow slot.
  */
 NetaudioStatus netaudio_flow_create_preflight(const char *json,
@@ -650,12 +731,12 @@ NetaudioStatus netaudio_transmit_flow_topology(const char *json,
                                                uintptr_t *out_length);
 
 /**
- * Validate the canonical transmit-flow specification, including cross-field constraints.
+ * Validate a transmit-flow specification and supply canonical defaults, preserving annotations.
  */
-NetaudioStatus netaudio_validate_transmit_flow_specification(const char *json,
-                                                             uint8_t *out_buffer,
-                                                             uintptr_t out_capacity,
-                                                             uintptr_t *out_length);
+NetaudioStatus netaudio_normalize_transmit_flow_specification(const char *json,
+                                                              uint8_t *out_buffer,
+                                                              uintptr_t out_capacity,
+                                                              uintptr_t *out_length);
 
 /**
  * Convert an observed transmitter record into the canonical flow specification.
@@ -787,6 +868,14 @@ NetaudioStatus netaudio_redundancy_control(const char *json,
                                            uintptr_t *out_length);
 
 /**
+ * Derive panel editor choices from the command planner and observed device state.
+ */
+NetaudioStatus netaudio_panel_presentation(const char *json,
+                                           uint8_t *out_buffer,
+                                           uintptr_t out_capacity,
+                                           uintptr_t *out_length);
+
+/**
  * Allocate a shared nonzero panel transaction sequence.
  */
 uint32_t netaudio_next_panel_sequence(void);
@@ -858,15 +947,29 @@ NetaudioStatus netaudio_plan_performance_command(const char *json,
                                                  uintptr_t *out_length);
 
 /**
- * Return a canonical MAC/device identity as a JSON string, or null if unavailable.
- * Accepts hexadecimal MAC/device IDs with colon, hyphen, or dot separators.
- * Known 64-bit MAC-derived representations collapse to 48 bits; other 64-bit
- * identities remain intact. Invalid and all-zero identities return null.
+ * Select a supported flow-inventory revision from observed or advertised evidence.
  */
-NetaudioStatus netaudio_canonical_device_mac(const char *value,
-                                             uint8_t *out_buffer,
-                                             uintptr_t out_capacity,
-                                             uintptr_t *out_length);
+NetaudioStatus netaudio_flow_inventory_protocol(const char *json,
+                                                uint8_t *out_buffer,
+                                                uintptr_t out_capacity,
+                                                uintptr_t *out_length);
+
+/**
+ * Classify an announcement for an existing, unexpired SAP session.
+ */
+NetaudioStatus netaudio_sap_transition(const char *json,
+                                       uint8_t *out_buffer,
+                                       uintptr_t out_capacity,
+                                       uintptr_t *out_length);
+
+/**
+ * Normalize an explicitly identified MAC, clock, or managed identity.
+ * Returns a JSON string, or null when the supplied value is invalid for its kind.
+ */
+NetaudioStatus netaudio_device_identity(const char *json,
+                                        uint8_t *out_buffer,
+                                        uintptr_t out_capacity,
+                                        uintptr_t *out_length);
 
 /**
  * Resolve advertised ARC version metadata. Null means unadvertised, not a
@@ -894,6 +997,14 @@ const char *netaudio_status_category(int32_t status);
 NetaudioStatus netaudio_last_error_message(uint8_t *out_buffer,
                                            uintptr_t out_capacity,
                                            uintptr_t *out_length);
+
+/**
+ * Classify managed subscription identifiers, messages, and aggregate summaries.
+ */
+NetaudioStatus netaudio_managed_subscription_status(const char *json,
+                                                    uint8_t *out_buffer,
+                                                    uintptr_t out_capacity,
+                                                    uintptr_t *out_length);
 
 /**
  * Validate an external subscription specification and compare optional complete receiver-flow readback.

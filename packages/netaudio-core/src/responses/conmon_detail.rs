@@ -40,7 +40,8 @@ pub struct LockResetStatus {
     pub raw_record_hexadecimal: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ConmonExportFragment {
     pub envelope_sequence_identifier: u16,
     pub record_protocol_identifier: u16,

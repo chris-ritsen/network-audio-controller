@@ -57,6 +57,26 @@ fn packet(rev: u16, extension: usize) -> Vec<u8> {
 }
 
 #[test]
+fn mute_state_preserves_unknown_reasons_without_guessing_their_meaning() {
+    for (flags, state, reasons) in [
+        (0, "unmuted", vec![]),
+        (1, "muted", vec!["synchronization loss"]),
+        (0x8000, "muted", vec!["unknown reason"]),
+        (
+            0x8001,
+            "muted",
+            vec!["synchronization loss", "unknown reason"],
+        ),
+    ] {
+        let mut bytes = packet(0x073a, 64);
+        word(&mut bytes[24..], 64 + 28, flags);
+        let status = parse_ptp_clock_status(&bytes).unwrap();
+        assert_eq!(status.mute_state, Some(state));
+        assert_eq!(status.mute_reasons, reasons);
+    }
+}
+
+#[test]
 fn dynamic_pointer_distinct_uuids_and_interface_geometry() {
     for e in [64, 112, 216] {
         let bytes = packet(0x073a, e);

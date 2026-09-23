@@ -82,18 +82,10 @@ export function subscriptionStatusText(subscription) {
   if (!status) {
     return ABSENT;
   }
-  const identifier = status.status || status.label;
-  const connected = {
-    DYNAMIC: "Connected — unicast",
-    STATIC: "Connected — multicast",
-    SUBSCRIBE_SELF: "Connected — local loopback",
-    MANUAL: "Connected — manually configured",
-    CONNECTED: "Connected",
-  };
   if (status.state === "connected" && statusTone(status.severity) === "good") {
-    return connected[identifier] || "Connected";
+    return status.label || "Connected";
   }
-  if (identifier === "NONE" || status.state === "none") return "Not subscribed";
+  if (status.state === "none") return "Not subscribed";
   const detail = typeof status.detail === "string" ? status.detail.trim() : "";
   if (detail && !/\b0x[\da-f]+\b|\b[\da-f]{16,}\b/i.test(detail)) {
     return detail.replace(/^(Error|Warning):\s*/i, "");
@@ -124,11 +116,13 @@ export function setMeteringScale(scale) {
 }
 
 export function meteringDecibelsFullScale(value) {
-  return Number.isInteger(value) ? meteringScale[value]?.dbfs ?? null : null;
+  return Number.isInteger(value) ? (meteringScale[value]?.dbfs ?? null) : null;
 }
 
 export function meteringSignalPresence(value) {
-  return Number.isInteger(value) ? meteringScale[value]?.state ?? "unknown" : "unknown";
+  return Number.isInteger(value)
+    ? (meteringScale[value]?.state ?? "unknown")
+    : "unknown";
 }
 
 export function meteringLabel(value) {
@@ -137,7 +131,9 @@ export function meteringLabel(value) {
   }
   const dbfs = meteringDecibelsFullScale(value);
 
-  return dbfs === null ? stateLabel(meteringSignalPresence(value)) : `${dbfs.toFixed(1)} dBFS`;
+  return dbfs === null
+    ? stateLabel(meteringSignalPresence(value))
+    : `${dbfs.toFixed(1)} dBFS`;
 }
 
 export function macAddress(device) {
@@ -287,57 +283,9 @@ export function statusTone(severity) {
 
 export function subscriptionTone(subscription) {
   const status = subscription?.status;
-  if ((status?.status || status?.label) === "UNRESOLVED") return "warn";
-  return statusTone(status?.severity);
-}
-
-const CLOCK_SUBDOMAIN_SIZE = 16;
-
-function clockSubdomainBytes(value) {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value === "string") {
-    return [...value].map((character) => character.charCodeAt(0) & 0xff);
-  }
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  if (
-    value.some((entry) => !Number.isInteger(entry) || entry < 0 || entry > 0xff)
-  ) {
-    return null;
-  }
-  return value.slice(0, CLOCK_SUBDOMAIN_SIZE);
-}
-
-export function clockSubdomain(value) {
-  const raw = clockSubdomainBytes(value);
-  if (raw === null) {
-    return ABSENT;
-  }
-  const terminator = raw.indexOf(0);
-  const content = terminator < 0 ? raw : raw.slice(0, terminator);
-  if (!content.length) {
-    return "unset (default subdomain)";
-  }
-  const printable = content.every((entry) => entry >= 0x20 && entry <= 0x7e);
-  if (printable) {
-    return content.map((entry) => String.fromCharCode(entry)).join("");
-  }
-  return "Custom subdomain";
-}
-
-export function clockSubdomainInputValue(value) {
-  const formatted = clockSubdomain(value);
-  if (
-    formatted === ABSENT ||
-    formatted === "unset (default subdomain)" ||
-    formatted === "Custom subdomain"
-  ) {
-    return "";
-  }
-  return formatted;
+  const tone = statusTone(status?.severity);
+  if (status?.state === "unresolved" && tone === "bad") return "warn";
+  return tone;
 }
 
 export function preferredLeader(value) {

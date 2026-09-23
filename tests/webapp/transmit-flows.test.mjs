@@ -163,7 +163,7 @@ test("browser keeps acknowledgement, device, effective-state, and persistence ev
       persistence_confirmation: null,
     }),
     [
-      ["Request acknowledgement", "Accepted (result 1)"],
+      ["Request acknowledgement", "Accepted"],
       ["Device confirmation", "No separate signal from this ARC transport"],
       ["Effective state", "Unverified"],
       ["Persistence", "Not verified"],

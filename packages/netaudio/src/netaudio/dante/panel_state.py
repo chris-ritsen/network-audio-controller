@@ -103,6 +103,16 @@ def panel_snapshot(device):
     state["readable"] = profile["read_unavailable_reason"] is None
     state["write_unavailable_reason"] = profile["write_unavailable_reason"]
     state["writable"] = state["write_unavailable_reason"] is None
+    observations = state.get("observations", {})
+    state["presentation"] = core.panel_presentation(
+        {
+            "profile": panel_facts(device),
+            "values": {name: observation["value"] for name, observation in observations.items()},
+            "fresh_values": {
+                name: observation["value"] for name, observation in observations.items() if observation["fresh"]
+            },
+        }
+    )
     return state
 
 

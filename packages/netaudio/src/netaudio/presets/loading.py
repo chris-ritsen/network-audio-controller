@@ -16,7 +16,7 @@ from netaudio.dante.network_configuration import (
 )
 from netaudio.dante.performance_configuration import requested_performance_properties
 from netaudio.dante.flow_lifecycle import inspect_transmit_flows, plan_create_transmit_flow
-from netaudio.dante.transmit_flow import TransmitFlowSpecification, compare_transmit_flows
+from netaudio.dante.transmit_flow import parse_transmit_flow_specification
 from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyChangedButUnverifiedError,
     SampleRateTopologyMutationOutcomeUnknownError,
@@ -481,16 +481,16 @@ async def _plan_channel_names(application, device, config: dict, channel_type: s
     return _change_or_unchanged(kind, requested, current)
 
 
-def _fresh_flow_specifications(inventory: dict) -> list[TransmitFlowSpecification]:
+def _fresh_flow_specifications(inventory: dict) -> list[_requests.TransmitFlowSpecification]:
     result = []
     for raw in inventory.get("flows", []):
-        result.append(TransmitFlowSpecification.from_dict(raw))
+        result.append(parse_transmit_flow_specification(raw))
     return result
 
 
 async def _plan_transmit_flows(application, device, config: dict) -> list[PresetAction]:
     raw_requested = config.get("transmit_flows", [])
-    desired_flows = [TransmitFlowSpecification.from_dict(raw) for raw in raw_requested]
+    desired_flows = [parse_transmit_flow_specification(raw) for raw in raw_requested]
     if not desired_flows:
         return []
     try:
@@ -505,52 +505,54 @@ async def _plan_transmit_flows(application, device, config: dict) -> list[Preset
         return [
             _unavailable(
                 "transmit_flow",
-                desired.to_dict(),
+                desired,
                 f"fresh transmit-flow planning readback failed: {exception}",
             )
             for desired in desired_flows
         ]
 
     current_by_id = {
-        flow.identity.global_flow_id: flow for flow in current_flows if flow.identity.global_flow_id is not None
+        flow.get("identity", {}).get("global_flow_id"): flow
+        for flow in current_flows
+        if flow.get("identity", {}).get("global_flow_id") is not None
     }
     actions = []
     for desired in desired_flows:
-        flow_id = desired.identity.global_flow_id
+        flow_id = desired.get("identity", {}).get("global_flow_id")
         if flow_id is not None and flow_id in current_by_id:
             current = current_by_id[flow_id]
-            comparison = compare_transmit_flows(desired, current)
-            if comparison.matches:
+            comparison = core.compare_transmit_flows(desired, current)
+            if comparison["matches"]:
                 actions.append(
                     _change_or_unchanged(
                         "transmit_flow",
-                        desired.to_dict(),
-                        current.to_dict(),
+                        desired,
+                        current,
                     )
                 )
             else:
                 reason = (
                     "fresh inventory does not expose all requested durable flow fields; destructive replacement is refused"
-                    if comparison.unavailable_fields and not comparison.differences
+                    if comparison["unavailable_fields"] and not comparison["differences"]
                     else "the identified flow has different durable state; destructive replacement is refused"
                 )
                 actions.append(
                     _ambiguous(
                         "transmit_flow",
-                        desired.to_dict(),
+                        desired,
                         reason,
-                        current=current.to_dict(),
+                        current=current,
                     )
                 )
             continue
         if flow_id is None:
-            matches = [flow for flow in current_flows if compare_transmit_flows(desired, flow).matches]
+            matches = [flow for flow in current_flows if core.compare_transmit_flows(desired, flow)["matches"]]
             if len(matches) == 1:
                 actions.append(
                     _change_or_unchanged(
                         "transmit_flow",
-                        desired.to_dict(),
-                        matches[0].to_dict(),
+                        desired,
+                        matches[0],
                         matches=True,
                     )
                 )
@@ -559,9 +561,9 @@ async def _plan_transmit_flows(application, device, config: dict) -> list[Preset
                 actions.append(
                     _ambiguous(
                         "transmit_flow",
-                        desired.to_dict(),
+                        desired,
                         "multiple existing flows match the identity-free request",
-                        current=[flow.to_dict() for flow in matches],
+                        current=[flow for flow in matches],
                     )
                 )
                 continue
@@ -570,7 +572,7 @@ async def _plan_transmit_flows(application, device, config: dict) -> list[Preset
             actions.append(
                 PresetAction(
                     kind="transmit_flow",
-                    payload=desired.to_dict(),
+                    payload=desired,
                     current=None,
                     state=PresetActionState.CHANGE,
                     reason="fresh inventory contains no matching flow",
@@ -580,7 +582,7 @@ async def _plan_transmit_flows(application, device, config: dict) -> list[Preset
             actions.append(
                 _unsupported(
                     "transmit_flow",
-                    desired.to_dict(),
+                    desired,
                     "; ".join(plan.reasons),
                 )
             )

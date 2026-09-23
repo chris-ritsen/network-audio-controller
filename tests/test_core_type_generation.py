@@ -2,7 +2,7 @@ from typing import Union, get_args
 
 import pytest
 
-from scripts.generate_core_types import generate, generate_protocols
+from scripts.generate_core_types import generate, generate_protocols, generate_audio_choices
 
 
 def test_generated_types_preserve_required_nullable_fields_and_named_references():
@@ -181,3 +181,18 @@ def test_protocol_catalog_generation_preserves_native_classification():
 def test_protocol_catalog_rejects_ambiguous_or_unsupported_metadata(records):
     with pytest.raises(ValueError):
         generate_protocols(records)
+
+
+def test_audio_choice_generation_preserves_native_values_labels_and_aliases():
+    choices = [{"value": 17, "label": "example", "aliases": ["example", "alternate"]}]
+    namespace = {}
+    exec(compile(generate_audio_choices(choices), "audio.py", "exec"), namespace)
+
+    assert namespace["SAMPLE_RATE_PULLUP_CHOICES"] == choices
+
+
+def test_protocol_metadata_includes_native_discovery_contract():
+    namespace = {}
+    discovery = {"SERVICE_ARC": "_example._udp.local.", "SERVICES": ["_example._udp.local."]}
+    exec(generate_protocols([], discovery), namespace)
+    assert {name: namespace[name] for name in discovery} == discovery

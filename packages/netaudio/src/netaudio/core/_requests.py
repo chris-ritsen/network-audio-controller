@@ -115,6 +115,32 @@ class ClockSourceFacts(_extensions.TypedDict):
     supported: list[JsonValue]
 
 
+class ConfigurationRequestValidate(_extensions.TypedDict):
+    kind: _typing.Literal["validate"]
+    values: dict[str, JsonValue]
+
+
+class ConfigurationRequestCapturePanel(_extensions.TypedDict):
+    fresh_values: dict[str, JsonValue]
+    kind: _typing.Literal["capture_panel"]
+
+
+ConfigurationRequest = _typing.Union[ConfigurationRequestValidate, ConfigurationRequestCapturePanel]
+
+
+class ConmonExportFragment(_extensions.TypedDict):
+    data_hexadecimal: str
+    echoed_tag_hexadecimal: str
+    envelope_sequence_identifier: int
+    fragment_identifier: int
+    fragment_size: int
+    has_more_fragments: bool
+    header_size: int
+    record_protocol_identifier: int
+    selector_value: int
+    total_encoded_size: int
+
+
 class HeartbeatLatePacketEntry(_extensions.TypedDict):
     late_packet_count: int
     receiver_flow_index: int
@@ -178,6 +204,46 @@ class Destination(_extensions.TypedDict):
     port: int
 
 
+class DeviceIdentityRequestMac(_extensions.TypedDict):
+    kind: _typing.Literal["mac"]
+    value: JsonValue
+
+
+class DeviceIdentityRequestPtpv1(_extensions.TypedDict):
+    kind: _typing.Literal["ptpv1"]
+    value: JsonValue
+
+
+class DeviceIdentityRequestManagedDevice(_extensions.TypedDict):
+    kind: _typing.Literal["managed_device"]
+    value: JsonValue
+
+
+class DeviceIdentityRequestManagedInventory(_extensions.TypedDict):
+    kind: _typing.Literal["managed_inventory"]
+    value: JsonValue
+
+
+class DeviceIdentityRequestManagedDomain(_extensions.TypedDict):
+    kind: _typing.Literal["managed_domain"]
+    value: JsonValue
+
+
+class DeviceIdentityRequestManagedPrimary(_extensions.TypedDict):
+    kind: _typing.Literal["managed_primary"]
+    value: JsonValue
+
+
+DeviceIdentityRequest = _typing.Union[
+    DeviceIdentityRequestMac,
+    DeviceIdentityRequestPtpv1,
+    DeviceIdentityRequestManagedDevice,
+    DeviceIdentityRequestManagedInventory,
+    DeviceIdentityRequestManagedDomain,
+    DeviceIdentityRequestManagedPrimary,
+]
+
+
 class Endpoint(_extensions.TypedDict):
     ipv4_address: str
     udp_port: int
@@ -194,10 +260,42 @@ class ExpectedSubscription(_extensions.TypedDict):
     source: _extensions.NotRequired[_typing.Union[list[str], None]]
 
 
+ExportKind = _typing.Literal["diagnostic_logs", "capability_partition"]
+
+
+class ExportConfiguration(_extensions.TypedDict):
+    kind: ExportKind
+    maximum_encoded_size: int
+
+
+class ExternalRtpDestinationSpec(_extensions.TypedDict):
+    address: str
+    port: _extensions.NotRequired[int]
+
+
+class ExternalSubscriptionCommandSubscribeExternalRtp(_extensions.TypedDict):
+    advertised_flow_slot_count: int
+    advertisement_supports_multiple_interfaces: _extensions.NotRequired[bool]
+    clock_offset: _extensions.NotRequired[_typing.Union[int, None]]
+    command: _typing.Literal["subscribe_external_rtp"]
+    device_protocol: int
+    flow_slot_assignments: list[int]
+    message_id: _extensions.NotRequired[int]
+    primary_destination: ExternalRtpDestinationSpec
+    receiver_channel_ids: list[int]
+    receiver_supports_multiple_interfaces: _extensions.NotRequired[bool]
+    secondary_destination: _extensions.NotRequired[_typing.Union[ExternalRtpDestinationSpec, None]]
+    session_id: int
+    source_address: str
+
+
+ExternalSubscriptionCommand = _typing.Union[ExternalSubscriptionCommandSubscribeExternalRtp]
+
+
 class ExternalReadbackRequestCommand(_extensions.TypedDict):
     inventory: _extensions.NotRequired[JsonValue]
     kind: _typing.Literal["command"]
-    specification: JsonValue
+    specification: ExternalSubscriptionCommand
 
 
 class Identity(_extensions.TypedDict):
@@ -215,6 +313,21 @@ class ExternalReadbackRequestIdentities(_extensions.TypedDict):
 
 
 ExternalReadbackRequest = _typing.Union[ExternalReadbackRequestCommand, ExternalReadbackRequestIdentities]
+
+
+class ExternalSubscriptionPlanRequest(_extensions.TypedDict):
+    advertised_flow_slot_count: int
+    clock_offset: _extensions.NotRequired[_typing.Union[int, None]]
+    device_protocol: int
+    flow_slot_assignments: list[int]
+    message_id: _extensions.NotRequired[int]
+    primary_destination: ExternalRtpDestinationSpec
+    receiver_channel_ids: list[int]
+    receiver_supports_multiple_interfaces: bool
+    secondary_address: _extensions.NotRequired[_typing.Union[str, None]]
+    secondary_port: _extensions.NotRequired[_typing.Union[int, None]]
+    session_id: int
+    source_address: str
 
 
 class FlowInventoryEvidence(_extensions.TypedDict):
@@ -306,10 +419,22 @@ class FlowCreateRequest(_extensions.TypedDict):
     specification: TransmitFlowSpecification
 
 
+class FlowDeletePreflightRequest(_extensions.TypedDict):
+    flow_id: int
+    inventory: JsonValue
+    protocol_id: int
+
+
 class FlowDeleteRequest(_extensions.TypedDict):
     device: FlowDeviceFacts
     flow_id: int
     protocol_id: _extensions.NotRequired[_typing.Union[int, None]]
+
+
+class FlowInventoryProtocolFacts(_extensions.TypedDict):
+    managed: bool
+    observed: _extensions.NotRequired[_typing.Union[int, None]]
+    version: _extensions.NotRequired[_typing.Union[str, None]]
 
 
 FlowMutation = _typing.Literal["create", "delete"]
@@ -398,6 +523,57 @@ class ManagedCommandRequest(_extensions.TypedDict):
     specification: JsonValue
 
 
+class ManagedCredentialApiKey(_extensions.TypedDict):
+    kind: _typing.Literal["api_key"]
+    value: str
+
+
+class ManagedCredentialControllerToken(_extensions.TypedDict):
+    kind: _typing.Literal["controller_token"]
+    value: str
+
+
+ManagedCredential = _typing.Union[ManagedCredentialApiKey, ManagedCredentialControllerToken]
+
+
+class ManagedOperationMonitorSignals(_extensions.TypedDict):
+    kind: _typing.Literal["monitor_signals"]
+
+
+class ManagedOperationIdentify(_extensions.TypedDict):
+    device_id: str
+    host_mac: list[int]
+    kind: _typing.Literal["identify"]
+
+
+class ManagedOperationArc(_extensions.TypedDict):
+    device_id: str
+    kind: _typing.Literal["arc"]
+    packet: list[int]
+
+
+class ManagedOperationSettings(_extensions.TypedDict):
+    device_id: str
+    kind: _typing.Literal["settings"]
+    packet: list[int]
+    response_opcode: int
+
+
+class ManagedOperationReboot(_extensions.TypedDict):
+    device_id: str
+    host_mac: list[int]
+    kind: _typing.Literal["reboot"]
+
+
+ManagedOperation = _typing.Union[
+    ManagedOperationMonitorSignals,
+    ManagedOperationIdentify,
+    ManagedOperationArc,
+    ManagedOperationSettings,
+    ManagedOperationReboot,
+]
+
+
 class SettingsExchange(_extensions.TypedDict):
     acknowledged: bool
     device_id: str
@@ -406,12 +582,51 @@ class SettingsExchange(_extensions.TypedDict):
     wrapper_id: int
 
 
+class ManagedSessionState(_extensions.TypedDict):
+    domain_id: _typing.Union[str, None]
+    expected_domain_id: _typing.Union[str, None]
+    frame: list[int]
+    local_ipv4: str
+    notification_port: int
+    operation: _typing.Union[ManagedOperation, None]
+    sent: bool
+    settings: _typing.Union[SettingsExchange, None]
+    target: str
+    targets: dict[str, int]
+    wrapper_id: int
+
+
+class ManagedSessionRequestBegin(_extensions.TypedDict):
+    action: _typing.Literal["begin"]
+    credential: str
+    expected_domain_id: _extensions.NotRequired[_typing.Union[str, None]]
+    local_ipv4: str
+    notification_port: int
+    operation: ManagedOperation
+    state: _extensions.NotRequired[_typing.Union[ManagedSessionState, None]]
+
+
+class ManagedSessionRequestReceive(_extensions.TypedDict):
+    action: _typing.Literal["receive"]
+    data: list[int]
+    state: ManagedSessionState
+
+
+ManagedSessionRequest = _typing.Union[ManagedSessionRequestBegin, ManagedSessionRequestReceive]
+
+
 class ManagedSettingsRequest(_extensions.TypedDict):
     device_id: str
     frame: list[int]
     response_opcode: _extensions.NotRequired[_typing.Union[int, None]]
     state: _extensions.NotRequired[_typing.Union[SettingsExchange, None]]
     wrapper_id: int
+
+
+class ManagedStatusRequest(_extensions.TypedDict):
+    status: _extensions.NotRequired[JsonValue]
+    status_message: _extensions.NotRequired[JsonValue]
+    summary: _extensions.NotRequired[JsonValue]
 
 
 class NetworkControlFacts(_extensions.TypedDict):
@@ -451,6 +666,12 @@ class PanelPlanRequest(_extensions.TypedDict):
     fresh_values: dict[str, JsonValue]
     profile: PanelProfileRequest
     requested: JsonValue
+
+
+class PanelPresentationRequest(_extensions.TypedDict):
+    fresh_values: dict[str, JsonValue]
+    profile: PanelProfileRequest
+    values: dict[str, JsonValue]
 
 
 class PanelReadbackRequest(_extensions.TypedDict):
@@ -500,6 +721,17 @@ class ReceiverSubscription(_extensions.TypedDict):
 class SampleRateStatus(_extensions.TypedDict):
     available_values: list[int]
     current_value: int
+
+
+class SapSessionAnnouncement(_extensions.TypedDict):
+    message_hash: int
+    raw_sdp: str
+
+
+class SapTransitionRequest(_extensions.TypedDict):
+    current: SapSessionAnnouncement
+    delete: bool
+    previous: _extensions.NotRequired[_typing.Union[SapSessionAnnouncement, None]]
 
 
 class SettingsCapabilityFacts(_extensions.TypedDict):

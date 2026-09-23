@@ -1,5 +1,15 @@
 use super::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ClockControlAvailability {
+    pub clock_source: bool,
+    pub preferred_leader: bool,
+    pub subdomain: bool,
+    pub global_unicast_delay_requests: bool,
+    pub aggregate_ptpv1_unicast_delay_requests: bool,
+}
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,6 +27,28 @@ pub struct ClockControl {
 }
 
 impl ClockControl {
+    pub fn availability(&self) -> ClockControlAvailability {
+        let rev = self.record_revision;
+
+        if rev != 0x0100 && rev < 0x0200 {
+            return ClockControlAvailability::default();
+        }
+
+        let caps = self.clock_capabilities.unwrap_or(0);
+        ClockControlAvailability {
+            clock_source: true,
+            preferred_leader: self.clock_capabilities.is_some()
+                && caps & 0x0120 == 0
+                && (rev < 0x072e
+                    || self
+                        .extension_flags
+                        .is_some_and(|flags| flags & 0x1000 == 0)),
+            subdomain: caps & 4 != 0,
+            global_unicast_delay_requests: rev >= 0x0603 && caps & 8 != 0 && caps & 0x0200 == 0,
+            aggregate_ptpv1_unicast_delay_requests: rev >= 0x071f && caps & 0x0200 != 0,
+        }
+    }
+
     pub fn is_query(&self) -> bool {
         self.clock_source.is_none()
             && self.preferred_leader.is_none()
@@ -34,26 +66,22 @@ pub fn build_clock_control(
     let c = control;
     let rev = c.record_revision;
     let reject = NetaudioError::UnsupportedProtocolOperation;
-    if rev != 0x0100 && rev < 0x0200 {
+    let allowed = c.availability();
+    if !allowed.clock_source {
         return Err(reject);
     }
-    let caps = c.clock_capabilities.unwrap_or(0);
-    if c.preferred_leader.is_some()
-        && (c.clock_capabilities.is_none()
-            || caps & 0x0120 != 0
-            || (rev >= 0x072e && c.extension_flags.is_none_or(|f| f & 0x1000 != 0)))
+    if c.preferred_leader.is_some() && !allowed.preferred_leader {
+        return Err(reject);
+    }
+    if c.subdomain.is_some() && !allowed.subdomain {
+        return Err(reject);
+    }
+    if c.global_unicast_delay_requests.is_some() && !allowed.global_unicast_delay_requests {
+        return Err(reject);
+    }
+    if c.aggregate_ptpv1_unicast_delay_requests.is_some()
+        && !allowed.aggregate_ptpv1_unicast_delay_requests
     {
-        return Err(reject);
-    }
-    if c.subdomain.is_some() && caps & 4 == 0 {
-        return Err(reject);
-    }
-    if c.global_unicast_delay_requests.is_some()
-        && (rev < 0x0603 || caps & 8 == 0 || caps & 0x0200 != 0)
-    {
-        return Err(reject);
-    }
-    if c.aggregate_ptpv1_unicast_delay_requests.is_some() && (rev < 0x071f || caps & 0x0200 == 0) {
         return Err(reject);
     }
     if let Some(source) = c.clock_source {

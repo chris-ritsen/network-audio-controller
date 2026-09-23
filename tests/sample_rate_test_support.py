@@ -15,7 +15,7 @@ async def fake_sample_rate_change(application, device, sample_rate, confirm_dest
         raise SampleRateTopologyUnsupportedError(
             f"requested sample rate {sample_rate} is not supported; device reports {supported_sample_rates}"
         )
-    capacity = SimpleNamespace(transmit_channel_count=0, receive_channel_count=0)
+    capacity = {"transmit_channel_count": 0, "receive_channel_count": 0}
     preflight = SimpleNamespace(
         current_sample_rate_hertz=current_sample_rate,
         target_sample_rate_hertz=sample_rate,
@@ -57,7 +57,7 @@ async def fake_sample_rate_change(application, device, sample_rate, confirm_dest
             preflight,
             observed_sample_rate,
         )
-    resulting_snapshot = SimpleNamespace(capacity=capacity)
+    resulting_snapshot = {"capacity": capacity}
     return SimpleNamespace(
         preflight=preflight,
         observed_sample_rate_hertz=observed_sample_rate,

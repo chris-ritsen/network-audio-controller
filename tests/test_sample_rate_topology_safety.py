@@ -176,7 +176,7 @@ async def test_sample_rate_inventory_checks_channel_identity_not_mapping_keys(in
 
     if inventory == "rekeyed":
         result = await preflight_sample_rate_change(device, 96_000, probe)
-        assert result.current_snapshot.capacity.receive_channel_count == 64
+        assert result.current_snapshot["capacity"]["receive_channel_count"] == 64
     else:
         with pytest.raises(SampleRateTopologyVerificationError, match="receiver inventory"):
             await preflight_sample_rate_change(device, 96_000, probe)
@@ -353,13 +353,13 @@ async def test_preflight_distinguishes_reversible_receiver_clipping_from_destruc
 
     preflight = await preflight_sample_rate_change(device, 192_000, probe)
 
-    assert preflight.target_capacity.to_dict() == {
+    assert preflight.target_capacity == {
         "sample_rate_hertz": 192_000,
         "receive_channel_count": 16,
         "transmit_channel_count": 16,
     }
-    assert [state.receiver_channel_number for state in preflight.reversible_receiver_clipping] == [64]
-    assert [state.to_dict() for state in preflight.destructive_transmitter_membership_loss] == [
+    assert [state["receiver_channel_number"] for state in preflight.reversible_receiver_clipping] == [64]
+    assert preflight.destructive_transmitter_membership_loss == [
         {
             "flow_number": 32,
             "flow_type": "multicast",
@@ -367,7 +367,7 @@ async def test_preflight_distinguishes_reversible_receiver_clipping_from_destruc
             "removed_channel_members": [17, 18, 19, 20, 21, 22, 23],
         }
     ]
-    assert preflight.uncharacterized_transmitter_flows == ()
+    assert preflight.uncharacterized_transmitter_flows == []
 
 
 @pytest.mark.asyncio
@@ -387,7 +387,7 @@ async def test_destructive_change_is_refused_before_mutation_without_confirmatio
         await change_sample_rate_topology_safe(device, 192_000, probe, mutate)
 
     assert mutation_called is False
-    assert raised.value.preflight.destructive_transmitter_membership_loss[0].removed_channel_members == (17,)
+    assert raised.value.preflight.destructive_transmitter_membership_loss[0]["removed_channel_members"] == [17]
 
 
 @pytest.mark.asyncio
@@ -433,11 +433,11 @@ async def test_confirmed_change_verifies_rate_receiver_clipping_and_exact_flow_r
 
     assert result.changed is True
     assert result.observed_sample_rate_hertz == 192_000
-    assert result.resulting_snapshot.capacity.receive_channel_count == 16
-    assert [state.receiver_channel_number for state in result.resulting_snapshot.receiver_subscriptions] == [1]
-    assert [state.channel_members for state in result.resulting_snapshot.transmitter_flows] == [
-        (1, 2),
-        (16, 0, 0, 0, 0, 0, 0, 0),
+    assert result.resulting_snapshot["capacity"]["receive_channel_count"] == 16
+    assert [state["receiver_channel_number"] for state in result.resulting_snapshot["receiver_subscriptions"]] == [1]
+    assert [state["channel_members"] for state in result.resulting_snapshot["transmitter_flows"]] == [
+        [1, 2],
+        [16, 0, 0, 0, 0, 0, 0, 0],
     ]
 
 
@@ -464,7 +464,7 @@ async def test_unicast_flow_blocks_capacity_reduction_even_with_destructive_conf
         )
 
     assert mutation_called is False
-    assert raised.value.preflight.uncharacterized_transmitter_flows[0].flow_number == 3
+    assert raised.value.preflight.uncharacterized_transmitter_flows[0]["flow_number"] == 3
 
 
 @pytest.mark.asyncio
@@ -487,7 +487,7 @@ async def test_all_out_of_range_multicast_flow_blocks_unproven_transition(instal
             confirm_destructive=True,
         )
 
-    assert "all active members" in raised.value.preflight.uncharacterized_transmitter_flows[0].reason
+    assert "all active members" in raised.value.preflight.uncharacterized_transmitter_flows[0]["reason"]
 
 
 @pytest.mark.asyncio
@@ -632,10 +632,10 @@ async def test_preflight_accepts_proven_zero_directional_capacities(
 
     preflight = await preflight_sample_rate_change(device, 96_000, probe)
 
-    assert preflight.current_snapshot.capacity.receive_channel_count == current_receive_count
-    assert preflight.current_snapshot.capacity.transmit_channel_count == current_transmit_count
-    assert preflight.target_capacity.receive_channel_count == target_receive_count
-    assert preflight.target_capacity.transmit_channel_count == target_transmit_count
+    assert preflight.current_snapshot["capacity"]["receive_channel_count"] == current_receive_count
+    assert preflight.current_snapshot["capacity"]["transmit_channel_count"] == current_transmit_count
+    assert preflight.target_capacity["receive_channel_count"] == target_receive_count
+    assert preflight.target_capacity["transmit_channel_count"] == target_transmit_count
 
 
 @pytest.mark.asyncio
@@ -665,12 +665,12 @@ async def test_model_name_cannot_replace_capacity_readback(install_flow_inventor
     assert loads == [True]
     assert result.changed is True
     assert result.preflight.capacity_known is False
-    assert result.preflight.current_snapshot.capacity.receive_channel_count == 8
-    assert result.preflight.current_snapshot.capacity.transmit_channel_count == 8
+    assert result.preflight.current_snapshot["capacity"]["receive_channel_count"] == 8
+    assert result.preflight.current_snapshot["capacity"]["transmit_channel_count"] == 8
     assert result.preflight.target_capacity is None
     assert result.observed_sample_rate_hertz == 96_000
-    assert result.resulting_snapshot.capacity.receive_channel_count == 4
-    assert result.resulting_snapshot.capacity.transmit_channel_count == 4
+    assert result.resulting_snapshot["capacity"]["receive_channel_count"] == 4
+    assert result.resulting_snapshot["capacity"]["transmit_channel_count"] == 4
 
 
 @pytest.mark.asyncio
@@ -709,8 +709,8 @@ async def test_reported_capacity_table_is_used_for_any_model(install_flow_invent
     preflight = await preflight_sample_rate_change(device, 96_000, probe)
 
     assert preflight.capacity_known is True
-    assert preflight.target_capacity.transmit_channel_count == 4
-    assert [loss.removed_channel_members for loss in preflight.destructive_transmitter_membership_loss] == [(7,)]
+    assert preflight.target_capacity["transmit_channel_count"] == 4
+    assert [loss["removed_channel_members"] for loss in preflight.destructive_transmitter_membership_loss] == [[7]]
 
 
 @pytest.mark.asyncio

@@ -186,7 +186,8 @@ const INFO_COLUMNS = [
     defaultHidden: true,
   },
   {
-    cell: (device) => format.clockSubdomain(device.clock_subdomain),
+    cell: (device) =>
+      device.clock_subdomain_presentation?.label || "Unavailable",
     id: "clock-subdomain",
     label: "Clock subdomain",
     defaultHidden: true,
@@ -355,18 +356,18 @@ function DeviceInfo({ location }) {
                 rowKey=${(device) => device.server_name || device.name}
                 rowHref=${(device) => devicePath("devices", format.deviceLabel(device), "receive")}
                 toolbar=${html`
-                <input
-                  type="search"
-                  placeholder="Find a device…"
-                  aria-label="Find device by name, address, model, or domain"
-                  size="18"
-                  value=${filter}
-                  onInput=${(event) => setQueryParameter("filter", event.target.value)}
-                />
-                <span class="nav-count"
-                  >${visible.length} devices · ${online} online</span
-                >
-              `}
+                  <input
+                    type="search"
+                    placeholder="Find a device…"
+                    aria-label="Find device by name, address, model, or domain"
+                    size="18"
+                    value=${filter}
+                    onInput=${(event) => setQueryParameter("filter", event.target.value)}
+                  />
+                  <span class="nav-count"
+                    >${visible.length} devices · ${online} online</span
+                  >
+                `}
               />`
         }
       <//>

@@ -1,4 +1,12 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionTransport {
+    Unicast,
+    Multicast,
+}
 
 fn presentation(identifier: &str) -> Option<(&'static str, Option<&'static str>)> {
     Some(match identifier {
@@ -50,6 +58,7 @@ pub fn is_self_connection(source_device: Option<&str>, status_code: u16) -> bool
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SubscriptionStatus {
+    pub transport: Option<SubscriptionTransport>,
     pub code: u16,
     pub receiver_status_code: Option<u16>,
     pub status: Option<&'static str>,
@@ -127,6 +136,11 @@ pub fn decode(code: u16, receiver_status_code: Option<u16>) -> SubscriptionStatu
         code,
         receiver_status_code,
         status: Some(definition.0),
+        transport: match definition.0 {
+            "DYNAMIC" => Some(SubscriptionTransport::Unicast),
+            "STATIC" => Some(SubscriptionTransport::Multicast),
+            _ => None,
+        },
         state: definition.1,
         severity: definition.2,
         settled: matches!(definition.1, "connected" | "error" | "unresolved"),
@@ -150,6 +164,7 @@ fn unknown(
         code,
         receiver_status_code,
         status: None,
+        transport: None,
         state: "unknown",
         severity: "warning",
         settled: false,
@@ -163,11 +178,12 @@ fn unknown(
 #[derive(Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SubscriptionClassification {
+    pub transport: Option<SubscriptionTransport>,
     pub state: &'static str,
     pub severity: &'static str,
     pub settled: bool,
-    pub label: Option<&'static str>,
-    pub detail: Option<&'static str>,
+    pub label: Option<String>,
+    pub detail: Option<String>,
 }
 
 pub fn classification_for_identifier(identifier: &str) -> SubscriptionClassification {
@@ -179,11 +195,81 @@ pub fn classification_for_identifier(identifier: &str) -> SubscriptionClassifica
     let display = presentation(identifier);
 
     SubscriptionClassification {
+        transport: entry.transport,
         state: entry.state,
         severity: entry.severity,
         settled: entry.settled,
-        label: display.map(|(label, _)| label),
-        detail: display.and_then(|(_, detail)| detail),
+        label: display.map(|(label, _)| label.to_owned()),
+        detail: display.and_then(|(_, detail)| detail).map(str::to_owned),
+    }
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ManagedStatusRequest {
+    status: Option<serde_json::Value>,
+    status_message: Option<serde_json::Value>,
+    summary: Option<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ManagedSubscriptionStatus {
+    #[serde(flatten)]
+    classification: SubscriptionClassification,
+    status: Option<String>,
+}
+
+fn text(value: &Option<serde_json::Value>) -> Option<&str> {
+    value
+        .as_ref()
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+pub fn managed_status(request: ManagedStatusRequest) -> ManagedSubscriptionStatus {
+    let identifier = text(&request.status).map(str::to_uppercase);
+    let summary = text(&request.summary).map(str::to_uppercase);
+    let mut classification =
+        classification_for_identifier(identifier.as_deref().unwrap_or_default());
+    let message = text(&request.status_message).and_then(|message| {
+        let lower = message.to_ascii_lowercase();
+        let prefix = ["error:", "warning:", "info:"]
+            .into_iter()
+            .find(|prefix| lower.starts_with(prefix));
+        let cleaned = prefix
+            .map_or(message, |prefix| &message[prefix.len()..])
+            .trim();
+        (!cleaned.is_empty()).then(|| cleaned.to_owned())
+    });
+
+    if classification.label.is_none() {
+        classification.label = Some(identifier.as_deref().or(summary.as_deref()).map_or_else(
+            || "Status unavailable".to_owned(),
+            |value| {
+                let human = value.replace('_', " ").to_lowercase();
+                let mut chars = human.chars();
+                chars
+                    .next()
+                    .map(|first| first.to_uppercase().to_string() + chars.as_str())
+                    .unwrap_or_default()
+            },
+        ));
+    }
+
+    classification.detail = classification.detail.or(message);
+    // An optimistic aggregate summary cannot erase a known per-channel failure.
+    classification.severity = match summary.as_deref() {
+        Some("ERROR") => "error",
+        Some("WARNING") if classification.severity != "error" => "warning",
+        _ => classification.severity,
+    };
+
+    ManagedSubscriptionStatus {
+        classification,
+        status: identifier,
     }
 }
 

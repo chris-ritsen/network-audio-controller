@@ -10,7 +10,8 @@ from typing import Any
 from netaudio import DanteDevice
 from netaudio.dante.latency import milliseconds_to_microseconds
 from netaudio.dante.performance_configuration import observed_performance_configuration
-from netaudio.dante.transmit_flow import TransmitFlowSpecification
+from netaudio import core
+from netaudio.dante.transmit_flow import parse_transmit_flow_specification
 from netaudio.presets.schema import (
     PRESET_EXTENSION_CONTENT_TAG,
     PRESET_EXTENSION_TAG,
@@ -81,17 +82,17 @@ def _canonical_transmit_flows(device: DanteDevice) -> list[dict[str, Any]]:
     for record in records:
         try:
             if isinstance(record, Mapping) and "channel_slots" in record:
-                specification = TransmitFlowSpecification.from_dict(record)
+                specification = parse_transmit_flow_specification(record)
             else:
-                specification = TransmitFlowSpecification.from_inventory_record(
+                specification = core.transmit_flow_specification(
                     record,
                     protocol_id=protocol_id,
                 )
-        except (TypeError, ValueError) as exception:
+        except (TypeError, ValueError, core.NetaudioCoreError) as exception:
             raise ValueError(
                 f"{device.name}: transmitter-flow inventory cannot be represented losslessly: {exception}"
             ) from exception
-        result.append(specification.to_dict())
+        result.append(specification)
     return result
 
 

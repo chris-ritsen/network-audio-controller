@@ -504,9 +504,8 @@ class NotificationPacketHandlers:
             return True
         handled = False
         for waiter in waiters:
-            if waiter.collector.matches(fragment):
-                waiter.observe(fragment)
-                handled = True
+            waiter.observe(fragment)
+            handled = handled or waiter.collector.matched
         return handled
 
     def _lookup_device(self, ip_str: str):

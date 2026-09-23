@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field as dataclass_field
 
 from netaudio import core
+from netaudio.core import _requests
 from netaudio.asynchronous_primitives import DeferredAsyncioEvent
 from netaudio.dante.const import (
     DEVICE_INFO_PORT,
@@ -144,23 +145,22 @@ class DanteNotificationService(NotificationPacketHandlers, DanteMulticastService
     def register_conmon_export_waiter(
         self,
         device_ip_address: str,
-        expected_echoed_tag: bytes,
-        expected_selector_value: int,
+        kind: _requests.ExportKind,
     ) -> ConmonExportWaiter:
         if self.is_waiting("conmon_export", device_ip_address):
             raise RuntimeError(f"ConMon export is already active for {device_ip_address}")
         waiter = ConmonExportWaiter(
             kind="conmon_export",
             key=device_ip_address,
-            collector=ConmonExportCollector(
-                expected_echoed_tag=expected_echoed_tag,
-                expected_selector_value=expected_selector_value,
-            ),
+            collector=ConmonExportCollector(kind),
         )
         self._waiters.setdefault(("conmon_export", device_ip_address), set()).add(waiter)
         return waiter
 
     def unregister_waiter(self, waiter: Waiter) -> None:
+        if isinstance(waiter, ConmonExportWaiter) and waiter.collector is not None:
+            waiter.collector.close()
+
         registry_key = (waiter.kind, waiter.key)
         waiters = self._waiters.get(registry_key)
         if waiters is None:
@@ -263,15 +263,13 @@ async def mutate_and_wait_for_clear_configuration_status(
 async def request_and_wait_for_conmon_export(
     notifications: DanteNotificationService,
     device_ip_address: str,
-    expected_echoed_tag: bytes,
-    expected_selector_value: int,
+    kind: _requests.ExportKind,
     request: Callable[[], Awaitable[None]],
     timeout: float,
 ) -> ConmonExport | None:
     waiter = notifications.register_conmon_export_waiter(
         device_ip_address,
-        expected_echoed_tag,
-        expected_selector_value,
+        kind,
     )
     try:
         await request()

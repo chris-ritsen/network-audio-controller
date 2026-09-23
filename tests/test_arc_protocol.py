@@ -2,6 +2,46 @@ from types import SimpleNamespace
 
 import pytest
 
+
+@pytest.mark.parametrize(
+    "observed,version,expected",
+    [
+        (0x2729, None, 0x2729),
+        (0x2729, "2.8.16", 0x2729),
+        (None, "2.7.41", 0x2729),
+        (None, None, None),
+    ],
+)
+def test_flow_inventory_uses_explicit_observed_protocol_before_discovery(observed, version, expected):
+    from types import SimpleNamespace
+    from netaudio.dante.arc_protocol import flow_inventory_protocol_identifier_for_device
+    from netaudio.dante.const import SERVICE_ARC
+
+    device = SimpleNamespace(
+        flow_protocol_id=observed,
+        services={
+            "arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": version}},
+        },
+    )
+    assert flow_inventory_protocol_identifier_for_device(device) == expected
+
+
+@pytest.mark.parametrize("observed", [True, 0xFFFF, -1])
+def test_unknown_observed_flow_revision_does_not_fall_back_to_an_advertised_revision(observed):
+    from types import SimpleNamespace
+    from netaudio.dante.arc_protocol import ArcProtocolError, flow_inventory_protocol_identifier_for_device
+    from netaudio.dante.const import SERVICE_ARC
+
+    device = SimpleNamespace(
+        flow_protocol_id=observed,
+        services={
+            "arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.7.41"}},
+        },
+    )
+    with pytest.raises(ArcProtocolError):
+        flow_inventory_protocol_identifier_for_device(device)
+
+
 from netaudio import core
 
 

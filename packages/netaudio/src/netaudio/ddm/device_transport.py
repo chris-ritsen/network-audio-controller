@@ -91,7 +91,7 @@ class ManagedDeviceTransport:
             normalize_device_id(device_id)
             return device_id
         except ValueError:
-            if len(device_id) != 32 or any(character not in "0123456789abcdef" for character in device_id.lower()):
+            if core.device_identity({"kind": "managed_inventory", "value": device_id}) is None:
                 raise ManagedDeviceControlError("The device's managed Controller identity is unsupported") from None
 
         fresh = await self.fetch_device(device, require_unique_primary=True)
@@ -114,18 +114,14 @@ class ManagedDeviceTransport:
             ]
             if len(observed) == 1 and fresh.id == getattr(observed_device, "ddm_device_id", None):
                 mac_address = observed[0].get("mac_address")
-        if not isinstance(mac_address, str):
+        identity = core.device_identity({"kind": "managed_primary", "value": mac_address})
+
+        if identity is None:
             raise ManagedDeviceControlError("The device's primary interface identity is unavailable")
 
-        try:
-            mac = bytes.fromhex(mac_address.replace(":", "").replace("-", ""))
-        except (AttributeError, TypeError, ValueError):
-            mac = b""
-        if len(mac) != 6 or not any(mac) or mac[0] & 1:
-            raise ManagedDeviceControlError("The device's primary interface identity is unavailable")
         # DDM's inventory identifier can differ from the Controller service's
         # EUI-64 identity. Service discovery still has to announce this target.
-        return (mac[:3] + b"\xff\xfe" + mac[3:]).hex()
+        return identity
 
     @staticmethod
     def _host_mac() -> bytes:

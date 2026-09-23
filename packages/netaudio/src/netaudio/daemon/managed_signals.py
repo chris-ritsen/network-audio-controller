@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import logging
 import socket
 
 from netaudio import core
-from netaudio.ddm.controller import ControllerAPIClient, DAPISession, normalize_device_id
+from netaudio.core import _requests
+from netaudio.ddm.controller import ControllerAPIClient, normalize_device_id
 
 logger = logging.getLogger("netaudio")
 
@@ -56,40 +56,41 @@ class ManagedSignalReceiver:
             endpoints = await asyncio.to_thread(api.endpoints)
             credential = transport._credential()
             reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(api.server, endpoints.service_port, ssl=api.ssl_context), 5
+                asyncio.open_connection(api.server, endpoints["service_port"], ssl=api.ssl_context), 5
             )
             local_address = writer.get_extra_info("sockname")[0]
             notification = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             notification.bind((local_address, 0))
-            writer.write(core.build_dapi_session_open())
-            writer.write(core.build_dapi_authentication(credential))
-            await writer.drain()
-            domain = None
-            while domain is None:
-                frame = await self._frame(reader, writer)
-                description = DAPISession._parse("dapi_session_description", frame)
-                if description is not None:
-                    domain = description["domain_id"]
-                    if domain != key[2].lower():
-                        raise ValueError("Managed signal session selected a different domain")
-            domain_bytes = bytes.fromhex(domain)
-            writer.write(
-                core.build_dapi_domain_initialization(
-                    domain_bytes,
-                    core.next_message_id(),
-                    notification.getsockname()[1],
-                    ipaddress.IPv4Address(local_address).packed,
-                )
-            )
-            await writer.drain()
+            request: _requests.ManagedSessionRequest = {
+                "action": "begin",
+                "state": None,
+                "credential": credential,
+                "local_ipv4": local_address,
+                "notification_port": notification.getsockname()[1],
+                "expected_domain_id": key[2],
+                "operation": {"kind": "monitor_signals"},
+            }
+
             while key in self.targets:
-                frame = await self._frame(reader, writer)
-                publication = DAPISession._parse("dapi_signal_presence_publication", frame)
+                result = core.advance_managed_session(request)
+
+                for frame in result["outgoing"]:
+                    writer.write(bytes(frame))
+
+                await writer.drain()
+                publication = result["signal_presence"]
+
                 if publication is not None:
                     if key in self._failed_targets:
                         logger.info("Managed signal updates recovered for %s", key)
                         self._failed_targets.discard(key)
                     self.accept(key, publication, writer.get_extra_info("peername")[:2])
+
+                request = {
+                    "action": "receive",
+                    "state": result["state"],
+                    "data": list(await asyncio.wait_for(reader.readexactly(result["receive_bytes"]), 10)),
+                }
         except asyncio.CancelledError:
             raise
         except (OSError, ValueError, RuntimeError, asyncio.IncompleteReadError, TimeoutError) as error:
@@ -107,18 +108,6 @@ class ManagedSignalReceiver:
                     logger.debug("Managed signal connection close failed: %s", error)
             if self.tasks.get(key) is asyncio.current_task():
                 self.tasks.pop(key)
-
-    @staticmethod
-    async def _frame(reader, writer):
-        header = await asyncio.wait_for(reader.readexactly(12), 10)
-        description = core.parse_response("dapi_frame_header", header)
-        if not description["server_to_client"]:
-            raise ValueError("Invalid managed signal frame direction")
-        frame = header + await asyncio.wait_for(reader.readexactly(description["payload_length"]), 10)
-        if DAPISession._parse("dapi_service_announcement", frame) is not None:
-            writer.write(core.build_dapi_service_acknowledgement(frame))
-            await writer.drain()
-        return frame
 
     def accept(self, key, publication, source):
         server_name = self.targets.get(key, {}).get(publication.get("device_id"))

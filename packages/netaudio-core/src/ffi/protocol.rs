@@ -1,22 +1,50 @@
 use super::*;
 
-/// Return a canonical MAC/device identity as a JSON string, or null if unavailable.
-/// Accepts hexadecimal MAC/device IDs with colon, hyphen, or dot separators.
-/// Known 64-bit MAC-derived representations collapse to 48 bits; other 64-bit
-/// identities remain intact. Invalid and all-zero identities return null.
+/// Select a supported flow-inventory revision from observed or advertised evidence.
 #[no_mangle]
-pub unsafe extern "C" fn netaudio_canonical_device_mac(
-    value: *const c_char,
+pub unsafe extern "C" fn netaudio_flow_inventory_protocol(
+    json: *const c_char,
     out_buffer: *mut u8,
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
     unsafe {
         json_output((out_buffer, out_capacity, out_length), || {
-            let value = c_string(value)?;
-            let identity = crate::device_identity::canonical_device_mac(value);
+            crate::protocol::flow_inventory_protocol(decode_json(c_string(json)?)?).map_err(
+                |message| FfiError::new(NetaudioStatus::UnsupportedProtocolOperation, message),
+            )
+        })
+    }
+}
 
-            Ok(identity)
+/// Classify an announcement for an existing, unexpired SAP session.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_sap_transition(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            Ok(crate::sap::transition(decode_json(c_string(json)?)?))
+        })
+    }
+}
+
+/// Normalize an explicitly identified MAC, clock, or managed identity.
+/// Returns a JSON string, or null when the supplied value is invalid for its kind.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_device_identity(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            let request = decode_json(c_string(json)?)?;
+            Ok(crate::device_identity::normalize(request))
         })
     }
 }

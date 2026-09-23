@@ -9,10 +9,9 @@ from enum import Enum
 from ipaddress import AddressValueError, IPv4Address
 
 from netaudio import core
+from netaudio.core._protocols import SAP_MULTICAST_ADDRESS as SAP_MULTICAST_ADDRESS, SAP_PORT as SAP_PORT
 from netaudio.dante.sdp import SdpDocument, SdpParseError, parse_sdp
 
-SAP_MULTICAST_ADDRESS = "239.255.255.255"
-SAP_PORT = 9875
 SAP_EXPIRY_SECONDS = 3600.0
 
 
@@ -299,11 +298,37 @@ class SapFlowInventory:
         if existing is not None and received_monotonic >= existing.expires_monotonic:
             del self._flows[identity]
             existing = None
-        if packet.delete:
-            if existing is None or existing.message_hash != packet.message_hash:
-                return None
+
+        transition = core.sap_transition(
+            {
+                "delete": packet.delete,
+                "current": {"message_hash": packet.message_hash, "raw_sdp": packet.raw_sdp},
+                "previous": {"message_hash": existing.message_hash, "raw_sdp": existing.raw_sdp}
+                if existing is not None
+                else None,
+            }
+        )
+
+        if transition is None:
+            return None
+
+        kind = SapInventoryChangeKind(transition)
+
+        if kind is SapInventoryChangeKind.DELETED:
             del self._flows[identity]
             return SapInventoryChange(SapInventoryChangeKind.DELETED, identity, None, existing)
+
+        if kind is SapInventoryChangeKind.REFRESHED and existing is not None:
+            refreshed = existing.refreshed(
+                announcement_interface=announcement_interface,
+                packet_source_ipv4=packet_source_ipv4,
+                packet_source_port=packet_source_port,
+                received_monotonic=received_monotonic,
+                wall_time=wall_time,
+                expiry_seconds=self.expiry_seconds,
+            )
+            self._flows[identity] = refreshed
+            return SapInventoryChange(kind, identity, refreshed, existing)
 
         candidate = DiscoveredExternalFlow.from_packet(
             packet,
@@ -314,23 +339,6 @@ class SapFlowInventory:
             wall_time=wall_time,
             expiry_seconds=self.expiry_seconds,
         )
-        if (
-            existing is not None
-            and existing.message_hash == candidate.message_hash
-            and existing.content_sha256 == candidate.content_sha256
-        ):
-            refreshed = existing.refreshed(
-                announcement_interface=announcement_interface,
-                packet_source_ipv4=packet_source_ipv4,
-                packet_source_port=packet_source_port,
-                received_monotonic=received_monotonic,
-                wall_time=wall_time,
-                expiry_seconds=self.expiry_seconds,
-            )
-            self._flows[identity] = refreshed
-            return SapInventoryChange(SapInventoryChangeKind.REFRESHED, identity, refreshed, existing)
-
-        kind = SapInventoryChangeKind.ADDED if existing is None else SapInventoryChangeKind.REPLACED
         if existing is not None:
             candidate = replace(
                 candidate,

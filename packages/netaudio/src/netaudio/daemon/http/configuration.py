@@ -19,7 +19,7 @@ from netaudio.dante.network_configuration import (
     network_snapshot,
     validate_interface_configuration,
 )
-from netaudio.dante.transmit_flow import FlowLifecycleState, TransmitFlowSpecification
+from netaudio.dante.transmit_flow import FlowLifecycleState, parse_transmit_flow_specification
 
 STATUS_TEXT = {
     200: "OK",
@@ -143,7 +143,7 @@ class DaemonConfigurationHandlers:
         if not device:
             return
         try:
-            specification = TransmitFlowSpecification.from_dict(params.get("specification"))
+            specification = parse_transmit_flow_specification(params.get("specification"))
             plan = plan_create_transmit_flow(device, specification)
         except (TypeError, ValueError) as exception:
             await self._send_json(writer, {"error": str(exception)}, 400)
@@ -172,11 +172,11 @@ class DaemonConfigurationHandlers:
         try:
             operation = getattr(self.application, "create_transmit_flow", None)
             if operation is None:
-                specification = TransmitFlowSpecification.from_dict(params.get("specification"))
+                specification = parse_transmit_flow_specification(params.get("specification"))
                 result = await self.operation_recorder.run_operation(
                     device,
                     "create_transmit_flow",
-                    specification.to_dict(),
+                    specification,
                     lambda: create_transmit_flow(device, specification),
                 )
             else:

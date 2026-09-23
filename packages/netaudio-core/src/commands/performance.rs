@@ -44,7 +44,7 @@ pub(crate) fn require_performance_protocol(
     Ok(negotiated_protocol_id.min(PROTOCOL_ARC_2809))
 }
 
-fn latency_nanoseconds(latency_microseconds: u64) -> Result<u32, NetaudioError> {
+pub(crate) fn latency_nanoseconds(latency_microseconds: u64) -> Result<u32, NetaudioError> {
     latency_microseconds
         .checked_mul(1_000)
         .and_then(|value| u32::try_from(value).ok())

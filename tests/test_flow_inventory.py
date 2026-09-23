@@ -120,9 +120,18 @@ async def test_legacy_receiver_query_transports_native_continuation(monkeypatch)
     first, terminal, next_id, identifiers = receiver_pages(0x2729)
     request = AsyncMock(side_effect=[first, terminal])
     monkeypatch.setattr(flows, "_request", request)
-    result = await flows.query_receiver_flow_inventory("192.0.2.10", 4440)
+    result = await flows.query_receiver_flow_inventory("192.0.2.10", 4440, protocol_id=0x2729)
     assert [flow["flow_number"] for flow in result["flows"]] == identifiers
     assert [call.args[2]["starting_flow"] for call in request.await_args_list] == [1, next_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol", [None, 0x2810, 0x2801])
+async def test_receiver_inventory_never_substitutes_a_legacy_revision(monkeypatch, protocol):
+    request = AsyncMock()
+    monkeypatch.setattr(flows, "_request", request)
+    assert await flows.query_receiver_flow_inventory("192.0.2.10", 4440, protocol_id=protocol) is None
+    request.assert_not_called()
 
 
 def synthetic_page(numbers, *, capacity=32, more=False, protocol=0x2729):

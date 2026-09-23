@@ -42,6 +42,8 @@ def clock_device(server_name, name, role, ptpv1_device_uuid=None, ptpv1_master_u
         [0, 29, 193, 80, 105, 256],
         [0, 29, 193, 80, 105, -1],
         [0, 29, 193, 80, 105, True],
+        [0, 29, 193, 80, 105, object()],
+        [0, 29, 193, 80, 105, float("nan")],
     ],
 )
 def test_invalid_clock_identities_fail_closed(value):

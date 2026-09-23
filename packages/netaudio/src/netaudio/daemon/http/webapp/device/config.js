@@ -1,4 +1,5 @@
 import { DeviceControls } from "./controls.js";
+import { sampleRatePullupChoices } from "../core-metadata.js";
 import { api } from "../api.js";
 import { AsyncButton, FieldRow, Panel } from "../components.js";
 import * as format from "../format.js";
@@ -194,21 +195,19 @@ function EncodingControl({ device, requestName }) {
 
 function PullupControl({ device, requestName }) {
   const select = useRef(null);
-  const labels = new Map([
-    [0, "None"],
-    [1, "+4.1667%"],
-    [2, "+0.1%"],
-    [3, "−0.1%"],
-    [4, "−4.0%"],
-  ]);
+  const labels = new Map(
+    sampleRatePullupChoices.map(({ value, label }) => [
+      value,
+      label.charAt(0).toUpperCase() + label.slice(1),
+    ]),
+  );
   const supported = (
     device.supported_sample_rate_pullup_raw_values || []
   ).filter((value) => labels.has(value));
   const writable = operationWritable(device, "sample_rate_pullup");
   if (!writable || !supported.length) {
     const current =
-      labels.get(Number(device.sample_rate_pullup_raw_value)) ??
-      format.text(device.sample_rate_pullup_raw_value);
+      labels.get(Number(device.sample_rate_pullup_raw_value)) ?? "Unknown";
     return html`<${FieldRow} label="Sample rate pull-up">
       <span>${current}</span>
       <span class="text-sm opacity-70"
@@ -252,19 +251,14 @@ function ClockingControls({ device, requestName }) {
   const subdomain = useRef(null);
   const unicast = useRef(null);
   const [changeSubdomain, setChangeSubdomain] = useState(false);
-  const status = device.clock_status || {};
-  const caps = status.clock_capabilities;
+  const allowed = device.clock_control_availability || {};
   const fresh = format.clockStatusFresh(device);
   const managed = isEnrolled(device);
-  const preferredAllowed =
-    fresh &&
-    caps != null &&
-    !(caps & 0x120) &&
-    (status.record_revision < 0x072e ||
-      status.preferred_leader_locked === false);
-  const named = fresh && !!(caps & 4);
-  const perPort = !!(caps & 0x200);
-  const unicastAllowed = fresh && !!(caps & 0x208);
+  const preferredAllowed = fresh && allowed.preferred_leader === true;
+  const named = fresh && allowed.subdomain === true;
+  const perPort = allowed.aggregate_ptpv1_unicast_delay_requests === true;
+  const unicastAllowed =
+    fresh && (perPort || allowed.global_unicast_delay_requests === true);
   const apply = async () => {
     const changes = {};
     if (preferredAllowed && preferred.current?.value !== "keep")
@@ -310,7 +304,10 @@ function ClockingControls({ device, requestName }) {
                 ${!preferredAllowed && fresh && html`<span>Unavailable or locked</span>`}
               <//>
               <${FieldRow} label="Clock source">
-                <select ref=${source} disabled=${!fresh}>
+                <select
+                  ref=${source}
+                  disabled=${!fresh || allowed.clock_source !== true}
+                >
                   <option value="keep">Keep current setting</option>
                   ${(device.clock_source_choices || []).map((choice) => html`<option value=${choice.code}>${choice.label}</option>`)}
                 </select>
@@ -328,8 +325,7 @@ function ClockingControls({ device, requestName }) {
                 <input
                   ref=${subdomain}
                   disabled=${!named || !changeSubdomain}
-                  maxlength="15"
-                  defaultValue=${format.clockSubdomainInputValue(device.clock_subdomain)}
+                  defaultValue=${device.clock_subdomain_presentation?.text ?? ""}
                 />
               <//>
               <${FieldRow}

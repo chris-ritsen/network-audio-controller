@@ -203,8 +203,8 @@ def _sample_rate_rows(label, result, exception):
                     label,
                     "Verified",
                     f"{preflight.current_sample_rate_hertz} -> {result.observed_sample_rate_hertz} Hz; "
-                    f"{result.resulting_snapshot.capacity.transmit_channel_count} TX / "
-                    f"{result.resulting_snapshot.capacity.receive_channel_count} RX",
+                    f"{result.resulting_snapshot['capacity']['transmit_channel_count']} TX / "
+                    f"{result.resulting_snapshot['capacity']['receive_channel_count']} RX",
                 ]
             )
         else:
@@ -231,8 +231,8 @@ def _sample_rate_rows(label, result, exception):
             [
                 label,
                 "Target capacity",
-                f"{preflight.target_capacity.transmit_channel_count} TX / "
-                f"{preflight.target_capacity.receive_channel_count} RX at "
+                f"{preflight.target_capacity['transmit_channel_count']} TX / "
+                f"{preflight.target_capacity['receive_channel_count']} RX at "
                 f"{preflight.target_sample_rate_hertz} Hz",
             ]
         )
@@ -241,18 +241,18 @@ def _sample_rate_rows(label, result, exception):
             [
                 label,
                 "Reversible RX clipping",
-                f"RX {subscription.receiver_channel_number} {subscription.receiver_channel_name} <- "
-                f"{subscription.transmitter_channel_name}@{subscription.transmitter_device_name}",
+                f"RX {subscription['receiver_channel_number']} {subscription['receiver_channel_name']} <- "
+                f"{subscription['transmitter_channel_name']}@{subscription['transmitter_device_name']}",
             ]
         )
     for membership_loss in preflight.destructive_transmitter_membership_loss:
-        removed = ",".join(str(value) for value in membership_loss.removed_channel_members)
-        retained = ",".join(str(value) for value in membership_loss.retained_channel_members)
+        removed = ",".join(str(value) for value in membership_loss["removed_channel_members"])
+        retained = ",".join(str(value) for value in membership_loss["retained_channel_members"])
         rows.append(
             [
                 label,
                 "Destructive TX membership loss",
-                f"flow {membership_loss.flow_number}: remove {removed}; retain {retained}",
+                f"flow {membership_loss['flow_number']}: remove {removed}; retain {retained}",
             ]
         )
     for uncharacterized_flow in preflight.uncharacterized_transmitter_flows:
@@ -260,7 +260,7 @@ def _sample_rate_rows(label, result, exception):
             [
                 label,
                 "Uncharacterized TX flow",
-                f"flow {uncharacterized_flow.flow_number}: {uncharacterized_flow.reason}",
+                f"flow {uncharacterized_flow['flow_number']}: {uncharacterized_flow['reason']}",
             ]
         )
     if (

@@ -399,24 +399,16 @@ fn build_conmon_export_request(
 }
 
 pub fn build_device_log_export(mac: [u8; 6], message_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_conmon_export_request(
-        mac,
-        message_id,
-        DIAGNOSTIC_LOG_EXPORT_TAG,
-        DIAGNOSTIC_LOG_EXPORT_SELECTOR,
-    )
+    let (tag, selector) = crate::conmon_export::ExportKind::DiagnosticLogs.identity();
+    build_conmon_export_request(mac, message_id, tag, selector)
 }
 
 pub fn build_capability_partition_export(
     mac: [u8; 6],
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_conmon_export_request(
-        mac,
-        message_id,
-        CAPABILITY_PARTITION_EXPORT_TAG,
-        CAPABILITY_PARTITION_EXPORT_SELECTOR,
-    )
+    let (tag, selector) = crate::conmon_export::ExportKind::CapabilityPartition.identity();
+    build_conmon_export_request(mac, message_id, tag, selector)
 }
 
 pub fn build_make_model(mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {

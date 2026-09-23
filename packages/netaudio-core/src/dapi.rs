@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
 const REQUEST_MARKER: [u8; 4] = [0xB9, 0x1A, 0x37, 0x26];
+pub const FRAME_HEADER_BYTES: usize = 12;
 const RESPONSE_MARKER: [u8; 4] = [0xB9, 0x1A, 0x37, 0x25];
 const NORMAL_MESSAGE: u32 = 2;
 const LAST_INITIALIZATION_WRAPPER_ID: u16 = 5;
@@ -137,17 +138,16 @@ impl SettingsExchange {
         wrapper_id: u16,
         response_opcode: Option<u16>,
     ) -> Result<Self, &'static str> {
-        if wrapper_id == 0
-            || device_id.len() != 16
-            || !device_id.bytes().all(|byte| byte.is_ascii_hexdigit())
-        {
+        let device_id = crate::device_identity::managed_device_id(device_id);
+
+        if wrapper_id == 0 || device_id.is_none() {
             return Err(
                 "managed settings requires a nonzero wrapper and a 16-digit device identity",
             );
         }
 
         Ok(Self {
-            device_id: device_id.to_ascii_lowercase(),
+            device_id: device_id.expect("device identity was validated"),
             wrapper_id,
             response_opcode,
             acknowledged: false,
@@ -241,6 +241,7 @@ pub struct SettingsPublication {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SignalPresencePublication {
     pub device_id: String,
     pub records: Vec<crate::signal_presence::SignalPresenceRecord>,
@@ -368,13 +369,55 @@ pub fn build_session_open() -> Vec<u8> {
     append_frame(SESSION_OPEN, &0u32.to_be_bytes()).expect("four-byte payload fits")
 }
 
-pub fn build_authentication(credential: &[u8]) -> Option<Vec<u8>> {
-    if !matches!(
-        credential.len(),
-        OBSERVED_CONTROLLER_TOKEN_BYTES | OBSERVED_API_KEY_BYTES
-    ) {
-        return None;
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum ManagedCredential {
+    ApiKey(String),
+    ControllerToken(String),
+}
+
+impl ManagedCredential {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        match self {
+            Self::ApiKey(value) => {
+                let bytes = value.as_bytes();
+                if bytes.len() != OBSERVED_API_KEY_BYTES
+                    || !bytes.iter().enumerate().all(|(index, byte)| {
+                        if matches!(index, 8 | 13 | 18 | 23) {
+                            *byte == b'-'
+                        } else {
+                            byte.is_ascii_hexdigit()
+                        }
+                    })
+                {
+                    return Err("DDM API key must use the observed UUID format");
+                }
+            }
+            Self::ControllerToken(value) => {
+                if value.len() != OBSERVED_CONTROLLER_TOKEN_BYTES || !value.is_ascii() {
+                    return Err("DDM returned an unsupported Controller authentication token");
+                }
+            }
+        }
+
+        Ok(())
     }
+}
+
+pub fn build_authentication(credential: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(credential).ok()?.to_owned();
+    let value = match credential.len() {
+        OBSERVED_API_KEY_BYTES => ManagedCredential::ApiKey(text),
+        OBSERVED_CONTROLLER_TOKEN_BYTES => ManagedCredential::ControllerToken(text),
+        _ => return None,
+    };
+    value.validate().ok()?;
     append_frame(AUTHENTICATION, credential)
 }
 
@@ -543,7 +586,8 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 pub fn parse_device_announcement(bytes: &[u8]) -> Option<DeviceAnnouncement> {
     parse_service_announcement(bytes)?;
     let frame = parse_frame(bytes)?;
-    let service_name_offset = find_bytes(bytes, b"_netaudio-cmc._udp")?;
+    let service = crate::protocol::SERVICE_CMC.strip_suffix(".local.")?;
+    let service_name_offset = find_bytes(bytes, service.as_bytes())?;
     if !frame.server_to_client
         || frame.message_type != NORMAL_MESSAGE
         || bytes.len() < 72

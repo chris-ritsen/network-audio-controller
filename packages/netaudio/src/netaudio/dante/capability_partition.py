@@ -39,7 +39,7 @@ def parse_capability_partition_export(
     maximum_archive_size: int = DEFAULT_MAXIMUM_CAPABILITY_ARCHIVE_SIZE,
     maximum_partition_size: int = DEFAULT_MAXIMUM_CAPABILITY_PARTITION_SIZE,
 ) -> CapabilityPartitionExport:
-    if export.echoed_tag != b"CAP1" or export.selector_value != 2:
+    if export.kind != "capability_partition":
         raise CapabilityPartitionExportError("response is not a CAP1 partition export")
     try:
         archive_payload = decode_bounded_gzip(export.encoded_payload, maximum_archive_size)

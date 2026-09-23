@@ -7,14 +7,15 @@ from collections.abc import Awaitable, Callable
 from typing import cast
 
 from netaudio import core
+from netaudio.core import _requests
 from netaudio.common.app_config import settings as app_settings
 from netaudio.network_path import source_address_for
 from netaudio.dante.arc_protocol import (
     ArcProtocolError,
     arc_protocol_for_device,
     advertised_arc_protocol_identifier_for_device,
+    flow_inventory_protocol_identifier_for_device,
 )
-from netaudio.dante.const import PROTOCOL_ARC_2729
 from netaudio.dante.channel import channel_by_number
 
 logger = logging.getLogger("netaudio")
@@ -27,14 +28,13 @@ class FlowValidationError(ValueError):
 
 
 def external_receiver_subscription_specification(
-    commands,
     device,
     flow,
     receiver_channel_ids,
     flow_slot_assignments,
     *,
     receiver_supports_multiple_interfaces: bool,
-) -> dict:
+) -> _requests.ExternalSubscriptionCommand:
     if not getattr(flow, "routable", False):
         reasons = "; ".join(getattr(flow, "routability_errors", ()) or ("flow is not routable",))
         raise FlowValidationError(f"external flow is not routable: {reasons}")
@@ -52,32 +52,26 @@ def external_receiver_subscription_specification(
             "direct external RTP subscription is unavailable for managed-only devices", status=409
         )
 
-    primary_address = getattr(flow, "primary_destination_address", None)
-    primary_port = getattr(flow, "primary_destination_port", None)
-    secondary_address = getattr(flow, "secondary_destination_address", None)
-    secondary_port = getattr(flow, "secondary_destination_port", None)
-    advertisement_supports_multiple_interfaces = secondary_address is not None and secondary_port is not None
-    secondary_destination = None
-
-    if advertisement_supports_multiple_interfaces and receiver_supports_multiple_interfaces:
-        secondary_destination = {"address": secondary_address, "port": secondary_port}
-
-    specification = commands.subscribe_external_rtp(
-        device_protocol=device_protocol,
-        receiver_channel_ids=receiver_channel_ids,
-        flow_slot_assignments=flow_slot_assignments,
-        advertised_flow_slot_count=getattr(flow, "channel_count", None),
-        source_address=flow.source_ipv4,
-        session_id=flow.session_id,
-        clock_offset=flow.clock_offset or 0,
-        primary_destination={"address": primary_address, "port": primary_port},
-        secondary_destination=secondary_destination,
-        advertisement_supports_multiple_interfaces=advertisement_supports_multiple_interfaces,
-        receiver_supports_multiple_interfaces=receiver_supports_multiple_interfaces,
-    )
-
     try:
-        core.build_command(specification)
+        specification = core.plan_external_subscription(
+            {
+                "device_protocol": device_protocol,
+                "receiver_channel_ids": list(receiver_channel_ids),
+                "flow_slot_assignments": list(flow_slot_assignments),
+                "advertised_flow_slot_count": flow.channel_count,
+                "source_address": flow.source_ipv4,
+                "session_id": flow.session_id,
+                "clock_offset": flow.clock_offset,
+                "primary_destination": {
+                    "address": flow.primary_destination_address,
+                    "port": flow.primary_destination_port,
+                },
+                "secondary_address": flow.secondary_destination_address,
+                "secondary_port": flow.secondary_destination_port,
+                "receiver_supports_multiple_interfaces": receiver_supports_multiple_interfaces,
+                "message_id": core.next_message_id(),
+            }
+        )
     except core.NetaudioCoreError as error:
         raise FlowValidationError(str(error)) from error
 
@@ -109,7 +103,6 @@ async def subscribe_external_rtp(
     receiver_supports_multiple_interfaces: bool,
 ) -> dict:
     specification = external_receiver_subscription_specification(
-        application.commands,
         device,
         flow,
         receiver_channel_ids,
@@ -407,7 +400,12 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
     if inventory_family != "legacy" or getattr(device, "requires_managed_control", False):
         return None
 
-    inventory = await query_receiver_flow_inventory(str(device.ipv4), device._arc_port(), device=device)
+    inventory = await query_receiver_flow_inventory(
+        str(device.ipv4),
+        device._arc_port(),
+        protocol_id=flow_inventory_protocol_identifier_for_device(device),
+        device=device,
+    )
 
     if inventory is None:
         return None
@@ -415,10 +413,14 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
     return correlate_receiver_flow_inventory(inventory, getattr(application, "external_flows", None))
 
 
-async def query_receiver_flow_inventory(device_ip: str, arc_port: int, *, device=None) -> dict | None:
+async def query_receiver_flow_inventory(
+    device_ip: str, arc_port: int, *, protocol_id: int | None, device=None
+) -> dict | None:
+    if protocol_id is None:
+        return None
 
     try:
-        with core.ReceiverFlowInventory(PROTOCOL_ARC_2729) as inventory:
+        with core.ReceiverFlowInventory(protocol_id) as inventory:
             state = inventory.state()
 
             while state["next_command"] is not None:

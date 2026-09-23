@@ -1,5 +1,21 @@
 use super::*;
 
+/// Derive panel editor choices from the command planner and observed device state.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_panel_presentation(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            let request = decode_json(c_string(json)?)?;
+            Ok(crate::device_controls::presentation::presentation(request))
+        })
+    }
+}
+
 /// Allocate a shared nonzero panel transaction sequence.
 #[no_mangle]
 pub extern "C" fn netaudio_next_panel_sequence() -> u32 {

@@ -1,6 +1,7 @@
 //! Device controls scoped by the supplied interoperability specification.
 mod models;
 pub mod planning;
+pub mod presentation;
 mod profile;
 pub use profile::{profile, PanelFamily, PanelProfile, PanelProfileRequest};
 mod protobuf;
@@ -10,6 +11,11 @@ pub use models::*;
 use protobuf as pb;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, Ordering};
+
+pub const SERIAL_BAUD_RATES: &[u32] =
+    &[1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400];
+pub const BANDWIDTH_MAXIMUM: u32 = 700;
+pub const BLUETOOTH_NAME_LIMIT: usize = 32;
 
 fn next_panel_sequence(counter: &AtomicU32) -> u32 {
     let previous = counter
@@ -194,7 +200,9 @@ impl PanelRequest {
                 name_source,
                 custom_name,
             } => {
-                if !matches!(name_source, 1 | 2) || custom_name.chars().count() > 32 {
+                if !matches!(name_source, 1 | 2)
+                    || custom_name.chars().count() > BLUETOOTH_NAME_LIMIT
+                {
                     return invalid();
                 }
                 let mut b = pb::scalar(1, *name_source);
@@ -240,8 +248,7 @@ impl PanelRequest {
                 (5, pb::message(1, &format.encode()))
             }
             Self::Serial { settings: s } => {
-                if ![1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400]
-                    .contains(&s.baud_rate)
+                if !SERIAL_BAUD_RATES.contains(&s.baud_rate)
                     || !matches!(s.data_bits, 7 | 8)
                     || s.parity > 2
                     || !matches!(s.stop_bits, 1 | 2)
@@ -265,7 +272,9 @@ impl PanelRequest {
                 (7, b)
             }
             Self::Bandwidth { target, enabled } => {
-                if *enabled && (*target == 0 || *target > 700) || !enabled && *target != 0 {
+                if *enabled && (*target == 0 || *target > BANDWIDTH_MAXIMUM)
+                    || !enabled && *target != 0
+                {
                     return invalid();
                 }
                 let mut b = Vec::new();

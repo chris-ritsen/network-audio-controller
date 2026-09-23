@@ -9,7 +9,7 @@ class ArcProtocolError(RuntimeError):
     pass
 
 
-def arc_protocol_for_device(device) -> _types.ArcProtocol | None:
+def _advertised_facts(device):
     managed = bool(getattr(device, "requires_managed_control", False))
     version = None
     services = getattr(device, "services", None)
@@ -26,10 +26,31 @@ def arc_protocol_for_device(device) -> _types.ArcProtocol | None:
 
             break
 
+    return version, managed
+
+
+def arc_protocol_for_device(device) -> _types.ArcProtocol | None:
+    version, managed = _advertised_facts(device)
+
     try:
         return core.arc_protocol(version, managed=managed)
     except (core.NetaudioCoreError, ValueError) as error:
         raise ArcProtocolError("unsupported ARC protocol version") from error
+
+
+def flow_inventory_protocol_identifier_for_device(device) -> int | None:
+    version, managed = _advertised_facts(device)
+
+    try:
+        return core.flow_inventory_protocol(
+            {
+                "observed": getattr(device, "flow_protocol_id", None),
+                "version": version,
+                "managed": managed,
+            }
+        )
+    except (core.NetaudioCoreError, ValueError) as error:
+        raise ArcProtocolError("unsupported flow inventory protocol") from error
 
 
 def require_arc_protocol_for_device(device) -> _types.ArcProtocol:

@@ -1,5 +1,38 @@
 use super::*;
 
+/// Present a validated subdomain without exposing unrecognized bytes as a name.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_clock_subdomain_presentation(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            Ok(crate::clock_configuration::subdomain_presentation(
+                &decode_json(c_string(json)?)?,
+            ))
+        })
+    }
+}
+
+/// Derive allowed clock controls using the command encoder's capability rules.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_clock_control_availability(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            let status = decode_json(c_string(json)?)?;
+            Ok(crate::clock_configuration::control_availability(&status))
+        })
+    }
+}
+
 /// Resolve current clock-source name and advertised choices from current and supported JSON facts.
 /// Unknown sources have no label and are not offered as choices. Internal clock is always a choice.
 #[no_mangle]

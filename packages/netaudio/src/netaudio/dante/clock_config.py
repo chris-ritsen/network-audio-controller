@@ -3,44 +3,12 @@ from __future__ import annotations
 from netaudio import core
 
 
-def clock_subdomain_bytes(value) -> bytes | None:
-    if value is None:
-        return None
-
-    try:
-        return core.normalize_clock_subdomain(value)
-    except core.NetaudioCoreError as error:
-        if error.category != "json_input":
-            raise
-
-        return None
-
-
 def format_clock_source_code(clock_source_code) -> str:
     return core.clock_sources({"current": clock_source_code, "supported": []})["current"] or "unknown"
 
 
 def format_clock_subdomain(value) -> str:
-    raw = clock_subdomain_bytes(value)
-
-    if raw is None:
-        return "unknown"
-
-    terminator = raw.find(b"\x00")
-    text_bytes = raw if terminator < 0 else raw[:terminator]
-
-    if not text_bytes:
-        return "unset"
-
-    try:
-        text = text_bytes.decode("ascii")
-    except UnicodeDecodeError:
-        return "unknown"
-
-    if text.isprintable():
-        return text
-
-    return "unknown"
+    return core.clock_subdomain_presentation(value)["label"]
 
 
 def parse_clock_source_selection(text: str) -> int:

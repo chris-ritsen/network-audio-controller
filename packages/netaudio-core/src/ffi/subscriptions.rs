@@ -1,5 +1,22 @@
 use super::*;
 
+/// Classify managed subscription identifiers, messages, and aggregate summaries.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_managed_subscription_status(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            Ok(crate::subscription_status::managed_status(decode_json(
+                c_string(json)?,
+            )?))
+        })
+    }
+}
+
 /// Validate an external subscription specification and compare optional complete receiver-flow readback.
 /// Returns requested/observed identities and separate ARC and SDP confirmation facts as JSON.
 #[no_mangle]

@@ -33,6 +33,8 @@ impl FlowType {
 pub struct ChannelSlot {
     pub slot: NonZeroU16,
     pub transmitter_channel: NonZeroU16,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -105,6 +107,8 @@ pub struct FlowIdentity {
     pub global_flow_id: Option<NonZeroU16>,
     pub media_type_code: Option<u16>,
     pub media_local_flow_id: Option<NonZeroU16>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -115,6 +119,8 @@ pub struct ProtocolRequirements {
     pub cohort: Option<String>,
     #[serde(default)]
     pub required_capabilities: Vec<String>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 fn schema_version() -> u32 {
@@ -143,6 +149,8 @@ pub struct TransmitFlowSpecification {
     pub protocol: ProtocolRequirements,
     #[serde(default)]
     pub raw_fields: BTreeMap<String, Value>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 impl TransmitFlowSpecification {

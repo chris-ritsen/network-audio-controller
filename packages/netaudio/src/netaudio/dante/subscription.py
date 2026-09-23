@@ -12,19 +12,12 @@ from netaudio.core import (
 
 
 def managed_subscription_status(status, status_message, summary) -> dict:
-    from netaudio.core import subscription_classification_for_identifier
-    from netaudio.dante.subscription_status import managed_status_presentation
+    from netaudio import core
 
-    normalized_summary = summary.casefold() if isinstance(summary, str) and summary else None
-    label, detail = managed_status_presentation(status, status_message, summary)
     return {
-        **subscription_classification_for_identifier(status),
+        **core.managed_subscription_status({"status": status, "status_message": status_message, "summary": summary}),
         "code": None,
-        "detail": detail,
         "icon": "",
-        "label": label,
-        "severity": {"connected": "ok", "error": "error", "warning": "warning"}.get(normalized_summary, "info"),
-        "status": status,
     }
 
 
@@ -79,10 +72,9 @@ class DanteSubscription:
         if self.status_code is None:
             if not any((self.ddm_status, self.ddm_summary, self.ddm_status_message)):
                 return (*self.status_message,) or ("Status unavailable",)
-            from netaudio.dante.subscription_status import managed_status_presentation
-
-            label, detail = managed_status_presentation(self.ddm_status, self.ddm_status_message, self.ddm_summary)
-            return (label, *((detail,) if detail else ()), *self.status_message)
+            status = managed_subscription_status(self.ddm_status, self.ddm_status_message, self.ddm_summary)
+            detail = status["detail"]
+            return (status["label"], *((detail,) if detail else ()), *self.status_message)
         entry = subscription_status(self.status_code, self.rx_channel_status_code)
         return (str(entry["label"]), *self.status_message)
 

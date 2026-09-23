@@ -166,20 +166,40 @@ def test_native_external_readback_confirms_only_the_requested_flow_membership():
     assert result["observed_effective_identities"] == []
 
 
-def test_command_frontend_exposes_external_subscription_specification():
-    commands = DanteCommands()
-    specification = commands.subscribe_external_rtp(
-        device_protocol=LEGACY_SPEC["device_protocol"],
-        receiver_channel_ids=LEGACY_SPEC["receiver_channel_ids"],
-        flow_slot_assignments=LEGACY_SPEC["flow_slot_assignments"],
-        advertised_flow_slot_count=LEGACY_SPEC["advertised_flow_slot_count"],
-        source_address=LEGACY_SPEC["source_address"],
-        session_id=LEGACY_SPEC["session_id"],
-        clock_offset=LEGACY_SPEC["clock_offset"],
-        primary_destination=LEGACY_SPEC["primary_destination"],
+@pytest.mark.parametrize("receiver_supports", [False, True])
+@pytest.mark.parametrize("secondary", [(None, None), ("239.69.1.11", None), (None, 5006), ("239.69.1.11", 5006)])
+def test_native_external_planner_selects_only_mutually_supported_destinations(receiver_supports, secondary):
+    request = {
+        key: value
+        for key, value in LEGACY_SPEC.items()
+        if key not in {"command", "advertisement_supports_multiple_interfaces", "receiver_supports_multiple_interfaces"}
+    }
+    request.update(
+        secondary_address=secondary[0],
+        secondary_port=secondary[1],
+        receiver_supports_multiple_interfaces=receiver_supports,
     )
-    specification["message_id"] = LEGACY_SPEC["message_id"]
-    assert core.build_command(specification) == (FIXTURE_DIRECTORY / "legacy-2729-3201.bin").read_bytes()
+    specification = core.plan_external_subscription(request)
+    advertised = all(value is not None for value in secondary)
+    assert specification["advertisement_supports_multiple_interfaces"] is advertised
+    assert specification["secondary_destination"] == (
+        {"address": secondary[0], "port": secondary[1]} if advertised and receiver_supports else None
+    )
+    assert core.build_command(specification)
+    readback = core.external_subscription_readback(
+        {"kind": "command", "specification": specification, "inventory": None}
+    )
+    assert len(readback["requested_effective_identities"][0]["interface_endpoints"]) == (
+        2 if advertised and receiver_supports else 1
+    )
+
+
+@pytest.mark.parametrize(
+    "extra", [{"unexpected": 1}, {"primary_destination": {"address": "239.1.1.1", "port": 5004, "unexpected": 1}}]
+)
+def test_external_subscription_contract_rejects_unknown_fields(extra):
+    with pytest.raises(core.NetaudioCoreError):
+        core.build_command({**LEGACY_SPEC, **extra})
 
 
 def discovered_flow():
@@ -216,12 +236,10 @@ def device(*, protocol="2.8.9", rx_channels=None, managed=False):
 
 
 def test_discovered_flow_maps_to_external_subscription_and_gates_secondary_destination():
-    commands = DanteCommands()
     flow = discovered_flow()
     target = device()
 
     primary_only = external_receiver_subscription_specification(
-        commands,
         target,
         flow,
         [1, 2],
@@ -236,7 +254,6 @@ def test_discovered_flow_maps_to_external_subscription_and_gates_secondary_desti
     assert primary_only["advertisement_supports_multiple_interfaces"] is True
 
     both_interfaces = external_receiver_subscription_specification(
-        commands,
         target,
         flow,
         [1, 2],
@@ -261,7 +278,6 @@ def test_discovered_flow_maps_to_external_subscription_and_gates_secondary_desti
 def test_high_level_external_mapping_fails_closed(receiver_ids, assignments, status):
     with pytest.raises(FlowValidationError) as error:
         external_receiver_subscription_specification(
-            DanteCommands(),
             device(),
             discovered_flow(),
             receiver_ids,
@@ -274,7 +290,6 @@ def test_high_level_external_mapping_fails_closed(receiver_ids, assignments, sta
 
 def test_discovered_flow_accepts_native_default_destination_port():
     specification = external_receiver_subscription_specification(
-        DanteCommands(),
         device(),
         replace(discovered_flow(), primary_destination_port=0),
         [1],
@@ -305,7 +320,6 @@ def test_discovered_flow_accepts_native_default_destination_port():
 def test_discovered_flow_is_validated_before_a_command_is_returned(changes):
     with pytest.raises(FlowValidationError):
         external_receiver_subscription_specification(
-            DanteCommands(),
             device(),
             replace(discovered_flow(), **changes),
             [1],
@@ -324,7 +338,6 @@ def test_discovered_flow_is_validated_before_a_command_is_returned(changes):
 )
 def test_high_level_external_mapping_accepts_bitmap_supported_forms(receiver_ids, assignments):
     specification = external_receiver_subscription_specification(
-        DanteCommands(),
         device(),
         discovered_flow(),
         receiver_ids,
@@ -422,7 +435,6 @@ def test_managed_only_device_is_rejected_before_build_or_send():
     target = device(managed=True)
     with pytest.raises(FlowValidationError, match="managed-only"):
         external_receiver_subscription_specification(
-            DanteCommands(),
             target,
             discovered_flow(),
             [1, 2],
@@ -435,7 +447,6 @@ def test_receiver_subscription_requires_known_receiver_channel_inventory():
     target = device(rx_channels=[])
     with pytest.raises(FlowValidationError, match="receiver channel not found"):
         external_receiver_subscription_specification(
-            DanteCommands(),
             target,
             discovered_flow(),
             [1],
@@ -451,7 +462,7 @@ def test_external_subscription_uses_channel_identity_not_inventory_key(numbers, 
 
     with pytest.raises(FlowValidationError) as error:
         external_receiver_subscription_specification(
-            DanteCommands(), target, discovered_flow(), [1], [1], receiver_supports_multiple_interfaces=False
+            target, discovered_flow(), [1], [1], receiver_supports_multiple_interfaces=False
         )
 
     assert error.value.status == status

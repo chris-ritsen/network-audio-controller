@@ -8,6 +8,7 @@ import sys
 
 from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante.core_transport import CoreTransport
+from netaudio.dante.const import MULTICAST_GROUP_CONTROL_MONITORING
 
 logger = logging.getLogger("netaudio")
 
@@ -44,7 +45,7 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.connect(("224.0.0.231", 1))
+        sock.connect((MULTICAST_GROUP_CONTROL_MONITORING, 1))
         local_ip = sock.getsockname()[0]
         sock.close()
 

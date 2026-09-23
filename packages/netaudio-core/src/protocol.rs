@@ -61,6 +61,12 @@ pub const OPCODE_TX_CHANNEL_INFO: u16 = 0x2000;
 pub const OPCODE_TX_CHANNEL_NAMES: u16 = 0x2010;
 pub const OPCODE_RX_CHANNELS: u16 = 0x3000;
 pub const SERVICE_ARC: &str = "_netaudio-arc._udp.local.";
+pub const SERVICE_CHAN: &str = "_netaudio-chan._udp.local.";
+pub const SERVICE_CMC: &str = "_netaudio-cmc._udp.local.";
+pub const SERVICE_DBC: &str = "_netaudio-dbc._udp.local.";
+pub const SERVICE_VIDEO: &str = "_dantevideo._udp.local.";
+pub const MULTICAST_GROUP_HEARTBEAT: &str = "224.0.0.233";
+pub const MULTICAST_GROUP_CONTROL_MONITORING: &str = "224.0.0.231";
 pub const DANTE_NAME_MAX_LENGTH: usize = 31;
 pub const RESPONSE_HEADER_SIZE: usize = 10;
 #[repr(u16)]
@@ -146,6 +152,27 @@ pub struct ArcProtocol {
     pub subscription_batch_limit: usize,
     pub channel_name_probe_protocol_id: u16,
     pub flow_query_protocol_ids: Vec<u16>,
+}
+
+#[derive(serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct FlowInventoryProtocolFacts {
+    pub observed: Option<u16>,
+    pub version: Option<String>,
+    pub managed: bool,
+}
+
+pub fn flow_inventory_protocol(
+    facts: FlowInventoryProtocolFacts,
+) -> Result<Option<u16>, &'static str> {
+    if let Some(observed) = facts.observed {
+        return arc_protocol_for_identifier(observed, facts.managed)
+            .map(|protocol| Some(protocol.protocol_id));
+    }
+
+    arc_protocol(facts.version.as_deref(), facts.managed)
+        .map(|protocol| protocol.map(|protocol| protocol.protocol_id))
 }
 
 pub fn arc_protocol(

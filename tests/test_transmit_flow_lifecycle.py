@@ -11,32 +11,24 @@ import pytest
 from netaudio import core
 from netaudio.dante import flow_lifecycle
 from netaudio.dante.transmit_flow import (
-    FlowIdentity,
     FlowLifecycleState,
-    FlowProtocolRequirements,
-    FlowSocket,
-    FlowType,
-    MediaMode,
-    RedundancyConstraint,
-    TransmitFlowSpecification,
-    TransmitterChannelSlot,
-    compare_transmit_flows,
+    parse_transmit_flow_specification,
 )
 
 
-def specification(**changes) -> TransmitFlowSpecification:
+def specification(**changes) -> dict:
     values = {
-        "media_mode": MediaMode.NATIVE_DANTE,
-        "flow_type": FlowType.MULTICAST,
+        "media_mode": "native_dante",
+        "flow_type": "multicast",
         "channel_slots": (
-            TransmitterChannelSlot(1, 1),
-            TransmitterChannelSlot(2, 2),
+            dict(slot=1, transmitter_channel=1),
+            dict(slot=2, transmitter_channel=2),
         ),
-        "identity": FlowIdentity(global_flow_id=2),
-        "protocol": FlowProtocolRequirements(protocol_id=0x2729),
+        "identity": dict(global_flow_id=2),
+        "protocol": dict(protocol_id=0x2729),
     }
     values.update(changes)
-    return TransmitFlowSpecification(**values)
+    return parse_transmit_flow_specification(values)
 
 
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures" / "transmit_flow_lifecycle"
@@ -84,9 +76,7 @@ def test_creation_candidate_never_confirms_ambiguous_inventory(ambiguous):
     _, candidate, comparison = flow_lifecycle._creation_candidate(
         before={"flows": []},
         after=inventory,
-        requested=specification(
-            identity=FlowIdentity(media_local_flow_id=2), protocol=FlowProtocolRequirements(protocol_id=0x2809)
-        ),
+        requested=specification(identity=dict(media_local_flow_id=2), protocol=dict(protocol_id=0x2809)),
         protocol_id=0x2809,
         correlated_flow_id=flow_id,
     )
@@ -207,7 +197,7 @@ def test_canonical_specification_preserves_unknown_fields_and_raw_readback():
             "interface": "secondary",
         },
         "redundancy": "required",
-        "identity": {"global_flow_id": 4, "media_type_code": 3, "media_local_flow_id": 2},
+        "identity": {"global_flow_id": 4, "media_type_code": 3, "media_local_flow_id": 2, "annotation": "Program"},
         "protocol": {
             "protocol_id": 0x2809,
             "protocol_version": "2.8.9",
@@ -219,22 +209,45 @@ def test_canonical_specification_preserves_unknown_fields_and_raw_readback():
         "future_top_level": {"preserved": True},
     }
 
-    parsed = TransmitFlowSpecification.from_dict(source)
+    parsed = parse_transmit_flow_specification(source)
 
-    assert parsed.to_dict() == source
-    assert parsed.channel_slots[0].extra_fields == {"vendor_slot_value": 99}
+    assert parsed == source
+    assert parsed["channel_slots"][0]["vendor_slot_value"] == 99
+
+
+def test_native_flow_normalization_supplies_defaults_without_mutating_input():
+    source = {
+        "media_mode": "native_dante",
+        "flow_type": "multicast",
+        "channel_slots": [{"slot": 1, "transmitter_channel": 2}],
+    }
+    baseline = deepcopy(source)
+    normalized = core.normalize_transmit_flow_specification(source)
+
+    assert source == baseline
+    assert normalized["schema_version"] == 1
+    assert normalized["redundancy"] == "device_default"
+    assert normalized["identity"]["global_flow_id"] is None
+    assert normalized["protocol"]["required_capabilities"] == []
+    assert core.normalize_transmit_flow_specification(normalized) == normalized
+
+    normalized["channel_slots"][0]["transmitter_channel"] = 3
+    assert source == baseline
 
 
 @pytest.mark.parametrize(
     "change, message",
     [
-        ({"channel_slots": (TransmitterChannelSlot(2, 1), TransmitterChannelSlot(1, 2))}, "strictly ascending"),
-        ({"channel_slots": (TransmitterChannelSlot(1, 1), TransmitterChannelSlot(2, 1))}, "duplicates"),
+        (
+            {"channel_slots": (dict(slot=2, transmitter_channel=1), dict(slot=1, transmitter_channel=2))},
+            "strictly ascending",
+        ),
+        ({"channel_slots": (dict(slot=1, transmitter_channel=1), dict(slot=2, transmitter_channel=1))}, "duplicates"),
         (
             {
-                "primary_destination": FlowSocket("239.1.1.1", 5004, "primary"),
-                "secondary_destination": FlowSocket("239.1.1.2", 5004, "primary"),
-                "redundancy": RedundancyConstraint.REQUIRED,
+                "primary_destination": dict(address="239.1.1.1", port=5004, interface="primary"),
+                "secondary_destination": dict(address="239.1.1.2", port=5004, interface="primary"),
+                "redundancy": "required",
             },
             "different interfaces",
         ),
@@ -268,19 +281,16 @@ def test_canonical_specification_rejects_invalid_mapping_or_destination(change, 
         {"protocol": {"required_capabilities": ["routing", "routing"]}},
     ],
 )
-def test_native_and_python_flow_specifications_reject_the_same_invalid_state(change):
-    value = {**specification().to_dict(), **change}
-
-    with pytest.raises(core.NetaudioCoreError):
-        core.validate_transmit_flow_specification(value)
+def test_flow_specification_rejects_invalid_state(change):
+    value = {**specification(), **change}
 
     with pytest.raises(ValueError):
-        TransmitFlowSpecification.from_dict(value)
+        parse_transmit_flow_specification(value)
 
 
 def test_comparison_only_requires_optional_authoring_fields_when_requested():
     requested = specification(sample_rate_hz=None, encoding_bits=None)
-    effective = TransmitFlowSpecification.from_inventory_record(
+    effective = core.transmit_flow_specification(
         {
             "flow_number": 2,
             "flow_type": "multicast",
@@ -290,12 +300,11 @@ def test_comparison_only_requires_optional_authoring_fields_when_requested():
         },
         protocol_id=0x2729,
     )
-    assert compare_transmit_flows(requested, effective).matches
+    assert core.compare_transmit_flows(requested, effective)["matches"]
     changed = specification(sample_rate_hz=96_000)
-    comparison = compare_transmit_flows(changed, effective)
-    assert not comparison.matches
-    assert comparison.differences[0].field == "sample_rate_hz"
-    assert core.compare_transmit_flows(changed.to_dict(), effective.to_dict()) == comparison.to_dict()
+    comparison = core.compare_transmit_flows(changed, effective)
+    assert not comparison["matches"]
+    assert comparison["differences"][0] == {"field": "sample_rate_hz", "requested": 96_000, "effective": 48_000}
 
 
 @pytest.mark.parametrize("extension", ["channel_slots", "primary_destination"])
@@ -304,22 +313,22 @@ def test_flow_comparison_ignores_annotations_not_encoded_on_the_wire(extension):
 
     if extension == "channel_slots":
         fields[extension] = (
-            TransmitterChannelSlot(1, 1, extra_fields={"description": "Console"}),
-            TransmitterChannelSlot(2, 2),
+            dict(slot=1, transmitter_channel=1, **{"description": "Console"}),
+            dict(slot=2, transmitter_channel=2),
         )
     else:
-        fields[extension] = FlowSocket("239.69.1.2", 5004, extra_fields={"description": "Studio"})
+        fields[extension] = dict(address="239.69.1.2", port=5004, **{"description": "Studio"})
 
     requested = specification(**fields)
     effective = specification(
-        primary_destination=FlowSocket("239.69.1.2", 5004) if extension == "primary_destination" else None
+        primary_destination=dict(address="239.69.1.2", port=5004) if extension == "primary_destination" else None
     )
 
-    assert compare_transmit_flows(requested, effective).matches
+    assert core.compare_transmit_flows(requested, effective)["matches"]
 
 
 def test_flow_comparison_does_not_confirm_missing_required_state():
-    comparison = core.compare_transmit_flows(specification().to_dict(), {})
+    comparison = core.compare_transmit_flows(specification(), {})
 
     assert comparison["matches"] is False
     assert {"media_mode", "flow_type", "channel_slots"} <= set(comparison["unavailable_fields"])
@@ -337,7 +346,7 @@ def test_flow_comparison_does_not_confirm_missing_required_state():
     ],
 )
 def test_native_flow_comparison_does_not_confirm_malformed_fields(field, value):
-    requested = {**specification().to_dict(), field: value}
+    requested = {**specification(), field: value}
     comparison = core.compare_transmit_flows(requested, requested)
 
     assert comparison["matches"] is False
@@ -354,14 +363,14 @@ def test_native_flow_plan_produces_capture_backed_command(protocol_id, raw_field
             "device": flow_lifecycle._flow_device_facts(device(protocol_id)),
             "specification": specification(
                 channel_slots=(
-                    (TransmitterChannelSlot(1, 1), TransmitterChannelSlot(2, 2))
+                    (dict(slot=1, transmitter_channel=1), dict(slot=2, transmitter_channel=2))
                     if modern
-                    else (TransmitterChannelSlot(1, 2),)
+                    else (dict(slot=1, transmitter_channel=2),)
                 ),
-                identity=FlowIdentity(media_local_flow_id=2) if modern else FlowIdentity(global_flow_id=2),
-                protocol=FlowProtocolRequirements(protocol_id=protocol_id),
+                identity=dict(media_local_flow_id=2) if modern else dict(global_flow_id=2),
+                protocol=dict(protocol_id=protocol_id),
                 raw_fields=raw_fields,
-            ).to_dict(),
+            ),
         }
     )
     assert plan["reasons"] == []
@@ -381,7 +390,7 @@ def test_native_flow_plan_rejects_conflicting_protocol_requirement():
         {
             "protocol_id": 0x2809,
             "device": flow_lifecycle._flow_device_facts(device(0x2809)),
-            "specification": specification(identity=FlowIdentity(media_local_flow_id=2)).to_dict(),
+            "specification": specification(identity=dict(media_local_flow_id=2)),
         }
     )
 
@@ -392,9 +401,9 @@ def test_native_flow_plan_rejects_conflicting_protocol_requirement():
 @pytest.mark.parametrize("channels", [list(range(1, 216)), [1, 1]])
 def test_native_flow_plan_never_accepts_a_command_the_serializer_rejects(channels):
     value = specification(
-        identity=FlowIdentity(media_local_flow_id=7),
-        protocol=FlowProtocolRequirements(protocol_id=0x2809),
-    ).to_dict()
+        identity=dict(media_local_flow_id=7),
+        protocol=dict(protocol_id=0x2809),
+    )
     value["channel_slots"] = [
         {"slot": slot, "transmitter_channel": channel} for slot, channel in enumerate(channels, 1)
     ]
@@ -450,7 +459,7 @@ def test_native_flow_planner_enforces_device_preconditions(operation, field, val
     facts[field] = value
     request = {"protocol_id": 0x2729, "device": facts}
     if operation == "create":
-        result = core.plan_transmit_flow_create({**request, "specification": specification().to_dict()})
+        result = core.plan_transmit_flow_create({**request, "specification": specification()})
     else:
         result = core.plan_transmit_flow_delete({**request, "flow_id": 2})
     assert result["command"] is None
@@ -459,7 +468,7 @@ def test_native_flow_planner_enforces_device_preconditions(operation, field, val
 
 def test_flow_plan_rejects_sparse_slots_instead_of_silently_renumbering_them():
     requested = specification(
-        channel_slots=(TransmitterChannelSlot(1, 1), TransmitterChannelSlot(3, 2)),
+        channel_slots=(dict(slot=1, transmitter_channel=1), dict(slot=3, transmitter_channel=2)),
     )
     plan = flow_lifecycle.plan_create_transmit_flow(device(), requested)
     assert not plan.supported
@@ -481,19 +490,19 @@ def test_planner_separates_supported_direct_and_unsupported_managed_or_rtp_paths
     assert not managed.supported and managed.transport == "ddm"
     assert "managed transmit-flow writes" in "; ".join(managed.reasons)
 
-    rtp = specification(media_mode=MediaMode.RTP_AES67)
+    rtp = specification(media_mode="rtp_aes67")
     unsupported = flow_lifecycle.plan_create_transmit_flow(device(), rtp)
     assert not unsupported.supported
     assert "only native Dante" in "; ".join(unsupported.reasons)
 
     modern_rtp = specification(
-        media_mode=MediaMode.RTP_AES67,
+        media_mode="rtp_aes67",
         name="Program",
         frames_per_packet=48,
-        primary_destination=FlowSocket("239.69.1.2", 5004),
-        secondary_destination=FlowSocket("239.69.1.3", 5004),
-        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
-        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+        primary_destination=dict(address="239.69.1.2", port=5004),
+        secondary_destination=dict(address="239.69.1.3", port=5004),
+        identity=dict(media_type_code=3, media_local_flow_id=7),
+        protocol=dict(protocol_id=0x2809, cohort="modern_2809"),
     )
     supported = flow_lifecycle.plan_create_transmit_flow(device(protocol_id=0x2809), modern_rtp)
     assert supported.supported
@@ -504,7 +513,7 @@ def test_planner_rejects_unsupported_fields_and_unproven_cohorts():
     named = flow_lifecycle.plan_create_transmit_flow(device(), specification(name="Program"))
     assert not named.supported and "flow name" in "; ".join(named.reasons)
 
-    unproven = specification(protocol=FlowProtocolRequirements(protocol_id=0x2801))
+    unproven = specification(protocol=dict(protocol_id=0x2801))
     plan = flow_lifecycle.plan_create_transmit_flow(device(protocol_id=0x2801), unproven)
     assert not plan.supported and "digest-bound" in "; ".join(plan.reasons)
 
@@ -515,12 +524,12 @@ def test_planner_rejects_channel_slots_beyond_advertised_audio_transmit_capacity
     target.routing_capacity_transmit_channel_count = 2
     requested = specification(
         channel_slots=(
-            TransmitterChannelSlot(1, 1),
-            TransmitterChannelSlot(2, 2),
-            TransmitterChannelSlot(3, 3),
+            dict(slot=1, transmitter_channel=1),
+            dict(slot=2, transmitter_channel=2),
+            dict(slot=3, transmitter_channel=3),
         ),
-        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
-        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+        identity=dict(media_type_code=3, media_local_flow_id=7),
+        protocol=dict(protocol_id=0x2809, cohort="modern_2809"),
     )
 
     plan = flow_lifecycle.plan_create_transmit_flow(target, requested)
@@ -592,7 +601,7 @@ async def test_legacy_create_preserves_acknowledgement_and_verifies_fresh_readba
     assert result.device_confirmation is None
     assert result.persistence_confirmation is None
     assert result.effective_state_confirmation is True
-    assert result.comparison.matches
+    assert result.comparison["matches"]
     assert sent == [
         {
             "command": "create_tx_flow",
@@ -610,8 +619,8 @@ async def test_static_modern_native_create_serializes_fields_without_format_muta
         sample_rate_hz=48_000,
         encoding_bits=24,
         frames_per_packet=48,
-        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
-        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+        identity=dict(media_type_code=3, media_local_flow_id=7),
+        protocol=dict(protocol_id=0x2809, cohort="modern_2809"),
         raw_fields={"request_options_word": 1},
     )
     after = {
@@ -675,18 +684,18 @@ async def test_static_modern_native_create_serializes_fields_without_format_muta
 
 @pytest.mark.asyncio
 async def test_static_rtp_create_correlates_allocated_and_media_local_identities(monkeypatch):
-    primary = FlowSocket("239.69.1.2", 5004)
-    secondary = FlowSocket("239.69.1.3", 5006)
+    primary = dict(address="239.69.1.2", port=5004)
+    secondary = dict(address="239.69.1.3", port=5006)
     requested = specification(
-        media_mode=MediaMode.RTP_AES67,
+        media_mode="rtp_aes67",
         name="RTP Program",
         sample_rate_hz=48_000,
         encoding_bits=24,
         frames_per_packet=48,
         primary_destination=primary,
         secondary_destination=secondary,
-        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
-        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+        identity=dict(media_type_code=3, media_local_flow_id=7),
+        protocol=dict(protocol_id=0x2809, cohort="modern_2809"),
     )
     after = {
         "maximum_flow_slots": 4,
@@ -702,8 +711,8 @@ async def test_static_rtp_create_correlates_allocated_and_media_local_identities
                 "sample_rate": 48_000,
                 "encoding": 24,
                 "frames_per_packet": 48,
-                "primary_destination": primary.to_dict(),
-                "secondary_destination": secondary.to_dict(),
+                "primary_destination": primary,
+                "secondary_destination": secondary,
             }
         ],
     }
@@ -727,7 +736,7 @@ async def test_static_rtp_create_correlates_allocated_and_media_local_identities
     assert result.state is FlowLifecycleState.CONFIRMED
     assert result.effective_state_confirmation is True
     assert result.request_acknowledgement["allocation"]["global_flow_id"] == 2
-    assert result.effective.identity.media_local_flow_id == 7
+    assert result.effective["identity"]["media_local_flow_id"] == 7
     assert sent == [
         {
             "command": "create_multicast_flow_2809",
@@ -751,15 +760,15 @@ async def test_static_rtp_create_correlates_allocated_and_media_local_identities
 @pytest.mark.asyncio
 async def test_modern_create_keeps_unexposed_readback_fields_partial(monkeypatch):
     requested = specification(
-        media_mode=MediaMode.RTP_AES67,
+        media_mode="rtp_aes67",
         name="RTP Program",
         sample_rate_hz=48_000,
         encoding_bits=24,
         frames_per_packet=48,
-        primary_destination=FlowSocket("239.69.1.2", 5004),
-        secondary_destination=FlowSocket("239.69.1.3", 5006),
-        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
-        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+        primary_destination=dict(address="239.69.1.2", port=5004),
+        secondary_destination=dict(address="239.69.1.3", port=5006),
+        identity=dict(media_type_code=3, media_local_flow_id=7),
+        protocol=dict(protocol_id=0x2809, cohort="modern_2809"),
     )
     after = {
         "maximum_flow_slots": 4,
@@ -798,12 +807,12 @@ async def test_modern_create_keeps_unexposed_readback_fields_partial(monkeypatch
 
     assert result.state is FlowLifecycleState.PARTIAL
     assert result.effective_state_confirmation is None
-    assert result.comparison.differences == ()
-    assert result.comparison.unavailable_fields == (
+    assert result.comparison["differences"] == []
+    assert result.comparison["unavailable_fields"] == [
         "media_mode",
         "frames_per_packet",
         "secondary_destination",
-    )
+    ]
     assert result.verification_observations[-1]["outcome"] == "partially_observed"
     assert len(sent) == 1
 
@@ -825,8 +834,8 @@ async def test_modern_create_requires_fresh_format_preconditions_before_sending(
     requested = specification(
         sample_rate_hz=48_000,
         encoding_bits=24,
-        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
-        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+        identity=dict(media_type_code=3, media_local_flow_id=7),
+        protocol=dict(protocol_id=0x2809, cohort="modern_2809"),
     )
     target = device(protocol_id=0x2809)
 
@@ -948,6 +957,41 @@ async def test_rejected_acknowledgement_does_not_invent_confirmation(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "inventory,expected_state",
+    [
+        (None, FlowLifecycleState.PENDING),
+        ({"flows": []}, FlowLifecycleState.REJECTED),
+        ({"flows": [{"flow_number": 2, "flow_type": "unicast", "channels": [1]}]}, FlowLifecycleState.REJECTED),
+        ({"flows": [{"flow_number": 2, "flow_type": "unknown", "channels": [1]}]}, FlowLifecycleState.REJECTED),
+        ({"flows": [{"flow_number": 2, "channels": [1]}]}, FlowLifecycleState.REJECTED),
+        ({"flows": [{"flow_number": 2, "flow_type": "multicast", "channels": []}]}, FlowLifecycleState.REJECTED),
+        ({"page_disposition": "more_pages", "flows": []}, FlowLifecycleState.PENDING),
+        ({"flows": [{"flow_number": 2}, {"flow_number": 2}]}, FlowLifecycleState.PENDING),
+    ],
+)
+async def test_delete_preflight_uses_native_evidence_and_never_sends_an_unsafe_request(
+    monkeypatch, inventory, expected_state
+):
+    async def read_inventory(_device, _protocol_id):
+        return deepcopy(inventory)
+
+    async def send_once(_device, _command):
+        pytest.fail("rejected or incomplete preflight must not send a delete")
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+    native = core.flow_delete_preflight({"inventory": inventory, "flow_id": 2, "protocol_id": 0x2729})
+    result = await flow_lifecycle.delete_transmit_flow(device(), 2)
+
+    assert native["state"] == ("unavailable" if expected_state is FlowLifecycleState.PENDING else "rejected")
+    assert native["specification"] is None
+    assert result.state is expected_state
+    assert result.request_acknowledgement is None
+    assert result.message.startswith(native["reason"])
+
+
+@pytest.mark.asyncio
 async def test_delete_requires_absent_readback_and_unchanged_unrelated_flows(monkeypatch):
     target = {
         "flow_number": 2,
@@ -983,7 +1027,7 @@ async def test_delete_requires_absent_readback_and_unchanged_unrelated_flows(mon
 
     assert result.state is FlowLifecycleState.DELETED
     assert result.effective is None
-    assert result.requested.identity.global_flow_id == 2
+    assert result.requested["identity"]["global_flow_id"] == 2
     assert result.effective_state_confirmation is True
     assert result.device_confirmation is None
 
@@ -1043,7 +1087,7 @@ async def test_delete_does_not_call_missing_readback_fields_a_contradiction(monk
     result = await flow_lifecycle.delete_transmit_flow(device(), 2)
     assert result.state is FlowLifecycleState.PARTIAL
     assert result.effective_state_confirmation is None
-    assert result.comparison.unavailable_fields == ("encoding_bits",)
+    assert result.comparison["unavailable_fields"] == ["encoding_bits"]
 
 
 @pytest.mark.asyncio
@@ -1074,7 +1118,7 @@ async def test_delete_acknowledged_timeout_is_partial_and_does_not_retry_write(m
     assert result.state is FlowLifecycleState.PARTIAL
     assert result.device_confirmation is None
     assert result.effective_state_confirmation is None
-    assert result.effective.identity.global_flow_id == 2
+    assert result.effective["identity"]["global_flow_id"] == 2
     assert len(sent) == 1
 
 
@@ -1187,7 +1231,7 @@ async def test_create_definitive_contradiction_is_inconsistent(monkeypatch):
     assert result.state is FlowLifecycleState.INCONSISTENT
     assert result.device_confirmation is None
     assert result.effective_state_confirmation is False
-    assert result.comparison is not None and not result.comparison.matches
+    assert result.comparison is not None and not result.comparison["matches"]
 
 
 @pytest.mark.asyncio
@@ -1416,7 +1460,7 @@ async def test_delete_correlated_target_change_is_inconsistent(monkeypatch):
 
     assert result.state is FlowLifecycleState.INCONSISTENT
     assert result.effective_state_confirmation is False
-    assert result.comparison is not None and not result.comparison.matches
+    assert result.comparison is not None and not result.comparison["matches"]
 
 
 def test_partial_inventory_cannot_supply_effective_flow_or_preset_comparison_state():

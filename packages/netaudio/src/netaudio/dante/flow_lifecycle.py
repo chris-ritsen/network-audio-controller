@@ -7,15 +7,11 @@ from typing import Any
 from netaudio import core
 from netaudio.core import _requests, _types
 from netaudio.dante import flows
-from netaudio.dante.arc_protocol import advertised_arc_protocol_identifier_for_device
+from netaudio.dante.arc_protocol import flow_inventory_protocol_identifier_for_device
 from netaudio.dante.transmit_flow import (
-    FlowComparison,
     FlowLifecycleState,
     FlowOperationPlan,
     FlowOperationResult,
-    FlowType,
-    TransmitFlowSpecification,
-    compare_transmit_flows,
 )
 
 
@@ -28,17 +24,14 @@ def _transport(device) -> str:
 
 
 def _readback_protocol_id(device) -> int | None:
-    advertised = getattr(device, "flow_protocol_id", None)
-    if advertised is None:
-        try:
-            advertised = advertised_arc_protocol_identifier_for_device(device)
-        except (AttributeError, RuntimeError):
-            advertised = None
-    return advertised
+    try:
+        return flow_inventory_protocol_identifier_for_device(device)
+    except (AttributeError, RuntimeError):
+        return None
 
 
-def _protocol_id(device, specification: TransmitFlowSpecification | None = None) -> int | None:
-    required = specification.protocol.protocol_id if specification is not None else None
+def _protocol_id(device, specification: _requests.TransmitFlowSpecification | None = None) -> int | None:
+    required = specification.get("protocol", {}).get("protocol_id") if specification is not None else None
     advertised = (getattr(device, "transmit_flow_authoring", None) or {}).get("protocol_id")
     return required if required is not None else advertised
 
@@ -67,13 +60,13 @@ def _flow_device_facts(device, required_capabilities=()) -> _requests.FlowDevice
     }
 
 
-def plan_create_transmit_flow(device, specification: TransmitFlowSpecification) -> FlowOperationPlan:
+def plan_create_transmit_flow(device, specification: _requests.TransmitFlowSpecification) -> FlowOperationPlan:
     protocol_id = _protocol_id(device, specification)
     native = core.plan_transmit_flow_create(
         {
             "protocol_id": protocol_id,
-            "specification": specification.to_dict(),
-            "device": _flow_device_facts(device, specification.protocol.required_capabilities),
+            "specification": specification,
+            "device": _flow_device_facts(device, specification.get("protocol", {}).get("required_capabilities", [])),
         }
     )
     reasons = native["reasons"]
@@ -89,14 +82,14 @@ def plan_create_transmit_flow(device, specification: TransmitFlowSpecification) 
         supported=supported,
         reasons=tuple(dict.fromkeys(reasons)),
         specification=specification,
-        flow_id=specification.identity.global_flow_id,
+        flow_id=specification.get("identity", {}).get("global_flow_id"),
         command_specification=native["command"] if supported else None,
         wire_authored_fields=tuple(native["wire_authored_fields"]),
         state_preconditions={
             key: value
             for key, value in (
-                ("sample_rate_hz", specification.sample_rate_hz),
-                ("encoding_bits", specification.encoding_bits),
+                ("sample_rate_hz", specification.get("sample_rate_hz")),
+                ("encoding_bits", specification.get("encoding_bits")),
             )
             if value is not None
         },
@@ -140,10 +133,8 @@ def canonical_inventory(flow_inventory: dict, protocol_id: int) -> dict[str, Any
     errors = []
     for index, record in enumerate(records):
         try:
-            specifications.append(
-                TransmitFlowSpecification.from_inventory_record(record, protocol_id=protocol_id).to_dict()
-            )
-        except (TypeError, ValueError) as exception:
+            specifications.append(core.transmit_flow_specification(record, protocol_id=protocol_id))
+        except (TypeError, ValueError, core.NetaudioCoreError) as exception:
             errors.append({"record_index": index, "error": str(exception), "raw_record": copy.deepcopy(record)})
     return {
         "schema_version": 1,
@@ -246,11 +237,11 @@ async def _refresh_authoring_family(device) -> dict | None:
 
 async def _fresh_format_preconditions(
     device,
-    specification: TransmitFlowSpecification,
+    specification: _requests.TransmitFlowSpecification,
 ) -> tuple[str, dict[str, Any]]:
     requested = (
-        ("sample_rate_hz", specification.sample_rate_hz, "probe_sample_rate_status"),
-        ("encoding_bits", specification.encoding_bits, "probe_encoding_status"),
+        ("sample_rate_hz", specification.get("sample_rate_hz"), "probe_sample_rate_status"),
+        ("encoding_bits", specification.get("encoding_bits"), "probe_encoding_status"),
     )
     requested = tuple((field, value, probe) for field, value, probe in requested if value is not None)
 
@@ -326,9 +317,9 @@ def _operation_result(
     transport: str,
     acknowledgement: _types.CommandReceipt | None,
     effective_confirmation: bool | None,
-    requested: TransmitFlowSpecification | None,
-    effective: TransmitFlowSpecification | None,
-    comparison: FlowComparison | None,
+    requested: _requests.TransmitFlowSpecification | _types.ObservedTransmitFlowSpecification | None,
+    effective: _types.ObservedTransmitFlowSpecification | None,
+    comparison: _types.FlowComparison | None,
     message: str,
     observations: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
 ) -> FlowOperationResult:
@@ -375,7 +366,7 @@ def _verification_outcome(operation: _requests.FlowMutation, record, comparison,
         {
             "operation": operation,
             "record_present": record is not None,
-            "comparison": comparison.to_dict() if comparison is not None else None,
+            "comparison": comparison,
             "authoring_refreshed": authoring_refresh is not None,
         }
     )
@@ -399,16 +390,16 @@ def _creation_candidate(
     *,
     before: dict,
     after: dict,
-    requested: TransmitFlowSpecification,
+    requested: _requests.TransmitFlowSpecification,
     protocol_id: int,
     correlated_flow_id: int | None,
-) -> tuple[int | None, dict | None, FlowComparison | None]:
+) -> tuple[int | None, dict | None, _types.FlowComparison | None]:
     try:
         result = core.flow_creation_candidate(
             {
                 "before": _inventory_evidence(before),
                 "after": _inventory_evidence(after),
-                "requested": requested.to_dict(),
+                "requested": requested,
                 "protocol_id": protocol_id,
                 "correlated_flow_id": correlated_flow_id,
             }
@@ -416,11 +407,10 @@ def _creation_candidate(
     except core.NetaudioCoreError as error:
         raise ValueError(error.detail or str(error)) from error
 
-    comparison = result["comparison"]
-    return result["flow_id"], result["record"], FlowComparison.from_dict(comparison) if comparison is not None else None
+    return result["flow_id"], result["record"], result["comparison"]
 
 
-async def create_transmit_flow(device, specification: TransmitFlowSpecification) -> FlowOperationResult:
+async def create_transmit_flow(device, specification: _requests.TransmitFlowSpecification) -> FlowOperationResult:
     plan = plan_create_transmit_flow(device, specification)
     if not plan.supported:
         return _operation_result(
@@ -473,7 +463,7 @@ async def create_transmit_flow(device, specification: TransmitFlowSpecification)
             )
         before = await _read_inventory(device, protocol_id)
         preflight = core.flow_create_preflight(
-            {"inventory": before, "requested_flow_id": specification.identity.global_flow_id}
+            {"inventory": before, "requested_flow_id": specification.get("identity", {}).get("global_flow_id")}
         )
         observations.append(
             _observation(
@@ -501,7 +491,7 @@ async def create_transmit_flow(device, specification: TransmitFlowSpecification)
 
         assert before is not None, "ready native preflight requires an inventory"
 
-        if specification.sample_rate_hz is not None or specification.encoding_bits is not None:
+        if specification.get("sample_rate_hz") is not None or specification.get("encoding_bits") is not None:
             precondition_outcome, precondition_details = await _fresh_format_preconditions(device, specification)
             observations.append(
                 _observation(
@@ -567,11 +557,13 @@ async def create_transmit_flow(device, specification: TransmitFlowSpecification)
             )
         )
 
-        correlated_flow_id = specification.identity.global_flow_id or _allocated_flow_id(acknowledgement)
+        correlated_flow_id = specification.get("identity", {}).get("global_flow_id") or _allocated_flow_id(
+            acknowledgement
+        )
         deadline = asyncio.get_running_loop().time() + VERIFICATION_TIMEOUT_SECONDS
         attempt = 0
-        last_effective: TransmitFlowSpecification | None = None
-        last_comparison: FlowComparison | None = None
+        last_effective: _types.ObservedTransmitFlowSpecification | None = None
+        last_comparison: _types.FlowComparison | None = None
         while True:
             attempt += 1
             after = await _read_inventory(device, protocol_id)
@@ -608,7 +600,7 @@ async def create_transmit_flow(device, specification: TransmitFlowSpecification)
                 if concurrent_activity is not None:
                     details["concurrent_topology_activity"] = concurrent_activity
                 if record is not None:
-                    last_effective = TransmitFlowSpecification.from_inventory_record(record, protocol_id=protocol_id)
+                    last_effective = core.transmit_flow_specification(record, protocol_id=protocol_id)
                     last_comparison = comparison
                 outcome = _verification_outcome("create", record, comparison, authoring_refresh, details)
                 observations.append(
@@ -665,7 +657,7 @@ async def create_transmit_flow(device, specification: TransmitFlowSpecification)
         comparison=last_comparison,
         message=(
             "request was acknowledged and correlated fresh readback was found, but some requested fields were not exposed"
-            if accepted and last_comparison is not None and last_comparison.unavailable_fields
+            if accepted and last_comparison is not None and last_comparison["unavailable_fields"]
             else (
                 "request was acknowledged but bounded fresh readback did not confirm the effective flow"
                 if accepted
@@ -728,69 +720,35 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
                 ],
             )
         before = await _read_inventory(device, protocol_id)
+        preflight = core.flow_delete_preflight({"inventory": before, "flow_id": flow_id, "protocol_id": protocol_id})
         observations.append(
             _observation(
                 phase="preflight",
                 attempt=1,
                 inventory=before,
-                outcome="available" if core.flow_inventory_complete(before) else "unavailable",
+                outcome=preflight["state"],
             )
         )
-        if before is None or not core.flow_inventory_complete(before):
+
+        if preflight["state"] != "ready":
+            unavailable = preflight["state"] == "unavailable"
+
             return _operation_result(
                 operation="delete",
-                state=FlowLifecycleState.PENDING,
+                state=FlowLifecycleState.PENDING if unavailable else FlowLifecycleState.REJECTED,
                 transport=plan.transport,
                 acknowledgement=None,
-                effective_confirmation=None,
+                effective_confirmation=None if unavailable else False,
                 requested=None,
                 effective=None,
                 comparison=None,
-                message="fresh preflight inventory was unavailable; no request was sent",
+                message=f"{preflight['reason']}; no request was sent",
                 observations=observations,
             )
-        record = _find_record(before, flow_id)
-        if record is None:
-            return _operation_result(
-                operation="delete",
-                state=FlowLifecycleState.REJECTED,
-                transport=plan.transport,
-                acknowledgement=None,
-                effective_confirmation=False,
-                requested=None,
-                effective=None,
-                comparison=None,
-                message=f"flow {flow_id} is not active; no request was sent",
-                observations=observations,
-            )
-        reported_flow_type = record.get("flow_type")
-        if isinstance(reported_flow_type, str) and reported_flow_type.casefold() != FlowType.MULTICAST.value:
-            return _operation_result(
-                operation="delete",
-                state=FlowLifecycleState.REJECTED,
-                transport=plan.transport,
-                acknowledgement=None,
-                effective_confirmation=False,
-                requested=None,
-                effective=None,
-                comparison=None,
-                message="only multicast transmit-flow deletion is supported; no request was sent",
-                observations=observations,
-            )
-        requested = TransmitFlowSpecification.from_inventory_record(record, protocol_id=protocol_id)
-        if requested.flow_type is not FlowType.MULTICAST:
-            return _operation_result(
-                operation="delete",
-                state=FlowLifecycleState.REJECTED,
-                transport=plan.transport,
-                acknowledgement=None,
-                effective_confirmation=False,
-                requested=requested,
-                effective=requested,
-                comparison=None,
-                message="only multicast transmit-flow deletion is supported; no request was sent",
-                observations=observations,
-            )
+
+        requested = preflight["specification"]
+        assert requested is not None
+        assert before is not None
 
         response = await _send_once(device, command_specification)
         acknowledgement = core.command_acknowledgement(response)
@@ -821,8 +779,8 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
 
         deadline = asyncio.get_running_loop().time() + VERIFICATION_TIMEOUT_SECONDS
         attempt = 0
-        last_effective: TransmitFlowSpecification | None = requested
-        last_comparison: FlowComparison | None = None
+        last_effective: _types.ObservedTransmitFlowSpecification | None = requested
+        last_comparison: _types.FlowComparison | None = None
         while True:
             attempt += 1
             after = await _read_inventory(device, protocol_id)
@@ -847,8 +805,8 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
                     {"concurrent_topology_activity": concurrent_activity} if concurrent_activity is not None else {}
                 )
                 if remaining is not None:
-                    last_effective = TransmitFlowSpecification.from_inventory_record(remaining, protocol_id=protocol_id)
-                    last_comparison = compare_transmit_flows(requested, last_effective)
+                    last_effective = core.transmit_flow_specification(remaining, protocol_id=protocol_id)
+                    last_comparison = core.compare_transmit_flows(requested, last_effective)
                 else:
                     last_effective = None
                     last_comparison = None

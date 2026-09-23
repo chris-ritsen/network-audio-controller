@@ -1,15 +1,130 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{command_spec::CommandSpec, parse_command_spec, SpecError};
+use super::SpecError;
 use crate::commands::EXTERNAL_RTP_DEFAULT_PORT;
+
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ExternalRtpDestinationSpec {
+    pub address: String,
+    #[serde(default)]
+    pub port: u16,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ExternalSubscriptionParameters {
+    pub advertised_flow_slot_count: u16,
+    #[serde(default)]
+    pub clock_offset: Option<u32>,
+    pub device_protocol: u16,
+    pub flow_slot_assignments: Vec<u16>,
+    #[serde(default)]
+    pub message_id: u16,
+    pub primary_destination: ExternalRtpDestinationSpec,
+    pub receiver_channel_ids: Vec<u16>,
+    pub session_id: u64,
+    pub source_address: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ExternalSubscriptionSpec {
+    #[serde(flatten)]
+    pub parameters: ExternalSubscriptionParameters,
+    #[serde(default)]
+    pub advertisement_supports_multiple_interfaces: bool,
+    #[serde(default)]
+    pub receiver_supports_multiple_interfaces: bool,
+    #[serde(default)]
+    pub secondary_destination: Option<ExternalRtpDestinationSpec>,
+}
+
+impl ExternalSubscriptionSpec {
+    pub fn build(&self) -> Result<Vec<u8>, SpecError> {
+        use crate::commands::{
+            ExternalFlowIdentity, ExternalReceiverSubscription, ExternalRtpDestination,
+        };
+
+        let destination =
+            |value: &ExternalRtpDestinationSpec| -> Result<ExternalRtpDestination, SpecError> {
+                Ok(ExternalRtpDestination {
+                    address: value.address.parse().map_err(|_| SpecError::InvalidIp)?,
+                    port: value.port,
+                })
+            };
+        let p = &self.parameters;
+        Ok(crate::commands::build_external_receiver_subscription(
+            &ExternalReceiverSubscription {
+                device_protocol: p.device_protocol,
+                receiver_channel_ids: &p.receiver_channel_ids,
+                flow_slot_assignments: &p.flow_slot_assignments,
+                advertised_flow_slot_count: p.advertised_flow_slot_count,
+                flow_identity: ExternalFlowIdentity {
+                    source_address: p.source_address.parse().map_err(|_| SpecError::InvalidIp)?,
+                    session_id: p.session_id,
+                },
+                clock_offset: p.clock_offset.unwrap_or(0),
+                primary_destination: destination(&p.primary_destination)?,
+                secondary_destination: self
+                    .secondary_destination
+                    .as_ref()
+                    .map(destination)
+                    .transpose()?,
+                advertisement_supports_multiple_interfaces: self
+                    .advertisement_supports_multiple_interfaces,
+                receiver_supports_multiple_interfaces: self.receiver_supports_multiple_interfaces,
+            },
+            p.message_id,
+        )?)
+    }
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ExternalSubscriptionPlanRequest {
+    #[serde(flatten)]
+    pub parameters: ExternalSubscriptionParameters,
+    pub secondary_address: Option<String>,
+    pub secondary_port: Option<u16>,
+    pub receiver_supports_multiple_interfaces: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExternalSubscriptionCommand {
+    SubscribeExternalRtp(ExternalSubscriptionSpec),
+}
+
+pub fn plan_external_subscription(
+    request: ExternalSubscriptionPlanRequest,
+) -> Result<ExternalSubscriptionCommand, SpecError> {
+    let advertised = request.secondary_address.zip(request.secondary_port);
+    let specification = ExternalSubscriptionSpec {
+        parameters: request.parameters,
+        advertisement_supports_multiple_interfaces: advertised.is_some(),
+        receiver_supports_multiple_interfaces: request.receiver_supports_multiple_interfaces,
+        secondary_destination: advertised
+            .filter(|_| request.receiver_supports_multiple_interfaces)
+            .map(|(address, port)| ExternalRtpDestinationSpec { address, port }),
+    };
+    specification.build()?;
+    Ok(ExternalSubscriptionCommand::SubscribeExternalRtp(
+        specification,
+    ))
+}
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExternalReadbackRequest {
     Command {
-        specification: Value,
+        specification: ExternalSubscriptionCommand,
         inventory: Option<Value>,
     },
     Identities {
@@ -117,23 +232,24 @@ impl Scope {
     }
 }
 
-fn command_intent(specification: Value) -> Result<(Vec<Identity>, Scope), SpecError> {
-    let command_json = specification.to_string();
-    super::build_command_from_json(&command_json)?;
-    let CommandSpec::SubscribeExternalRtp {
-        receiver_channel_ids,
-        flow_slot_assignments,
-        primary_destination,
+fn command_intent(
+    specification: ExternalSubscriptionCommand,
+) -> Result<(Vec<Identity>, Scope), SpecError> {
+    let ExternalSubscriptionCommand::SubscribeExternalRtp(specification) = specification;
+    specification.build()?;
+    let ExternalSubscriptionSpec {
+        parameters:
+            ExternalSubscriptionParameters {
+                receiver_channel_ids,
+                flow_slot_assignments,
+                primary_destination,
+                source_address,
+                session_id,
+                ..
+            },
         secondary_destination,
-        source_address,
-        session_id,
         ..
-    } = parse_command_spec(&command_json)?
-    else {
-        return Err(SpecError::InvalidJson(
-            "expected an external RTP subscription command".into(),
-        ));
-    };
+    } = specification;
 
     let source_ipv4 = source_address.parse().map_err(|_| SpecError::InvalidIp)?;
     let interface_endpoints = std::iter::once(primary_destination)

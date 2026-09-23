@@ -7,14 +7,14 @@ from netaudio.dante.sample_rate_pullup import (
 )
 
 
-def test_sample_rate_pullup_labels_use_authentic_tuning_table():
+def test_sample_rate_pullup_labels_name_supported_values_without_exposing_unknown_codes():
     assert sample_rate_pullup_label(None) == "unknown"
     assert sample_rate_pullup_label(0) == "none"
     assert sample_rate_pullup_label(1) == "+4.1667%"
     assert sample_rate_pullup_label(2) == "+0.1%"
     assert sample_rate_pullup_label(3) == "-0.1%"
     assert sample_rate_pullup_label(4) == "-4.0%"
-    assert sample_rate_pullup_label(7) == "raw 7"
+    assert sample_rate_pullup_label(7) == "unknown"
 
 
 def test_supported_sample_rate_pullup_values_are_named():

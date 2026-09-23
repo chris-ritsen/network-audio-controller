@@ -3,6 +3,43 @@ use serde::{Deserialize, Serialize};
 use crate::network::{redundancy_control, RedundancyControlRequest};
 use crate::responses::{audio_capability_control, AudioCapabilityControl};
 
+#[derive(Serialize)]
+pub struct AudioValueChoice {
+    pub value: u32,
+    pub label: &'static str,
+    pub aliases: &'static [&'static str],
+}
+
+pub fn sample_rate_pullup_choices() -> [AudioValueChoice; 5] {
+    [
+        AudioValueChoice {
+            value: 0,
+            label: "none",
+            aliases: &["none"],
+        },
+        AudioValueChoice {
+            value: 1,
+            label: "+4.1667%",
+            aliases: &["+4.1667%", "4.1667%"],
+        },
+        AudioValueChoice {
+            value: 2,
+            label: "+0.1%",
+            aliases: &["+0.1%", "0.1%"],
+        },
+        AudioValueChoice {
+            value: 3,
+            label: "-0.1%",
+            aliases: &["-0.1%"],
+        },
+        AudioValueChoice {
+            value: 4,
+            label: "-4.0%",
+            aliases: &["-4.0%", "-4%"],
+        },
+    ]
+}
+
 #[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]

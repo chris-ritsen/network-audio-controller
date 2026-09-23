@@ -1,6 +1,55 @@
 use std::net::Ipv4Addr;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+pub const MULTICAST_ADDRESS: &str = "239.255.255.255";
+pub const PORT: u16 = 9875;
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct SapSessionAnnouncement {
+    pub message_hash: std::num::NonZeroU16,
+    pub raw_sdp: String,
+}
+
+/// The host selects the session by parsed origin/session identity and expires its cache.
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct SapTransitionRequest {
+    pub delete: bool,
+    pub current: SapSessionAnnouncement,
+    pub previous: Option<SapSessionAnnouncement>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SapTransition {
+    Added,
+    Refreshed,
+    Replaced,
+    Deleted,
+}
+
+pub fn transition(request: SapTransitionRequest) -> Option<SapTransition> {
+    let previous = request.previous.as_ref();
+    let same_message =
+        previous.is_some_and(|previous| previous.message_hash == request.current.message_hash);
+
+    if request.delete {
+        return same_message.then_some(SapTransition::Deleted);
+    }
+
+    Some(match previous {
+        None => SapTransition::Added,
+        Some(previous) if same_message && previous.raw_sdp == request.current.raw_sdp => {
+            SapTransition::Refreshed
+        }
+        Some(_) => SapTransition::Replaced,
+    })
+}
 
 const CONTENT_TYPE: &[u8] = b"application/sdp\0";
 
