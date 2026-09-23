@@ -176,22 +176,29 @@ control protocols. Protocol work is recorded in reviewed source, focused tests,
 and evidence records identifying observed behavior and remaining unknowns.
 Research tooling is separate from normal application use.
 
-Run the offline Python and Rust tests:
+Run the shared local/CI checks for the current host, using installed dependencies:
 
 ```bash
-uv run pytest -q
-cargo test --manifest-path packages/netaudio-core/Cargo.toml
+make check-local
 ```
 
-Run Python lint checks or the broader source-quality checks:
+This incrementally builds the Rust core, selects that library for Python tests,
+and checks the native ABI, generated interfaces, formatting, lint, types, Rust
+tests, Python tests, and web unit tests. The run has a five-minute total limit.
+Its printed report path contains results, per-check logs, source identity, and
+the tested library digest. Failed checks stop the run; timeouts are incomplete.
+
+Run only source-quality/native checks or select another check group:
 
 ```bash
-uv run ruff check .
 make quality
+.venv/bin/python scripts/check_project.py --scope python --offline
+.venv/bin/python scripts/check_project.py --scope webapp --offline
 ```
 
-The [CI workflow](.github/workflows/quality.yml) also runs browser tests and
-checks package installation across supported platforms.
+The manually dispatched [CI workflow](.github/workflows/quality.yml) uses the
+same check commands. Browser tests and installed-wheel/platform matrices are
+separate, explicitly selected checks.
 
 ## Project background
 

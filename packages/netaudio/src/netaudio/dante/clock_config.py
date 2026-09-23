@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from netaudio import core
 
-CLOCK_SOURCE_MAXIMUM = 0xFFFF
-
 
 def clock_subdomain_bytes(value) -> bytes | None:
     if value is None:
@@ -47,21 +45,30 @@ def format_clock_subdomain(value) -> str:
 
 def parse_clock_source_selection(text: str) -> int:
     if not isinstance(text, str) or not text.strip():
-        raise ValueError("clock source must be an integer from 0 through 65535")
+        raise ValueError("clock source must be an integer")
+
     stripped = text.strip()
+
     if stripped.lower().startswith("0x"):
         try:
             clock_source = int(stripped, 16)
         except ValueError as exception:
-            raise ValueError("clock source must be an integer from 0 through 65535") from exception
+            raise ValueError("clock source must be an integer") from exception
     else:
         if not stripped.isdigit():
-            raise ValueError("clock source must be an integer from 0 through 65535")
-        clock_source = int(stripped)
-    if clock_source > CLOCK_SOURCE_MAXIMUM:
-        raise ValueError("clock source must be an integer from 0 through 65535")
+            raise ValueError("clock source must be an integer")
 
-    if core.clock_sources({"current": clock_source, "supported": []})["current"] is None:
+        clock_source = int(stripped)
+
+    try:
+        selected = core.clock_sources({"current": clock_source, "supported": []})["current"]
+    except core.NetaudioCoreError as error:
+        if error.category != "json_input":
+            raise
+
+        raise ValueError("clock source is unknown or unsupported") from error
+
+    if selected is None:
         raise ValueError("clock source is unknown or unsupported")
 
     return clock_source

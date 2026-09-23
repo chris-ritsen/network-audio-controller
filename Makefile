@@ -15,6 +15,7 @@ help:
 	@echo "test-browser WEB_TESTS='path/to/browser.test.mjs'  Explicit browser UI checks"
 	@echo "lint LINT_FILES='path/to/changed.py'             Focused Python lint"
 	@echo "test-full / quality                           Explicit broad checks; not routine"
+	@echo "check-local                                   Shared local/CI checks with a report; five-minute limit"
 	@echo "core / install / deploy                        Explicit build and deployment commands"
 
 header:
@@ -86,15 +87,7 @@ lint:
 	$(BOUNDED) $(PYTHON) -m ruff check $(LINT_FILES)
 
 quality:
-	uv lock --check
-	$(PYTHON) -m ruff check .
-	$(PYTHON) -m ruff format --check .
-	.venv/bin/pyright
-	$(PYTHON) scripts/generate_core_binding.py --check
-	$(PYTHON) scripts/generate_core_types.py --check
-	cargo fmt --manifest-path packages/netaudio-core/Cargo.toml -- --check
-	cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets --features schema -- -D warnings
-	cargo test --manifest-path packages/netaudio-core/Cargo.toml
+	$(PYTHON) scripts/check_project.py --scope native --offline
 
 wheel-smoke:
 	@tmp=$$(mktemp -d) || exit 1; \
@@ -117,7 +110,8 @@ wheel-smoke:
 check-label-provenance:
 	uv run netaudio lab provenance check
 
-check-local: test
+check-local:
+	$(PYTHON) scripts/check_project.py --scope all --offline
 
 seed-opcode-fixtures:
 	uv run netaudio lab provenance seed --clean

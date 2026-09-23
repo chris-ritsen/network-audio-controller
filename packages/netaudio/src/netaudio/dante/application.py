@@ -6,8 +6,10 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from functools import partial
+from typing import TYPE_CHECKING, TypeVar
 
 from netaudio import core
+from netaudio.core import _requests, _types
 from netaudio.dante.channel import channel_by_number
 from netaudio.dante.capability_partition import (
     CapabilityPartitionExport,
@@ -88,6 +90,19 @@ from netaudio.dante.state import (
 
 logger = logging.getLogger("netaudio")
 
+if TYPE_CHECKING:
+    from netaudio.ddm.device_transport import ManagedDeviceTransport
+
+Result = TypeVar("Result")
+
+
+def _probe_result(value: object, result_type: type[Result]) -> Result:
+    if not isinstance(value, result_type):
+        raise RuntimeError("unexpected readback type")
+
+    return value
+
+
 CHANNEL_NAME_NOTIFICATION_IDS = {
     "rx": (NOTIFICATION_RX_CHANNEL_CHANGE, NOTIFICATION_PROPERTY_CHANGE),
     "tx": (NOTIFICATION_TX_CHANNEL_CHANGE, NOTIFICATION_TX_LABEL_CHANGE, NOTIFICATION_PROPERTY_CHANGE),
@@ -163,7 +178,7 @@ class DanteApplication:
         self._started = False
         self._capability_probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._managed_transport = managed_transport
-        self._managed_transports: dict[str, object] = {}
+        self._managed_transports: dict[str, ManagedDeviceTransport] = {}
         self.operation_recorder = operation_recorder
 
     def set_operation_recorder(self, recorder) -> None:
@@ -207,7 +222,7 @@ class DanteApplication:
     def _apply_device_settings(device, settings) -> None:
         if not isinstance(settings, dict):
             return
-        controls = latency_controls_from_settings(settings)
+        controls = dict(latency_controls_from_settings(settings))
         if settings.get("sample_rate"):
             controls["sample_rate"] = settings["sample_rate"]
         device.apply_controls(controls)
@@ -270,8 +285,13 @@ class DanteApplication:
         from netaudio._capture import PacketDissector, _record
 
         dissect_packet = PacketDissector()
+        queue = self._capture_queue
+
+        if queue is None:
+            return
+
         while True:
-            item = await self._capture_queue.get()
+            item = await queue.get()
             if item is None:
                 return
             payload, device_ip, port, direction, source_type = item
@@ -338,7 +358,7 @@ class DanteApplication:
             raise RuntimeError(f"control address {target} is ambiguous across devices: {names}")
         return matches[0] if matches else target
 
-    def _require_probe_supported(self, target, operation: str) -> None:
+    def _require_probe_supported(self, target, operation: _requests.Operation) -> None:
         if hasattr(target, "dante_model_primary_capabilities"):
             candidates = [target]
         else:
@@ -566,7 +586,9 @@ class DanteApplication:
         send_probe: Callable[[object], Awaitable[None]],
         timeout: float,
         description: str,
-    ):
+        *,
+        result_type: type[Result],
+    ) -> Result:
         key = self._control_key(target)
         async with self._capability_probe_lock(capability_name, key):
             waiter = self.notifications.register_waiter(capability_name, key)
@@ -579,7 +601,7 @@ class DanteApplication:
                         raise CapabilityProbeTimeout(f"{description} readback timed out for {key}") from None
                 if waiter.latest_result is None:
                     raise RuntimeError(f"{description} readback was unavailable for {key}")
-                return waiter.latest_result
+                return _probe_result(waiter.latest_result, result_type)
             finally:
                 self.notifications.unregister_waiter(waiter)
 
@@ -623,7 +645,7 @@ class DanteApplication:
         send_probe: Callable[[object], Awaitable[None]],
         timeout: float,
         description: str,
-    ):
+    ) -> dict:
         key = self._control_key(target)
         async with self._capability_probe_lock(capability_name, key):
             waiter = self.notifications.register_waiter(capability_name, key)
@@ -645,11 +667,11 @@ class DanteApplication:
                     except asyncio.TimeoutError:
                         continue
                     if waiter.latest_result is not None:
-                        return waiter.latest_result
+                        return _probe_result(waiter.latest_result, dict)
                     waiter.clear()
                 if waiter.latest_result is None:
                     raise CapabilityProbeTimeout(f"{description} readback timed out for {key}")
-                return waiter.latest_result
+                return _probe_result(waiter.latest_result, dict)
             finally:
                 self.notifications.unregister_waiter(waiter)
 
@@ -1395,10 +1417,10 @@ class DanteApplication:
     async def mutate_and_wait_for_notification(
         self,
         device,
-        mutate: Callable[[], Awaitable[object]],
+        mutate: Callable[[], Awaitable[Result]],
         notification_ids,
         timeout: float = 2.0,
-    ):
+    ) -> Result:
         if getattr(device, "requires_managed_control", False):
             return await mutate()
         device_ip_address = str(device.ipv4)
@@ -1522,6 +1544,7 @@ class DanteApplication:
             self.send_probe_aes67,
             timeout,
             "AES67 status",
+            result_type=tuple,
         )
         self._apply_aes67_readback(target, status)
         return status
@@ -1589,6 +1612,7 @@ class DanteApplication:
             self.send_probe_clear_configuration_status,
             timeout,
             "clear-configuration status",
+            result_type=dict,
         )
 
     async def probe_clocking_status(self, device, timeout: float = 3.0, record_revision=None) -> dict:
@@ -1663,6 +1687,7 @@ class DanteApplication:
             self.send_probe_interface_status,
             timeout,
             "interface status",
+            result_type=dict,
         )
         device = target if hasattr(target, "interfaces") else self._device_by_control_key(self._control_key(target))
         if device is not None:
@@ -1680,6 +1705,7 @@ class DanteApplication:
             self.send_probe_interface_statistics,
             timeout,
             "interface statistics",
+            result_type=InterfaceStatisticsObservation,
         )
         device = target if hasattr(target, "interfaces") else self._device_by_control_key(self._control_key(target))
         if device is not None:
@@ -1698,6 +1724,7 @@ class DanteApplication:
             self.send_probe_lock_reset_status,
             timeout,
             "lock status",
+            result_type=LockStatusObservation,
         )
 
     async def probe_preferred_leader_state(self, target, timeout: float = 2.0) -> bool | None:
@@ -1747,6 +1774,7 @@ class DanteApplication:
             self.send_probe_switch_configuration,
             timeout,
             "switch configuration",
+            result_type=dict,
         )
         from netaudio.dante.network_configuration import switch_configuration_fields
 
@@ -1928,7 +1956,7 @@ class DanteApplication:
             if acknowledgement is None or not acknowledgement["parseable"]:
                 state = "unverified"
             else:
-                state = "request_acknowledged" if acknowledgement["accepted"] else "rejected"
+                state = "request_acknowledged" if acknowledgement.get("accepted") else "rejected"
 
             return {
                 "state": state,
@@ -2230,7 +2258,7 @@ class DanteApplication:
 
     async def preview_clock_configuration(
         self, device, changes: dict, timeout: float = 3.0, record_revision=None
-    ) -> dict:
+    ) -> _types.ClockPlan:
         from netaudio.dante.clock_control import preview_clock_configuration
 
         if getattr(device, "requires_managed_control", False):
@@ -2362,13 +2390,21 @@ class DanteApplication:
         return result["status"]
 
     async def set_interface(
-        self, device, mode: str, static_configuration: dict | None = None, *, interface="primary", timeout=2.0
+        self,
+        device,
+        mode: str,
+        static_configuration: dict | None = None,
+        *,
+        interface: _requests.NetworkInterface = "primary",
+        timeout=2.0,
     ) -> list[dict]:
         from netaudio.dante.network_configuration import set_interface
 
         return await set_interface(self, device, mode, static_configuration, interface=interface, timeout=timeout)
 
-    async def set_interface_dhcp(self, target, timeout: float = 2.0, *, interface="primary") -> list[dict]:
+    async def set_interface_dhcp(
+        self, target, timeout: float = 2.0, *, interface: _requests.NetworkInterface = "primary"
+    ) -> list[dict]:
         return await self.set_interface(target, "dhcp", interface=interface, timeout=timeout)
 
     async def set_interface_static(
@@ -2380,7 +2416,7 @@ class DanteApplication:
         gateway: str,
         timeout: float = 2.0,
         *,
-        interface="primary",
+        interface: _requests.NetworkInterface = "primary",
     ) -> list[dict] | None:
         return await self.set_interface(
             target,
@@ -2546,7 +2582,9 @@ class DanteApplication:
         await self.dispatcher.stop()
 
         if self._capture_writer_task is not None:
-            self._capture_queue.put_nowait(None)
+            if self._capture_queue is not None:
+                self._capture_queue.put_nowait(None)
+
             try:
                 await asyncio.wait_for(self._capture_writer_task, timeout=5)
             except asyncio.TimeoutError:

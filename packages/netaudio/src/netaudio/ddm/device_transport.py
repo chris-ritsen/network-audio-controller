@@ -81,9 +81,9 @@ class ManagedDeviceTransport:
         return device_id
 
     @staticmethod
-    def _domain_options(device) -> dict[str, str]:
+    def _domain_id(device) -> str | None:
         domain_id = getattr(device, "ddm_domain_id", None)
-        return {"expected_domain_id": domain_id} if isinstance(domain_id, str) and domain_id else {}
+        return domain_id if isinstance(domain_id, str) and domain_id else None
 
     async def _control_device_id(self, device) -> str:
         device_id = self._device_id(device)
@@ -114,6 +114,9 @@ class ManagedDeviceTransport:
             ]
             if len(observed) == 1 and fresh.id == getattr(observed_device, "ddm_device_id", None):
                 mac_address = observed[0].get("mac_address")
+        if not isinstance(mac_address, str):
+            raise ManagedDeviceControlError("The device's primary interface identity is unavailable")
+
         try:
             mac = bytes.fromhex(mac_address.replace(":", "").replace("-", ""))
         except (AttributeError, TypeError, ValueError):
@@ -146,7 +149,7 @@ class ManagedDeviceTransport:
                 self._credential(),
                 device_id,
                 self._host_mac(),
-                **self._domain_options(device),
+                expected_domain_id=self._domain_id(device),
             )
             return None
         if command == "identify":
@@ -156,7 +159,7 @@ class ManagedDeviceTransport:
                 self._credential(),
                 device_id,
                 self._host_mac(),
-                **self._domain_options(device),
+                expected_domain_id=self._domain_id(device),
             )
             return None
 
@@ -178,17 +181,22 @@ class ManagedDeviceTransport:
                 self._credential(),
                 device_id,
                 packet,
-                **self._domain_options(device),
+                expected_domain_id=self._domain_id(device),
             )
         if plan["transport"] == "settings":
+            response_opcode = plan["response_opcode"]
+
+            if response_opcode is None:
+                raise ManagedDeviceControlError("managed settings plan has no response opcode")
+
             return await asyncio.to_thread(
                 query_managed_settings_with_api_key,
                 self.server,
                 self._credential(),
                 device_id,
                 packet,
-                plan["response_opcode"],
-                **self._domain_options(device),
+                response_opcode,
+                expected_domain_id=self._domain_id(device),
             )
         raise ManagedDeviceControlError(f"{command} has no supported managed transport")
 

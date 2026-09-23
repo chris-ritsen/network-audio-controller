@@ -1,4 +1,7 @@
 import ctypes
+import os
+import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -8,8 +11,33 @@ from pathlib import Path
 import pytest
 
 from netaudio.core import binding
-from netaudio.core.binding import CoreClient, NetaudioCoreLibraryMissing, lock_token
+from netaudio.core.binding import CoreClient, lock_token
 from tests.test_core_protocol import FakeDanteDevice, FakeReplayDevice, load_fixture
+
+
+@pytest.mark.parametrize("present", [False, True], ids=["missing", "invalid-library"])
+def test_explicit_library_override_never_falls_back_to_another_build(tmp_path, present):
+    library = tmp_path / "selected-library"
+
+    if present:
+        library.write_bytes(b"not a native library")
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from netaudio import core; core.require()"],
+        env={**os.environ, "NETAUDIO_CORE_LIB": str(library)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode != 0
+    assert "NetaudioCoreLibraryMissing" in result.stderr
+    assert str(library) in result.stderr
+    assert "make core" in result.stderr
+
+    if not present:
+        assert f"{library}: not found" in result.stderr
+        assert "io error" not in result.stderr
 
 
 @pytest.mark.parametrize("result_code", [1, 1536])
@@ -132,23 +160,6 @@ def test_client_serializes_concurrent_native_calls_per_instance():
 
     assert results == [(260, 520, True, 0x1030)] * 32
     assert library.maximum_active_calls == 1
-
-
-def test_require_reports_missing_library_without_io_error_status(monkeypatch):
-    missing = Path("/tmp/netaudio-core-missing.so")
-    monkeypatch.setattr(binding, "_library", None)
-    monkeypatch.setattr(binding, "_load_attempted", False)
-    monkeypatch.setattr(binding, "_load_failures", [])
-    monkeypatch.setattr(binding, "_candidate_paths", lambda: (missing,))
-
-    with pytest.raises(NetaudioCoreLibraryMissing) as exception:
-        binding.require()
-
-    message = str(exception.value)
-    assert "io error" not in message
-    assert "ABI-incompatible" not in message
-    assert "make core" in message
-    assert f"{missing}: not found" in message
 
 
 def test_concurrent_first_use_waits_for_native_library_configuration(monkeypatch):

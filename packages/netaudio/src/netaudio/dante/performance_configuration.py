@@ -115,12 +115,6 @@ def observed_performance_configuration(device) -> _types.PerformanceSnapshot:
     )
 
 
-def _integer(name: str, value: object, maximum: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
-        raise ValueError(f"{name} must be an integer from 0 through {maximum}")
-    return value
-
-
 def _performance_command(device, operation: str, payload: dict[str, int] | int) -> dict:
     _require_direct_device(device)
 
@@ -174,17 +168,16 @@ def _invalidate_performance_properties(device, property_ids) -> None:
 async def get_performance_settings(device, property_ids) -> dict[int, int]:
     _require_direct_device(device)
     protocol_id = _negotiated_protocol_id(device)
-    requested_ids = [_integer("property_id", value, 0xFFFF) for value in property_ids]
+    requested_ids = list(property_ids)
+    specification = {
+        "command": "query_performance_settings",
+        "negotiated_protocol_id": protocol_id,
+        "property_ids": requested_ids,
+    }
+    core.build_command(specification)
     _invalidate_performance_properties(device, requested_ids)
 
-    response = await _send_once(
-        device,
-        {
-            "command": "query_performance_settings",
-            "negotiated_protocol_id": protocol_id,
-            "property_ids": requested_ids,
-        },
-    )
+    response = await _send_once(device, specification)
     if response is None:
         raise RuntimeError("fresh performance property readback was unavailable")
     settings = core.parse_response("device_settings", response)

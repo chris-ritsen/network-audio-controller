@@ -31,7 +31,9 @@ def test_parse_clock_source_accepts_decimal_and_hex():
     assert parse_clock_source_selection("0x2") == 2
 
 
-@pytest.mark.parametrize("value", ["", "65536", "3", "0xDED4", "0x-1"])
+@pytest.mark.parametrize(
+    "value", ["", "65536", "3", "0xDED4", "0x-1", pytest.param("1" + "0" * 400, id="oversized-number")]
+)
 def test_parse_clock_source_rejects_empty_and_out_of_range(value):
     with pytest.raises(ValueError):
         parse_clock_source_selection(value)

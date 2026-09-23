@@ -5,6 +5,25 @@ import pytest
 from netaudio.cli import state
 from netaudio.cli_support import execution as common_module
 from netaudio.dante.device import DanteDevice
+from netaudio.dante.application import DanteApplication
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry", [False, True])
+async def test_probe_rejects_wrong_notification_shape_and_releases_waiter(retry):
+    application = DanteApplication()
+    target = "192.0.2.10"
+
+    async def send_probe(_target):
+        application.notifications.notify_waiters("codec", target, b"wrong payload")
+
+    with pytest.raises(RuntimeError, match="unexpected readback type"):
+        if retry:
+            await application._probe_with_retries("codec", target, send_probe, 0.1, "codec")
+        else:
+            await application._probe_once("codec", target, send_probe, 0.1, "codec", result_type=dict)
+
+    assert application.notifications.waiters_for("codec", target) == ()
 
 
 @pytest.fixture(autouse=True)

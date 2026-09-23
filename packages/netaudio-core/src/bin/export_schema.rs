@@ -114,7 +114,11 @@ fn main() {
         "SubscriptionReadbackRequest": input::<subscription_readback::Request>(),
         "SubscriptionReconciliationRequest": input::<subscription_reconciliation::Request>(),
     });
-    let schemas = json!({"inputs": inputs, "outputs": outputs});
+    let schemas = json!({
+        "inputs": inputs,
+        "outputs": outputs,
+        "protocols": netaudio_core::protocol::protocol_catalog(),
+    });
 
     println!(
         "{}",

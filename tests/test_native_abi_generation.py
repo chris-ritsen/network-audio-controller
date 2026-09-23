@@ -9,12 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 GENERATOR = ROOT / "scripts" / "generate_core_binding.py"
 
 
-def test_shipped_ctypes_declarations_match_the_native_header():
-    result = subprocess.run([sys.executable, str(GENERATOR), "--check"], cwd=ROOT, capture_output=True, text=True)
-
-    assert result.returncode == 0, result.stderr
-
-
 @pytest.mark.parametrize(
     "declaration", ["long double netaudio_unknown(void);", "void netaudio_callback(void (*callback)(void));"]
 )

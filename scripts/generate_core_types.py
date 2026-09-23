@@ -11,7 +11,45 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUTS = {
     "inputs": ROOT / "packages/netaudio/src/netaudio/core/_requests.py",
     "outputs": ROOT / "packages/netaudio/src/netaudio/core/_types.py",
+    "protocols": ROOT / "packages/netaudio/src/netaudio/core/_protocols.py",
 }
+
+
+def generate_protocols(records: list[dict]) -> str:
+    labels = {}
+    arc = []
+    modern = []
+
+    for record in records:
+        identifier = record["protocol_id"]
+        family = record["family"]
+        modern_arc = record["modern_arc"]
+
+        if (
+            type(identifier) is not int
+            or not 0 <= identifier <= 65535
+            or identifier in labels
+            or family not in {"ARC", "CMC", "SETTINGS"}
+            or type(modern_arc) is not bool
+            or (modern_arc and family != "ARC")
+        ):
+            raise ValueError("invalid protocol catalog entry")
+
+        labels[identifier] = family
+
+        if family == "ARC":
+            arc.append(identifier)
+
+        if modern_arc:
+            modern.append(identifier)
+
+    return (
+        "# Generated from Rust protocol metadata by scripts/generate_core_types.py. Do not edit.\n"
+        f"ARC_PROTOCOL_IDS = {tuple(arc)!r}\n"
+        f"MODERN_ARC_PROTOCOL_IDS = {tuple(modern)!r}\n"
+        f"CAPTURE_PROTOCOL_IDS = {tuple(labels)!r}\n"
+        f"PROTOCOL_LABELS = {labels!r}\n"
+    )
 
 
 def generate(schemas: dict) -> str:
@@ -198,7 +236,7 @@ def main():
     for contract, output in OUTPUTS.items():
         source = subprocess.run(
             [sys.executable, "-m", "ruff", "format", "--stdin-filename", str(output), "-"],
-            input=generate(schemas[contract]),
+            input=generate_protocols(schemas[contract]) if contract == "protocols" else generate(schemas[contract]),
             check=True,
             capture_output=True,
             text=True,

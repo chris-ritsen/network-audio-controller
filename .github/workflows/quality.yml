@@ -34,7 +34,12 @@ jobs:
       - run: npm ci
       - run: npm run build:webapp
       - run: git diff --exit-code -- packages/netaudio/src/netaudio/daemon/http/webapp/app.css packages/netaudio/src/netaudio/daemon/http/webapp/icon-paths.js
-      - run: node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
+      - run: python scripts/check_project.py --scope webapp --report "${{ runner.temp }}/checks/report.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: webapp-checks-${{ matrix.runner }}
+          path: ${{ runner.temp }}/checks/
       - if: inputs.browser_tests
         run: npx playwright install --with-deps chromium webkit
       - if: inputs.browser_tests
@@ -58,7 +63,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --python ${{ matrix.python-version }} --all-groups
-      - run: uv run --python ${{ matrix.python-version }} pytest -q
+      - run: uv run --python ${{ matrix.python-version }} python scripts/check_project.py --scope python --report "${{ runner.temp }}/checks/report.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: python-checks-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/checks/
 
   cross-platform-tests:
     if: inputs.scope == 'compatibility'
@@ -72,8 +82,12 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
-      - run: cargo test --manifest-path packages/netaudio-core/Cargo.toml
-      - run: uv run pytest -q
+      - run: uv run python scripts/check_project.py --scope runtime --report "${{ runner.temp }}/checks/report.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: runtime-checks-${{ matrix.runner }}
+          path: ${{ runner.temp }}/checks/
 
   native-quality:
     if: inputs.scope == 'native' || inputs.scope == 'compatibility'
@@ -89,20 +103,12 @@ jobs:
           tool: cbindgen@0.29.4
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --python 3.9 --all-groups
-      - run: uv lock --check
-      - run: uv run --isolated --python 3.9 --no-project python -m compileall -q packages/netaudio/src/netaudio
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pyright
-      - run: uv run python scripts/generate_core_binding.py --check
-      - run: uv run python scripts/generate_core_types.py --check
-      - run: >-
-          cbindgen --verify --config packages/netaudio-core/cbindgen.toml
-          --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h
-          packages/netaudio-core
-      - run: cargo fmt --manifest-path packages/netaudio-core/Cargo.toml -- --check
-      - run: cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets --features schema -- -D warnings
-      - run: cargo test --manifest-path packages/netaudio-core/Cargo.toml
+      - run: uv run --python 3.9 python scripts/check_project.py --scope native --report "${{ runner.temp }}/checks/report.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-checks
+          path: ${{ runner.temp }}/checks/
 
   installed-wheel:
     if: inputs.scope == 'compatibility'

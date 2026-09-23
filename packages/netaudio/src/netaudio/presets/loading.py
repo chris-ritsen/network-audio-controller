@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any, Awaitable, Callable
 
 from netaudio import core
+from netaudio.core import _requests, _types
 from netaudio.dante.audio_capabilities import audio_capability_fields
 from netaudio.dante.readback import MUTATION_ERRORS, ReadbackResult, audio_readback_result, readback_after_notification
 from netaudio.dante.network_configuration import (
@@ -284,7 +285,7 @@ def _interface_payload(interface: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _expected_interface_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _expected_interface_payload(payload: dict[str, Any]) -> _types.InterfaceConfiguration:
     return validate_interface_configuration(payload["mode"], payload["configuration"])
 
 
@@ -350,7 +351,7 @@ async def _plan_status_setting(
     application,
     device,
     *,
-    kind: str,
+    kind: _requests.Operation,
     requested: Any,
     probe_name: str,
 ) -> PresetAction:
@@ -413,7 +414,7 @@ async def _plan_latency(application, device, requested: float) -> PresetAction:
     control = core.latency_control(requested, settings, True)
 
     return _change_or_unchanged(
-        "latency", requested, settings["configured_latency_ms"], matches=control["effective_state_confirmed"]
+        "latency", requested, settings.get("configured_latency_ms"), matches=control["effective_state_confirmed"]
     )
 
 
@@ -681,18 +682,20 @@ async def _plan_receiver_subscriptions(device, device_name: str, config: dict) -
     return actions
 
 
-def _preset_external_identity(receiver_channel: int, subscription: dict) -> dict:
+def _preset_external_identity(receiver_channel: int, subscription: dict) -> _requests.Identity:
     identity = subscription["flow_identity"]
     return {
         "receiver_channel": receiver_channel,
         "flow_slot": subscription["flow_slot"],
         "source_ipv4": identity["source_ipv4"],
         "session_id": identity["session_id"],
-        "interface_endpoints": subscription.get("interface_endpoints"),
+        "interface_endpoints": subscription["interface_endpoints"],
     }
 
 
-def _external_subscription_readback(subscriptions: list[tuple[int, dict]], inventory: dict | None) -> dict:
+def _external_subscription_readback(
+    subscriptions: list[tuple[int, dict]], inventory: dict | None
+) -> _types.ExternalSubscriptionReadback:
     return core.external_subscription_readback(
         {
             "kind": "identities",

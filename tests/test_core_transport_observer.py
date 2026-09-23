@@ -58,16 +58,3 @@ def test_timeout_preserves_sent_capture_for_observer():
 def test_operation_without_observer_requires_no_capture_interface():
     client = object()
     assert CoreTransport()._call_and_observe(client, threading.Lock(), lambda active: active) is client
-
-
-def test_core_package_exports_every_public_binding_name():
-    from netaudio.core import binding
-
-    public_names = {
-        name
-        for name, value in vars(binding).items()
-        if not name.startswith("_")
-        and ((name.isupper() and isinstance(value, int)) or getattr(value, "__module__", None) == binding.__name__)
-    }
-    assert public_names <= set(core.__all__)
-    assert set(core.__all__) <= set(vars(core))

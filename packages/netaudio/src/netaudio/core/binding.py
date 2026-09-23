@@ -79,6 +79,8 @@ def _candidate_paths():
     override = os.environ.get("NETAUDIO_CORE_LIB")
     if override:
         yield Path(override)
+        return
+
     for library_name in _library_names():
         yield Path(__file__).resolve().parent / library_name
         for profile in ("release", "debug"):
@@ -289,7 +291,7 @@ def latency_configuration(settings: Mapping[str, _requests.JsonValue]) -> _types
 
 def latency_control(
     requested_milliseconds: float,
-    settings: dict[str, _requests.JsonValue] | None = None,
+    settings: _types.LatencyState | dict[str, _requests.JsonValue] | None = None,
     acknowledged: bool | None = None,
 ) -> _types.LatencyCompletion:
     return _call_json(

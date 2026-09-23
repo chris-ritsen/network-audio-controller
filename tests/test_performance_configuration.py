@@ -70,6 +70,21 @@ class FakeDevice:
         return next(self._responses)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "properties", [[True], [-1], [65536], ["1"], pytest.param([0x8301] * 32768, id="oversized-packet")]
+)
+async def test_invalid_performance_query_preserves_cache_and_never_sends(properties):
+    device = FakeDevice([], [])
+    device.performance_settings = {0x8301: 250000}
+
+    with pytest.raises((ValueError, core.NetaudioCoreError)):
+        await get_performance_settings(device, properties)
+
+    assert device.performance_settings == {0x8301: 250000}
+    assert device.specifications == []
+
+
 def test_native_performance_readback_preserves_width_and_leaves_unknown_properties_uninterpreted():
     packet = _settings_response({0x8301: 0xFFFFFFFF, 0x0310: 0xFFFF, 0x9999: 0x12345678})
 

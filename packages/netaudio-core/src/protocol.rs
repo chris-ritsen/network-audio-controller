@@ -9,6 +9,37 @@ pub enum NetaudioProtocol {
     Settings = 0xFFFF,
 }
 
+#[derive(serde::Serialize)]
+pub struct ProtocolMetadata {
+    pub protocol_id: u16,
+    pub family: &'static str,
+    pub modern_arc: bool,
+}
+
+pub fn protocol_catalog() -> Vec<ProtocolMetadata> {
+    use NetaudioProtocol::*;
+
+    [
+        Arc2729, DefaultArc, Arc2801, Arc2809, Arc280F, Cmc, Settings,
+    ]
+    .into_iter()
+    .map(|protocol| {
+        let family = match protocol {
+            Cmc => "CMC",
+            Settings => "SETTINGS",
+            DefaultArc | Arc2729 | Arc2801 | Arc2809 | Arc280F => "ARC",
+        };
+        let protocol_id = protocol as u16;
+
+        ProtocolMetadata {
+            protocol_id,
+            family,
+            modern_arc: is_modern_arc_protocol(protocol_id),
+        }
+    })
+    .collect()
+}
+
 #[repr(u16)]
 pub enum NetaudioPort {
     Arc = 4440,
