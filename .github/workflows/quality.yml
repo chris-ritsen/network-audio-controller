@@ -1,6 +1,9 @@
 name: quality
 
 on:
+  pull_request:
+  push:
+    branches: [main, master]
   workflow_dispatch:
     inputs:
       scope:
@@ -19,11 +22,11 @@ concurrency:
 
 jobs:
   webapp-tests:
-    if: inputs.scope == 'webapp' || inputs.scope == 'compatibility'
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'webapp' || inputs.scope == 'compatibility'
     strategy:
       fail-fast: false
       matrix:
-        runner: ${{ fromJSON(inputs.scope == 'compatibility' && '["ubuntu-latest", "macos-15", "windows-latest"]' || '["ubuntu-latest"]') }}
+        runner: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.scope == 'compatibility') && '["ubuntu-latest", "macos-15", "windows-latest"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 20
     runs-on: ${{ matrix.runner }}
     steps:
@@ -40,9 +43,9 @@ jobs:
         with:
           name: webapp-checks-${{ matrix.runner }}
           path: ${{ runner.temp }}/checks/
-      - if: inputs.browser_tests
+      - if: github.event_name != 'workflow_dispatch' || inputs.browser_tests
         run: npx playwright install --with-deps chromium webkit
-      - if: inputs.browser_tests
+      - if: github.event_name != 'workflow_dispatch' || inputs.browser_tests
         run: npx playwright test
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -51,11 +54,11 @@ jobs:
           path: test-results/
 
   python-tests:
-    if: inputs.scope == 'python' || inputs.scope == 'compatibility'
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'python' || inputs.scope == 'compatibility'
     strategy:
       fail-fast: false
       matrix:
-        python-version: ${{ fromJSON(inputs.scope == 'compatibility' && '["3.9", "3.10", "3.11", "3.12", "3.13"]' || '["3.13"]') }}
+        python-version: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.scope == 'compatibility') && '["3.9", "3.10", "3.11", "3.12", "3.13"]' || '["3.13"]') }}
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -71,7 +74,7 @@ jobs:
           path: ${{ runner.temp }}/checks/
 
   cross-platform-tests:
-    if: inputs.scope == 'compatibility'
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'compatibility'
     strategy:
       fail-fast: false
       matrix:
@@ -90,7 +93,7 @@ jobs:
           path: ${{ runner.temp }}/checks/
 
   native-quality:
-    if: inputs.scope == 'native' || inputs.scope == 'compatibility'
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'native' || inputs.scope == 'compatibility'
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -111,7 +114,7 @@ jobs:
           path: ${{ runner.temp }}/checks/
 
   installed-wheel:
-    if: inputs.scope == 'compatibility'
+    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'compatibility'
     strategy:
       fail-fast: false
       matrix:

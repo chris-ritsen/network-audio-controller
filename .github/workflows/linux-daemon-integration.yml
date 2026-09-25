@@ -1,6 +1,9 @@
 name: Linux daemon integration
 
 on:
+  pull_request:
+  push:
+    branches: [main, master]
   workflow_dispatch:
 
 concurrency:
