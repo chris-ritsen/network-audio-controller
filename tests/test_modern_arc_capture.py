@@ -15,6 +15,7 @@ from netaudio.dante.channel_status_paging import (
 from netaudio.dante.const import (
     OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
     PROTOCOL_ARC_2809,
+    PROTOCOL_ARC_280C,
     PROTOCOL_ARC_280F,
     SERVICE_ARC,
 )
@@ -59,6 +60,7 @@ def test_fixture_records_exact_digest_bound_capture_provenance():
     ("version", "expected"),
     [
         ("2.8.15", PROTOCOL_ARC_280F),
+        ("2.8.12", PROTOCOL_ARC_280C),
         ("2.8.9", PROTOCOL_ARC_2809),
     ],
 )

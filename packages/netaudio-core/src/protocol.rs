@@ -1,5 +1,6 @@
 pub const PROTOCOL_ID: u16 = 0x27FF;
 pub const PROTOCOL_ARC_2809: u16 = 0x2809;
+pub const PROTOCOL_ARC_280C: u16 = 0x280C;
 pub const PROTOCOL_ARC_280F: u16 = 0x280F;
 pub const OPCODE_CHANNEL_COUNT: u16 = 0x1000;
 pub const OPCODE_DEVICE_NAME_SET: u16 = 0x1001;
@@ -14,7 +15,8 @@ pub const RESULT_CODE_MORE_PAGES: u16 = 0x8112;
 pub const COMMON_ARC_PROTOCOL_IDS: [u16; 3] = [PROTOCOL_ID, 0x2729, PROTOCOL_ARC_2809];
 pub const DEVICE_SETTINGS_ARC_PROTOCOL_IDS: [u16; 4] =
     [PROTOCOL_ID, 0x2729, 0x2801, PROTOCOL_ARC_2809];
-pub const MODERN_ARC_PROTOCOL_IDS: [u16; 2] = [PROTOCOL_ARC_2809, PROTOCOL_ARC_280F];
+pub const MODERN_ARC_PROTOCOL_IDS: [u16; 3] =
+    [PROTOCOL_ARC_2809, PROTOCOL_ARC_280C, PROTOCOL_ARC_280F];
 
 const PROTOCOL_SETTINGS: u16 = 0xFFFF;
 const CONMON_MINIMUM_SIZE: usize = 28;
@@ -67,7 +69,7 @@ pub fn device_settings_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 4] {
     DEVICE_SETTINGS_ARC_PROTOCOL_IDS.map(|protocol_id| (protocol_id, opcode))
 }
 
-pub fn modern_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 2] {
+pub fn modern_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 3] {
     MODERN_ARC_PROTOCOL_IDS.map(|protocol_id| (protocol_id, opcode))
 }
 

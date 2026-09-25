@@ -638,7 +638,9 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
                 | OPCODE_CREATE_TX_FLOW
                 | OPCODE_DELETE_TX_FLOW
         ),
-        PROTOCOL_ARC_2809 | crate::protocol::PROTOCOL_ARC_280F => matches!(
+        PROTOCOL_ARC_2809
+        | crate::protocol::PROTOCOL_ARC_280C
+        | crate::protocol::PROTOCOL_ARC_280F => matches!(
             envelope.opcode,
             OPCODE_QUERY_TX_FLOWS_2809
                 | OPCODE_CREATE_TX_FLOW_2809
