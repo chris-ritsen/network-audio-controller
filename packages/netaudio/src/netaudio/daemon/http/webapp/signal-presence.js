@@ -17,12 +17,13 @@ export function signalIndicator(values, channelNumber, now = Date.now(), directi
   const timestamp = values?.[`${direction}_updated_at`]?.[channelNumber] ?? values?.wall_time;
   if (!Number.isFinite(timestamp) || now - timestamp * 1000 > SIGNAL_MAX_AGE_MS || timestamp * 1000 > now + 1000) return STATES.unknown;
   const raw = values?.[direction]?.[channelNumber];
-  const presence = raw == null ? values?.[`${direction}_signal_presence`]?.[channelNumber] : format.meteringSignalPresence(raw);
+  const source = values?.metering_source;
+  const presence = raw == null ? values?.[`${direction}_signal_presence`]?.[channelNumber] : format.meteringSignalPresence(raw, source);
   const state = STATES[presence] || STATES.unknown;
-  const dbfs = raw == null ? null : format.meteringDecibelsFullScale(raw);
+  const dbfs = raw == null ? null : format.meteringDecibelsFullScale(raw, source);
 
   if (dbfs !== null) {
-    return { ...state, dbfs, level: (dbfs + 126) / 126, icon: state.state === "quiet" ? state.icon : dbfs < -24 ? "signal-low" : "signal-high" };
+    return { ...state, dbfs, level: Math.max(0, Math.min(1, (dbfs + 126) / 126)), icon: state.state === "quiet" ? state.icon : dbfs < -24 ? "signal-low" : "signal-high" };
   }
 
   return state;

@@ -15,11 +15,12 @@ from netaudio.cli_support.output import output_single, output_table, structured_
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.device.display import _channel_matches
 from netaudio.commands.meter import tui
-from netaudio.commands.meter.models import format_meter_sample
+from netaudio.commands.meter.models import METER_DISPLAY_FLOOR_DBFS, format_meter_sample
 from netaudio.commands.meter.tui import MeterViewOptions
 from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon import client as daemon_client
 from netaudio.dante.const import MULTICAST_GROUP_CONTROL_MONITORING
+from netaudio.dante.metering import classify_signal_presence, metering_value_dbfs
 from netaudio.dante.service import DanteMulticastService
 from netaudio.icons import icon
 
@@ -28,23 +29,28 @@ meter_app = typer.Typer(
 )
 
 
-def _render_meter_bar(level: int, bar_width: int = 32) -> str:
-    if level >= 254:
-        return ansi("90", "░" * bar_width + "  --")
+def _render_meter_bar(level: int, source: str | None, bar_width: int = 32) -> str:
+    state = classify_signal_presence(level, source)
+    dbfs = metering_value_dbfs(level, source)
+    if state == "clipping":
+        return ansi("31", "█" * bar_width + "  CLIP")
 
-    amplitude = 254 - level
-    filled = round(amplitude / 254 * bar_width)
-    filled = max(0, min(bar_width, filled))
+    if dbfs is None:
+        label = "Muted" if state == "muted" else "Unknown"
+        return ansi("90", "░" * bar_width + f"  {label}")
+
+    fraction = (dbfs - METER_DISPLAY_FLOOR_DBFS) / -METER_DISPLAY_FLOOR_DBFS
+    filled = round(max(0.0, min(1.0, fraction)) * bar_width)
     empty = bar_width - filled
 
-    if amplitude > 220:
+    if dbfs >= -3:
         color_code = "31"
-    elif amplitude > 180:
+    elif dbfs >= -12:
         color_code = "33"
     else:
         color_code = "32"
 
-    return f"{ansi(color_code, '█' * filled)}{ansi('90', '░' * empty)} {level:>3}"
+    return f"{ansi(color_code, '█' * filled)}{ansi('90', '░' * empty)} {dbfs:.1f} dBFS"
 
 
 def _direction_shown(key: str, options: MeterViewOptions) -> bool:
@@ -94,7 +100,7 @@ def _render_meter_display(device_levels: list[tuple[str, str, dict]], options: M
                     continue
 
                 level = info.get("level", 254)
-                bar = _render_meter_bar(level, bar_width)
+                bar = _render_meter_bar(level, source, bar_width)
                 display_name = channel_name or f"Ch {channel_number}"
 
                 lines.append(

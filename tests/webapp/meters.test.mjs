@@ -4,7 +4,7 @@ import { WEBAPP, fixture } from "./setup.mjs";
 
 const { drawMeters } = await import(`${WEBAPP}meters.js`);
 const format = await import(`${WEBAPP}format.js`);
-format.setMeteringScale(Object.assign([], fixture("metering-scale")));
+format.setMeteringScale(fixture("metering-scale"));
 
 test("meter frames reuse text layout until names or width change", () => {
   let measured = 0;
@@ -67,7 +67,7 @@ test("meter tracks keep their geometry as readable signal labels and levels chan
     [undefined, undefined, "—"],
   ];
   for (const [level, presence] of samples) {
-    drawMeters(node, 600, [1], { 1: level }, { 1: presence }, { 1: "Left" }, new Map(), 0);
+    drawMeters(node, 600, [1], { 1: level }, { 1: presence }, { 1: "Left" }, new Map(), 0, "detailed");
   }
   assert.deepEqual(labels, samples.map((sample) => sample[2]));
   assert.equal(tracks.length, samples.length);
@@ -81,12 +81,41 @@ test("meter interpretation arrives with the event snapshot instead of a browser 
   };
   const { connect } = await import(`${WEBAPP}store.js`);
   connect();
-  receive({ data: JSON.stringify({ event: "snapshot", devices: {}, metering_scale: [
+  receive({ data: JSON.stringify({ event: "snapshot", devices: {}, metering_scale: { detailed: [
     { dbfs: -10, state: "signal_present" },
-  ] }) });
-  assert.equal(format.meteringLabel(0), "-10.0 dBFS");
-  assert.equal(format.meterFraction(0), 51 / 61);
-  assert.equal(format.meteringLabel(1), "Unknown");
-  assert.equal(format.meterFraction(null), 0);
-  format.setMeteringScale(Object.assign([], fixture("metering-scale")));
+  ] } }) });
+  assert.equal(format.meteringLabel(0, "detailed"), "-10.0 dBFS");
+  assert.equal(format.meterFraction(0, "detailed"), 51 / 61);
+  assert.equal(format.meteringLabel(1, "detailed"), "Unknown");
+  assert.equal(format.meterFraction(null, "detailed"), 0);
+  format.setMeteringScale(fixture("metering-scale"));
+});
+
+test("source changes select the matching native scale for labels, lamps, and canvas meters", async () => {
+  const { signalIndicator } = await import(`${WEBAPP}signal-presence.js`);
+  const detailed = [];
+  const passive = [];
+  detailed[40] = { dbfs: -19.5, state: "signal_present" };
+  passive[40] = { dbfs: -20, state: "signal_present" };
+  detailed[123] = { dbfs: -61, state: "signal_present" };
+  passive[123] = { dbfs: -61.5, state: "below_threshold" };
+  format.setMeteringScale({ detailed, signal_presence: passive });
+  const labels = [];
+  const context = {
+    setTransform() {}, clearRect() {}, fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+    measureText: (text) => ({ width: text.length * 7 }),
+    fillText(text) { if (this.textAlign === "right") labels.push(text); },
+  };
+  const node = { getContext: () => context, style: {} };
+  for (const [source, dbfs, state] of [["signal_presence", -20, "quiet"], ["detailed", -19.5, "present"]]) {
+    const sample = { wall_time: 99, rx: { 1: 40, 2: 123 }, metering_source: source };
+    assert.equal(signalIndicator(sample, 1, 100_000).dbfs, dbfs);
+    assert.equal(signalIndicator(sample, 2, 100_000).state, state);
+    drawMeters(node, 600, [1], sample.rx, {}, { 1: "Left" }, new Map(), 0, source);
+    assert.equal(format.meteringLabel(40, source), `${dbfs.toFixed(1)} dBFS`);
+  }
+  assert.deepEqual(labels, ["-20.0 dBFS", "-19.5 dBFS"]);
+  assert.equal(format.meteringDecibelsFullScale(40, "unknown"), null);
+  assert.equal(signalIndicator({ wall_time: 99, rx: { 1: 40 } }, 1, 100_000).state, "unknown");
+  format.setMeteringScale(fixture("metering-scale"));
 });

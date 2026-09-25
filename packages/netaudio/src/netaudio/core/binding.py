@@ -393,7 +393,7 @@ def verify_interface_configuration(request: _requests.InterfaceReadbackRequest) 
     _call_json(require().netaudio_verify_interface_configuration, request, "interface configuration readback")
 
 
-def metering_scale() -> list[dict]:
+def metering_scale() -> _types.MeteringScales:
     status, data = _call_buffer(require().netaudio_metering_scale)
 
     if status != STATUS_OK:

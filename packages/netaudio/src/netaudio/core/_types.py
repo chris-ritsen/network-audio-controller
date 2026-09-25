@@ -656,6 +656,16 @@ class ManagedSubscriptionStatus(_extensions.TypedDict):
     transport: _typing.Union[SubscriptionTransport, None]
 
 
+class MeteringValue(_extensions.TypedDict):
+    dbfs: _typing.Union[float, None]
+    state: str
+
+
+class MeteringScales(_extensions.TypedDict):
+    detailed: list[MeteringValue]
+    signal_presence: list[MeteringValue]
+
+
 class NetworkControlState(_extensions.TypedDict):
     configuration_modes: list[str]
     inventory_completeness: InventoryCompleteness

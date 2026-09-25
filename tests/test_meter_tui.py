@@ -439,9 +439,9 @@ def test_device_capacity_change_discards_old_samples_and_rebuilds_rows():
     ("raw", "indication", "state", "dbfs"),
     [
         (0x00, "clipping", "CLIP", "clip"),
-        (0xFD, "below_threshold", "quiet", "-126.0"),
+        (0xFD, "below_threshold", "quiet", "-126.5"),
         (0xFE, "muted", "MUTED", "mute"),
-        (0xFF, "unknown", "UNKNOWN", "invalid"),
+        (0xFF, "unknown", "UNKNOWN", "unknown"),
     ],
 )
 def test_raw_sentinels_are_preserved_and_render_with_distinct_semantics(raw, indication, state, dbfs):
@@ -453,7 +453,7 @@ def test_raw_sentinels_are_preserved_and_render_with_distinct_semantics(raw, ind
     assert row.level == raw
     assert row.indication == indication
     assert _state_label(row) == state
-    assert _dbfs_label(row.level) == dbfs
+    assert _dbfs_label(row.level, row.metering_source) == dbfs
 
 
 @pytest.mark.parametrize(

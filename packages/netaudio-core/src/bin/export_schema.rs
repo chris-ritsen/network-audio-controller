@@ -28,6 +28,7 @@ fn main() {
         SERVICE_CMC, SERVICE_DBC, SERVICE_VIDEO,
     };
     let outputs = registry!({
+        "MeteringScales": output::<netaudio_core::metering::MeteringScales>(),
         "DiagnosticAudioCapabilities": output::<netaudio_core::diagnostic_audio::DiagnosticAudioCapabilities>(),
         "ExportProgress": output::<netaudio_core::conmon_export::ExportProgress<'static>>(),
         "ClockControlAvailability": output::<netaudio_core::commands::ClockControlAvailability>(),

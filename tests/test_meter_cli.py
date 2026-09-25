@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 import time
+import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -57,6 +58,21 @@ def _meter(device, options: MeterViewOptions, timeout: float = 0, snapshot: bool
 
 def _set_output(monkeypatch, output_format: OutputFormat):
     monkeypatch.setattr(state, "output_format", output_format)
+
+
+@pytest.mark.parametrize("source,expected", [("signal_presence", "-20.0"), ("detailed", "-19.5")])
+def test_meter_snapshot_renders_the_sample_source_scale(monkeypatch, reset_cli_state, source, expected):
+    device, get_cache, _, _ = _patch_daemon(monkeypatch, source=source)
+    sample = _sample(source)
+    sample["tx"] = {17: 40}
+    sample["tx_signal_presence"] = {}
+    get_cache.return_value = {device.server_name: sample}
+    _set_output(monkeypatch, OutputFormat.plain)
+
+    result = _meter(device, MeterViewOptions(no_color=True), snapshot=True)
+
+    assert result.exit_code == 0, result.output
+    assert expected in result.output
 
 
 def test_passive_json_snapshot_reads_cache_without_start_or_stop(monkeypatch, reset_cli_state):

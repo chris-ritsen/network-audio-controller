@@ -17,7 +17,7 @@ from netaudio.commands.meter.models import (
     _fit_cell,
     _fit_render_cell,
 )
-from netaudio.dante.metering import metering_value_dbfs
+from netaudio.dante.metering import classify_signal_presence, metering_value_dbfs
 
 
 def _ansi(code: str, text: str, enabled: bool) -> str:
@@ -36,13 +36,15 @@ def _state_label(row: MeterRow) -> str:
     }.get(row.indication, _clean_terminal_text(row.indication))
 
 
-def _dbfs_label(level: int | None) -> str:
+def _dbfs_label(level: int | None, source: str | None) -> str:
     if level is None:
         return "--"
-    value = metering_value_dbfs(level)
+    value = metering_value_dbfs(level, source)
     if value is not None:
         return f"{value:.1f}"
-    return {0x00: "clip", 0xFE: "mute", 0xFF: "invalid"}.get(level, "--")
+    return {"clipping": "clip", "muted": "mute", "unknown": "unknown"}.get(
+        classify_signal_presence(level, source), "--"
+    )
 
 
 def _source_label(source: str | None) -> str:
@@ -79,12 +81,13 @@ def _meter_bar(row: MeterRow, width: int) -> tuple[str, str]:
     """Return a fixed-width level bar and its ANSI color."""
     width = max(0, width)
     blank = " " * width
-    if width == 0 or _is_stale(row) or row.level is None or row.level in (0xFE, 0xFF):
+    if width == 0 or _is_stale(row) or row.level is None:
         return blank, ""
-    if row.level == 0x00:
+
+    if classify_signal_presence(row.level, row.metering_source) == "clipping":
         return "█" * width, "91;1"
 
-    dbfs = metering_value_dbfs(row.level)
+    dbfs = metering_value_dbfs(row.level, row.metering_source)
     if dbfs is None or dbfs <= METER_DISPLAY_FLOOR_DBFS:
         return blank, ""
     fraction = min(1.0, max(0.0, (dbfs - METER_DISPLAY_FLOOR_DBFS) / -METER_DISPLAY_FLOOR_DBFS))
@@ -225,7 +228,7 @@ def render_meter_frame(
                     f"{marker}{_fit_render_cell(row.device_name, device_width)} "
                     f"{row.key.direction:<3} {row.key.channel_number:>3} "
                     f"{_fit_render_cell(row.channel_name, channel_width)} "
-                    f"{state_token} {raw:>4} {_dbfs_label(row.level):>8} "
+                    f"{state_token} {raw:>4} {_dbfs_label(row.level, row.metering_source):>8} "
                     f"{meter_token} {source:<7}"
                 )
             else:
@@ -233,7 +236,7 @@ def render_meter_frame(
                     f"{marker}{_fit_render_cell(row.device_name, device_width)} "
                     f"{row.key.direction:<3} {row.key.channel_number:>3} "
                     f"{_fit_render_cell(row.channel_name, channel_width)} "
-                    f"{state_token} {raw:>4} {_dbfs_label(row.level):>8} "
+                    f"{state_token} {raw:>4} {_dbfs_label(row.level, row.metering_source):>8} "
                     f"{source:<7}"
                 )
         line = _fit_cell(line, line_width)

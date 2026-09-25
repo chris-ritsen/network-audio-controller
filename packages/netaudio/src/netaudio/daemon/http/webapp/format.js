@@ -109,30 +109,30 @@ export function subscriptionSource(subscription) {
 
 export const METER_FLOOR_DBFS = -61;
 
-let meteringScale = [];
+let meteringScale = {};
 
 export function setMeteringScale(scale) {
-  meteringScale = Array.isArray(scale) ? scale : [];
+  meteringScale = scale && typeof scale === "object" && !Array.isArray(scale) ? scale : {};
 }
 
-export function meteringDecibelsFullScale(value) {
-  return Number.isInteger(value) ? (meteringScale[value]?.dbfs ?? null) : null;
+export function meteringDecibelsFullScale(value, source) {
+  return Number.isInteger(value) ? (meteringScale[source]?.[value]?.dbfs ?? null) : null;
 }
 
-export function meteringSignalPresence(value) {
+export function meteringSignalPresence(value, source) {
   return Number.isInteger(value)
-    ? (meteringScale[value]?.state ?? "unknown")
+    ? (meteringScale[source]?.[value]?.state ?? "unknown")
     : "unknown";
 }
 
-export function meteringLabel(value) {
+export function meteringLabel(value, source) {
   if (value === null || value === undefined) {
     return ABSENT;
   }
-  const dbfs = meteringDecibelsFullScale(value);
+  const dbfs = meteringDecibelsFullScale(value, source);
 
   return dbfs === null
-    ? stateLabel(meteringSignalPresence(value))
+    ? stateLabel(meteringSignalPresence(value, source))
     : `${dbfs.toFixed(1)} dBFS`;
 }
 
@@ -179,12 +179,12 @@ export function clockLeaderName(device, inventory) {
     : text(device.ptpv1_master_uuid);
 }
 
-export function meterFraction(value) {
-  if (meteringSignalPresence(value) === "clipping") {
+export function meterFraction(value, source) {
+  if (meteringSignalPresence(value, source) === "clipping") {
     return 1;
   }
 
-  const decibelsFullScale = meteringDecibelsFullScale(value);
+  const decibelsFullScale = meteringDecibelsFullScale(value, source);
   if (decibelsFullScale === null || decibelsFullScale <= METER_FLOOR_DBFS) {
     return 0;
   }

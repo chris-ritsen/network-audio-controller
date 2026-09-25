@@ -15,8 +15,8 @@ const PRESENCE_LABELS = {
   unknown: "Unknown",
 };
 
-function meterReadout(value, presence) {
-  const level = format.meteringLabel(value);
+function meterReadout(value, presence, source) {
+  const level = format.meteringLabel(value, source);
   const label = presence ? PRESENCE_LABELS[presence] || "Unknown" : "";
   if (label.toLowerCase() === level.toLowerCase()) return label;
   return label ? `${level}  ${label}` : level;
@@ -108,7 +108,7 @@ export function MeterBank({ device, direction, serverName }) {
       }
       const elapsed = lastDrawn.current ? (timestamp - lastDrawn.current) / 1000 : 0;
       lastDrawn.current = timestamp;
-      drawMeters(node, width, numbers, values, presence, names, peaks.current, elapsed);
+      drawMeters(node, width, numbers, values, presence, names, peaks.current, elapsed, latest.current?.metering_source);
     };
     frame.current = window.requestAnimationFrame(step);
     return () => {
@@ -168,7 +168,7 @@ function meterLayout(context, width, numbers, names) {
   return { columns, compact, canvasWidth, barLeft, barWidth, rows, height };
 }
 
-export function drawMeters(node, width, numbers, values, presence, names, peaks, elapsed) {
+export function drawMeters(node, width, numbers, values, presence, names, peaks, elapsed, source) {
   const ratio = window.devicePixelRatio || 1;
   const context = node.getContext("2d");
   let cached = layouts.get(node);
@@ -193,8 +193,8 @@ export function drawMeters(node, width, numbers, values, presence, names, peaks,
     const y = row.y + (compact ? row.lines.length * ROW_HEIGHT : 0);
     const centre = y + ROW_HEIGHT / 2;
     const raw = values[number];
-    const fraction = format.meterFraction(raw);
-    const decibels = format.meteringDecibelsFullScale(raw);
+    const fraction = format.meterFraction(raw, source);
+    const decibels = format.meteringDecibelsFullScale(raw, source);
 
     context.font = LABEL_FONT;
     context.fillStyle = COLORS.text;
@@ -206,7 +206,7 @@ export function drawMeters(node, width, numbers, values, presence, names, peaks,
 
     const filled = Math.round(barWidth * fraction);
     if (filled > 0) {
-      context.fillStyle = format.meteringSignalPresence(raw) === "clipping" || (decibels !== null && decibels >= -3) ? COLORS.clip
+      context.fillStyle = format.meteringSignalPresence(raw, source) === "clipping" || (decibels !== null && decibels >= -3) ? COLORS.clip
         : decibels !== null && decibels >= -12 ? COLORS.hot : COLORS.nominal;
       context.fillRect(barLeft, y + 5, filled, ROW_HEIGHT - 10);
     }
@@ -223,7 +223,7 @@ export function drawMeters(node, width, numbers, values, presence, names, peaks,
     context.fillStyle = COLORS.text;
     context.textAlign = "right";
     const indication = presence[number];
-    const label = meterReadout(raw, indication);
+    const label = meterReadout(raw, indication, source);
     context.fillText(label, canvasWidth - COLUMN_GAP, compact ? centre + ROW_HEIGHT : centre, Math.min(columns.valueWidth, canvasWidth - COLUMN_GAP * 2));
   });
 

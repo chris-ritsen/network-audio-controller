@@ -137,7 +137,8 @@ def format_meter_sample(device, sample: object) -> dict | None:
             result[direction][channel_number] = {
                 "name": channel_name,
                 "level": level,
-                "signal_presence": indications.get(channel_number) or classify_signal_presence(level),
+                "signal_presence": indications.get(channel_number)
+                or classify_signal_presence(level, sample.get("metering_source")),
             }
     return result
 
@@ -412,7 +413,7 @@ class MeterViewModel:
                     level = levels.get(channel_number)
                     indication = indications.get(channel_number)
                     if indication is None and level is not None:
-                        indication = classify_signal_presence(level)
+                        indication = classify_signal_presence(level, source)
                     result.append(
                         MeterRow(
                             key=MeterRowKey(server_name, direction, channel_number),

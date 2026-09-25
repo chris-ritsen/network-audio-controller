@@ -1,6 +1,8 @@
 use super::*;
 
-/// Return the dBFS value and signal state for every metering byte, indexed by byte value.
+/// Return detailed and signal_presence scales, each indexed by the raw byte value.
+/// Each entry contains dbfs (null for special values) and state. Callers must select
+/// the scale matching the sample source; heartbeat dBFS values are estimates.
 #[no_mangle]
 pub unsafe extern "C" fn netaudio_metering_scale(
     out_buffer: *mut u8,

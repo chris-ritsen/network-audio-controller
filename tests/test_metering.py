@@ -32,7 +32,7 @@ PASSIVE_RECORD = {
 
 
 def test_native_metering_scale_reaches_clients_with_signal_boundaries_and_special_states():
-    scale = make_http_server()._snapshot_payload()["metering_scale"]
+    scale = make_http_server()._snapshot_payload()["metering_scale"]["detailed"]
     expected = {
         0: (None, "clipping"),
         1: (0.0, "signal_present"),
@@ -48,15 +48,41 @@ def test_native_metering_scale_reaches_clients_with_signal_boundaries_and_specia
 
     for raw, (dbfs, state) in expected.items():
         assert scale[raw] == {"dbfs": dbfs, "state": state}
-        assert metering_value_dbfs(raw) == dbfs
-        assert classify_signal_presence(raw) == state
+        assert metering_value_dbfs(raw, "detailed") == dbfs
+        assert classify_signal_presence(raw, "detailed") == state
+
+
+def test_passive_measurements_keep_their_source_through_native_scale_and_http_snapshot():
+    scales = make_http_server()._snapshot_payload()["metering_scale"]
+    assert set(scales) == {"detailed", "signal_presence"}
+    assert all(len(scale) == 256 for scale in scales.values())
+
+    # Contributor's fixed-level AVIO experiment, issue 54, comment 5833037369.
+    # These midrange observations support the passive scale, not a new mute code.
+    for raw, measured_dbfs in [(40, -20), (60, -30), (80, -40), (100, -50), (120, -60), (122, -61), (128, -64)]:
+        assert scales["signal_presence"][raw]["dbfs"] == measured_dbfs
+        assert metering_value_dbfs(raw, "signal_presence") == measured_dbfs
+        assert metering_value_dbfs(raw, "detailed") == measured_dbfs + 0.5
+
+    assert classify_signal_presence(123, "detailed") == "signal_present"
+    assert classify_signal_presence(123, "signal_presence") == "below_threshold"
+    assert classify_signal_presence(193, "signal_presence") == "below_threshold"
+
+    for source in scales:
+        assert metering_value_dbfs(254, source) is None
+        assert classify_signal_presence(254, source) == "muted"
+        assert classify_signal_presence(255, source) == "unknown"
+
+    for source in (None, "unknown", "managed"):
+        assert metering_value_dbfs(40, source) is None
+        assert classify_signal_presence(40, source) == "unknown"
 
 
 @pytest.mark.parametrize("value", [None, True, -1, 256, 1.5, "1"])
 def test_metering_interpretation_requires_a_byte(value):
     for interpret in (metering_value_dbfs, classify_signal_presence):
         with pytest.raises(ValueError):
-            interpret(value)
+            interpret(value, "detailed")
 
 
 def make_manager():

@@ -1,15 +1,27 @@
 {
-  "0": {"dbfs": null, "state": "clipping"},
-  "1": {"dbfs": 0, "state": "signal_present"},
-  "2": {"dbfs": -0.5, "state": "signal_present"},
-  "20": {"dbfs": -9.5, "state": "signal_present"},
-  "21": {"dbfs": -10, "state": "signal_present"},
-  "22": {"dbfs": -10.5, "state": "signal_present"},
-  "24": {"dbfs": -11.5, "state": "signal_present"},
-  "30": {"dbfs": -14.5, "state": "signal_present"},
-  "123": {"dbfs": -61, "state": "signal_present"},
-  "124": {"dbfs": -61.5, "state": "below_threshold"},
-  "253": {"dbfs": -126, "state": "below_threshold"},
-  "254": {"dbfs": null, "state": "muted"},
-  "255": {"dbfs": null, "state": "unknown"}
+  "detailed": {
+    "0": { "dbfs": null, "state": "clipping" },
+    "1": { "dbfs": 0, "state": "signal_present" },
+    "2": { "dbfs": -0.5, "state": "signal_present" },
+    "20": { "dbfs": -9.5, "state": "signal_present" },
+    "21": { "dbfs": -10, "state": "signal_present" },
+    "22": { "dbfs": -10.5, "state": "signal_present" },
+    "24": { "dbfs": -11.5, "state": "signal_present" },
+    "30": { "dbfs": -14.5, "state": "signal_present" },
+    "123": { "dbfs": -61, "state": "signal_present" },
+    "124": { "dbfs": -61.5, "state": "below_threshold" },
+    "253": { "dbfs": -126, "state": "below_threshold" },
+    "254": { "dbfs": null, "state": "muted" },
+    "255": { "dbfs": null, "state": "unknown" }
+  },
+  "signal_presence": {
+    "0": { "dbfs": null, "state": "clipping" },
+    "40": { "dbfs": -20, "state": "signal_present" },
+    "122": { "dbfs": -61, "state": "signal_present" },
+    "123": { "dbfs": -61.5, "state": "below_threshold" },
+    "193": { "dbfs": -96.5, "state": "below_threshold" },
+    "253": { "dbfs": -126.5, "state": "below_threshold" },
+    "254": { "dbfs": null, "state": "muted" },
+    "255": { "dbfs": null, "state": "unknown" }
+  }
 }

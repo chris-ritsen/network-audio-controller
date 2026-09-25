@@ -7,7 +7,7 @@ const { subscriptionIndicator } = await import(
 );
 const { signalIndicator } = await import(`${WEBAPP}signal-presence.js`);
 const { setMeteringScale } = await import(`${WEBAPP}format.js`);
-setMeteringScale(Object.assign([], fixture("metering-scale")));
+setMeteringScale(fixture("metering-scale"));
 
 test("connected transport icons distinguish dynamic and static subscriptions without guessing other states", async () => {
   const { h } = await import("preact");
@@ -188,43 +188,53 @@ test("detailed level samples provide signal indication without exposing raw valu
     [null, "Signal unavailable"],
   ]) {
     assert.equal(
-      signalIndicator({ wall_time: 99, rx: { 1: raw } }, 1, now).label,
+      signalIndicator(
+        { wall_time: 99, rx: { 1: raw }, metering_source: "detailed" },
+        1,
+        now,
+      ).label,
       label,
     );
   }
 });
 
 test("receive and transmit preserve reported levels without collapsing half-decibel differences", () => {
-  for (const direction of ["rx", "tx"]) {
-    let previous = Infinity;
-    for (const [raw, expected] of Object.entries(fixture("metering-scale"))) {
-      if (expected.dbfs === null) continue;
+  for (const [source, scale] of Object.entries(fixture("metering-scale"))) {
+    for (const direction of ["rx", "tx"]) {
+      let previous = Infinity;
+      for (const [raw, expected] of Object.entries(scale)) {
+        if (expected.dbfs === null) continue;
 
-      const result = signalIndicator(
-        { wall_time: 99, [direction]: { 1: Number(raw) } },
-        1,
-        100_000,
-        direction,
-      );
-      assert.equal(result.dbfs, expected.dbfs);
-      assert.ok(result.level < previous);
-      assert.ok(result.level >= 0 && result.level <= 1);
-      previous = result.level;
-    }
-    for (const [raw, state] of [
-      [0, "clipping"],
-      [254, "muted"],
-      [255, "unknown"],
-    ]) {
-      assert.equal(
-        signalIndicator(
-          { wall_time: 99, [direction]: { 1: raw } },
+        const result = signalIndicator(
+          {
+            wall_time: 99,
+            [direction]: { 1: Number(raw) },
+            metering_source: source,
+          },
           1,
           100_000,
           direction,
-        ).state,
-        state,
-      );
+        );
+        assert.equal(result.dbfs, expected.dbfs);
+        assert.ok(result.level < previous);
+        assert.ok(result.level >= 0 && result.level <= 1);
+        previous = result.level;
+      }
+      for (const [raw, state] of [
+        [0, "clipping"],
+        [254, "muted"],
+        [255, "unknown"],
+      ]) {
+        assert.equal(
+          signalIndicator(
+            { wall_time: 99, [direction]: { 1: raw }, metering_source: source },
+            1,
+            100_000,
+            direction,
+          ).state,
+          state,
+        );
+      }
     }
   }
   assert.equal(

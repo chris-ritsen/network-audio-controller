@@ -809,7 +809,9 @@ NetaudioStatus netaudio_inventory_state(NetaudioInventory *inventory,
                                         uintptr_t *out_length);
 
 /**
- * Return the dBFS value and signal state for every metering byte, indexed by byte value.
+ * Return detailed and signal_presence scales, each indexed by the raw byte value.
+ * Each entry contains dbfs (null for special values) and state. Callers must select
+ * the scale matching the sample source; heartbeat dBFS values are estimates.
  */
 NetaudioStatus netaudio_metering_scale(uint8_t *out_buffer,
                                        uintptr_t out_capacity,

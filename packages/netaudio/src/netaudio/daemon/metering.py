@@ -491,8 +491,12 @@ class MeteringManager:
 
             tx = {tx_first_channel_index + offset + 1: value for offset, value in enumerate(tx_levels)}
             rx = {rx_first_channel_index + offset + 1: value for offset, value in enumerate(rx_levels)}
-            tx_indications = {channel: classify_signal_presence(value) for channel, value in tx.items()}
-            rx_indications = {channel: classify_signal_presence(value) for channel, value in rx.items()}
+            tx_indications = {
+                channel: classify_signal_presence(value, "signal_presence") for channel, value in tx.items()
+            }
+            rx_indications = {
+                channel: classify_signal_presence(value, "signal_presence") for channel, value in rx.items()
+            }
             now = time.monotonic()
             sample = {
                 "tx": tx,
