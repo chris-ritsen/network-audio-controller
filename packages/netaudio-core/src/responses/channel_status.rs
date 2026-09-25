@@ -504,7 +504,9 @@ fn parse_receiver_flow_status_record_2809(
         endpoint_offset,
     ) = match protocol_id {
         PROTOCOL_ARC_2809 => (84usize, 52usize, 54usize, 60usize, 62usize, 68usize),
-        PROTOCOL_ARC_280F => (92usize, 56usize, 58usize, 68usize, 70usize, 76usize),
+        PROTOCOL_ARC_280C | PROTOCOL_ARC_280F => {
+            (92usize, 56usize, 58usize, 68usize, 70usize, 76usize)
+        }
         _ => return None,
     };
     let record_offset = usize::from(record_pointer);
@@ -512,7 +514,7 @@ fn parse_receiver_flow_status_record_2809(
     let record = response.get(record_offset..record_end)?;
     let expected_record_type = match protocol_id {
         PROTOCOL_ARC_2809 => 0x1422,
-        PROTOCOL_ARC_280F => 0x1626,
+        PROTOCOL_ARC_280C | PROTOCOL_ARC_280F => 0x1626,
         _ => return None,
     };
     let record_type_code = read_u16(record, 0)?;

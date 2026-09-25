@@ -4,6 +4,7 @@ pub enum NetaudioProtocol {
     Arc2729 = 0x2729,
     Arc2801 = 0x2801,
     Arc2809 = 0x2809,
+    Arc280C = 0x280C,
     Arc280F = 0x280F,
     Cmc = 0x1200,
     Settings = 0xFFFF,
@@ -20,14 +21,14 @@ pub fn protocol_catalog() -> Vec<ProtocolMetadata> {
     use NetaudioProtocol::*;
 
     [
-        Arc2729, DefaultArc, Arc2801, Arc2809, Arc280F, Cmc, Settings,
+        Arc2729, DefaultArc, Arc2801, Arc2809, Arc280C, Arc280F, Cmc, Settings,
     ]
     .into_iter()
     .map(|protocol| {
         let family = match protocol {
             Cmc => "CMC",
             Settings => "SETTINGS",
-            DefaultArc | Arc2729 | Arc2801 | Arc2809 | Arc280F => "ARC",
+            DefaultArc | Arc2729 | Arc2801 | Arc2809 | Arc280C | Arc280F => "ARC",
         };
         let protocol_id = protocol as u16;
 
@@ -54,6 +55,7 @@ pub enum NetaudioPort {
 
 pub const PROTOCOL_ID: u16 = NetaudioProtocol::DefaultArc as u16;
 pub const PROTOCOL_ARC_2809: u16 = NetaudioProtocol::Arc2809 as u16;
+pub const PROTOCOL_ARC_280C: u16 = NetaudioProtocol::Arc280C as u16;
 pub const PROTOCOL_ARC_280F: u16 = NetaudioProtocol::Arc280F as u16;
 pub const OPCODE_CHANNEL_COUNT: u16 = 0x1000;
 pub const OPCODE_DEVICE_NAME_SET: u16 = 0x1001;
@@ -120,7 +122,8 @@ pub const DEVICE_SETTINGS_ARC_PROTOCOL_IDS: [u16; 4] = [
     NetaudioProtocol::Arc2801 as u16,
     PROTOCOL_ARC_2809,
 ];
-pub const MODERN_ARC_PROTOCOL_IDS: [u16; 2] = [PROTOCOL_ARC_2809, PROTOCOL_ARC_280F];
+pub const MODERN_ARC_PROTOCOL_IDS: [u16; 3] =
+    [PROTOCOL_ARC_2809, PROTOCOL_ARC_280C, PROTOCOL_ARC_280F];
 
 pub fn next_message_id(previous: u16) -> u16 {
     previous.wrapping_add(1).max(1)
@@ -316,7 +319,7 @@ pub fn device_settings_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 4] {
     DEVICE_SETTINGS_ARC_PROTOCOL_IDS.map(|protocol_id| (protocol_id, opcode))
 }
 
-pub fn modern_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 2] {
+pub fn modern_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 3] {
     MODERN_ARC_PROTOCOL_IDS.map(|protocol_id| (protocol_id, opcode))
 }
 

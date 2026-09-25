@@ -12,6 +12,7 @@ from netaudio.dante.arc_protocol import (
 )
 from netaudio.dante.const import (
     PROTOCOL_ARC_2809,
+    PROTOCOL_ARC_280C,
     PROTOCOL_ARC_280F,
     SERVICE_ARC,
 )
@@ -73,6 +74,7 @@ async def test_device_inventory_consumes_native_protocol_and_media_metadata(dire
     ("version", "expected"),
     [
         ("2.8.15", PROTOCOL_ARC_280F),
+        ("2.8.12", PROTOCOL_ARC_280C),
         ("2.8.9", PROTOCOL_ARC_2809),
     ],
 )
