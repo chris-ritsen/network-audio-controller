@@ -58,6 +58,7 @@ fn metering_frame_v3(tx_levels: &[u8], rx_levels: &[u8]) -> Vec<u8> {
     data
 }
 
+mod arc_280c_capture;
 mod conmon;
 mod conmon_detail;
 mod device;

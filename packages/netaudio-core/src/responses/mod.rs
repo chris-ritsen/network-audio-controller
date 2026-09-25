@@ -22,7 +22,7 @@ use crate::protocol::{
     is_common_arc_protocol, modern_arc_protocol_opcodes, response_envelope,
     validate_conmon_envelope, validate_response_envelope, OPCODE_CHANNEL_COUNT,
     OPCODE_DEVICE_NAME_SET, OPCODE_RX_CHANNELS, OPCODE_TX_CHANNEL_INFO, OPCODE_TX_CHANNEL_NAMES,
-    PROTOCOL_ARC_2809, PROTOCOL_ARC_280F,
+    PROTOCOL_ARC_2809, PROTOCOL_ARC_280C, PROTOCOL_ARC_280F,
 };
 
 pub use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
