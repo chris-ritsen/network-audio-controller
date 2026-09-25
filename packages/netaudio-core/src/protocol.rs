@@ -541,7 +541,7 @@ pub fn diagnostic_packet_header(data: &[u8]) -> Option<DiagnosticPacketHeader> {
             read_u16(data, 10)?,
             read_u16(data, 6),
         ),
-        PROTOCOL_ID | 0x2729 | 0x2801 | PROTOCOL_ARC_2809 | PROTOCOL_ARC_280F | 0x1200 => (
+        id if is_supported_arc_protocol(id) || id == crate::commands::PROTOCOL_CMC => (
             "arc",
             read_u16(data, 4),
             read_u16(data, 6)?,
@@ -560,6 +560,7 @@ pub fn diagnostic_packet_header(data: &[u8]) -> Option<DiagnosticPacketHeader> {
             PROTOCOL_SETTINGS => "PROTOCOL_SETTINGS",
             PROTOCOL_ID => "PROTOCOL_ARC",
             PROTOCOL_ARC_2809 => "PROTOCOL_ARC_SETTINGS",
+            PROTOCOL_ARC_280C => "PROTOCOL_ARC_280C",
             PROTOCOL_ARC_280F => "PROTOCOL_ARC_280F",
             crate::commands::PROTOCOL_CMC => "PROTOCOL_CMC",
             crate::commands::PROTOCOL_DANTE_FLOW => "PROTOCOL_ARC_2729",

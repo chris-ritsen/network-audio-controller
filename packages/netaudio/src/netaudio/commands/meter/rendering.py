@@ -163,38 +163,38 @@ def render_meter_frame(
         return "\n".join((_ansi("1", title, color), _ansi("90", footer, color)))
 
     if line_width < 39:
-        header = " D  Ch  State Raw"
+        header = " D  Ch  State" + (" dBFS" if line_width >= 22 else "")
         compact = "tiny"
         device_width = 0
         channel_width = 0
         meter_width = 0
     elif line_width < 74:
-        device_width = max(6, min(14, (line_width - 32) // 2))
-        channel_width = max(1, line_width - device_width - 32)
+        device_width = max(6, min(14, (line_width - 36) // 2))
+        channel_width = max(1, line_width - device_width - 36)
         header = (
             f" {_fit_cell('Device', device_width)} "
             f"D {'Ch':>3} {_fit_cell('Channel', channel_width)} "
-            f"  {_fit_cell('State', 7)} {_fit_cell('Raw', 4)} Src"
+            f"  {_fit_cell('State', 7)} {'dBFS':>8} Src"
         )
         compact = "compact"
         meter_width = 0
     else:
         device_width = max(12, min(24, width // 5))
-        available_meter_width = line_width - device_width - 44 - 18
+        available_meter_width = line_width - device_width - 39 - 18
         meter_width = min(20, available_meter_width) if available_meter_width >= 6 else 0
         if meter_width:
-            channel_width = max(1, line_width - device_width - 44 - meter_width)
+            channel_width = max(1, line_width - device_width - 39 - meter_width)
             header = (
                 f" {_fit_cell('Device', device_width)} "
                 f"{'Dir':<3} {'Ch':>3} {_fit_cell('Channel', channel_width)} "
-                f"  {_fit_cell('State', 8)} Raw   dBFS {_fit_cell('Level', meter_width)} Source"
+                f"  {_fit_cell('State', 8)}    dBFS {_fit_cell('Level', meter_width)} Source"
             )
         else:
-            channel_width = max(1, line_width - device_width - 43)
+            channel_width = max(1, line_width - device_width - 38)
             header = (
                 f" {_fit_cell('Device', device_width)} "
                 f"{'Dir':<3} {'Ch':>3} {_fit_cell('Channel', channel_width)} "
-                f"  {_fit_cell('State', 8)} Raw   dBFS     Source"
+                f"  {_fit_cell('State', 8)}    dBFS     Source"
             )
         compact = "wide"
 
@@ -203,14 +203,16 @@ def render_meter_frame(
     for index, row in visible:
         stale = _is_stale(row)
         state_icon, state, state_color = _state_appearance(row)
-        raw = f"0x{row.level:02X}" if row.level is not None else "--"
+        readout = _dbfs_label(row.level, row.metering_source)
         source = "stale" if stale else _source_label(row.metering_source)
         marker = ">" if index == viewport.selected else " "
         meter_token = _METER_PLACEHOLDER * meter_width
         if compact == "tiny":
             state_text = _fit_render_cell(state, 5)
             state_token = f"{_STATE_PLACEHOLDER} {state_text}"
-            line = f"{marker}{row.key.direction[0]} {row.key.channel_number:>3} {state_token} {raw:>4}"
+            line = f"{marker}{row.key.direction[0]} {row.key.channel_number:>3} {state_token}"
+            if line_width >= 22:
+                line += f" {readout:>8}"
         elif compact == "compact":
             state_text = _fit_render_cell(state, 7)
             state_token = f"{_STATE_PLACEHOLDER} {state_text}"
@@ -218,7 +220,7 @@ def render_meter_frame(
                 f"{marker}{_fit_render_cell(row.device_name, device_width)} "
                 f"{row.key.direction[0]} {row.key.channel_number:>3} "
                 f"{_fit_render_cell(row.channel_name, channel_width)} "
-                f"{state_token} {raw:>4} {source:<7}"
+                f"{state_token} {readout:>8} {source:<7}"
             )
         else:
             state_text = _fit_render_cell(state, 8)
@@ -228,7 +230,7 @@ def render_meter_frame(
                     f"{marker}{_fit_render_cell(row.device_name, device_width)} "
                     f"{row.key.direction:<3} {row.key.channel_number:>3} "
                     f"{_fit_render_cell(row.channel_name, channel_width)} "
-                    f"{state_token} {raw:>4} {_dbfs_label(row.level, row.metering_source):>8} "
+                    f"{state_token} {readout:>8} "
                     f"{meter_token} {source:<7}"
                 )
             else:
@@ -236,7 +238,7 @@ def render_meter_frame(
                     f"{marker}{_fit_render_cell(row.device_name, device_width)} "
                     f"{row.key.direction:<3} {row.key.channel_number:>3} "
                     f"{_fit_render_cell(row.channel_name, channel_width)} "
-                    f"{state_token} {raw:>4} {_dbfs_label(row.level, row.metering_source):>8} "
+                    f"{state_token} {readout:>8} "
                     f"{source:<7}"
                 )
         line = _fit_cell(line, line_width)

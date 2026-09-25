@@ -35,6 +35,12 @@ pub(crate) fn plan_subscription_request(
     let protocol = crate::protocol::arc_protocol_for_identifier(request.protocol_id, false)
         .map_err(|error| SpecError::InvalidJson(error.into()))?;
 
+    if request.protocol_id == crate::protocol::PROTOCOL_ARC_280C {
+        return Err(SpecError::InvalidJson(
+            "subscription writes are not supported for this ARC revision".into(),
+        ));
+    }
+
     if request.channels.is_empty() || request.records.is_empty() {
         return Err(SpecError::InvalidJson(
             "subscription plan requires receiver channels and records".into(),

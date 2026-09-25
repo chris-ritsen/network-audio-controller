@@ -1,9 +1,12 @@
 {
   "_provenance": {
     "source": "Own passive capture (Windows pktmon) of Dante Controller polling Shure devices on a production Dante network",
+    "source_url": "https://github.com/chris-ritsen/network-audio-controller/pull/61",
+    "source_commit": "a1ed5b566731078e77860ddb5f5eea789da5b433",
     "capture_sha256": "d7f62c11cadbb1f8e87e64a751612235582731c7cb8ce61b7cbb37405cb5002c",
     "capture_date": "2026-08-28",
-    "evidence_class": "observed Dante Controller requests and unmodified device responses on UDP 4440",
+    "evidence_class": "observed",
+    "scope": "Contributor-reported passive Controller requests and device responses on UDP 4440, sanitized as described below; channel and flow status reads only.",
     "devices": {
       "shure_mxwapx4": "Shure MXWAPX4, Dante platform DanteIP-Zynq-US-SC",
       "shure_mxa920": "Shure MXA920, Dante platform DanteIP-Zynq7000-DDR"

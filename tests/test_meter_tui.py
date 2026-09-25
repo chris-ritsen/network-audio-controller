@@ -515,8 +515,8 @@ def test_level_bar_is_responsive_and_caps_at_twenty_cells():
         no_color=True,
     )
 
-    assert "Level" not in narrow
-    assert "█" not in narrow
+    assert "Level" in narrow
+    assert 0 < narrow.count("█") < ordinary.count("█")
     assert "Level" in ordinary
     assert "█" in ordinary
     assert wide.count("█") == 20
@@ -551,7 +551,7 @@ def test_user_labels_cannot_collide_with_state_or_level_render_markers():
     assert "§" not in frame
     assert "?rack" in frame
     assert "?" * 17 in frame
-    assert frame.count("█") == 17
+    assert frame.count("█") == 20
 
 
 def test_viewport_navigation_is_bounded_and_preserves_selected_identity():
@@ -786,10 +786,12 @@ def test_render_is_bounded_sanitized_and_contains_no_ansi_when_color_is_disabled
     assert "connected?" in frame
     if width == 100:
         assert "?forged" in frame
-    assert "00" in frame
-    assert "FD" in frame
-    assert "FE" in frame
-    assert "FF" in frame
+    assert "clip" in frame
+    assert "-126.5" in frame
+    assert "mute" in frame
+    assert "unknown" in frame
+    assert "Raw" not in frame
+    assert "0x" not in frame
     assert "PASSIVE" in frame
     assert ">" in frame
     assert "Age" not in frame
@@ -833,7 +835,7 @@ def test_state_lamps_use_controller_style_colors_and_keep_text_labels():
     assert "<1s" not in frame
 
 
-def test_tiny_terminal_keeps_selection_state_and_raw_value_visible():
+def test_tiny_terminal_keeps_selection_and_stale_state_without_raw_codes():
     viewport = MeterViewport()
     stale = _row(17, level=0x7B, indication="signal_present")
     stale = replace(stale, age=3.0)
@@ -853,7 +855,22 @@ def test_tiny_terminal_keeps_selection_state_and_raw_value_visible():
     assert ">T" in frame
     assert "! STALE" in frame
     assert "STALE" in frame
-    assert "0x7B" in frame
+    assert "0x7B" not in frame
+
+
+@pytest.mark.parametrize("width", [50, 100, 160])
+@pytest.mark.parametrize("source,expected", [("signal_presence", "-20.0"), ("detailed", "-19.5")])
+def test_terminal_meter_uses_source_aware_dbfs_instead_of_raw_columns(width, source, expected):
+    viewport = MeterViewport()
+    viewport.replace_rows([_row(1, level=40, source=source)], page_size=3)
+    frame = render_meter_frame(
+        viewport, width=width, height=5, mode="passive", connection_status="connected", no_color=True
+    )
+
+    assert expected in frame
+    assert "Raw" not in frame
+    assert "0x28" not in frame
+    assert all(cell_len(line) < width for line in frame.splitlines())
 
 
 @pytest.mark.parametrize("height", [1, 2])

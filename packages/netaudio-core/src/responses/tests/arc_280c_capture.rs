@@ -57,8 +57,7 @@ fn channel_status_query_builders_match_the_controller_requests_for_280c() {
         let built =
             build_query_receiver_flow_status(PROTOCOL_ARC_280C, 1, transaction_id(&request))
                 .unwrap();
-        assert_eq!(built.len(), request.len());
-        assert_eq!(built[..10], request[..10]);
+        assert_eq!(built, request);
     }
 }
 
