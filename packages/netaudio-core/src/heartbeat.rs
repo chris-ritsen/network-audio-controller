@@ -7,6 +7,21 @@ use crate::bytes::read_u16;
 pub const HEARTBEAT_PROTOCOL: u16 = 0xFFFE;
 pub const HEARTBEAT_HEADER_SIZE: usize = 0x20;
 
+pub fn monitoring_payload(record: &[u8], minimum: usize) -> Option<usize> {
+    let total = usize::from(read_u16(record, 0)?);
+    let subheader = usize::from(read_u16(record, 4)?);
+    let length = usize::from(read_u16(record, 6)?);
+    let payload = 8usize.checked_add(subheader)?;
+    if total != record.len()
+        || subheader < 2
+        || length < minimum
+        || payload.checked_add(length)? > total
+    {
+        return None;
+    }
+    Some(payload)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HeartbeatRecord<'a> {
     pub record_type: u16,

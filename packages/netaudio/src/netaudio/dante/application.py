@@ -1374,6 +1374,7 @@ class DanteApplication:
             device.receiver_flows = None
             device.receiver_flow_completeness = "unknown"
             device.receiver_flow_status_page = None
+            device.receiver_flow_partial_inventory = None
             device.rx_flow_count = None
             device.gain_device_type = None
             device.gain_levels = None
@@ -1611,12 +1612,12 @@ class DanteApplication:
             result_type=dict,
         )
 
-    async def probe_clocking_status(self, device, timeout: float = 3.0, record_revision=None) -> dict:
+    async def probe_clocking_status(self, device, timeout: float = 3.0, control_profile=None) -> dict:
         key = self._control_key(device)
         async with self._capability_probe_lock("clock_status", key):
             waiter = self.notifications.register_waiter(STATUS_KIND_CLOCK, key)
             try:
-                await self.send_refresh_clock_status(device, record_revision=record_revision)
+                await self.send_refresh_clock_status(device, control_profile=control_profile)
                 try:
                     await asyncio.wait_for(waiter.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
@@ -1809,6 +1810,11 @@ class DanteApplication:
 
                 inventory.accept(response)
                 state = inventory.state()
+
+                partial = state.get("partial_inventory")
+                if direction == "receiver" and isinstance(partial, dict):
+                    device.receiver_flow_partial_inventory = partial
+                    device.receiver_flow_completeness = "partial"
 
             return state["inventory"]
 
@@ -2136,12 +2142,12 @@ class DanteApplication:
         await self._send_settings(device_ip_address, self.commands.probe_switch_configuration(host_mac))
 
     async def send_refresh_clock_status(
-        self, target, host_mac=None, message_id: int | None = None, record_revision=None
+        self, target, host_mac=None, message_id: int | None = None, control_profile=None
     ) -> None:
-        from netaudio.dante.clock_control import clock_record_revision
+        from netaudio.dante.clock_control import clock_control_profile
 
         device = self._control_target(target)
-        revision = clock_record_revision(device, record_revision)
+        revision = clock_control_profile(control_profile)
         await self._send_settings(device, self.commands.refresh_clock_status(revision, host_mac, message_id))
 
     async def send_remove_subscriptions(self, device, channel_numbers):
@@ -2247,16 +2253,16 @@ class DanteApplication:
         )
 
     async def preview_clock_configuration(
-        self, device, changes: dict, timeout: float = 3.0, record_revision=None
+        self, device, changes: dict, timeout: float = 3.0, control_profile=None
     ) -> _types.ClockPlan:
         from netaudio.dante.clock_control import preview_clock_configuration
 
         if getattr(device, "requires_managed_control", False):
             raise RuntimeError("Direct clock configuration is unavailable for managed devices.")
-        status = await self.probe_clocking_status(device, timeout=timeout, record_revision=record_revision)
-        return preview_clock_configuration(device, status, changes, record_revision)
+        status = await self.probe_clocking_status(device, timeout=timeout, control_profile=control_profile)
+        return preview_clock_configuration(device, status, changes, control_profile)
 
-    async def set_clock_configuration(self, device, changes: dict, timeout: float = 5.0, record_revision=None) -> dict:
+    async def set_clock_configuration(self, device, changes: dict, timeout: float = 5.0, control_profile=None) -> dict:
         def audit_result(result):
             return {
                 "state": "confirmed" if result["effective_state_confirmed"] else "unverified",
@@ -2271,14 +2277,14 @@ class DanteApplication:
             device,
             "clock_configuration",
             changes,
-            lambda: self._set_clock_configuration(device, changes, timeout, record_revision),
+            lambda: self._set_clock_configuration(device, changes, timeout, control_profile),
             result_adapter=audit_result,
         )
 
-    async def _set_clock_configuration(self, device, changes: dict, timeout: float = 5.0, record_revision=None) -> dict:
+    async def _set_clock_configuration(self, device, changes: dict, timeout: float = 5.0, control_profile=None) -> dict:
         async with self._capability_probe_lock("clock_configuration", self._control_key(device)):
             preview = await self.preview_clock_configuration(
-                device, changes, timeout=timeout, record_revision=record_revision
+                device, changes, timeout=timeout, control_profile=control_profile
             )
             sent = bool(preview["changes"])
             result = {
@@ -2299,7 +2305,7 @@ class DanteApplication:
             while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
                 try:
                     status = await self.probe_clocking_status(
-                        device, timeout=min(1.0, remaining), record_revision=record_revision
+                        device, timeout=min(1.0, remaining), control_profile=control_profile
                     )
                 except (CapabilityProbeTimeout, RuntimeError, OSError):
                     status = None

@@ -63,7 +63,7 @@ test("meter tracks keep their geometry as readable signal labels and levels chan
     [30, "signal_present", "-14.5 dBFS  Signal"],
     [0, "clipping", "Clipping"],
     [254, "muted", "Muted"],
-    [255, "unknown", "Unknown"],
+    [255, "framing_marker", "Signal unavailable"],
     [undefined, undefined, "—"],
   ];
   for (const [level, presence] of samples) {
@@ -97,8 +97,8 @@ test("source changes select the matching native scale for labels, lamps, and can
   const passive = [];
   detailed[40] = { dbfs: -19.5, state: "signal_present" };
   passive[40] = { dbfs: -20, state: "signal_present" };
-  detailed[123] = { dbfs: -61, state: "signal_present" };
-  passive[123] = { dbfs: -61.5, state: "below_threshold" };
+  detailed[121] = { dbfs: -60, state: "signal_present" };
+  passive[121] = { dbfs: -60.5, state: "below_threshold" };
   format.setMeteringScale({ detailed, signal_presence: passive });
   const labels = [];
   const context = {
@@ -108,7 +108,7 @@ test("source changes select the matching native scale for labels, lamps, and can
   };
   const node = { getContext: () => context, style: {} };
   for (const [source, dbfs, state] of [["signal_presence", -20, "quiet"], ["detailed", -19.5, "present"]]) {
-    const sample = { wall_time: 99, rx: { 1: 40, 2: 123 }, metering_source: source };
+    const sample = { wall_time: 99, rx: { 1: 40, 2: 121 }, metering_source: source };
     assert.equal(signalIndicator(sample, 1, 100_000).dbfs, dbfs);
     assert.equal(signalIndicator(sample, 2, 100_000).state, state);
     drawMeters(node, 600, [1], sample.rx, {}, { 1: "Left" }, new Map(), 0, source);

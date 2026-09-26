@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from typing import Any
+from typing_extensions import TypeGuard
 
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.monitoring.model import _json_safe
@@ -141,20 +142,21 @@ def _subscription_failure_state(subscription: Mapping[str, Any]) -> bool | None:
 
 
 def _flow_map(health: Any) -> dict[str, dict[str, Any]]:
-    if not isinstance(health, dict) or not isinstance(health.get("flows"), list):
+    if not isinstance(health, dict) or not isinstance(health.get("paths"), list):
         return {}
     mapped = {}
-    for flow in health["flows"]:
+    for flow in health["paths"]:
         if not isinstance(flow, dict):
             continue
-        slot = flow.get("receiver_flow_slot")
-        index = flow.get("receiver_flow_index")
-        if _positive_integer(slot):
-            identity = f"receiver-flow:{slot}"
-        elif _unsigned_integer(index):
-            identity = f"receiver-flow-index:{index}"
-        else:
+        slot = flow.get("audio_receiver_flow_id")
+        network = flow.get("network_interface_index")
+        if (
+            flow.get("attribution_status") != "resolved"
+            or not _positive_integer(slot)
+            or not _unsigned_integer(network)
+        ):
             continue
+        identity = f"audio-receiver:{slot}/network:{network}/attribution:{flow.get('attribution_epoch', 0)}"
         mapped[identity] = flow
     return mapped
 
@@ -162,16 +164,13 @@ def _flow_map(health: Any) -> dict[str, dict[str, Any]]:
 def _configured_flow_latency(snapshot: Mapping[str, Any], health_flow: Mapping[str, Any]) -> int | None:
     if snapshot.get("receiver_flow_completeness") in ("partial", "unknown"):
         return None
-    slot = health_flow.get("receiver_flow_slot")
-    receiver_flows = snapshot.get("receiver_flows")
-    if _positive_integer(slot) and isinstance(receiver_flows, list):
-        for flow in receiver_flows:
-            if not isinstance(flow, dict) or flow.get("global_flow_id", flow.get("flow_number")) != slot:
-                continue
-            configured = flow.get("latency_nanoseconds")
-            if _positive_integer(configured):
-                return configured
-    configured = snapshot.get("receiver_flow_latency_ns")
+    if health_flow.get("attribution_status") != "resolved":
+        return None
+    observation = (health_flow.get("latency") or {}).get("current") or {}
+    evidence = observation.get("evidence") or {}
+    if evidence.get("comparison_key") != (health_flow.get("evidence") or {}).get("comparison_key"):
+        return None
+    configured = evidence.get("configured_latency_nanoseconds")
     return configured if _positive_integer(configured) else None
 
 
@@ -185,17 +184,17 @@ def _interface_map(traffic: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-def _unsigned_integer(value: Any) -> bool:
+def _unsigned_integer(value: Any) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-def _positive_integer(value: Any) -> bool:
+def _positive_integer(value: Any) -> TypeGuard[int]:
     return _unsigned_integer(value) and value > 0
 
 
-def _unsigned_number(value: Any) -> bool:
+def _unsigned_number(value: Any) -> TypeGuard[int | float]:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
 
 
-def _positive_number(value: Any) -> bool:
+def _positive_number(value: Any) -> TypeGuard[int | float]:
     return _unsigned_number(value) and value > 0

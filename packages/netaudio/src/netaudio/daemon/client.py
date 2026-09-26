@@ -24,6 +24,12 @@ def daemon_port() -> int:
     return app_settings.daemon_port or DEFAULT_DAEMON_PORT
 
 
+async def get_diagnostics_from_daemon(device: str, *, reset: bool = False):
+    if reset:
+        return await _daemon_request("POST", "/diagnostics/reset", {"device": device})
+    return await _daemon_request("GET", "/diagnostics/" + quote(device, safe=""))
+
+
 async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.0):
     try:
         reader, writer = await asyncio.wait_for(

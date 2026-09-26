@@ -208,7 +208,7 @@ pub fn arc_protocol(
             return Err("unsupported ARC protocol version");
         }
 
-        (major << 12) | (minor << 8) | patch
+        ((major << 12) | (minor << 8) | patch).min(PROTOCOL_ARC_280F)
     };
 
     arc_protocol_for_identifier(protocol_id, managed).map(Some)
@@ -225,8 +225,8 @@ pub fn arc_protocol_for_identifier(
     Ok(ArcProtocol {
         protocol_id,
         modern_channel_inventory: is_modern_arc_protocol(protocol_id),
-        subscription_page: protocol_id == PROTOCOL_ARC_280F,
-        subscription_batch_limit: if managed || protocol_id == PROTOCOL_ARC_280F {
+        subscription_page: is_modern_arc_protocol(protocol_id),
+        subscription_batch_limit: if managed || is_modern_arc_protocol(protocol_id) {
             crate::commands::SUBSCRIPTION_PAGE_CAPACITY
         } else {
             crate::commands::LEGACY_SUBSCRIPTION_BATCH_CAPACITY

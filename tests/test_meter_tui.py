@@ -439,9 +439,9 @@ def test_device_capacity_change_discards_old_samples_and_rebuilds_rows():
     ("raw", "indication", "state", "dbfs"),
     [
         (0x00, "clipping", "CLIP", "clip"),
-        (0xFD, "below_threshold", "quiet", "-126.5"),
-        (0xFE, "muted", "MUTED", "mute"),
-        (0xFF, "unknown", "UNKNOWN", "unknown"),
+        (0xFD, "mute_or_floor", "FLOOR", "floor"),
+        (0xFE, "mute_or_floor", "FLOOR", "floor"),
+        (0xFF, "mute_or_floor", "FLOOR", "floor"),
     ],
 )
 def test_raw_sentinels_are_preserved_and_render_with_distinct_semantics(raw, indication, state, dbfs):
@@ -787,9 +787,8 @@ def test_render_is_bounded_sanitized_and_contains_no_ansi_when_color_is_disabled
     if width == 100:
         assert "?forged" in frame
     assert "clip" in frame
-    assert "-126.5" in frame
-    assert "mute" in frame
-    assert "unknown" in frame
+    assert "floor" in frame
+    assert "-126.5" not in frame
     assert "Raw" not in frame
     assert "0x" not in frame
     assert "PASSIVE" in frame

@@ -66,7 +66,7 @@ def test_native_clock_permissions_match_command_acceptance(revision, caps, flags
             "host_mac": "020000000001",
             "message_id": 1,
             "control": {
-                "record_revision": revision,
+                "status_revision": revision,
                 "clock_capabilities": caps,
                 "extension_flags": flags,
                 field: value,
@@ -300,7 +300,7 @@ def test_unchanged_locked_settings_are_skipped_and_unknown_fields_rejected():
     preview = preview_clock_configuration(device, status(extension_flags=0x1000), {"preferred_leader": False})
     assert preview["changes"] == {}
     with pytest.raises(core.NetaudioCoreError, match="Unsupported"):
-        preview_clock_configuration(device, status(), {"ptpv2_domain": 2})
+        preview_clock_configuration(device, status(), {"unknown_clock_setting": 2})
 
 
 @pytest.mark.asyncio
@@ -368,7 +368,7 @@ async def test_http_clock_native_rejection_is_a_conflict_not_server_failure(
         if failure == "timeout":
             raise core.NetaudioCoreError(core.STATUS_TIMEOUT, "clock transport")
 
-        core.clock_record_revision({"clock_revision": 0x073A, "explicit_revision": 0x0724})
+        core.clock_control_profile({"control_profile": 0x0724})
 
     setattr(server.application, method, rejected)
     writer = FakeWriter()
@@ -380,7 +380,7 @@ async def test_http_clock_native_rejection_is_a_conflict_not_server_failure(
     assert code == expected_status
 
     if failure == "revision":
-        assert "differs" in result["error"]
+        assert "Unsupported" in result["error"]
 
     assert writer.closed
 
@@ -415,34 +415,21 @@ def test_auxiliary_writers_are_unsupported(command):
         core.build_command({"command": command, "host_mac": "020000000001"})
 
 
-def test_revision_override_cannot_replace_a_known_clock_revision():
-    from netaudio.dante.clock_control import clock_record_revision
-
-    _, device = device_and_app()
-    with pytest.raises(core.NetaudioCoreError, match="differs"):
-        clock_record_revision(device, 0x0724)
-    device.clock_status = None
-    assert clock_record_revision(device, 0x0724) == 0x0724
-
-
 @pytest.mark.parametrize(
     "facts,expected",
     [
-        ({"clock_revision": 0x073A, "model_revision": 0x0724}, 0x073A),
-        ({"model_revision": 0x0724, "interface_revision": 0x073A}, 0x0724),
-        ({"interface_revision": 0x073A}, 0x073A),
-        ({"explicit_revision": 0x073A}, 0x073A),
-        ({"clock_revision": 0x073A, "explicit_revision": 0x073A}, 0x073A),
+        ({}, 0x073A),
+        ({"control_profile": 0x073A}, 0x073A),
+        ({"control_profile": 0x0734}, 0x0734),
     ],
 )
-def test_native_clock_revision_uses_reported_facts(facts, expected):
-    assert core.clock_record_revision(facts) == expected
+def test_native_clock_profile_is_local(facts, expected):
+    assert core.clock_control_profile(facts) == expected
 
 
 @pytest.mark.parametrize(
     "facts",
     [
-        {},
         {"clock_revision": True, "model_revision": 0x073A},
         {"clock_revision": 0, "interface_revision": 0x073A},
         {"model_revision": 65536},
@@ -453,7 +440,7 @@ def test_native_clock_revision_uses_reported_facts(facts, expected):
 )
 def test_native_clock_revision_never_guesses_past_invalid_evidence(facts):
     with pytest.raises(core.NetaudioCoreError):
-        core.clock_record_revision(facts)
+        core.clock_control_profile(facts)
 
 
 @pytest.mark.parametrize("subdomain", ["house", [104, 111, 117, 115, 101], b"house"])
@@ -494,9 +481,10 @@ def test_native_clock_plan_does_not_treat_numeric_false_as_unchanged():
     assert plan["changes"] == {"preferred_leader": False}
 
 
-def test_native_clock_plan_uses_fresh_status_revision_and_rejects_conflicting_override():
-    with pytest.raises(core.NetaudioCoreError, match="differs"):
-        core.plan_clock_configuration({"status": status(), "changes": {}, "revisions": {"explicit_revision": 0x0724}})
+def test_native_clock_plan_uses_local_profile_and_requires_fresh_status():
+    plan = core.plan_clock_configuration({"status": status(), "changes": {}, "control_profile": 0x0734})
+    assert plan["control"]["control_profile"] == 0x0734
+    assert plan["control"]["status_revision"] == 0x073A
 
     with pytest.raises(core.NetaudioCoreError, match="supported clock status"):
         core.plan_clock_configuration({"status": status(status_supported=False), "changes": {}})

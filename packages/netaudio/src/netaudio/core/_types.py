@@ -105,12 +105,92 @@ class ChannelSlot(_extensions.TypedDict):
     transmitter_channel: int
 
 
+class ClockBasePort(_extensions.TypedDict):
+    role: _typing.Union[str, None]
+    state: _typing.Union[str, None]
+    state_code: int
+    unknown: int
+
+
 class ClockControlAvailability(_extensions.TypedDict):
     aggregate_ptpv1_unicast_delay_requests: bool
     clock_source: bool
+    follower_only: bool
     global_unicast_delay_requests: bool
+    multicast_dscp: bool
+    ports: bool
     preferred_leader: bool
+    preferred_protocol: bool
+    priority_mapping: bool
+    ptpv2_clock_class: bool
+    ptpv2_domain: bool
+    ptpv2_priority1: bool
+    ptpv2_priority2: bool
     subdomain: bool
+
+
+class ClockInterfaceVector(_extensions.TypedDict):
+    first_record: int
+    offset: int
+    stride: int
+    unknown_header_words: list[int]
+
+
+class Observation(_extensions.TypedDict):
+    clock_state_evidence: JsonValue
+    display_epoch: int
+    epoch: int
+    evidence: JsonValue
+    latency_microseconds: _typing.Union[int, None]
+    observed_at: str
+    observed_monotonic: float
+    raw: int
+    raw_record: list[int]
+    record_type: int
+    sample_rate_hertz: _typing.Union[int, None]
+    sequence: _typing.Union[int, None]
+    sequence_gap: int
+    source: str
+    timestamp_provenance: str
+    value: _typing.Union[float, None]
+    value_unit: str
+
+
+class Series(_extensions.TypedDict):
+    baseline: _typing.Union[int, None]
+    current: _typing.Union[Observation, None]
+    delta: _typing.Union[int, None]
+    display_epoch: int
+    fresh: bool
+    histogram: JsonValue
+    history: list[Observation]
+    increase_since_baseline: _typing.Union[int, None]
+    statistics: JsonValue
+
+
+class Diagnostic(_extensions.TypedDict):
+    evidence: JsonValue
+    kind: str
+
+
+class ClockVariation(_extensions.TypedDict):
+    active: bool
+    deviation_ppb: _typing.Union[float, None]
+    last_epoch: _typing.Union[int, None]
+    last_observed_monotonic: _typing.Union[float, None]
+    observable: bool
+    recovered: bool
+    recovery_since: _typing.Union[float, None]
+    threshold_ppb: int
+    window_size: int
+
+
+class ClockObservations(_extensions.TypedDict):
+    conmon: Series
+    diagnostics: list[Diagnostic]
+    heartbeat: Series
+    variation: dict[str, ClockVariation]
+    warning_enabled: bool
 
 
 class ClockPlan(_extensions.TypedDict):
@@ -135,6 +215,14 @@ class ClockSubdomainPresentation(_extensions.TypedDict):
     text: _typing.Union[str, None]
 
 
+class ClockVector(_extensions.TypedDict):
+    count: int
+    first_record: int
+    offset: int
+    stride: int
+    unknown: int
+
+
 class CodecFormat(_extensions.TypedDict):
     codec_type: int
     level: int
@@ -157,35 +245,27 @@ class CommandReceipt(_extensions.TypedDict):
     result_code: _extensions.NotRequired[int]
 
 
-class LateSample(_extensions.TypedDict):
-    late_packet_count: int
-    late_packet_delta: _typing.Union[int, None]
-    preserve_history: bool
-    receiver_flow_index: int
-
-
-class LateUpdate(_extensions.TypedDict):
-    samples: list[LateSample]
-    sequence: int
-
-
-class LatencySample(_extensions.TypedDict):
-    latency_nanoseconds: int
-    latency_sample_count: int
-    receiver_flow_index: int
-    sample_rate_hertz: int
-
-
-class LatencyUpdate(_extensions.TypedDict):
-    preserve_history: bool
-    samples: list[LatencySample]
-    sequence: int
+class ReceiverPath(_extensions.TypedDict):
+    attribution_epoch: int
+    attribution_reason: _typing.Union[str, None]
+    attribution_status: str
+    audio_receiver_flow_id: _typing.Union[int, None]
+    evidence: JsonValue
+    global_flow_id: _typing.Union[int, None]
+    late_packets: Series
+    latency: Series
+    media_type: _typing.Union[str, None]
+    network_interface_index: _typing.Union[int, None]
+    telemetry_index: int
 
 
 class ConnectionHealthUpdate(_extensions.TypedDict):
+    complete: bool
     device_extended_unique_identifier: str
-    late_packets: _typing.Union[LateUpdate, None]
-    latency: _typing.Union[LatencyUpdate, None]
+    diagnostics: list[Diagnostic]
+    fresh: bool
+    paths: list[ReceiverPath]
+    retention_limit: int
 
 
 class ControllerApiRoutes(_extensions.TypedDict):
@@ -246,6 +326,25 @@ class ExportResult(_extensions.TypedDict):
 class ExportProgress(_extensions.TypedDict):
     matched: bool
     result: _typing.Union[ExportResult, None]
+
+
+class ExtendedClockPort(_extensions.TypedDict):
+    announce_interval: _typing.Union[int, None]
+    announce_interval_raw: _typing.Union[int, None]
+    delay_mechanism: _typing.Union[int, None]
+    delay_request_interval: _typing.Union[int, None]
+    delay_request_interval_raw: _typing.Union[int, None]
+    follower_only: _typing.Union[bool, None]
+    network_interface_index: _typing.Union[int, None]
+    peer_delay_interval: _typing.Union[int, None]
+    peer_delay_interval_raw: _typing.Union[int, None]
+    port_id: _typing.Union[int, None]
+    raw_record: list[int]
+    record_index: int
+    sync_interval: _typing.Union[int, None]
+    sync_interval_raw: _typing.Union[int, None]
+    ttl: _typing.Union[int, None]
+    validity: int
 
 
 class Identity(_extensions.TypedDict):
@@ -470,14 +569,20 @@ InventoryCompleteness = _typing.Literal["unknown", "partial", "complete"]
 class InventoryStateVariant0(_extensions.TypedDict):
     inventory: None
     next_command: dict[str, JsonValue]
+    partial_inventory: dict[str, JsonValue]
 
 
 class InventoryStateVariant1(_extensions.TypedDict):
+    inventory: None
+    next_command: dict[str, JsonValue]
+
+
+class InventoryStateVariant2(_extensions.TypedDict):
     inventory: dict[str, JsonValue]
     next_command: None
 
 
-InventoryState = _typing.Union[InventoryStateVariant0, InventoryStateVariant1]
+InventoryState = _typing.Union[InventoryStateVariant0, InventoryStateVariant1, InventoryStateVariant2]
 
 
 LatencyOutcome = _typing.Literal["rejected", "unavailable", "confirmed", "unverified"]
@@ -658,6 +763,9 @@ class ManagedSubscriptionStatus(_extensions.TypedDict):
 
 class MeteringValue(_extensions.TypedDict):
     dbfs: _typing.Union[float, None]
+    display_state: str
+    raw: int
+    source: str
     state: str
 
 
@@ -878,6 +986,84 @@ class PerformanceSnapshot(_extensions.TypedDict):
     receive_flow_performance: _extensions.NotRequired[_typing.Union[PacketPerformance, None]]
     transmit_flow_performance: _extensions.NotRequired[_typing.Union[PacketPerformance, None]]
     unicast_performance: _extensions.NotRequired[_typing.Union[PacketPerformance, None]]
+
+
+class PtpClockPortRecord(_extensions.TypedDict):
+    interface_flags: _typing.Union[int, None]
+    interface_record: _typing.Union[list[int], None]
+    link_down: _typing.Union[bool, None]
+    network_interface_index: _typing.Union[int, None]
+    ptp_version: int
+    record_flags: int
+    record_format_code: int
+    record_number: int
+    reserved_byte: int
+    role: _typing.Union[str, None]
+    state: _typing.Union[str, None]
+    state_code: int
+    status_flags: int
+    transport_path: _typing.Union[str, None]
+    transport_path_code: int
+    unicast_delay_requests: _typing.Union[bool, None]
+    unknown_word: int
+    user_disabled: _typing.Union[bool, None]
+
+
+class PtpClockStatus(_extensions.TypedDict):
+    aggregate_ptpv1_unicast_delay_requests: _typing.Union[bool, None]
+    base_ports: list[ClockBasePort]
+    clock_capabilities: _typing.Union[int, None]
+    clock_frequency_offset_parts_per_billion: int
+    clock_port_records: _typing.Union[list[PtpClockPortRecord], None]
+    clock_port_state_code: _typing.Union[int, None]
+    clock_role: _typing.Union[str, None]
+    clock_source: _typing.Union[str, None]
+    clock_source_code: int
+    clock_state: _typing.Union[str, None]
+    clock_state_code: int
+    clock_subdomain: _typing.Union[list[int], None]
+    congestion_delay_microseconds: int
+    descriptor_bytes: list[int]
+    domain_raw: _typing.Union[int, None]
+    extended_capabilities: _typing.Union[int, None]
+    extended_port_descriptor: _typing.Union[list[int], None]
+    extended_ports: list[ExtendedClockPort]
+    extended_ptpv2_domain: _typing.Union[int, None]
+    extended_validity: _typing.Union[int, None]
+    extension_flags: _typing.Union[int, None]
+    extension_offset: _typing.Union[int, None]
+    extension_unknown_byte: _typing.Union[int, None]
+    extension_unknown_word: _typing.Union[int, None]
+    follower_only: _typing.Union[bool, None]
+    global_unicast_delay_requests: _typing.Union[bool, None]
+    interface_vector: _typing.Union[ClockInterfaceVector, None]
+    maximum_drift_parts_per_billion: _typing.Union[int, None]
+    multicast_dscp: _typing.Union[int, None]
+    mute_flags: _typing.Union[int, None]
+    mute_reasons: list[str]
+    mute_state: _typing.Union[str, None]
+    port_vector: _typing.Union[ClockVector, None]
+    preferred_leader: _typing.Union[bool, None]
+    preferred_leader_locked: _typing.Union[bool, None]
+    preferred_protocol: _typing.Union[int, None]
+    priority_mapping: _typing.Union[int, None]
+    ptpv1_device_uuid: _typing.Union[list[int], None]
+    ptpv1_grandmaster_uuid: _typing.Union[list[int], None]
+    ptpv1_master_uuid: _typing.Union[list[int], None]
+    ptpv2_clock_class: _typing.Union[int, None]
+    ptpv2_domain: _typing.Union[int, None]
+    ptpv2_priority1: _typing.Union[int, None]
+    ptpv2_priority2: _typing.Union[int, None]
+    raw_record: list[int]
+    record_revision: int
+    servo_state: _typing.Union[str, None]
+    servo_state_code: int
+    status_supported: bool
+    stratum: int
+    synchronization: str
+    uuid_reserved: list[int]
+    word_clock_state: _typing.Union[str, None]
+    word_clock_state_code: _typing.Union[int, None]
 
 
 class ReceiverCapabilities(_extensions.TypedDict):

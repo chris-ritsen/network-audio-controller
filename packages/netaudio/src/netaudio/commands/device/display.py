@@ -324,45 +324,37 @@ def _format_connection_latency_nanoseconds(latency_nanoseconds: int | None) -> s
 def _connection_health_rows(connection_health: dict | None) -> list[list[str]]:
     if not isinstance(connection_health, dict):
         return []
-    fresh = connection_health.get("fresh")
-    if fresh is True:
-        freshness = "fresh"
-    elif fresh is False:
-        freshness = "stale"
-    else:
-        freshness = "unknown"
-    observed_at = connection_health.get("observed_at")
-    if isinstance(observed_at, str) and observed_at:
-        freshness = f"{freshness}; received {observed_at}"
-    rows = [["Receiver Flow Connection Health", freshness]]
-    flows = connection_health.get("flows")
-    if not isinstance(flows, list):
-        return rows
-    for flow in flows:
-        if not isinstance(flow, dict):
-            continue
-        receiver_flow_slot = flow.get("receiver_flow_slot")
-        if type(receiver_flow_slot) is not int:
-            continue
-        current = _format_connection_latency_nanoseconds(flow.get("current_latency_nanoseconds"))
-        average = _format_connection_latency_nanoseconds(flow.get("average_latency_nanoseconds"))
-        peak = _format_connection_latency_nanoseconds(flow.get("peak_latency_nanoseconds"))
-        rows.append(
-            [
-                f"Receiver Flow Slot {receiver_flow_slot} Latency",
-                f"current {current}; average {average}; peak {peak}",
-            ]
+
+    rows = []
+    for path in connection_health.get("paths", []):
+        label = (
+            f"Audio flow {path['audio_receiver_flow_id']} · network {path['network_interface_index'] + 1}"
+            if path.get("attribution_status") == "resolved"
+            else f"Telemetry index {path['telemetry_index']} · attribution unavailable"
         )
-        late_packet_count = flow.get("late_packet_count")
-        late_packet_delta = flow.get("late_packet_delta")
-        value_label = str(late_packet_count) if type(late_packet_count) is int else "unknown"
-        delta_label = f"{late_packet_delta:+d}" if type(late_packet_delta) is int else "unknown"
-        rows.append(
-            [
-                f"Receiver Flow Slot {receiver_flow_slot} Late Packets",
-                f"count {value_label}; delta {delta_label}",
-            ]
-        )
+        latency = path.get("latency") or {}
+        current = latency.get("current") or {}
+        statistics = latency.get("statistics") or {}
+        fresh = "fresh" if latency.get("fresh") else "stale"
+        value = current.get("latency_microseconds")
+        rows.append([label, f"reported maximum {value} µs; {fresh}" if value is not None else "latency unavailable"])
+        if statistics.get("finite_count"):
+            rows.append(["Mean of retained maxima", _format_connection_latency_nanoseconds(round(statistics["mean"]))])
+            rows.append(
+                [
+                    "Peak reported maximum",
+                    f"{_format_connection_latency_nanoseconds(round(statistics['maximum']))} at {statistics['peak_observed_at']}",
+                ]
+            )
+        late = path.get("late_packets") or {}
+        if late.get("current"):
+            rows.append(
+                [
+                    "Late packets",
+                    f"counter {late['current']['raw']}; increase {late.get('increase_since_baseline')}; {'fresh' if late.get('fresh') else 'stale'}",
+                ]
+            )
+
     return rows
 
 

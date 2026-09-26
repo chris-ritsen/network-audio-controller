@@ -1,6 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ClockBasePort {
     pub state_code: u16,
     pub state: Option<String>,
@@ -9,6 +10,7 @@ pub struct ClockBasePort {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PtpClockPortRecord {
     pub record_flags: u16,
     pub user_disabled: Option<bool>,
@@ -31,6 +33,7 @@ pub struct PtpClockPortRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ClockVector {
     pub offset: u16,
     pub count: u16,
@@ -40,6 +43,7 @@ pub struct ClockVector {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ClockInterfaceVector {
     pub offset: u16,
     pub unknown_header_words: [u16; 2],
@@ -48,6 +52,28 @@ pub struct ClockInterfaceVector {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ExtendedClockPort {
+    pub port_id: Option<u16>,
+    pub network_interface_index: Option<u16>,
+    pub record_index: usize,
+    pub raw_record: Vec<u8>,
+    pub validity: u16,
+    pub ttl: Option<u8>,
+    pub follower_only: Option<bool>,
+    pub sync_interval: Option<i8>,
+    pub sync_interval_raw: Option<u8>,
+    pub announce_interval: Option<i8>,
+    pub announce_interval_raw: Option<u8>,
+    pub delay_request_interval: Option<i8>,
+    pub delay_request_interval_raw: Option<u8>,
+    pub peer_delay_interval: Option<i8>,
+    pub peer_delay_interval_raw: Option<u8>,
+    pub delay_mechanism: Option<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PtpClockStatus {
     pub record_revision: u16,
     pub raw_record: Vec<u8>,
@@ -91,6 +117,18 @@ pub struct PtpClockStatus {
     pub clock_port_state_code: Option<u16>,
     pub clock_role: Option<String>,
     pub clock_port_records: Option<Vec<PtpClockPortRecord>>,
+    pub follower_only: Option<bool>,
+    pub extended_port_descriptor: Option<Vec<u8>>,
+    pub extended_ports: Vec<ExtendedClockPort>,
+    pub extended_capabilities: Option<u32>,
+    pub extended_validity: Option<u32>,
+    pub priority_mapping: Option<u8>,
+    pub preferred_protocol: Option<u8>,
+    pub ptpv2_clock_class: Option<u8>,
+    pub extended_ptpv2_domain: Option<u8>,
+    pub ptpv2_priority1: Option<u8>,
+    pub ptpv2_priority2: Option<u8>,
+    pub multicast_dscp: Option<u8>,
 }
 
 fn label(value: u16, labels: &[&str]) -> Option<String> {
@@ -223,6 +261,18 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
         clock_port_state_code: None,
         clock_role: None,
         clock_port_records: None,
+        follower_only: None,
+        extended_port_descriptor: None,
+        extended_ports: vec![],
+        extended_capabilities: None,
+        extended_validity: None,
+        priority_mapping: None,
+        preferred_protocol: None,
+        ptpv2_clock_class: None,
+        extended_ptpv2_domain: None,
+        ptpv2_priority1: None,
+        ptpv2_priority2: None,
+        multicast_dscp: None,
     };
     if !supported {
         return Some(s);
@@ -265,15 +315,11 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
     }
     .into();
     let e = usize::from(s.extension_offset.unwrap_or(0));
-    if rev < 0x0400 || e == 0 || e >= r.len() {
+    if rev < 0x0400 || e == 0 {
         return Some(s);
     }
     let size = if rev >= 0x0726 {
-        if read_u16(r, e + 38)? > 11 {
-            44
-        } else {
-            40
-        }
+        44
     } else if rev >= 0x071c {
         36
     } else if rev >= 0x0705 {
@@ -291,6 +337,7 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
     s.domain_raw = Some(r[e + 9]);
     let flags = read_u16(r, e + 10)?;
     s.extension_flags = Some(flags);
+    s.follower_only = (rev >= 0x0717).then_some(flags & 4 != 0);
     s.preferred_leader_locked = (rev >= 0x072e).then_some(flags & 0x1000 != 0);
     s.ptpv2_domain = (rev >= 0x0728 && flags & 0x0800 != 0).then_some(r[e + 9]);
     s.global_unicast_delay_requests = (0x0603..0x071f).contains(&rev).then_some(flags & 1 != 0);
@@ -330,6 +377,79 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
         return Some(s);
     }
     s.descriptor_bytes = r[e + 32..e + size].to_vec();
+    if rev >= 0x0726 {
+        let descriptor = r.get(e + 32..e + 44)?;
+        s.extended_port_descriptor = Some(descriptor.to_vec());
+        let stride = usize::from(read_u16(descriptor, 6)?);
+        let start = usize::from(read_u16(descriptor, 8)?);
+        let count = usize::from(read_u16(descriptor, 10)?);
+
+        if rev != 0x0738 && (start != 0 || count != 0) {
+            if start == 0 || count == 0 || stride < 12 {
+                return None;
+            }
+            claim(r, &mut used, start, count.checked_mul(stride)?)?;
+
+            for index in 0..count {
+                let p = start + index * stride;
+                let raw = r.get(p..p + stride)?;
+                let validity = read_u16(raw, 0)?;
+                let value = |bit, offset| -> Option<Option<u8>> {
+                    if rev >= 0x0739 && validity & bit != 0 {
+                        Some(Some(*raw.get(offset)?))
+                    } else {
+                        Some(None)
+                    }
+                };
+                let sync = value(2, 8)?;
+                let announce = value(4, 9)?;
+                let delay = value(8, 10)?;
+                let peer = value(16, 11)?;
+                s.extended_ports.push(ExtendedClockPort {
+                    port_id: None,
+                    network_interface_index: (validity & 1 != 0)
+                        .then(|| read_u16(raw, 2))
+                        .flatten(),
+                    record_index: index,
+                    raw_record: raw.to_vec(),
+                    validity,
+                    ttl: value(64, 4)?,
+                    follower_only: (rev >= 0x0739 && raw[6] & 1 != 0).then_some(raw[5] & 1 != 0),
+                    sync_interval: sync.map(|v| v as i8),
+                    sync_interval_raw: sync,
+                    announce_interval: announce.map(|v| v as i8),
+                    announce_interval_raw: announce,
+                    delay_request_interval: delay.map(|v| v as i8),
+                    delay_request_interval_raw: delay,
+                    peer_delay_interval: peer.map(|v| v as i8),
+                    peer_delay_interval_raw: peer,
+                    delay_mechanism: value(32, 12)?,
+                });
+
+                if index == 0 && rev >= 0x0739 && stride >= 40 {
+                    s.extended_capabilities = Some(read_u32(raw, 32)?);
+                    let valid = read_u32(raw, 36)?;
+                    s.extended_validity = Some(valid);
+                    let global = |bit: u32, offset: usize| -> Option<Option<u8>> {
+                        if valid & (1u32 << bit) != 0u32 {
+                            Some(Some(*raw.get(offset)?))
+                        } else {
+                            Some(None)
+                        }
+                    };
+                    s.priority_mapping = global(0, 48)?;
+                    s.preferred_protocol = global(1, 49)?;
+                    s.ptpv2_clock_class = global(2, 51)?;
+                    s.extended_ptpv2_domain = global(3, 50)?;
+                    s.ptpv2_priority1 = global(4, 52)?;
+                    s.ptpv2_priority2 = global(5, 53)?;
+                    if rev >= 0x073a {
+                        s.multicast_dscp = global(6, 60)?;
+                    }
+                }
+            }
+        }
+    }
     if read_u16(r, e + 34)? == 0 {
         return Some(s);
     }
@@ -371,26 +491,43 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
         });
     }
     s.port_vector = Some(v);
-    if rev >= 0x0726 && read_u16(r, e + 38)? > 11 && read_u16(r, e + 42)? != 0 {
-        let v3 = vector(r, &mut used, read_u16(r, e + 40)?)?;
-        let stride = usize::from(v3.stride);
-        if stride < 4 {
+
+    // Extended properties pair by ordinal with the fixed 16-byte port vector;
+    // their own index identifies a network interface, not a writable port.
+    let mut port_ids = std::collections::HashSet::new();
+    if ports.len() == s.extended_ports.len()
+        && ports.iter().all(|port| {
+            (1..=64).contains(&port.record_number) && port_ids.insert(port.record_number)
+        })
+    {
+        for (port, properties) in ports.iter_mut().zip(&mut s.extended_ports) {
+            properties.port_id = Some(port.record_number);
+            port.network_interface_index = properties.network_interface_index;
+        }
+    }
+
+    // The retained AVIO status capture has a pointer to a separate interface
+    // vector at this revision, not the newer inline extended-port geometry.
+    if rev == 0x0738 && read_u16(r, e + 38)? > 11 && read_u16(r, e + 42)? != 0 {
+        let interfaces = vector(r, &mut used, read_u16(r, e + 40)?)?;
+        let stride = usize::from(interfaces.stride);
+        if stride < 4 || usize::from(interfaces.count) != ports.len() {
             return None;
         }
-        let start = usize::from(v3.first_record);
-        claim(r, &mut used, start, count.checked_mul(stride)?)?;
-        for (i, port) in ports.iter_mut().enumerate() {
-            let p = start + i * stride;
+        let start = usize::from(interfaces.first_record);
+        claim(r, &mut used, start, ports.len().checked_mul(stride)?)?;
+        for (index, port) in ports.iter_mut().enumerate() {
+            let p = start + index * stride;
             let flags = read_u16(r, p)?;
             port.interface_flags = Some(flags);
             port.interface_record = Some(r[p..p + stride].to_vec());
             port.network_interface_index = (flags & 1 != 0).then(|| read_u16(r, p + 2)).flatten();
         }
         s.interface_vector = Some(ClockInterfaceVector {
-            offset: v3.offset,
-            unknown_header_words: [v3.count, v3.unknown],
-            first_record: v3.first_record,
-            stride: v3.stride,
+            offset: interfaces.offset,
+            unknown_header_words: [interfaces.count, interfaces.unknown],
+            first_record: interfaces.first_record,
+            stride: interfaces.stride,
         });
     }
     let ptpv1: Vec<_> = ports.iter().filter(|p| p.ptp_version == 1).collect();

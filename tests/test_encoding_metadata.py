@@ -35,7 +35,13 @@ def test_audio_readback_requires_an_applied_unsigned_value(status, expected, sta
 def controls_input(channel_audio_metadata):
     return {
         "name": None,
-        "counts": (1, 1, None, 0),
+        "counts": {
+            "tx_count": 1,
+            "rx_count": 1,
+            "locked": None,
+            "transmit_flow_authoring_capability_word": 0,
+            "receiver_telemetry_capacity": None,
+        },
         "aes67": None,
         "settings": None,
         "channel_audio_metadata": channel_audio_metadata,
@@ -56,7 +62,7 @@ def test_native_authoring_profile_survives_device_serialization(
 ):
     device = DanteDevice()
     data = controls_input(None)
-    data["counts"] = (1, 1, False, capability_word)
+    data["counts"]["transmit_flow_authoring_capability_word"] = capability_word
     device.apply_controls(device.controls_data_from_core(data))
 
     serialized = DanteDeviceSerializer.to_json(device)
@@ -68,7 +74,7 @@ def test_native_authoring_profile_survives_device_serialization(
         "supports_flow_options": capability_word == 0x1000,
     }
 
-    data["counts"] = (1, 1, False, None)
+    data["counts"]["transmit_flow_authoring_capability_word"] = None
     device.apply_controls(device.controls_data_from_core(data))
     assert getattr(device, "transmit_flow_authoring", None) is None
 
@@ -77,7 +83,6 @@ def test_native_authoring_profile_survives_device_serialization(
 async def test_control_fetch_reuses_rx_inventory_metadata_and_applies_property_capabilities(monkeypatch):
     device = DanteDevice()
     core_client = MagicMock()
-    core_client.get_channel_count.return_value = (2, 2, False, 0)
     core_client.get_rx_inventory.return_value = {
         "channels": [],
         "channel_audio_metadata": {
@@ -90,7 +95,9 @@ async def test_control_fetch_reuses_rx_inventory_metadata_and_applies_property_c
     core_client.get_tx_channels.return_value = []
     core_client.get_device_name.return_value = "avio-input"
     core_client.get_device_settings.return_value = None
-    core_client.execute.return_value = None
+    core_client.execute.side_effect = lambda spec: (
+        bytes.fromhex("28090010000110000001000000020002") if spec["command"] == "channel_count" else None
+    )
     core_client.get_property_directory.return_value = {
         "properties": [{"property_id": 0x8020, "flags": 0x0001}],
         "aes67_configured_property_advertised": False,

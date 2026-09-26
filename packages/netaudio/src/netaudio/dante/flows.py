@@ -439,6 +439,11 @@ async def query_receiver_flow_inventory(
                 inventory.accept(response)
                 state = inventory.state()
 
+                partial = state.get("partial_inventory")
+                if device is not None and isinstance(partial, dict):
+                    device.receiver_flow_partial_inventory = partial
+                    device.receiver_flow_completeness = "partial"
+
             return state["inventory"]
     except core.NetaudioCoreError as error:
         logger.debug("Receiver flow inventory failed: %s", error)

@@ -93,8 +93,7 @@ pub fn build_modern_arc_subscription_page(
     records: &[SubscriptionPageRecord],
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    if ![PROTOCOL_ARC_2809, PROTOCOL_ARC_280F].contains(&protocol_id)
-        || (protocol_id == PROTOCOL_ARC_2809 && media_type_code != MODERN_ARC_AUDIO_MEDIA_TYPE)
+    if !crate::protocol::is_modern_arc_protocol(protocol_id)
         || page_capacity == 0
         || usize::from(page_capacity) > SUBSCRIPTION_PAGE_CAPACITY
         || records.is_empty()

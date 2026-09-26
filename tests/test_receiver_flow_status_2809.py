@@ -20,7 +20,7 @@ def test_native_inventory_command_encodes_open_ended_pagination_range():
         command = inventory.state()["next_command"]
 
     built = core.build_command({**command, "message_id": 0x2856})
-    assert built.hex() == "28090022285636000000000000000000000100010000000000000000830283060310"
+    assert built.hex() == "28090022285636000000000000000000000100010001000000000000830283060310"
 
 
 def test_parser_exposes_flow_format_latency_endpoint_and_receiver_mapping():

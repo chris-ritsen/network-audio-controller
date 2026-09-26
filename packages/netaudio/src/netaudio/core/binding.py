@@ -261,6 +261,10 @@ def connection_health_update(request: _requests.ConnectionHealthUpdateRequest) -
     return _call_json(require().netaudio_connection_health_update, request, "connection-health update")
 
 
+def clock_observation_update(request: _requests.ClockObservationRequest) -> _types.ClockObservations | None:
+    return _call_json(require().netaudio_clock_observation_update, request, "clock observation")
+
+
 def sample_rate_status_evidence(status: _requests.SampleRateStatus) -> _types.SampleRateStatus:
     return _call_json(
         require().netaudio_sample_rate_evidence, {"kind": "status", "status": status}, "sample-rate status"
@@ -1203,8 +1207,8 @@ def managed_subscription_status(request: _requests.ManagedStatusRequest) -> _typ
     return _call_json(require().netaudio_managed_subscription_status, request, "managed subscription status")
 
 
-def clock_record_revision(facts: dict) -> int:
-    return _call_json(require().netaudio_clock_record_revision, facts, "clock record revision")
+def clock_control_profile(facts: _requests.ClockProfile) -> int:
+    return _call_json(require().netaudio_clock_control_profile, facts, "clock control profile")
 
 
 def flow_inventory_protocol(facts: _requests.FlowInventoryProtocolFacts) -> int | None:
@@ -1227,17 +1231,17 @@ def receiver_self_connection_capabilities(spec: _requests.ReceiverCapabilityRequ
     return _call_json(require().netaudio_receiver_self_connection_capabilities, spec, "receiver capabilities")
 
 
-def plan_clock_configuration(spec: dict) -> _types.ClockPlan:
-    spec = dict(spec)
+def plan_clock_configuration(spec: _requests.ClockPlanRequest) -> _types.ClockPlan:
+    payload = dict(spec)
 
     for field in ("status", "changes"):
-        if isinstance(spec.get(field), dict):
-            spec[field] = {
-                key: list(value) if isinstance(value, (bytes, bytearray)) else value
-                for key, value in spec[field].items()
+        value = payload.get(field)
+        if isinstance(value, dict):
+            payload[field] = {
+                key: list(item) if isinstance(item, (bytes, bytearray)) else item for key, item in value.items()
             }
 
-    return _call_json(require().netaudio_plan_clock_configuration, spec, "clock configuration plan")
+    return _call_json(require().netaudio_plan_clock_configuration, payload, "clock configuration plan")
 
 
 def clock_configuration_matches(observed: dict, requested: dict) -> bool:

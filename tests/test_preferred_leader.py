@@ -25,7 +25,7 @@ class TestClockControlPacket:
                 "host_mac": "020000000001",
                 "message_id": 1,
                 "control": {
-                    "record_revision": 0x073A,
+                    "status_revision": 0x073A,
                     "clock_capabilities": 0,
                     "extension_flags": 0,
                     "preferred_leader": preferred,
@@ -40,15 +40,15 @@ class TestClockControlPacket:
 
     def test_query_selects_no_fields(self):
         packet = core.build_command(
-            {"command": "refresh_clock_status", "record_revision": 0x0738, "host_mac": "020000000001", "message_id": 1}
+            {"command": "refresh_clock_status", "control_profile": 0x073A, "host_mac": "020000000001", "message_id": 1}
         )
 
-        assert packet[24:28] == bytes.fromhex("07380021")
+        assert packet[24:28] == bytes.fromhex("073a0021")
         assert packet[32:] == bytes(60)
 
-    def test_missing_revision_fails(self):
-        with pytest.raises(core.NetaudioCoreError):
-            core.build_command({"command": "refresh_clock_status", "host_mac": "020000000001"})
+    def test_query_defaults_to_current_local_profile(self):
+        packet = core.build_command({"command": "refresh_clock_status", "host_mac": "020000000001"})
+        assert packet[24:28] == bytes.fromhex("073a0021")
 
 
 class TestPreferredLeaderFromConmon0x0020:
@@ -98,7 +98,7 @@ class TestPreferredLeaderFromConmon0x0020:
         ).read_bytes()
         calls = []
 
-        async def refresh(target, host_mac=None, sequence=0x0021, record_revision=None):
+        async def refresh(target, host_mac=None, sequence=0x0021, control_profile=None):
             calls.append((target, sequence))
             application.notifications._on_packet(packet, (str(target.ipv4), 8702))
             await deliver_status_events(application)
@@ -124,7 +124,7 @@ class TestPreferredLeaderFromConmon0x0020:
         with pytest.raises(CapabilityProbeTimeout, match="clock status probe timed out"):
             await application.probe_clocking_status(device, timeout=0.01)
 
-        application.send_refresh_clock_status.assert_awaited_once_with(device, record_revision=None)
+        application.send_refresh_clock_status.assert_awaited_once_with(device, control_profile=None)
         assert not application.notifications.is_waiting("clock_status", "192.168.1.61")
 
     def test_live_avio_bluetooth_clock_publication_parses_raw_source(self):

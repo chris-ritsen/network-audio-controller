@@ -595,14 +595,14 @@ fn transmitter_channel_status_2809_query_matches_shipping_controller_request() {
 }
 
 #[test]
-fn receiver_flow_status_2809_query_matches_shipping_controller_request() {
+fn receiver_flow_status_query_keeps_media_separate_from_starting_flow() {
     assert_eq!(
         build_query_receiver_flow_status(PROTOCOL_ARC_2809, 1, 0x2856).unwrap(),
-        decode_hexadecimal("28090022285636000000000000000000000100010000000000000000830283060310")
+        decode_hexadecimal("28090022285636000000000000000000000100010001000000000000830283060310")
     );
     assert_eq!(
         build_query_receiver_flow_status(PROTOCOL_ARC_2809, 16, 0x2857).unwrap(),
-        decode_hexadecimal("28090022285736000000000000000000000100100000000000000000830283060310")
+        decode_hexadecimal("28090022285736000000000000000000000100010010000000000000830283060310")
     );
 }
 
@@ -912,14 +912,14 @@ fn delete_tx_flow_2729_encodes_flow_slot_after_a_unit_count() {
 }
 
 #[test]
-fn modern_arc_280f_queries_and_video_subscription_pages_match_controller_packets() {
+fn modern_arc_280f_query_range_and_captured_video_subscription_pages() {
     assert_eq!(
         build_query_tx_flows(PROTOCOL_ARC_280F, 0x05E9).unwrap(),
         decode_hexadecimal("280f002205e926000000000000000000000100010001000000000000000000000000")
     );
     assert_eq!(
         build_query_receiver_flow_status(PROTOCOL_ARC_280F, 1, 0x05EA).unwrap(),
-        decode_hexadecimal("280f002205ea36000000000000000000000100010000000000000000000000000000")
+        decode_hexadecimal("280f002205ea36000000000000000000000100010001000000000000000000000000")
     );
 
     let set = [SubscriptionPageRecord::Set {
@@ -940,10 +940,7 @@ fn modern_arc_280f_queries_and_video_subscription_pages_match_controller_packets
         build_modern_arc_subscription_page(PROTOCOL_ARC_280F, 1, 4, &clear, 0x05DC).unwrap(),
         decode_hexadecimal("280f001c05dc34100000000000000000080001010001000400000000")
     );
-    assert_eq!(
-        build_modern_arc_subscription_page(PROTOCOL_ARC_2809, 1, 4, &clear, 0x05DC),
-        Err(NetaudioError::InvalidPage)
-    );
+    assert!(build_modern_arc_subscription_page(PROTOCOL_ARC_2809, 1, 4, &clear, 0x05DC).is_ok());
     assert_eq!(
         build_modern_arc_subscription_page(PROTOCOL_ARC_280F, 1, 5, &clear, 0x05DC),
         Err(NetaudioError::InvalidPage)

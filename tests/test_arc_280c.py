@@ -60,7 +60,7 @@ def test_capture_diagnostics_recognize_every_contributed_exchange(captures):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["set", "clear"])
-async def test_read_only_revision_never_falls_back_to_legacy_subscription_writes(captures, action):
+async def test_modern_revision_never_falls_back_to_legacy_subscription_writes(captures, action):
     device = device_for_capture()
     device.execute = AsyncMock(
         return_value=bytes.fromhex(captures["shure_mxa920"]["receiver_channel_status"]["response"])
@@ -71,13 +71,14 @@ async def test_read_only_revision_never_falls_back_to_legacy_subscription_writes
     if action == "set":
         record.update(tx_channel="Mic", tx_device="Source")
 
-    with pytest.raises((core.NetaudioCoreError, ValueError), match="subscription writes"):
-        await device.application._send_subscription_records(device, [record])
+    await device.application._send_subscription_records(device, [record])
+    device.execute.assert_awaited_once()
+    packet = core.build_command(device.execute.call_args.args[0])
+    assert packet[:2] == bytes.fromhex("280c")
+    assert packet[6:8] == bytes.fromhex("3410")
 
-    device.execute.assert_not_awaited()
 
-
-def test_read_only_revision_reconciliation_rejects_pending_changes_but_accepts_satisfied_routes():
+def test_modern_revision_reconciliation_skips_satisfied_routes():
     request = {
         "protocol_id": 0x280C,
         "managed": False,
@@ -87,12 +88,11 @@ def test_read_only_revision_reconciliation_rejects_pending_changes_but_accepts_s
     }
     assert core.plan_subscription_reconciliation(request)["batches"] == []
     request["expected"] = [{"number": 1, "source": None}]
-    with pytest.raises(core.NetaudioCoreError, match="subscription writes"):
-        core.plan_subscription_reconciliation(request)
+    assert len(core.plan_subscription_reconciliation(request)["batches"]) == 1
 
 
-def test_uncaptured_receiver_flow_continuations_are_not_guessed():
-    with pytest.raises(core.NetaudioCoreError):
-        core.build_command(
-            {"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x280C, "starting_flow": 2}
-        )
+def test_receiver_flow_continuation_preserves_protocol():
+    packet = core.build_command(
+        {"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x280C, "starting_flow": 2}
+    )
+    assert packet[16:24] == bytes.fromhex("0001000100020000")

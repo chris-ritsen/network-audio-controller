@@ -8,6 +8,7 @@ TELEMETRY_FIELDS = frozenset(
         "last_seen",
         "network_interface_traffic",
         "receiver_flow_connection_health",
+        "clock_observations",
     }
 )
 

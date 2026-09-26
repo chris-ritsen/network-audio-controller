@@ -11,7 +11,7 @@ def metering_scale() -> _types.MeteringScales:
     return core.metering_scale()
 
 
-def _metering_value(value: int, source: str | None) -> _types.MeteringValue:
+def normalize_metering_value(value: int, source: str | None) -> _types.MeteringValue:
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 255:
         raise ValueError("metering value must fit in one byte")
 
@@ -22,15 +22,15 @@ def _metering_value(value: int, source: str | None) -> _types.MeteringValue:
     if source == "signal_presence":
         return scales["signal_presence"][value]
 
-    return {"dbfs": None, "state": "unknown"}
+    return {"raw": value, "source": source or "unknown", "dbfs": None, "state": "unknown", "display_state": "unknown"}
 
 
 def metering_value_dbfs(value: int, source: str | None) -> float | None:
-    return _metering_value(value, source)["dbfs"]
+    return normalize_metering_value(value, source)["dbfs"]
 
 
 def classify_signal_presence(value: int, source: str | None) -> str:
-    return _metering_value(value, source)["state"]
+    return normalize_metering_value(value, source)["state"]
 
 
 def parse_metering_levels(data: bytes) -> dict:

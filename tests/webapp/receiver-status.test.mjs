@@ -179,8 +179,8 @@ test("detailed level samples provide signal indication without exposing raw valu
   const now = 100_000;
   for (const [raw, label] of [
     [20, "Signal present"],
-    [123, "Signal present"],
-    [124, "No signal"],
+    [121, "Signal present"],
+    [122, "No signal"],
     [253, "No signal"],
     [0, "Clipping"],
     [254, "Muted"],
@@ -223,7 +223,7 @@ test("receive and transmit preserve reported levels without collapsing half-deci
       for (const [raw, state] of [
         [0, "clipping"],
         [254, "muted"],
-        [255, "unknown"],
+        [255, source === "detailed" ? "unknown" : "muted"],
       ]) {
         assert.equal(
           signalIndicator(

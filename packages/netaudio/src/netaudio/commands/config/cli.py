@@ -909,14 +909,14 @@ app.command("interface")(interface)
 app.command("redundancy")(redundancy)
 
 
-async def run_clock_configuration(application, devices, changes, record_revision, preview):
+async def run_clock_configuration(application, devices, changes, control_profile, preview):
     from netaudio.monitoring.model import _json_safe
 
     _, device = select_device(filter_devices(devices))[0]
     if preview:
-        result = await application.preview_clock_configuration(device, changes, record_revision=record_revision)
+        result = await application.preview_clock_configuration(device, changes, control_profile=control_profile)
     else:
-        result = await application.set_clock_configuration(device, changes, record_revision=record_revision)
+        result = await application.set_clock_configuration(device, changes, control_profile=control_profile)
     output_single(_json_safe(result))
     if not preview and not result["effective_state_confirmed"]:
         raise typer.Exit(code=ExitCode.ERROR)
@@ -937,12 +937,23 @@ def clock_configuration(
     ptpv1_unicast: Optional[bool] = typer.Option(
         None, "--ptpv1-unicast/--no-ptpv1-unicast", help="Enable or disable unicast delay requests on all PTPv1 ports."
     ),
-    record_revision: Optional[int] = typer.Option(
-        None, "--record-revision", help="Explicit ConMon record revision when discovery cannot supply one."
+    profile: str = typer.Option("current", "--profile", help="Clock serializer: current or legacy."),
+    follower_only: Optional[bool] = typer.Option(None, "--follower-only/--no-follower-only"),
+    domain: Optional[int] = typer.Option(None, "--ptpv2-domain", min=0, max=255),
+    priority1: Optional[int] = typer.Option(None, "--priority1", min=0, max=255),
+    priority2: Optional[int] = typer.Option(None, "--priority2", min=0, max=255),
+    dscp: Optional[int] = typer.Option(None, "--multicast-dscp", min=0, max=63),
+    settings: Optional[str] = typer.Option(
+        None, "--settings", help="Typed clock changes as a JSON object, including per-port settings."
     ),
     preview: bool = typer.Option(False, "--preview", help="Read current state and show changes without writing."),
 ):
     """Apply clock settings together and confirm them with fresh readback."""
+    from netaudio.core._protocols import CLOCK_CONTROL_PROFILES
+
+    if profile not in CLOCK_CONTROL_PROFILES:
+        raise typer.BadParameter("Profile must be current or legacy.")
+    control_profile = CLOCK_CONTROL_PROFILES[profile]
     changes = {
         key: value
         for key, value in {
@@ -951,7 +962,20 @@ def clock_configuration(
             "subdomain": subdomain,
             "global_unicast_delay_requests": global_unicast,
             "aggregate_ptpv1_unicast_delay_requests": ptpv1_unicast,
+            "follower_only": follower_only,
+            "ptpv2_domain": domain,
+            "ptpv2_priority1": priority1,
+            "ptpv2_priority2": priority2,
+            "multicast_dscp": dscp,
         }.items()
         if value is not None
     }
-    run_command(run_clock_configuration, changes, record_revision, preview)
+    if settings is not None:
+        import json
+
+        extra = json.loads(settings)
+        if not isinstance(extra, dict) or changes.keys() & extra.keys():
+            raise typer.BadParameter("Settings must be an object without duplicate command-line fields.")
+        changes.update(extra)
+
+    run_command(run_clock_configuration, changes, control_profile, preview)

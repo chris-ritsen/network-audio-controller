@@ -31,6 +31,7 @@ pub mod managed_session;
 pub mod metering;
 pub mod netif;
 pub mod network;
+pub mod observation;
 pub mod parser;
 pub mod performance_configuration;
 pub mod protocol;

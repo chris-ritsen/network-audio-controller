@@ -3,9 +3,41 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from netaudio import core
-from netaudio.core import _types
+from netaudio.core import _requests, _types
 
 CLOCK_STATUS_MAX_AGE_SECONDS = 10.0
+
+EXTENDED_CLOCK_FIELDS = (
+    "follower_only",
+    "priority_mapping",
+    "preferred_protocol",
+    "ptpv2_clock_class",
+    "ptpv2_domain",
+    "ptpv2_priority1",
+    "ptpv2_priority2",
+    "multicast_dscp",
+)
+
+
+def observed_clock_configuration(status: dict) -> dict:
+    allowed = core.clock_control_availability(status)
+    changes = {
+        name: status[name] for name in EXTENDED_CLOCK_FIELDS if allowed.get(name) and status.get(name) is not None
+    }
+    ports = []
+    for port in status.get("extended_ports", []):
+        if port.get("port_id") is None:
+            continue
+        fields = {
+            name: value
+            for name, value in port.items()
+            if name in _requests.ClockPortControl.__annotations__ and value is not None
+        }
+        if len(fields) > 1:
+            ports.append(fields)
+    if ports:
+        changes["ports"] = ports
+    return changes
 
 
 def clock_status_fresh(snapshot, now: datetime | None = None) -> bool:
@@ -28,27 +60,18 @@ def clock_status_fresh(snapshot, now: datetime | None = None) -> bool:
     return 0 <= age <= CLOCK_STATUS_MAX_AGE_SECONDS
 
 
-def _revision_facts(device, override=None) -> dict:
-    status = getattr(device, "clock_status", None) or {}
-
-    return {
-        "clock_revision": status.get("record_revision"),
-        "explicit_revision": override,
-        "model_revision": getattr(device, "dante_model_record_protocol_version", None),
-        "interface_revision": getattr(device, "interface_status_protocol", None),
-    }
+def clock_control_profile(override: int | None = None) -> int:
+    return core.clock_control_profile({"control_profile": override})
 
 
-def clock_record_revision(device, override: int | None = None) -> int:
-    return core.clock_record_revision(_revision_facts(device, override))
-
-
-def preview_clock_configuration(device, status: dict, changes: dict, revision: int | None = None) -> _types.ClockPlan:
+def preview_clock_configuration(
+    device, status: dict, changes: dict, control_profile: int | None = None
+) -> _types.ClockPlan:
     return core.plan_clock_configuration(
         {
             "status": status,
             "changes": changes,
-            "revisions": _revision_facts(device, revision),
+            "control_profile": control_profile,
             "supported_clock_sources": getattr(device, "supported_clock_sources", None) or [],
         }
     )

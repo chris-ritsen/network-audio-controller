@@ -68,7 +68,13 @@ def test_empty_native_settings_refresh_removes_stale_performance_from_presets():
     controls = device.controls_data_from_core(
         {
             "name": None,
-            "counts": (0, 0, None, None),
+            "counts": {
+                "tx_count": 0,
+                "rx_count": 0,
+                "locked": None,
+                "transmit_flow_authoring_capability_word": None,
+                "receiver_telemetry_capacity": None,
+            },
             "settings": core.parse_response("device_settings", packet),
             "rx": [],
             "tx": [],

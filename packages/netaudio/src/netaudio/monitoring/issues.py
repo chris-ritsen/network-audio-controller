@@ -11,7 +11,7 @@ from datetime import datetime
 from netaudio.dante.clock_control import clock_status_fresh, CLOCK_STATUS_MAX_AGE_SECONDS
 from typing import Any
 
-from netaudio.monitoring.model import EventSeverity, _json_safe
+from netaudio.monitoring.model import EventSeverity, EventJournalThresholds, _json_safe
 from netaudio.monitoring.signals import _device_identity, _flow_map, _subscription_failure_state, _subscription_map
 
 ISSUE_SCHEMA_VERSION = 1
@@ -22,11 +22,14 @@ class IssueKind(str, Enum):
     SUBNET_CONFLICT = "subnet_conflict"
     CLOCK_SYNCHRONIZATION = "clock_synchronization"
     CLOCK_MUTED = "clock_muted"
+    CLOCK_FREQUENCY_VARIATION = "clock_frequency_variation"
     BLUETOOTH_LINK_LOST = "bluetooth_link_lost"
     VIDEO_SIGNAL_FAILURE = "video_signal_failure"
     PULLUP_MISMATCH = "pullup_mismatch"
     SUBSCRIPTION_FAILURE = "subscription_failure"
     RECEIVER_HEALTH_DEGRADED = "receiver_health_degraded"
+    RECEIVER_LATENCY_PRESSURE = "receiver_latency_pressure"
+    RECEIVER_LATE_PACKETS = "receiver_late_packets"
     LICENSING_FAILURE = "licensing_failure"
     SAFE_STATE = "safe_state"
     UPGRADE_REQUIRED = "upgrade_required"
@@ -166,6 +169,12 @@ class MonitoringIssue:
         )
 
     def material_signature(self) -> tuple[Any, ...]:
+        if self.kind in {
+            IssueKind.RECEIVER_LATENCY_PRESSURE,
+            IssueKind.RECEIVER_LATE_PACKETS,
+            IssueKind.CLOCK_FREQUENCY_VARIATION,
+        }:
+            return (self.kind, self.severity, self.observation_state, self.scope)
         return (
             self.kind,
             self.severity,
@@ -295,10 +304,11 @@ class IssueEngine:
 
     _CROSS_DEVICE_KINDS = frozenset({IssueKind.ADDRESS_CONFLICT, IssueKind.PULLUP_MISMATCH})
 
-    def __init__(self, *, history_limit: int = 1000):
+    def __init__(self, *, history_limit: int = 1000, thresholds: EventJournalThresholds | None = None):
         if isinstance(history_limit, bool) or not isinstance(history_limit, int) or history_limit <= 0:
             raise ValueError("issue history_limit must be a positive integer")
         self.history_limit = history_limit
+        self.thresholds = thresholds or EventJournalThresholds()
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._active: dict[str, MonitoringIssue] = {}
         self._history: list[MonitoringIssue] = []
@@ -536,11 +546,45 @@ class IssueEngine:
             subscription = _subscription_map(snapshot.get("subscriptions")).get(issue.scope.channel_identity or "")
             return subscription is not None and _subscription_failure_state(subscription) is False
         if issue.kind is IssueKind.RECEIVER_HEALTH_DEGRADED:
-            return issue.scope.flow_identity in _flow_map(snapshot.get("receiver_flow_connection_health"))
+            path = _flow_map(snapshot.get("receiver_flow_connection_health")).get(issue.scope.flow_identity or "")
+            return path is not None and any(
+                (path.get(name) or {}).get("fresh") is True for name in ("latency", "late_packets")
+            )
+        if issue.kind in {IssueKind.RECEIVER_LATENCY_PRESSURE, IssueKind.RECEIVER_LATE_PACKETS}:
+            if snapshot.get("receiver_flow_completeness") in ("partial", "unknown"):
+                return False
+            path = _flow_map(snapshot.get("receiver_flow_connection_health")).get(issue.scope.flow_identity or "")
+            if path is None:
+                return False
+            metric = path["latency" if issue.kind is IssueKind.RECEIVER_LATENCY_PRESSURE else "late_packets"]
+            sample = metric.get("current") or {}
+            if metric.get("fresh") is not True or sample.get("evidence", {}).get("comparison_key") != path.get(
+                "evidence", {}
+            ).get("comparison_key"):
+                return False
+            if issue.kind is IssueKind.RECEIVER_LATE_PACKETS:
+                return metric.get("delta") == 0
+            budget = sample.get("evidence", {}).get("configured_latency_nanoseconds")
+            return (
+                isinstance(budget, (int, float))
+                and budget > 0
+                and sample.get("raw", 0) > 0
+                and sample.get("value") is not None
+                and sample["value"] <= budget * self.thresholds.flow_latency_recovery_ratio
+            )
         if issue.kind in {IssueKind.CLOCK_SYNCHRONIZATION, IssueKind.CLOCK_MUTED}:
             if issue.evidence_source == "device_clock_status":
                 return (issue.scope.device_identity, issue.kind) in self._clock_recovered
             return isinstance(snapshot.get("ddm_clocking_state"), dict)
+        if issue.kind is IssueKind.CLOCK_FREQUENCY_VARIATION:
+            clock = snapshot.get("clock_observations") or {}
+            source = issue.scope.interface_identity
+            policy = (clock.get("variation") or {}).get(source, {})
+            return (
+                clock.get("warning_enabled") is True
+                and policy.get("observable") is True
+                and policy.get("recovered") is True
+            )
         if issue.kind is IssueKind.TELEMETRY_MISSING:
             return isinstance(snapshot.get("failed_queries"), list)
         if issue.kind is IssueKind.TELEMETRY_STALE:
@@ -767,8 +811,28 @@ class IssueEngine:
         return result
 
     def _detect_clock(self, snapshot: Mapping[str, Any], timestamp: str) -> list[MonitoringIssue]:
+        variation = []
+        clock = snapshot.get("clock_observations") or {}
+        if clock.get("warning_enabled") is True:
+            for source, policy in (clock.get("variation") or {}).items():
+                if policy.get("active") is True and policy.get("observable") is True:
+                    variation.append(
+                        _candidate(
+                            snapshot,
+                            timestamp,
+                            IssueKind.CLOCK_FREQUENCY_VARIATION,
+                            EventSeverity.WARNING,
+                            "Clock frequency variation",
+                            f"{source.title()} frequency variation exceeds the local threshold",
+                            {"policy": policy, "observations": (clock.get(source) or {}).get("history", [])[-20:]},
+                            "clock_frequency_statistics",
+                            IssueEvidenceClass.INFERENCE,
+                            "Inspect clock-source and network stability.",
+                            interface_identity=source,
+                        )
+                    )
         if not isinstance(snapshot.get("ddm_clocking_state"), dict):
-            return self._detect_direct_clock(snapshot, timestamp)
+            return variation + self._detect_direct_clock(snapshot, timestamp)
         evidence = {}
         managed = snapshot.get("ddm_clocking_state")
         if isinstance(managed, dict):
@@ -830,6 +894,58 @@ class IssueEngine:
             )
         health = snapshot.get("receiver_flow_connection_health")
         for identity, flow in _flow_map(health).items():
+            for name, kind, title in (
+                ("latency", IssueKind.RECEIVER_LATENCY_PRESSURE, "Receiver latency budget pressure"),
+                ("late_packets", IssueKind.RECEIVER_LATE_PACKETS, "Receiver late packets increased"),
+            ):
+                metric = flow.get(name) or {}
+                sample = metric.get("current") or {}
+                evidence = sample.get("evidence") or {}
+                if metric.get("fresh") is not True or evidence.get("comparison_key") != (
+                    flow.get("evidence") or {}
+                ).get("comparison_key"):
+                    continue
+                if name == "latency":
+                    budget = evidence.get("configured_latency_nanoseconds")
+                    previous = any(
+                        issue.kind is kind
+                        and issue.scope.device_identity == str(snapshot["device_identity"])
+                        and issue.scope.flow_identity == identity
+                        for issue in self._active.values()
+                    )
+                    threshold = (
+                        self.thresholds.flow_latency_recovery_ratio
+                        if previous
+                        else self.thresholds.flow_latency_warning_ratio
+                    )
+                    comparable = (
+                        isinstance(budget, (int, float))
+                        and budget > 0
+                        and sample.get("raw", 0) > 0
+                        and sample.get("value") is not None
+                    )
+                    bad = comparable and (
+                        sample["value"] > budget * threshold if previous else sample["value"] >= budget * threshold
+                    )
+                else:
+                    bad = (metric.get("delta") or 0) > 0
+                if bad:
+                    result.append(
+                        _candidate(
+                            snapshot,
+                            timestamp,
+                            kind,
+                            EventSeverity.WARNING,
+                            title,
+                            f"Audio flow {flow['audio_receiver_flow_id']}, network {flow['network_interface_index'] + 1}",
+                            {"path": flow, "observation": sample},
+                            "receiver_path_telemetry",
+                            IssueEvidenceClass.DERIVED_STATE,
+                            "Inspect the source and receiver network path.",
+                            flow_identity=identity,
+                            interface_identity=f"network:{flow['network_interface_index']}",
+                        )
+                    )
             degraded_fields = {}
             for key in ("status", "severity", "connected", "healthy", "error", "error_code"):
                 value = flow.get(key)
@@ -974,10 +1090,13 @@ class IssueEngine:
             if isinstance(value, dict) and value.get("fresh") is False:
                 stale.append({"field": field, "value": value})
             if isinstance(value, dict):
-                for stream_name in ("latency_stream", "late_packet_stream"):
-                    stream = value.get(stream_name)
-                    if isinstance(stream, dict) and stream.get("fresh") is False:
-                        stale.append({"field": f"{field}.{stream_name}", "value": stream})
+                for path in value.get("paths", []):
+                    for name in ("latency", "late_packets"):
+                        stream = path.get(name) or {}
+                        if stream.get("current") and stream.get("fresh") is False:
+                            stale.append(
+                                {"field": f"Telemetry index {path['telemetry_index']} {name}", "value": stream}
+                            )
         if stale:
             result.append(
                 _candidate(

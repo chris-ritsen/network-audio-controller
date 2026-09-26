@@ -2,35 +2,22 @@ use crate::bytes::{read_u16, read_u32};
 use crate::heartbeat::{
     parse_heartbeat_device_extended_unique_identifier, parse_heartbeat_records,
 };
+use crate::observation::{Diagnostic, Observation, Series};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-
-const FLOW_LATENCY_RECORD_TYPE: u16 = 0x8003;
-const LATE_PACKET_RECORD_TYPE: u16 = 0x8004;
-const EXTENSION_LENGTH: u16 = 4;
-const FLOW_LATENCY_VECTOR_OFFSET: u16 = 24;
-const LATE_PACKET_VECTOR_OFFSET: u16 = 20;
-const VECTOR_ENTRY_WIDTH: usize = 4;
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HeartbeatFlowLatencyEntry {
-    pub receiver_flow_index: u16,
+    pub telemetry_index: u16,
     pub latency_sample_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HeartbeatFlowLatencyRecord {
-    pub record_length: u16,
-    pub extension_length: u16,
-    pub payload_length: u16,
+    pub raw_record: Vec<u8>,
     pub sequence: u16,
-    pub unknown_word_at_offset_10: u16,
-    pub entry_count: u16,
-    pub start_receiver_flow_index: u16,
-    pub vector_offset: u16,
-    pub unknown_word_at_offset_18: u16,
     pub sample_rate_hertz: u32,
     pub entries: Vec<HeartbeatFlowLatencyEntry>,
 }
@@ -38,22 +25,15 @@ pub struct HeartbeatFlowLatencyRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HeartbeatLatePacketEntry {
-    pub receiver_flow_index: u16,
+    pub telemetry_index: u16,
     pub late_packet_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HeartbeatLatePacketRecord {
-    pub record_length: u16,
-    pub extension_length: u16,
-    pub payload_length: u16,
+    pub raw_record: Vec<u8>,
     pub sequence: u16,
-    pub unknown_word_at_offset_10: u16,
-    pub entry_count: u16,
-    pub start_receiver_flow_index: u16,
-    pub vector_offset: u16,
-    pub unknown_word_at_offset_18: u16,
     pub entries: Vec<HeartbeatLatePacketEntry>,
 }
 
@@ -63,145 +43,208 @@ pub struct HeartbeatConnectionHealthRecords {
     pub device_extended_unique_identifier: String,
     pub latency_records: Vec<HeartbeatFlowLatencyRecord>,
     pub late_packet_records: Vec<HeartbeatLatePacketRecord>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
-fn validate_vector_geometry(
-    record: &[u8],
-    minimum_record_length: usize,
-    expected_vector_offset: u16,
-) -> Option<(u16, u16, u16, u16)> {
-    if record.len() < minimum_record_length {
-        return None;
-    }
-
-    let record_length = read_u16(record, 0)?;
-    let extension_length = read_u16(record, 4)?;
-    let payload_length = read_u16(record, 6)?;
-    let entry_count = read_u16(record, 12)?;
-    let start_receiver_flow_index = read_u16(record, 14)?;
-    let vector_offset = read_u16(record, 16)?;
-    let vector_length = usize::from(entry_count).checked_mul(VECTOR_ENTRY_WIDTH)?;
-    let expected_record_length = usize::from(vector_offset).checked_add(vector_length)?;
-    let flow_index_end =
-        u32::from(start_receiver_flow_index).checked_add(u32::from(entry_count))?;
-
-    if usize::from(record_length) != record.len()
-        || record_length % 4 != 0
-        || extension_length != EXTENSION_LENGTH
-        || 8usize
-            .checked_add(usize::from(extension_length))?
-            .checked_add(usize::from(payload_length))?
-            != record.len()
-        || vector_offset != expected_vector_offset
-        || expected_record_length != record.len()
-        || entry_count == 0
-        || flow_index_end > u32::from(u16::MAX) + 1
+fn geometry(record: &[u8], fixed: usize) -> Option<(usize, u16, u16, usize)> {
+    let payload = crate::heartbeat::monitoring_payload(record, fixed)?;
+    let count = read_u16(record, payload)?;
+    let first = read_u16(record, payload + 2)?;
+    let offset = usize::from(read_u16(record, payload + 4)?);
+    let end = offset.checked_add(usize::from(count).checked_mul(4)?)?;
+    if count == 0
+        || offset < payload + fixed
+        || end > record.len()
+        || u32::from(first) + u32::from(count) > 65536
     {
         return None;
     }
-
-    Some((record_length, extension_length, payload_length, entry_count))
-}
-
-fn parse_flow_latency_record(record: &[u8]) -> Option<HeartbeatFlowLatencyRecord> {
-    let (record_length, extension_length, payload_length, entry_count) =
-        validate_vector_geometry(record, 24, FLOW_LATENCY_VECTOR_OFFSET)?;
-    let start_receiver_flow_index = read_u16(record, 14)?;
-    let sample_rate_hertz = read_u32(record, 20)?;
-    if sample_rate_hertz == 0 {
-        return None;
-    }
-    let mut entries = Vec::with_capacity(usize::from(entry_count));
-    for entry_index in 0..entry_count {
-        let entry_offset = usize::from(FLOW_LATENCY_VECTOR_OFFSET)
-            .checked_add(usize::from(entry_index).checked_mul(VECTOR_ENTRY_WIDTH)?)?;
-        entries.push(HeartbeatFlowLatencyEntry {
-            receiver_flow_index: start_receiver_flow_index.checked_add(entry_index)?,
-            latency_sample_count: read_u32(record, entry_offset)?,
-        });
-    }
-
-    Some(HeartbeatFlowLatencyRecord {
-        record_length,
-        extension_length,
-        payload_length,
-        sequence: read_u16(record, 8)?,
-        unknown_word_at_offset_10: read_u16(record, 10)?,
-        entry_count,
-        start_receiver_flow_index,
-        vector_offset: read_u16(record, 16)?,
-        unknown_word_at_offset_18: read_u16(record, 18)?,
-        sample_rate_hertz,
-        entries,
-    })
-}
-
-fn parse_late_packet_record(record: &[u8]) -> Option<HeartbeatLatePacketRecord> {
-    let (record_length, extension_length, payload_length, entry_count) =
-        validate_vector_geometry(record, 20, LATE_PACKET_VECTOR_OFFSET)?;
-    let start_receiver_flow_index = read_u16(record, 14)?;
-    let mut entries = Vec::with_capacity(usize::from(entry_count));
-    for entry_index in 0..entry_count {
-        let entry_offset = usize::from(LATE_PACKET_VECTOR_OFFSET)
-            .checked_add(usize::from(entry_index).checked_mul(VECTOR_ENTRY_WIDTH)?)?;
-        entries.push(HeartbeatLatePacketEntry {
-            receiver_flow_index: start_receiver_flow_index.checked_add(entry_index)?,
-            late_packet_count: read_u32(record, entry_offset)?,
-        });
-    }
-
-    Some(HeartbeatLatePacketRecord {
-        record_length,
-        extension_length,
-        payload_length,
-        sequence: read_u16(record, 8)?,
-        unknown_word_at_offset_10: read_u16(record, 10)?,
-        entry_count,
-        start_receiver_flow_index,
-        vector_offset: read_u16(record, 16)?,
-        unknown_word_at_offset_18: read_u16(record, 18)?,
-        entries,
-    })
+    Some((payload, count, first, offset))
 }
 
 pub fn parse_heartbeat_connection_health_packet(
     data: &[u8],
 ) -> Option<HeartbeatConnectionHealthRecords> {
-    let records = parse_heartbeat_records(data)?;
-    let mut latency_records = Vec::new();
-    let mut late_packet_records = Vec::new();
-
-    for record in records {
-        match record.record_type {
-            FLOW_LATENCY_RECORD_TYPE => {
-                latency_records.push(parse_flow_latency_record(record.bytes)?);
-            }
-            LATE_PACKET_RECORD_TYPE => {
-                late_packet_records.push(parse_late_packet_record(record.bytes)?);
-            }
-            _ => {}
+    let mut result = HeartbeatConnectionHealthRecords {
+        device_extended_unique_identifier: parse_heartbeat_device_extended_unique_identifier(data)?,
+        latency_records: vec![],
+        late_packet_records: vec![],
+        diagnostics: vec![],
+    };
+    for record in parse_heartbeat_records(data)? {
+        let fixed = match record.record_type {
+            0x8003 => 12,
+            0x8004 => 8,
+            _ => continue,
+        };
+        let Some((payload, count, first, offset)) = geometry(record.bytes, fixed) else {
+            result.diagnostics.push(Diagnostic {
+                kind: "malformed_record".into(),
+                evidence: json!({"record_type": record.record_type, "raw_record": record.bytes}),
+            });
+            continue;
+        };
+        let sequence = read_u16(record.bytes, 8)?;
+        if record.record_type == 0x8003 {
+            result.latency_records.push(HeartbeatFlowLatencyRecord {
+                raw_record: record.bytes.to_vec(),
+                sequence,
+                sample_rate_hertz: read_u32(record.bytes, payload + 8)?,
+                entries: (0..count)
+                    .map(|i| {
+                        Some(HeartbeatFlowLatencyEntry {
+                            telemetry_index: first.checked_add(i)?,
+                            latency_sample_count: read_u32(
+                                record.bytes,
+                                offset + usize::from(i) * 4,
+                            )?,
+                        })
+                    })
+                    .collect::<Option<_>>()?,
+            });
+        } else {
+            result.late_packet_records.push(HeartbeatLatePacketRecord {
+                raw_record: record.bytes.to_vec(),
+                sequence,
+                entries: (0..count)
+                    .map(|i| {
+                        Some(HeartbeatLatePacketEntry {
+                            telemetry_index: first.checked_add(i)?,
+                            late_packet_count: read_u32(record.bytes, offset + usize::from(i) * 4)?,
+                        })
+                    })
+                    .collect::<Option<_>>()?,
+            });
         }
     }
-
-    if latency_records.is_empty() && late_packet_records.is_empty() {
-        return None;
-    }
-
-    Some(HeartbeatConnectionHealthRecords {
-        device_extended_unique_identifier: parse_heartbeat_device_extended_unique_identifier(data)?,
-        latency_records,
-        late_packet_records,
-    })
+    (!result.latency_records.is_empty()
+        || !result.late_packet_records.is_empty()
+        || !result.diagnostics.is_empty())
+    .then_some(result)
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct PreviousStream {
-    pub sequence: u16,
-    pub elapsed_seconds: f64,
+pub struct Topology {
+    pub inventory_family: Option<String>,
+    pub capacity: Option<Value>,
+    #[serde(default)]
+    pub complete: bool,
+    #[serde(default)]
+    pub flows: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ReceiverPath {
+    pub attribution_epoch: u64,
+    pub telemetry_index: u16,
+    pub network_interface_index: Option<u16>,
+    pub audio_receiver_flow_id: Option<u16>,
+    pub media_type: Option<String>,
+    pub global_flow_id: Option<u16>,
+    pub attribution_status: String,
+    pub attribution_reason: Option<String>,
+    pub evidence: Value,
+    pub latency: Series,
+    pub late_packets: Series,
+}
+
+impl ReceiverPath {
+    fn new(index: u16) -> Self {
+        Self {
+            attribution_epoch: 0,
+            telemetry_index: index,
+            network_interface_index: None,
+            audio_receiver_flow_id: None,
+            media_type: None,
+            global_flow_id: None,
+            attribution_status: "unresolved".into(),
+            attribution_reason: None,
+            evidence: Value::Null,
+            latency: Series::default(),
+            late_packets: Series::default(),
+        }
+    }
+    fn attribute(&mut self, topology: &Topology) {
+        let capacity = topology.capacity.as_ref().unwrap_or(&Value::Null);
+        let f = capacity["base_receive_flow_capacity"].as_u64().unwrap_or(0);
+        let n = capacity["network_interface_count"].as_u64().unwrap_or(0);
+        self.network_interface_index = None;
+        self.audio_receiver_flow_id = None;
+        self.media_type = None;
+        self.global_flow_id = None;
+        self.attribution_status = "unresolved".into();
+        self.attribution_reason = Some("Audio capacity or network topology is unavailable".into());
+        self.evidence = json!({"capacity": capacity, "inventory_complete": topology.complete});
+        if f == 0
+            || n == 0
+            || f > 65535
+            || n > 65535
+            || capacity["resource_extension_offset"].as_u64() != Some(0)
+            || !topology.complete
+            || topology.flows.iter().any(|flow| {
+                flow["media_type_code"].as_u64() != Some(3)
+                    && topology.inventory_family.as_deref() != Some("legacy")
+            })
+        {
+            return;
+        }
+        let index = u64::from(self.telemetry_index);
+        if index >= f * n {
+            self.attribution_reason = Some("Telemetry index exceeds advertised topology".into());
+            return;
+        }
+        let local_id = (index % f + 1) as u16;
+        self.network_interface_index = Some((index / f) as u16);
+        self.audio_receiver_flow_id = Some(local_id);
+        self.media_type = Some("audio".into());
+        let matches: Vec<_> = topology
+            .flows
+            .iter()
+            .filter(|flow| {
+                let id = if topology.inventory_family.as_deref() == Some("legacy") {
+                    &flow["flow_number"]
+                } else {
+                    &flow["media_local_flow_id"]
+                };
+                id.as_u64() == Some(u64::from(local_id))
+            })
+            .collect();
+        self.attribution_reason = Some("Audio receiver flow is not uniquely resolved".into());
+        if matches.len() == 1 {
+            self.global_flow_id = matches[0]["global_flow_id"]
+                .as_u64()
+                .or_else(|| matches[0]["flow_number"].as_u64())
+                .and_then(|v| u16::try_from(v).ok());
+            self.evidence["flow"] = matches[0].clone();
+            self.evidence["source"] = matches[0]["source"].clone();
+            self.evidence["configured_latency_nanoseconds"] =
+                matches[0]["latency_nanoseconds"].clone();
+            self.attribution_status = "resolved".into();
+            self.attribution_reason = None;
+        }
+        self.evidence["network_interface_index"] = json!(self.network_interface_index);
+        self.evidence["audio_receiver_flow_id"] = json!(local_id);
+        let flow = self.evidence["flow"].clone();
+        self.evidence["comparison_key"] = json!({"capacity": f, "networks": n,
+            "network": self.network_interface_index, "local_id": local_id,
+            "global_id": self.global_flow_id, "source": flow["source"], "flow_name": flow["flow_name"],
+            "endpoint": flow["endpoint_descriptor_hexadecimal"],
+            "mapping": flow["receiver_mapping_descriptor_hexadecimal"],
+            "budget": flow["latency_nanoseconds"]});
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ConnectionHealthUpdate {
+    pub device_extended_unique_identifier: String,
+    pub complete: bool,
     pub fresh: bool,
-    pub late_counts: Vec<HeartbeatLatePacketEntry>,
+    pub retention_limit: usize,
+    pub paths: Vec<ReceiverPath>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Deserialize)]
@@ -209,341 +252,134 @@ pub struct PreviousStream {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UpdateRequest {
     pub records: HeartbeatConnectionHealthRecords,
+    pub previous: Option<ConnectionHealthUpdate>,
+    pub topology: Topology,
+    pub observed_at: String,
+    pub observed_monotonic: f64,
     pub freshness_seconds: f64,
-    pub latency_previous: Option<PreviousStream>,
-    pub late_previous: Option<PreviousStream>,
+    pub history_limit: usize,
+    #[serde(default)]
+    pub refresh_only: bool,
+    #[serde(default)]
+    pub reset: bool,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct LatencySample {
-    pub receiver_flow_index: u16,
-    pub latency_sample_count: u32,
-    pub sample_rate_hertz: u32,
-    pub latency_nanoseconds: u64,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct LatencyUpdate {
-    pub sequence: u16,
-    pub preserve_history: bool,
-    pub samples: Vec<LatencySample>,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct LateSample {
-    pub receiver_flow_index: u16,
-    pub late_packet_count: u32,
-    pub late_packet_delta: Option<u32>,
-    pub preserve_history: bool,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct LateUpdate {
-    pub sequence: u16,
-    pub samples: Vec<LateSample>,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ConnectionHealthUpdate {
-    pub device_extended_unique_identifier: String,
-    pub latency: Option<LatencyUpdate>,
-    pub late_packets: Option<LateUpdate>,
-}
-
-fn sequence_progress(
-    previous: Option<&PreviousStream>,
-    sequence: u16,
-    freshness: f64,
-) -> Option<(bool, bool)> {
-    let Some(previous) = previous else {
-        return Some((false, false));
-    };
-
-    if !previous.elapsed_seconds.is_finite() || previous.elapsed_seconds < 0.0 {
-        return None;
-    }
-
-    if !previous.fresh || previous.elapsed_seconds >= freshness {
-        return Some((false, false));
-    }
-
-    let delta = sequence.wrapping_sub(previous.sequence);
-    (delta != 0 && delta < 0x8000).then_some((true, delta == 1))
-}
-
-fn common_sequence(sequences: impl Iterator<Item = u16>) -> Result<Option<u16>, String> {
-    let mut sequence = None;
-
-    for current in sequences {
-        if sequence.is_some_and(|previous| previous != current) {
-            return Err("connection-health records disagree on sequence".into());
-        }
-
-        sequence = Some(current);
-    }
-
-    Ok(sequence)
-}
-
-/// Validate both record families before returning any state change. The caller
-/// owns retention and observation timestamps; sequence and counter semantics live here.
 pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpdate>, String> {
-    let records = request.records;
-    let identity = &records.device_extended_unique_identifier;
-
-    if identity.len() != 16
-        || !identity.bytes().all(|byte| byte.is_ascii_hexdigit())
-        || identity.bytes().all(|byte| byte == b'0')
-        || !request.freshness_seconds.is_finite()
-        || request.freshness_seconds <= 0.0
-    {
-        return Err("invalid connection-health identity or freshness interval".into());
-    }
-
-    let latency_sequence =
-        common_sequence(records.latency_records.iter().map(|record| record.sequence))?;
-    let late_sequence = common_sequence(
-        records
-            .late_packet_records
-            .iter()
-            .map(|record| record.sequence),
+    crate::observation::validate_limits(
+        request.observed_monotonic,
+        request.freshness_seconds,
+        request.history_limit,
     )?;
-    let mut seen = HashSet::new();
-    let mut samples = Vec::new();
-
-    for record in records.latency_records {
-        if record.sample_rate_hertz == 0 || usize::from(record.entry_count) != record.entries.len()
-        {
-            return Err("invalid connection-health latency record".into());
-        }
-
+    let identity = &request.records.device_extended_unique_identifier;
+    if identity.len() != 16
+        || !identity.bytes().all(|c| c.is_ascii_hexdigit())
+        || identity.bytes().all(|c| c == b'0')
+    {
+        return Err("Invalid monitoring identity".into());
+    }
+    let mut state = request.previous.unwrap_or_default();
+    if !state.device_extended_unique_identifier.is_empty()
+        && state.device_extended_unique_identifier != *identity
+    {
+        return Err("Monitoring identity changed".into());
+    }
+    state.device_extended_unique_identifier = identity.clone();
+    state.retention_limit = request.history_limit;
+    let mut changed = false;
+    let diagnostic_count = state.diagnostics.len();
+    let mut observations = Vec::new();
+    for record in request.records.latency_records {
         for entry in record.entries {
-            if !seen.insert(entry.receiver_flow_index) {
-                return Err("duplicate connection-health latency flow".into());
-            }
-
-            let numerator = u64::from(entry.latency_sample_count) * 1_000_000_000;
-            let denominator = u64::from(record.sample_rate_hertz);
-            let quotient = numerator / denominator;
-            let twice_remainder = (numerator % denominator) * 2;
-            let round_up = twice_remainder > denominator
-                || (twice_remainder == denominator && quotient % 2 != 0);
-            samples.push(LatencySample {
-                receiver_flow_index: entry.receiver_flow_index,
-                latency_sample_count: entry.latency_sample_count,
-                sample_rate_hertz: record.sample_rate_hertz,
-                latency_nanoseconds: quotient + u64::from(round_up),
+            observations.push((
+                entry.telemetry_index,
+                false,
+                Observation::new(
+                    i64::from(entry.latency_sample_count),
+                    Some(record.sample_rate_hertz),
+                    Some(record.sequence),
+                    "receiver_latency",
+                    &request.observed_at,
+                    request.observed_monotonic,
+                    record.raw_record.clone(),
+                ),
+            ));
+        }
+    }
+    for record in request.records.late_packet_records {
+        for entry in record.entries {
+            observations.push((
+                entry.telemetry_index,
+                true,
+                Observation::new(
+                    i64::from(entry.late_packet_count),
+                    None,
+                    Some(record.sequence),
+                    "late_packets",
+                    &request.observed_at,
+                    request.observed_monotonic,
+                    record.raw_record.clone(),
+                ),
+            ));
+        }
+    }
+    for diagnostic in request.records.diagnostics {
+        if state.diagnostics.last() != Some(&diagnostic) {
+            state.diagnostics.push(diagnostic);
+        }
+    }
+    for (index, late, mut observation) in observations {
+        let position = state
+            .paths
+            .iter()
+            .position(|p| p.telemetry_index == index)
+            .unwrap_or_else(|| {
+                state.paths.push(ReceiverPath::new(index));
+                state.paths.len() - 1
             });
+        let path = &mut state.paths[position];
+        let previous_path = path.clone();
+        path.attribute(&request.topology);
+        if !previous_path.evidence.is_null()
+            && previous_path.evidence["comparison_key"] != path.evidence["comparison_key"]
+        {
+            path.attribution_epoch += 1;
         }
-    }
-
-    let latency = latency_sequence.and_then(|sequence| {
-        let (preserve_history, _) = sequence_progress(
-            request.latency_previous.as_ref(),
-            sequence,
+        observation.evidence = path.evidence.clone();
+        let series = if late {
+            &mut path.late_packets
+        } else {
+            &mut path.latency
+        };
+        let accepted = series.accept(
+            observation,
             request.freshness_seconds,
-        )?;
-        Some(LatencyUpdate {
-            sequence,
-            preserve_history,
-            samples,
-        })
-    });
-    seen.clear();
-    let mut late_values = Vec::new();
-
-    for record in records.late_packet_records {
-        if usize::from(record.entry_count) != record.entries.len() {
-            return Err("invalid connection-health late-packet record".into());
+            request.history_limit,
+            &mut state.diagnostics,
+        );
+        if !accepted {
+            *path = previous_path;
         }
-
-        for entry in record.entries {
-            if !seen.insert(entry.receiver_flow_index) {
-                return Err("duplicate connection-health late-packet flow".into());
+        changed |= accepted;
+    }
+    for path in &mut state.paths {
+        for series in [&mut path.latency, &mut path.late_packets] {
+            changed |= series.refresh(request.observed_monotonic, request.freshness_seconds);
+            if request.reset {
+                series.reset();
+                changed = true;
             }
-
-            late_values.push(entry);
         }
     }
-
-    let late_packets = late_sequence.and_then(|sequence| {
-        let (preserve, consecutive) = sequence_progress(
-            request.late_previous.as_ref(),
-            sequence,
-            request.freshness_seconds,
-        )?;
-        let previous: HashMap<_, _> = request
-            .late_previous
-            .as_ref()
-            .into_iter()
-            .flat_map(|stream| &stream.late_counts)
-            .map(|entry| (entry.receiver_flow_index, entry.late_packet_count))
-            .collect();
-        let samples = late_values
-            .into_iter()
-            .map(|entry| {
-                let prior = previous
-                    .get(&entry.receiver_flow_index)
-                    .filter(|count| preserve && **count <= entry.late_packet_count);
-                LateSample {
-                    receiver_flow_index: entry.receiver_flow_index,
-                    late_packet_count: entry.late_packet_count,
-                    late_packet_delta: prior
-                        .filter(|_| consecutive)
-                        .map(|count| entry.late_packet_count - count),
-                    preserve_history: prior.is_some(),
-                }
-            })
-            .collect();
-
-        Some(LateUpdate { sequence, samples })
-    });
-
-    Ok(
-        (latency.is_some() || late_packets.is_some()).then_some(ConnectionHealthUpdate {
-            device_extended_unique_identifier: records.device_extended_unique_identifier,
-            latency,
-            late_packets,
-        }),
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::heartbeat::{HEARTBEAT_HEADER_SIZE, HEARTBEAT_PROTOCOL};
-    use crate::test_support::decode_hexadecimal;
-
-    fn packet(records: &[u8]) -> Vec<u8> {
-        let length = HEARTBEAT_HEADER_SIZE + records.len();
-        let mut data = vec![0; HEARTBEAT_HEADER_SIZE];
-        data[0..2].copy_from_slice(&HEARTBEAT_PROTOCOL.to_be_bytes());
-        data[2..4].copy_from_slice(&u16::try_from(length).unwrap().to_be_bytes());
-        data[8..16].copy_from_slice(&decode_hexadecimal("001dc1fffe50368b"));
-        data.extend_from_slice(records);
-        data
+    state.fresh = state
+        .paths
+        .iter()
+        .any(|p| p.latency.fresh || p.late_packets.fresh);
+    state.paths.sort_by_key(|p| p.telemetry_index);
+    changed |= state.diagnostics.len() != diagnostic_count;
+    if state.diagnostics.len() > request.history_limit {
+        state
+            .diagnostics
+            .drain(..state.diagnostics.len() - request.history_limit);
     }
-
-    fn paired_records(sequence: u16, latency: [u32; 2], late_packet_counts: [u32; 2]) -> Vec<u8> {
-        let mut latency_record =
-            decode_hexadecimal("00208003000400140000000000020000001800000000bb800000000000000000");
-        latency_record[8..10].copy_from_slice(&sequence.to_be_bytes());
-        latency_record[24..28].copy_from_slice(&latency[0].to_be_bytes());
-        latency_record[28..32].copy_from_slice(&latency[1].to_be_bytes());
-
-        let mut late_packet_record =
-            decode_hexadecimal("001c8004000400100000000000020000001400000000000000000000");
-        late_packet_record[8..10].copy_from_slice(&sequence.to_be_bytes());
-        late_packet_record[20..24].copy_from_slice(&late_packet_counts[0].to_be_bytes());
-        late_packet_record[24..28].copy_from_slice(&late_packet_counts[1].to_be_bytes());
-        latency_record.extend_from_slice(&late_packet_record);
-        latency_record
-    }
-
-    #[test]
-    fn reproduces_baseline_treatment_and_cumulative_late_packet_records() {
-        let cases = [
-            (41130, [14, 0], [0, 0]),
-            (41132, [1006, 0], [825, 0]),
-            (41133, [14, 0], [825, 0]),
-        ];
-
-        for (sequence, latency, late_packet_counts) in cases {
-            let parsed = parse_heartbeat_connection_health_packet(&packet(&paired_records(
-                sequence,
-                latency,
-                late_packet_counts,
-            )))
-            .unwrap();
-
-            assert_eq!(parsed.latency_records[0].sequence, sequence);
-            assert_eq!(parsed.device_extended_unique_identifier, "001dc1fffe50368b");
-            assert_eq!(parsed.latency_records[0].sample_rate_hertz, 48_000);
-            assert_eq!(
-                parsed.latency_records[0].entries[0].latency_sample_count,
-                latency[0]
-            );
-            assert_eq!(
-                parsed.late_packet_records[0].entries[0].late_packet_count,
-                late_packet_counts[0]
-            );
-        }
-    }
-
-    #[test]
-    fn preserves_zero_based_receiver_flow_indices() {
-        let mut records = paired_records(0x406F, [0, 18], [0, 7]);
-        records[14..16].copy_from_slice(&7u16.to_be_bytes());
-        records[32 + 14..32 + 16].copy_from_slice(&7u16.to_be_bytes());
-        let parsed = parse_heartbeat_connection_health_packet(&packet(&records)).unwrap();
-
-        assert_eq!(parsed.latency_records[0].entries[0].receiver_flow_index, 7);
-        assert_eq!(parsed.latency_records[0].entries[1].receiver_flow_index, 8);
-        assert_eq!(
-            parsed.late_packet_records[0].entries[1].receiver_flow_index,
-            8
-        );
-    }
-
-    #[test]
-    fn rejects_malformed_target_geometry_without_partial_values() {
-        let valid = paired_records(41132, [1006, 0], [825, 0]);
-        for (offset, value) in [(16usize, 20u16), (32 + 12, 3), (32 + 16, 24)] {
-            let mut malformed = valid.clone();
-            malformed[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
-            assert_eq!(
-                parse_heartbeat_connection_health_packet(&packet(&malformed)),
-                None
-            );
-        }
-    }
-
-    #[test]
-    fn accepts_independent_record_families_and_rejects_invalid_records() {
-        let valid = paired_records(41132, [1006, 0], [825, 0]);
-
-        let mut zero_count = valid.clone();
-        zero_count[12..14].copy_from_slice(&0u16.to_be_bytes());
-        assert_eq!(
-            parse_heartbeat_connection_health_packet(&packet(&zero_count)),
-            None
-        );
-
-        let mut zero_rate = valid.clone();
-        zero_rate[20..24].copy_from_slice(&0u32.to_be_bytes());
-        assert_eq!(
-            parse_heartbeat_connection_health_packet(&packet(&zero_rate)),
-            None
-        );
-
-        let latency_only = parse_heartbeat_connection_health_packet(&packet(&valid[..32])).unwrap();
-        assert_eq!(latency_only.latency_records.len(), 1);
-        assert!(latency_only.late_packet_records.is_empty());
-
-        let late_packet_only =
-            parse_heartbeat_connection_health_packet(&packet(&valid[32..])).unwrap();
-        assert!(late_packet_only.latency_records.is_empty());
-        assert_eq!(late_packet_only.late_packet_records.len(), 1);
-
-        let mut overlapping = valid.clone();
-        let mut second_pair = paired_records(41132, [18, 0], [7, 0]);
-        second_pair[14..16].copy_from_slice(&1u16.to_be_bytes());
-        second_pair[32 + 14..32 + 16].copy_from_slice(&1u16.to_be_bytes());
-        overlapping.extend_from_slice(&second_pair);
-        let overlapping = parse_heartbeat_connection_health_packet(&packet(&overlapping)).unwrap();
-        assert_eq!(overlapping.latency_records.len(), 2);
-        assert_eq!(overlapping.late_packet_records.len(), 2);
-
-        let mut missing_identity = packet(&valid);
-        missing_identity[8..16].fill(0);
-        assert_eq!(
-            parse_heartbeat_connection_health_packet(&missing_identity),
-            None
-        );
-    }
+    Ok((changed || request.refresh_only).then_some(state))
 }

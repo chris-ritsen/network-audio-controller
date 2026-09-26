@@ -54,6 +54,7 @@ fn main() {
         "ArcProtocol": output::<netaudio_core::protocol::ArcProtocol>(),
         "ServiceAdvertisement": output::<netaudio_core::discovery::ServiceAdvertisement>(),
         "ClockPlan": output::<netaudio_core::clock_configuration::ClockPlan>(),
+        "PtpClockStatus": output::<netaudio_core::responses::PtpClockStatus>(),
         "SubscriptionStatus": output::<netaudio_core::subscription_status::SubscriptionStatus>(),
         "SubscriptionClassification": output::<netaudio_core::subscription_status::SubscriptionClassification>(),
         "ManagedSubscriptionStatus": output::<netaudio_core::subscription_status::ManagedSubscriptionStatus>(),
@@ -82,6 +83,7 @@ fn main() {
         "PerformanceCapabilities": output::<performance_configuration::PerformanceCapabilities>(),
         "PerformanceSnapshot": output::<performance_configuration::PerformanceSnapshot>(),
         "ConnectionHealthUpdate": output::<heartbeat_connection_health::ConnectionHealthUpdate>(),
+        "ClockObservations": output::<netaudio_core::heartbeat_clock::ClockObservations>(),
         "Availability": output::<capabilities::Availability>(),
         "ChannelCapacity": output::<sample_rate_topology::ChannelCapacity>(),
         "SampleRateStatus": output::<sample_rate_topology::SampleRateStatus>(),
@@ -90,6 +92,10 @@ fn main() {
         "SubscriptionPlan": output::<subscription_reconciliation::Plan>(),
     });
     let inputs = registry!({
+        "ClockProfile": input::<netaudio_core::clock_configuration::ClockProfile>(),
+        "ClockPlanRequest": input::<netaudio_core::clock_configuration::ClockPlanRequest>(),
+        "ClockReadbackRequest": input::<netaudio_core::clock_configuration::ClockReadbackRequest>(),
+        "ClockControl": input::<netaudio_core::commands::ClockControl>(),
         "ExportConfiguration": input::<netaudio_core::conmon_export::ExportConfiguration>(),
         "ConmonExportFragment": input::<netaudio_core::responses::ConmonExportFragment>(),
         "ExternalSubscriptionPlanRequest": input::<netaudio_core::spec::ExternalSubscriptionPlanRequest>(),
@@ -137,6 +143,7 @@ fn main() {
         "PerformanceFacts": input::<performance_configuration::PerformanceFacts>(),
         "PerformanceSnapshotFacts": input::<performance_configuration::PerformanceSnapshotFacts>(),
         "ConnectionHealthUpdateRequest": input::<heartbeat_connection_health::UpdateRequest>(),
+        "ClockObservationRequest": input::<netaudio_core::heartbeat_clock::ClockObservationRequest>(),
         "AvailabilityRequest": input::<capabilities::AvailabilityRequest>(),
         "SampleRateStatus": input::<sample_rate_topology::SampleRateStatus>(),
         "ChannelCapacity": input::<sample_rate_topology::ChannelCapacity>(),
@@ -149,6 +156,7 @@ fn main() {
         "outputs": outputs,
         "protocols": netaudio_core::protocol::protocol_catalog(),
         "discovery": {
+            "CLOCK_CONTROL_PROFILES": {"current": 0x073au16, "legacy": 0x0734u16},
             "CONTROLLER_AUTH_PORT": netaudio_core::controller_api::AUTH_PORT,
             "CONTROLLER_VERSIONS_PATH": netaudio_core::controller_api::VERSIONS_PATH,
             "SAP_MULTICAST_ADDRESS": netaudio_core::sap::MULTICAST_ADDRESS,

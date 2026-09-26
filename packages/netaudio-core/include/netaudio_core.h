@@ -422,21 +422,18 @@ NetaudioStatus netaudio_normalize_clock_subdomain(const char *json,
                                                   uintptr_t *out_length);
 
 /**
- * Resolve a clock revision from explicit and device-reported facts, returning a JSON integer.
- * Input keys: explicit_revision, clock_revision, model_revision, interface_revision.
- * Missing/null values are unavailable. Precedence follows that order; an explicit
- * revision conflicting with clock_revision or an invalid selected value is an error.
+ * Resolve the local control_profile, defaulting to the current serializer.
+ * Status, model, and interface revisions are not serializer selectors.
  */
-NetaudioStatus netaudio_clock_record_revision(const char *json,
+NetaudioStatus netaudio_clock_control_profile(const char *json,
                                               uint8_t *out_buffer,
                                               uintptr_t out_capacity,
                                               uintptr_t *out_length);
 
 /**
  * Normalize and validate clock changes; return requested, before, changes, and control as JSON.
- * Input: status (parsed clock status), changes, optional revisions (revision facts),
- * and optional supported_clock_sources (integer array). The status record supplies
- * clock_revision. Null changes are omitted; subdomain accepts a Latin-1 string or
+ * Input: status, changes, optional control_profile and supported_clock_sources.
+ * Null changes are omitted; subdomain accepts a Latin-1 string or
  * byte array and normalizes to 16 bytes with a NUL terminator and zero padding.
  * Pass control to the clock_control command and requested to the readback comparison.
  */
@@ -808,6 +805,14 @@ NetaudioStatus netaudio_inventory_state(NetaudioInventory *inventory,
                                         uint8_t *out_buffer,
                                         uintptr_t out_capacity,
                                         uintptr_t *out_length);
+
+/**
+ * Accept source-specific clock observations and compute bounded statistics.
+ */
+NetaudioStatus netaudio_clock_observation_update(const char *json,
+                                                 uint8_t *out_buffer,
+                                                 uintptr_t out_capacity,
+                                                 uintptr_t *out_length);
 
 /**
  * Return detailed and signal_presence scales, each indexed by the raw byte value.

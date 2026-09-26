@@ -86,7 +86,7 @@ fn representative_commands_keep_their_routes() {
     );
     assert_eq!(
         route_for(
-            r#"{"command":"clock_control","control":{"record_revision":1850,"clock_source":0}}"#
+            r#"{"command":"clock_control","control":{"control_profile":1850,"status_revision":1850,"clock_source":0}}"#
         ),
         (
             Target::Settings,
@@ -233,7 +233,7 @@ fn probe_encoding_keeps_its_message_type_independent_of_the_message_id() {
 fn refresh_clock_status_preserves_the_requested_sequence_and_mac() {
     let host_mac = [0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D];
     let routed = routed_with_assigned_id(
-        r#"{"command":"refresh_clock_status","record_revision":1850,"message_id":33}"#,
+        r#"{"command":"refresh_clock_status","control_profile":1850,"message_id":33}"#,
         host_mac,
         1,
     );

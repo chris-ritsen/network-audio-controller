@@ -38,17 +38,18 @@ def test_native_metering_scale_reaches_clients_with_signal_boundaries_and_specia
         0: (None, "clipping"),
         1: (0.0, "signal_present"),
         2: (-0.5, "signal_present"),
-        123: (-61.0, "signal_present"),
+        123: (-61.0, "below_threshold"),
         124: (-61.5, "below_threshold"),
         253: (-126.0, "below_threshold"),
         254: (None, "muted"),
-        255: (None, "unknown"),
+        255: (None, "framing_marker"),
     }
 
     assert len(scale) == 256
 
     for raw, (dbfs, state) in expected.items():
-        assert scale[raw] == {"dbfs": dbfs, "state": state}
+        assert scale[raw]["dbfs"] == dbfs
+        assert scale[raw]["state"] == state
         assert metering_value_dbfs(raw, "detailed") == dbfs
         assert classify_signal_presence(raw, "detailed") == state
 
@@ -65,14 +66,14 @@ def test_passive_measurements_keep_their_source_through_native_scale_and_http_sn
         assert metering_value_dbfs(raw, "signal_presence") == measured_dbfs
         assert metering_value_dbfs(raw, "detailed") == measured_dbfs + 0.5
 
-    assert classify_signal_presence(123, "detailed") == "signal_present"
+    assert classify_signal_presence(123, "detailed") == "below_threshold"
     assert classify_signal_presence(123, "signal_presence") == "below_threshold"
     assert classify_signal_presence(193, "signal_presence") == "below_threshold"
 
     for source in scales:
         assert metering_value_dbfs(254, source) is None
-        assert classify_signal_presence(254, source) == "muted"
-        assert classify_signal_presence(255, source) == "unknown"
+        assert classify_signal_presence(254, source) == ("muted" if source == "detailed" else "mute_or_floor")
+        assert classify_signal_presence(255, source) == ("framing_marker" if source == "detailed" else "mute_or_floor")
 
     for source in (None, "unknown", "managed"):
         assert metering_value_dbfs(40, source) is None
@@ -242,7 +243,7 @@ def test_passive_sample_reaches_transient_cache_with_raw_values_and_source_metad
     assert cached["rx"] == {1: 0x6D}
     assert cached["tx_raw"] == [0xFE, 0xFE]
     assert cached["rx_raw"] == [0x6D]
-    assert cached["tx_signal_presence"] == {1: "muted", 2: "muted"}
+    assert cached["tx_signal_presence"] == {1: "mute_or_floor", 2: "mute_or_floor"}
     assert cached["rx_signal_presence"] == {1: "signal_present"}
 
 
@@ -323,8 +324,8 @@ def test_heartbeat_channel_blocks_reach_meter_cache_without_losing_earlier_chann
     cached = manager.get_cached_levels("avio-bt-1")
     assert cached["tx"] == {1: 40, 2: 60, 5: 254, 6: 193}
     assert cached["rx"] == {1: 255, 9: 80}
-    assert cached["rx_signal_presence"][1] == "unknown"
-    assert cached["tx_signal_presence"][5] == "muted"
+    assert cached["rx_signal_presence"][1] == "mute_or_floor"
+    assert cached["tx_signal_presence"][5] == "mute_or_floor"
     assert cached["tx_signal_presence"][6] == "below_threshold"
 
     # A new packet is a new observation, not permission to retain old channels.

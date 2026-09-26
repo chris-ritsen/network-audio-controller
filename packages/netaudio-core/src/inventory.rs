@@ -7,6 +7,11 @@ use serde_json::{Map, Value};
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum InventoryState {
+    Partial {
+        next_command: Map<String, Value>,
+        inventory: (),
+        partial_inventory: Map<String, Value>,
+    },
     Pending {
         next_command: Map<String, Value>,
         inventory: (),

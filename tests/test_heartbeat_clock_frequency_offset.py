@@ -26,6 +26,7 @@ def test_authentic_qemu_control_and_treatment_decode_as_signed_parts_per_billion
 
     assert baseline == [
         {
+            "raw_record": list(BASELINE_PACKET[-16:]),
             "record_length": 16,
             "extension_length": 4,
             "payload_length": 4,

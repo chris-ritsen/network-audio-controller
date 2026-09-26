@@ -57,7 +57,7 @@ class MonitoringEventJournal:
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._conditions: dict[tuple[str, str, str], bool] = {}
         self._next_sequence = 1
-        self.issue_engine = IssueEngine(history_limit=max_events)
+        self.issue_engine = IssueEngine(history_limit=max_events, thresholds=self.thresholds)
 
     @classmethod
     def from_daemon_config(
@@ -627,21 +627,28 @@ class MonitoringEventJournal:
         after_health = current.get("receiver_flow_connection_health")
         before_flows = _flow_map(before_health)
         after_flows = _flow_map(after_health)
-        late_stream = after_health.get("late_packet_stream") if isinstance(after_health, dict) else None
-        late_stream_fresh = isinstance(late_stream, dict) and late_stream.get("fresh") is True
         for identity in sorted(before_flows.keys() & after_flows.keys()):
             before_flow = before_flows[identity]
             after_flow = after_flows[identity]
-            if late_stream_fresh:
+            late = after_flow.get("late_packets") or {}
+            prior = before_flow.get("late_packets") or {}
+            current_sample = late.get("current") or {}
+            prior_sample = prior.get("current") or {}
+            if (
+                late.get("fresh") is True
+                and (current_sample.get("evidence") or {}).get("comparison_key")
+                == (after_flow.get("evidence") or {}).get("comparison_key")
+                and current_sample.get("epoch") == prior_sample.get("epoch")
+            ):
                 self._observe_counter(
                     current,
                     timestamp,
                     generated,
                     identity=identity,
                     identity_keyword="flow_identity",
-                    previous_measurement=before_flow,
-                    current_measurement=after_flow,
-                    field="late_packet_count",
+                    previous_measurement=prior_sample,
+                    current_measurement=current_sample,
+                    field="raw",
                     increase_kind=MonitoringEventKind.LATE_PACKET_COUNT_INCREASED,
                     reset_kind=MonitoringEventKind.LATE_PACKET_COUNTER_RESET,
                     source="heartbeat_receiver_flow_late_packets",
@@ -651,13 +658,14 @@ class MonitoringEventJournal:
     def _observe_flow_latency(self, current, health, timestamp, generated) -> None:
         if not isinstance(health, dict):
             return
-        latency_stream = health.get("latency_stream")
-        if not isinstance(latency_stream, dict) or latency_stream.get("fresh") is not True:
-            return
         for identity, flow in _flow_map(health).items():
-            latency = flow.get("current_latency_nanoseconds")
+            series = flow.get("latency") or {}
+            sample = series.get("current") or {}
+            if series.get("fresh") is not True or sample.get("raw", 0) <= 0:
+                continue
+            latency = sample.get("value")
             configured = _configured_flow_latency(current, flow)
-            if not _unsigned_integer(latency) or not _positive_integer(configured):
+            if not _unsigned_number(latency) or not _positive_integer(configured):
                 continue
             warning = round(configured * self.thresholds.flow_latency_warning_ratio)
             recovery = round(configured * self.thresholds.flow_latency_recovery_ratio)
@@ -690,7 +698,7 @@ class MonitoringEventJournal:
                         "configured_latency_nanoseconds": configured,
                         "warning_threshold_nanoseconds": warning,
                         "recovery_threshold_nanoseconds": recovery,
-                        "latency_stream": health.get("latency_stream"),
+                        "latency_observation": sample,
                     },
                     "heartbeat_receiver_flow_latency",
                     DerivationStatus.DERIVED,
@@ -815,9 +823,13 @@ class MonitoringEventJournal:
     def _prime_conditions(self, snapshot) -> None:
         health = snapshot.get("receiver_flow_connection_health")
         for identity, flow in _flow_map(health).items():
-            latency = flow.get("current_latency_nanoseconds")
+            series = flow.get("latency") or {}
+            sample = series.get("current") or {}
+            if series.get("fresh") is not True or sample.get("raw", 0) <= 0:
+                continue
+            latency = sample.get("value")
             configured = _configured_flow_latency(snapshot, flow)
-            if _unsigned_integer(latency) and _positive_integer(configured):
+            if _unsigned_number(latency) and _positive_integer(configured):
                 warning = round(configured * self.thresholds.flow_latency_warning_ratio)
                 self._conditions[(str(snapshot["device_identity"]), "flow_latency", identity)] = latency >= warning
         link_speed_mbps = snapshot.get("link_speed_mbps")

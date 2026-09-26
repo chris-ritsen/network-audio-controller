@@ -12,7 +12,7 @@ from netaudio.dante.const import (
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
 from netaudio.dante.events import DanteEvent, EventType
-from netaudio.dante.metering import classify_signal_presence, parse_metering_levels
+from netaudio.dante.metering import classify_signal_presence, normalize_metering_value, parse_metering_levels
 from netaudio.dante.service import DanteMulticastService
 
 logger = logging.getLogger("netaudio")
@@ -71,6 +71,11 @@ class MeteringManager:
             "source_port": cached.get("source_port"),
             "metering_source": cached.get("metering_source"),
         }
+        for direction in ("tx", "rx"):
+            result[f"{direction}_normalized"] = {
+                channel: normalize_metering_value(raw, result["metering_source"])
+                for channel, raw in result[direction].items()
+            }
         for key in (
             "sequence",
             "tx_count",

@@ -191,18 +191,10 @@ pub fn build_query_receiver_flow_status(
     if !crate::protocol::is_modern_arc_protocol(protocol_id) || starting_flow == 0 {
         return Err(NetaudioError::InvalidFlowProtocol);
     }
-    if protocol_id == crate::protocol::PROTOCOL_ARC_280C && starting_flow != 1 {
-        return Err(NetaudioError::InvalidFlowSlot);
-    }
-
     let mut body = [0u8; 24];
     body[6..8].copy_from_slice(&1u16.to_be_bytes());
-    body[8..10].copy_from_slice(&starting_flow.to_be_bytes());
-    if protocol_id == crate::protocol::PROTOCOL_ARC_280C {
-        // Both contributed first-page requests carry this additional selector.
-        // Its continuation semantics have not been established by a capture.
-        body[10..12].copy_from_slice(&1u16.to_be_bytes());
-    }
+    body[8..10].copy_from_slice(&1u16.to_be_bytes());
+    body[10..12].copy_from_slice(&starting_flow.to_be_bytes());
 
     if protocol_id == PROTOCOL_ARC_2809 {
         body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);

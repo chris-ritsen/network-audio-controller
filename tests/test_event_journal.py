@@ -54,17 +54,26 @@ def snapshot(server_name: str = "receiver.local.") -> dict:
         "receiver_flow_latency_ns": 1_000_000,
         "receiver_flow_connection_health": {
             "fresh": True,
-            "latency_stream": {"sequence": 1, "observed_at": "2026-09-11T12:00:00Z", "fresh": True},
-            "late_packet_stream": {"sequence": 1, "observed_at": "2026-09-11T12:00:00Z", "fresh": True},
-            "flows": [
+            "paths": [
                 {
-                    "receiver_flow_index": 0,
-                    "receiver_flow_slot": 1,
-                    "current_latency_nanoseconds": 500_000,
-                    "average_latency_nanoseconds": 450_000,
-                    "peak_latency_nanoseconds": 600_000,
-                    "late_packet_count": 5,
-                    "late_packet_delta": 0,
+                    "telemetry_index": 0,
+                    "audio_receiver_flow_id": 1,
+                    "network_interface_index": 0,
+                    "attribution_status": "resolved",
+                    "evidence": {"configured_latency_nanoseconds": 1000000},
+                    "latency": {
+                        "fresh": True,
+                        "current": {
+                            "raw": 24,
+                            "value": 500000,
+                            "epoch": 0,
+                            "evidence": {"configured_latency_nanoseconds": 1000000},
+                        },
+                    },
+                    "late_packets": {
+                        "fresh": True,
+                        "current": {"raw": 5, "epoch": 0, "evidence": {"configured_latency_nanoseconds": 1000000}},
+                    },
                 }
             ],
         },
@@ -145,13 +154,13 @@ def test_late_packet_counter_increase_and_reset_are_not_conflated():
     observe(journal, initial, 0)
 
     increased = deepcopy(initial)
-    increased["receiver_flow_connection_health"]["flows"][0]["late_packet_count"] = 8
+    increased["receiver_flow_connection_health"]["paths"][0]["late_packets"]["current"]["raw"] = 8
     [event] = observe(journal, increased, 1)
     assert event.kind is MonitoringEventKind.LATE_PACKET_COUNT_INCREASED
     assert event.raw["delta"] == 3
 
     reset = deepcopy(increased)
-    reset["receiver_flow_connection_health"]["flows"][0]["late_packet_count"] = 1
+    reset["receiver_flow_connection_health"]["paths"][0]["late_packets"]["current"]["raw"] = 1
     [event] = observe(journal, reset, 2)
     assert event.kind is MonitoringEventKind.LATE_PACKET_COUNTER_RESET
     assert event.raw["delta"] is None
@@ -190,11 +199,19 @@ def test_threshold_hysteresis_prevents_latency_event_storms():
     kinds = []
     for second, latency in enumerate((810_000, 790_000, 610_000, 590_000, 610_000), start=1):
         value = deepcopy(value)
-        flow = value["receiver_flow_connection_health"]["flows"][0]
-        flow["current_latency_nanoseconds"] = latency
-        flow["average_latency_nanoseconds"] = latency
-        flow["peak_latency_nanoseconds"] = max(flow["peak_latency_nanoseconds"], latency)
-        kinds.extend(event.kind for event in observe(journal, value, second))
+        flow = value["receiver_flow_connection_health"]["paths"][0]
+        flow["latency"]["current"]["value"] = latency
+        flow["latency"]["current"]["raw"] = 24
+        flow["latency"]["current"]["observed_at"] = str(second)
+        kinds.extend(
+            event.kind
+            for event in observe(journal, value, second)
+            if event.kind
+            in {
+                MonitoringEventKind.RECEIVER_FLOW_LATENCY_HIGH,
+                MonitoringEventKind.RECEIVER_FLOW_LATENCY_RECOVERED,
+            }
+        )
 
     assert kinds == [
         MonitoringEventKind.RECEIVER_FLOW_LATENCY_HIGH,
@@ -202,7 +219,7 @@ def test_threshold_hysteresis_prevents_latency_event_storms():
     ]
     event = journal.list_events(kind=MonitoringEventKind.RECEIVER_FLOW_LATENCY_HIGH)[0]
     assert event.derivation_status is DerivationStatus.DERIVED
-    assert event.raw["flow_measurement"]["peak_latency_nanoseconds"] == 810_000
+    assert event.raw["flow_measurement"]["latency"]["current"]["value"] == 810_000
 
 
 def test_interface_utilization_hysteresis_uses_reported_rates_and_link_speed():
@@ -233,7 +250,7 @@ def test_unknown_or_missing_data_does_not_create_recovery_or_change_events():
     missing = deepcopy(failed)
     missing.pop("clock_role")
     missing["subscriptions"][0].pop("status")
-    missing["receiver_flow_connection_health"]["flows"][0].pop("current_latency_nanoseconds")
+    missing["receiver_flow_connection_health"]["paths"][0]["latency"]["current"].pop("value")
     assert observe(journal, missing, 1) == []
 
     available_again = deepcopy(missing)
@@ -396,12 +413,12 @@ def test_partial_receiver_inventory_cannot_report_latency_recovery(tmp_path):
     value = snapshot()
     value["receiver_flow_completeness"] = "complete"
     observe(journal, value, 0)
-    value["receiver_flow_connection_health"]["flows"][0]["current_latency_nanoseconds"] = 950_000
+    value["receiver_flow_connection_health"]["paths"][0]["latency"]["current"]["value"] = 950_000
     observe(journal, value, 1)
     partial = deepcopy(value)
     partial["receiver_flow_completeness"] = "partial"
     partial["receiver_flow_status_page"] = {"page_disposition": "more_pages", "result_code": 0x8112, "flows": []}
-    partial["receiver_flow_connection_health"]["flows"][0]["current_latency_nanoseconds"] = 100_000
+    partial["receiver_flow_connection_health"]["paths"][0]["latency"]["current"]["value"] = 100_000
     generated = observe(journal, partial, 2)
     assert all(event.kind is not MonitoringEventKind.RECEIVER_FLOW_LATENCY_RECOVERED for event in generated)
     assert partial["receiver_flow_status_page"]["result_code"] == 0x8112

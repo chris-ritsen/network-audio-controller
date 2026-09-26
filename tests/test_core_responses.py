@@ -58,7 +58,9 @@ def _channel_count_response(tx_count=260, rx_count=520):
 
 
 def test_channel_count_preserves_u16_counts():
-    assert core.parse_response("channel_count", bytes(_channel_count_response())) == {
+    result = core.parse_response("channel_count", bytes(_channel_count_response()))
+    assert result.pop("receiver_telemetry_capacity")["raw_response"] == list(_channel_count_response())
+    assert result == {
         "transmit_flow_authoring_capability_word": 0,
         "uses_modern_transmit_flow_authoring": False,
         "tx_count": 260,
@@ -98,7 +100,13 @@ def test_authoring_capabilities_are_consistent_from_wire_to_device(word, protoco
     controls = device.controls_data_from_core(
         {
             "name": "Receiver",
-            "counts": (260, 520, None, word),
+            "counts": {
+                "tx_count": 260,
+                "rx_count": 520,
+                "locked": None,
+                "transmit_flow_authoring_capability_word": word,
+                "receiver_telemetry_capacity": None,
+            },
             "rx": [],
             "tx": [],
             "channels_included": False,

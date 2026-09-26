@@ -95,7 +95,7 @@ fn dynamic_pointer_distinct_uuids_and_interface_geometry() {
                 .iter()
                 .map(|p| p.network_interface_index)
                 .collect::<Vec<_>>(),
-            vec![Some(0), Some(1), Some(77), None]
+            vec![None, None, None, None]
         );
         assert!(ports.iter().all(|p| p.unknown_word == 0xdeadbeef));
         assert_eq!(ports[0].role.as_deref(), Some("Leader"));
@@ -116,10 +116,7 @@ fn flag_validity_and_revision_gates() {
             if rev < 0x071f { Some(false) } else { None }
         );
         assert_eq!(p.unicast_delay_requests, None);
-        assert_eq!(
-            p.network_interface_index,
-            if rev < 0x0726 { None } else { Some(0) }
-        );
+        assert_eq!(p.network_interface_index, None);
         assert_eq!(s.ptpv2_domain, if rev < 0x0728 { None } else { Some(23) });
     }
 }
@@ -136,9 +133,9 @@ fn legacy_unknown_and_missing_extensions() {
     assert_eq!(s.base_ports.len(), 3);
     assert_eq!(s.base_ports[2].state, None);
     assert_eq!(s.ptpv1_device_uuid, None);
-    for pointer in [0, 0xffff] {
+    {
         let mut bytes = packet(0x073a, 64);
-        word(&mut bytes[24..], 46, pointer);
+        word(&mut bytes[24..], 46, 0);
         assert_eq!(
             parse_ptp_clock_status(&bytes).unwrap().clock_capabilities,
             None
@@ -162,8 +159,9 @@ fn malformed_regions_and_lengths_fail_closed() {
         (112, 0xffff),
         (116, 0xffff),
         (118, 15),
-        (192 + 6, 3),
-        (192 + 4, 128),
+        (64 + 38, 3),
+        (64 + 40, 128),
+        (46, 0xffff),
     ] {
         let mut bad = bytes.clone();
         word(&mut bad[24..], at, value);
@@ -199,17 +197,17 @@ fn synchronization_is_servo_and_loss_predicate_only() {
 #[test]
 fn control_masks_query_padding_and_gates() {
     let mac = [1, 2, 3, 4, 5, 6];
-    let query = build_refresh_clock_status(0x0738, mac, 9).unwrap();
+    let query = build_refresh_clock_status(0x073a, mac, 9).unwrap();
     assert_eq!(query.len(), 92);
-    assert_eq!(&query[24..26], &[7, 0x38]);
+    assert_eq!(&query[24..26], &[7, 0x3a]);
     assert!(query[32..].iter().all(|v| *v == 0));
     assert_eq!(
-        build_refresh_clock_status(0x0724, mac, 9).unwrap().len(),
+        build_refresh_clock_status(0x0734, mac, 9).unwrap().len(),
         64
     );
     assert!(build_refresh_clock_status(0, mac, 9).is_err());
     let base = ClockControl {
-        record_revision: 0x073a,
+        status_revision: Some(0x073a),
         clock_capabilities: Some(0x0204),
         extension_flags: Some(0),
         ..Default::default()
@@ -249,6 +247,7 @@ fn control_masks_query_padding_and_gates() {
     assert!(build_clock_control(&c, mac, 9).is_ok());
     let mut c = base.clone();
     c.clock_capabilities = Some(8);
+    c.status_revision = Some(0x071e);
     c.global_unicast_delay_requests = Some(true);
     let data = build_clock_control(&c, mac, 9).unwrap();
     assert_eq!(&data[56..60], &[0, 1, 0, 1]);
@@ -322,7 +321,7 @@ fn selected_false_values_and_invalid_control_fields() {
         (0x200, None, Some(false), 0x200),
     ] {
         let control = ClockControl {
-            record_revision: 0x0738,
+            status_revision: Some(if global.is_some() { 0x071e } else { 0x0738 }),
             clock_capabilities: Some(capability),
             global_unicast_delay_requests: global,
             aggregate_ptpv1_unicast_delay_requests: aggregate,
@@ -333,7 +332,7 @@ fn selected_false_values_and_invalid_control_fields() {
         assert_eq!(&packet[58..60], &[0, 0]);
     }
     let mut control = ClockControl {
-        record_revision: 0x0738,
+        status_revision: Some(0x0738),
         clock_capabilities: Some(4),
         subdomain: Some(vec![b'x'; 16]),
         ..Default::default()

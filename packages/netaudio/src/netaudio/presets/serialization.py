@@ -145,6 +145,11 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
         if getattr(device, "clock_source_code", None) is not None:
             config["clock_source_code"] = device.clock_source_code
         clock_status = getattr(device, "clock_status", None) or {}
+        from netaudio.dante.clock_control import observed_clock_configuration
+
+        extended_clock = observed_clock_configuration(clock_status)
+        if extended_clock:
+            config["clock_configuration"] = extended_clock
         for field in ("clock_subdomain", "global_unicast_delay_requests", "aggregate_ptpv1_unicast_delay_requests"):
             if clock_status.get(field) is not None:
                 config[field] = clock_status[field]

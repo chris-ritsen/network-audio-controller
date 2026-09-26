@@ -130,6 +130,7 @@ class DanteDevice:
         self.receiver_flows: list[dict] | None = None
         self.receiver_flow_completeness = "unknown"
         self.receiver_flow_status_page: dict | None = None
+        self.receiver_flow_partial_inventory: dict | None = None
         self.flow_protocol_id: int | None = None
         self.transmit_flow_authoring_capability_word: int | None = None
         self.transmit_flow_authoring: dict | None = None
@@ -186,6 +187,8 @@ class DanteDevice:
         self.interface_statistics: dict | None = None
         self.network_interface_traffic: dict | None = None
         self.receiver_flow_connection_health: dict | None = None
+        self.receiver_telemetry_capacity: dict | None = None
+        self.clock_observations: dict | None = None
         self.link_speed_mbps: int | None = None
         self.interface_reboot_required: bool = False
         self.interface_status_protocol: int | None = None
@@ -477,6 +480,7 @@ class DanteDevice:
             self.receiver_flow_completeness = "unknown"
             return
         self.receiver_flow_status_page = deepcopy(page)
+        self.receiver_flow_partial_inventory = None
         flows = [dict(flow) for flow in records]
         self.receiver_flows = flows
         reported_flow_count = page.get("reported_flow_count")
@@ -692,8 +696,8 @@ class DanteDevice:
         def _work(client):
             from netaudio import core
 
-            counts = client.get_channel_count()
-            tx_count, rx_count, _, _ = counts
+            counts = core.parse_response("channel_count", client.execute({"command": "channel_count"}))
+            tx_count, rx_count = counts["tx_count"], counts["rx_count"]
             if include_channels:
                 rx_inventory = client.get_rx_inventory(rx_count)
                 rx_channels = rx_inventory["channels"]
@@ -753,7 +757,11 @@ class DanteDevice:
         controls = {}
         if data["name"]:
             controls["name"] = data["name"]
-        tx_count, rx_count, locked, transmit_flow_authoring_capability_word = data["counts"]
+        counts = data["counts"]
+        tx_count, rx_count = counts["tx_count"], counts["rx_count"]
+        locked = counts["locked"]
+        transmit_flow_authoring_capability_word = counts["transmit_flow_authoring_capability_word"]
+        controls["receiver_telemetry_capacity"] = counts["receiver_telemetry_capacity"]
         controls["tx_count"] = tx_count
         controls["rx_count"] = rx_count
         controls["transmit_flow_authoring_capability_word"] = transmit_flow_authoring_capability_word
@@ -840,6 +848,8 @@ class DanteDevice:
             self.tx_count = self.tx_count_raw = data["tx_count"]
         if "rx_count" in data:
             self.rx_count = self.rx_count_raw = data["rx_count"]
+        if "receiver_telemetry_capacity" in data:
+            self.receiver_telemetry_capacity = data["receiver_telemetry_capacity"]
         if "transmit_flow_authoring_capability_word" in data:
             self.transmit_flow_authoring_capability_word = data["transmit_flow_authoring_capability_word"]
         if "transmit_flow_authoring" in data:

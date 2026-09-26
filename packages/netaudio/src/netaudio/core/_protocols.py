@@ -12,6 +12,7 @@ PROTOCOL_LABELS = {
     4608: "CMC",
     65535: "SETTINGS",
 }
+CLOCK_CONTROL_PROFILES = {"current": 1850, "legacy": 1844}
 CONTROLLER_AUTH_PORT = 8443
 CONTROLLER_VERSIONS_PATH = "/dapi"
 MEDIA_SERVICE_TYPES = ["_netaudio-chan._udp.local.", "_dantevideo._udp.local."]

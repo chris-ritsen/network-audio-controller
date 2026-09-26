@@ -35,6 +35,7 @@ pub struct FlowInventory {
     identifiers: HashSet<u16>,
     records: Vec<Value>,
     receiver_pages: Vec<Value>,
+    raw_pages: Vec<Vec<u8>>,
     complete: Option<Value>,
 }
 
@@ -65,6 +66,7 @@ impl FlowInventory {
             identifiers: HashSet::new(),
             records: Vec::new(),
             receiver_pages: Vec::new(),
+            raw_pages: Vec::new(),
             complete: None,
         })
     }
@@ -113,7 +115,8 @@ impl FlowInventory {
         let mut numbers = HashSet::with_capacity(page.identifiers.len());
 
         for number in &page.identifiers {
-            if *number > u16::from(page.capacity)
+            if *number == 0
+                || *number > u16::from(page.capacity)
                 || (self.direction == FlowDirection::Receiver && *number < self.starting_flow)
                 || self.identifiers.contains(number)
                 || !numbers.insert(*number)
@@ -125,7 +128,12 @@ impl FlowInventory {
         let next = match envelope.result_code {
             RESULT_CODE_SUCCESS => None,
             RESULT_CODE_MORE_PAGES => {
-                let next = numbers.iter().max().ok_or("flow page made no progress")? + 1;
+                let next = numbers
+                    .iter()
+                    .max()
+                    .ok_or("flow page made no progress")?
+                    .checked_add(1)
+                    .ok_or("flow identifier overflow")?;
 
                 if next <= self.starting_flow || next > u16::from(page.capacity) {
                     return Err("flow page made no progress");
@@ -142,6 +150,8 @@ impl FlowInventory {
         self.records.extend(page.records);
         self.pages += 1;
 
+        self.raw_pages.push(response.to_vec());
+
         if let Some(receiver_page) = page.receiver_page {
             self.receiver_pages.push(receiver_page);
         }
@@ -152,6 +162,8 @@ impl FlowInventory {
             final_page["reported_flow_count"] = json!(self.records.len());
             final_page["flows"] = json!(self.records);
             final_page["pages"] = json!(self.receiver_pages);
+            final_page["raw_pages"] = json!(self.raw_pages);
+            final_page["complete"] = json!(true);
             self.complete = Some(final_page);
         } else {
             self.complete = Some(json!({
@@ -219,6 +231,19 @@ impl FlowInventory {
             command.insert(field.into(), json!(self.protocol_id));
         }
 
-        InventoryState::pending(command)
+        if self.direction == FlowDirection::Receiver && self.pages > 0 {
+            InventoryState::Partial {
+                next_command: command,
+                inventory: (),
+                partial_inventory: serde_json::Map::from_iter([
+                    ("complete".into(), json!(false)),
+                    ("flows".into(), json!(self.records)),
+                    ("pages".into(), json!(self.receiver_pages)),
+                    ("raw_pages".into(), json!(self.raw_pages)),
+                ]),
+            }
+        } else {
+            InventoryState::pending(command)
+        }
     }
 }

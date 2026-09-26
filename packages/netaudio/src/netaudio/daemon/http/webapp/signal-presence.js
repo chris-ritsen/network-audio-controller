@@ -8,6 +8,8 @@ export const SIGNAL_MAX_AGE_MS = 5000;
 const STATES = {
   unknown: { state: "unknown", label: "Signal unavailable", icon: "signal-unknown" },
   muted: { state: "muted", label: "Muted", icon: "signal-muted" },
+  mute_or_floor: { state: "muted", label: "Muted or below meter floor", icon: "signal-muted" },
+  framing_marker: { state: "unknown", label: "Signal unavailable", icon: "signal-unknown" },
   clipping: { state: "clipping", label: "Clipping", icon: "signal-clipping", level: 1 },
   below_threshold: { state: "quiet", label: "No signal", icon: "signal-quiet" },
   signal_present: { state: "present", label: "Signal present", icon: "signal-high" },

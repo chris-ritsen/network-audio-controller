@@ -880,6 +880,7 @@ def _preserved_actions(config: dict) -> list[PresetAction]:
         "sample_rate_pullup",
         "clock_source_code",
         "clock_subdomain",
+        "clock_configuration",
         "global_unicast_delay_requests",
         "aggregate_ptpv1_unicast_delay_requests",
         "redundancy_mode",
@@ -978,6 +979,11 @@ async def _plan_device_actions(application, matched: MatchedPresetDevice) -> Pre
     }
     if "preferred_leader" in config and not getattr(matched.device, "requires_managed_control", False):
         clock_changes["preferred_leader"] = config["preferred_leader"]
+    if "clock_configuration" in config:
+        extended = config["clock_configuration"]
+        if not isinstance(extended, dict) or clock_changes.keys() & extended.keys():
+            raise ValueError("Clock configuration must be an object without duplicate settings")
+        clock_changes.update(extended)
     for category, requested in config.get("device_controls", {}).get("settings", {}).items():
         if "pair" in category.lower():
             actions.append(_unsupported("device_control", requested, "Pairing clearing is excluded from presets."))

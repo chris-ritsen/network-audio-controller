@@ -107,6 +107,7 @@ pub fn flow_authoring_capabilities(capability_word: u16) -> FlowAuthoringCapabil
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChannelCount {
+    pub receiver_telemetry_capacity: serde_json::Value,
     pub transmit_flow_authoring_capability_word: u16,
     pub uses_modern_transmit_flow_authoring: bool,
     pub tx_count: u16,
@@ -272,7 +273,23 @@ pub fn parse_channel_count(response: &[u8]) -> Option<ChannelCount> {
         return None;
     }
     let transmit_flow_authoring_capability_word = read_u16(response, RESPONSE_HEADER_SIZE)?;
+    let revision = read_u16(response, 0)?;
+    let field = |minimum, offset| {
+        (revision >= minimum)
+            .then(|| read_u16(response, offset))
+            .flatten()
+    };
     Some(ChannelCount {
+        receiver_telemetry_capacity: serde_json::json!({
+            "protocol_id": revision,
+            "base_transmit_flow_capacity": field(0x2600, 0x16),
+            "base_receive_flow_capacity": field(0x2600, 0x18),
+            "network_interface_count": field(0x2600, 0x1e),
+            "receiver_error_flag_mask": field(0x2711, 0x24),
+            "receiver_error_field_mask": field(0x2711, 0x26),
+            "resource_extension_offset": if revision < 0x2802 { Some(0) } else { field(0x2802, 0x2c) },
+            "raw_response": response,
+        }),
         transmit_flow_authoring_capability_word,
         uses_modern_transmit_flow_authoring: flow_authoring_capabilities(
             transmit_flow_authoring_capability_word,

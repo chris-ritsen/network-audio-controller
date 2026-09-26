@@ -12,13 +12,43 @@ pub fn control_availability(status: &Value) -> crate::commands::ClockControlAvai
             .and_then(Value::as_u64)
             .and_then(|value| u16::try_from(value).ok())
     };
-    crate::commands::ClockControl {
-        record_revision: field("record_revision").unwrap_or(0),
+    let mut availability = crate::commands::ClockControl {
+        status_revision: field("record_revision"),
         clock_capabilities: field("clock_capabilities"),
         extension_flags: field("extension_flags"),
         ..Default::default()
     }
-    .availability()
+    .availability();
+    availability.follower_only = field("record_revision").is_some_and(|r| r >= 0x0717)
+        && status.get("follower_only").is_some_and(Value::is_boolean);
+    let valid = status
+        .get("extended_validity")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let revision = field("record_revision").unwrap_or(0);
+    let available = |name: &str, bit: u32| {
+        revision >= 0x0739
+            && status.get(name).is_some_and(Value::is_u64)
+            && valid & (1u64 << bit) != 0u64
+    };
+    availability.priority_mapping = available("priority_mapping", 0);
+    availability.preferred_protocol = available("preferred_protocol", 1);
+    availability.ptpv2_clock_class = available("ptpv2_clock_class", 2);
+    availability.ptpv2_domain = revision >= 0x0728
+        && status.get("ptpv2_domain").is_some_and(Value::is_u64)
+        && field("extension_flags").is_some_and(|flags| flags & 0x0800 != 0);
+    availability.ptpv2_priority1 = available("ptpv2_priority1", 4);
+    availability.ptpv2_priority2 = available("ptpv2_priority2", 5);
+    availability.multicast_dscp = revision >= 0x073a && available("multicast_dscp", 6);
+    availability.ports = status
+        .get("extended_ports")
+        .and_then(Value::as_array)
+        .is_some_and(|ports| {
+            ports
+                .iter()
+                .any(|port| port.get("port_id").is_some_and(Value::is_u64))
+        });
+    availability
 }
 
 pub fn clock_source_name(source: u16) -> Option<&'static str> {
@@ -70,40 +100,29 @@ pub fn clock_sources(facts: ClockSourceFacts) -> ClockSources {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
-pub struct ClockRevisionFacts {
-    pub clock_revision: Option<Value>,
-    pub explicit_revision: Option<Value>,
-    pub model_revision: Option<Value>,
-    pub interface_revision: Option<Value>,
+pub struct ClockProfile {
+    pub control_profile: Option<u16>,
 }
 
-pub fn record_revision(facts: &ClockRevisionFacts) -> Result<u16, &'static str> {
-    if let (Some(explicit), Some(known)) = (&facts.explicit_revision, &facts.clock_revision) {
-        if explicit != known {
-            return Err("The explicit clock revision differs from the device clock status.");
-        }
+pub fn control_profile(profile: &ClockProfile) -> Result<u16, &'static str> {
+    match profile
+        .control_profile
+        .unwrap_or(crate::commands::default_clock_control_profile())
+    {
+        value @ (0x0734 | 0x073a) => Ok(value),
+        _ => Err("Unsupported clock control profile."),
     }
-
-    facts
-        .explicit_revision
-        .as_ref()
-        .or(facts.clock_revision.as_ref())
-        .or(facts.model_revision.as_ref())
-        .or(facts.interface_revision.as_ref())
-        .and_then(Value::as_u64)
-        .filter(|value| *value > 0 && *value <= u16::MAX.into())
-        .map(|value| value as u16)
-        .ok_or("Clock record revision is unavailable; supply an explicit record revision.")
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ClockPlanRequest {
     pub status: Map<String, Value>,
     pub changes: Map<String, Value>,
-    #[serde(default)]
-    pub revisions: ClockRevisionFacts,
+    pub control_profile: Option<u16>,
     #[serde(default)]
     pub supported_clock_sources: Vec<u16>,
 }
@@ -115,6 +134,9 @@ fn status_field(name: &str) -> Result<&str, &'static str> {
         "preferred_leader"
         | "global_unicast_delay_requests"
         | "aggregate_ptpv1_unicast_delay_requests" => Ok(name),
+        "follower_only" | "priority_mapping" | "preferred_protocol" | "ptpv2_clock_class"
+        | "ptpv2_domain" | "ptpv2_priority1" | "ptpv2_priority2" | "multicast_dscp" => Ok(name),
+        "ports" => Ok("extended_ports"),
         _ => Err("Unsupported clock settings"),
     }
 }
@@ -128,6 +150,12 @@ fn normalized_value_valid(name: &str, value: &Value) -> bool {
                     .iter()
                     .all(|byte| byte.as_u64().is_some_and(|value| value <= u8::MAX.into()))
         }),
+        "multicast_dscp" => value.as_u64().is_some_and(|v| v <= 63),
+        "priority_mapping" | "preferred_protocol" | "ptpv2_clock_class" | "ptpv2_domain"
+        | "ptpv2_priority1" | "ptpv2_priority2" => value.as_u64().is_some_and(|v| v <= 255),
+        "ports" => {
+            serde_json::from_value::<Vec<crate::commands::ClockPortControl>>(value.clone()).is_ok()
+        }
         _ => value.is_boolean(),
     }
 }
@@ -201,7 +229,7 @@ pub struct ClockPlan {
     pub control: Map<String, Value>,
 }
 
-pub fn plan_configuration(mut request: ClockPlanRequest) -> Result<ClockPlan, String> {
+pub fn plan_configuration(request: ClockPlanRequest) -> Result<ClockPlan, String> {
     for name in request.changes.keys() {
         status_field(name)?;
     }
@@ -212,12 +240,11 @@ pub fn plan_configuration(mut request: ClockPlanRequest) -> Result<ClockPlan, St
         );
     }
 
-    request.revisions.clock_revision = request
-        .status
-        .get("record_revision")
-        .filter(|value| !value.is_null())
-        .cloned();
-    let revision = record_revision(&request.revisions)?;
+    let profile = control_profile(&ClockProfile {
+        control_profile: request.control_profile,
+    })?;
+    let available = serde_json::to_value(control_availability(&json!(request.status)))
+        .map_err(|e| e.to_string())?;
     let mut requested = Map::new();
     let mut before = Map::new();
     let mut changed = Map::new();
@@ -241,7 +268,26 @@ pub fn plan_configuration(mut request: ClockPlanRequest) -> Result<ClockPlan, St
             .cloned()
             .unwrap_or(Value::Null);
 
+        if name == "ports" {
+            let (prior, pending) = plan_ports(&observed, &value)?;
+            if pending.as_array().is_some_and(|ports| !ports.is_empty()) {
+                changed.insert(name.clone(), pending);
+            }
+            before.insert(name.clone(), prior);
+            requested.insert(name, value);
+            continue;
+        }
+
+        if observed.is_null() {
+            return Err(format!("Fresh valid readback is unavailable for {name}."));
+        }
+
         if observed != value {
+            if available.get(&name) != Some(&Value::Bool(true)) {
+                return Err(format!(
+                    "The device's reported clock capabilities do not permit changing {name}."
+                ));
+            }
             changed.insert(name.clone(), value.clone());
         }
 
@@ -250,7 +296,15 @@ pub fn plan_configuration(mut request: ClockPlanRequest) -> Result<ClockPlan, St
     }
 
     let mut control = changed.clone();
-    control.insert("record_revision".into(), json!(revision));
+    control.insert("control_profile".into(), json!(profile));
+    control.insert(
+        "status_revision".into(),
+        request
+            .status
+            .get("record_revision")
+            .cloned()
+            .unwrap_or(Value::Null),
+    );
     control.insert(
         "clock_capabilities".into(),
         request
@@ -294,6 +348,7 @@ pub fn plan_configuration(mut request: ClockPlanRequest) -> Result<ClockPlan, St
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ClockReadbackRequest {
     pub status: Map<String, Value>,
@@ -312,8 +367,64 @@ pub fn configuration_matches(request: &ClockReadbackRequest) -> Result<bool, &'s
             return Err("Invalid normalized clock configuration value");
         }
 
-        matches &= request.status.get(status_name) == Some(expected);
+        if name == "ports" {
+            matches &= plan_ports(
+                request.status.get(status_name).unwrap_or(&Value::Null),
+                expected,
+            )
+            .is_ok_and(|(_, changes)| changes.as_array().is_some_and(Vec::is_empty));
+        } else {
+            matches &= request.status.get(status_name) == Some(expected);
+        }
     }
 
     Ok(matches)
+}
+
+fn plan_ports(observed: &Value, requested: &Value) -> Result<(Value, Value), String> {
+    let ports: Vec<crate::commands::ClockPortControl> =
+        serde_json::from_value(requested.clone()).map_err(|error| error.to_string())?;
+    let observed = observed
+        .as_array()
+        .ok_or("Fresh port readback is unavailable")?;
+    let mut seen = std::collections::HashSet::new();
+    let mut before = Vec::new();
+    let mut changes = Vec::new();
+
+    for port in ports {
+        if !(1..=64).contains(&port.port_id) || !seen.insert(port.port_id) {
+            return Err("Clock port IDs must be unique and between 1 and 64".into());
+        }
+        let matching: Vec<_> = observed
+            .iter()
+            .filter(|item| item.get("port_id") == Some(&json!(port.port_id)))
+            .collect();
+        if matching.len() != 1 {
+            return Err("Fresh unambiguous port readback is unavailable".into());
+        }
+        let mut prior = Map::from_iter([("port_id".into(), json!(port.port_id))]);
+        let mut pending = prior.clone();
+        let Value::Object(fields) = json!(port) else {
+            unreachable!()
+        };
+
+        for (name, desired) in fields {
+            if name == "port_id" || desired.is_null() {
+                continue;
+            }
+            let current = matching[0]
+                .get(&name)
+                .filter(|v| !v.is_null())
+                .ok_or_else(|| format!("Fresh valid port readback is unavailable for {name}"))?;
+            prior.insert(name.clone(), current.clone());
+            if current != &desired {
+                pending.insert(name, desired);
+            }
+        }
+        before.push(json!(prior));
+        if pending.len() > 1 {
+            changes.push(json!(pending));
+        }
+    }
+    Ok((json!(before), json!(changes)))
 }

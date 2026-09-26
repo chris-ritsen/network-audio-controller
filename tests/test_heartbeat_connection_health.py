@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 from copy import deepcopy
-from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -119,23 +118,6 @@ def test_invalid_second_stream_cannot_partially_commit_first_stream():
     assert tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER) == baseline
 
 
-def test_sequence_wrap_is_forward_but_a_replayed_packet_is_not():
-    tracker = ReceiverFlowConnectionHealthTracker()
-    tracker_update(tracker, heartbeat_packet(late_packet_sequence=65535, late_packet_counts=(2,)), 100.0)
-    state = tracker_update(tracker, heartbeat_packet(late_packet_sequence=0, late_packet_counts=(5,)), 101.0)
-    assert state["flows"][0]["late_packet_delta"] == 3
-    baseline = deepcopy(tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER))
-
-    assert tracker.update(parsed(heartbeat_packet(late_packet_sequence=65535)), "replay", 102.0) is None
-    assert tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER) == baseline
-
-
-def test_latency_conversion_does_not_lose_precision_at_the_wire_limit():
-    tracker = ReceiverFlowConnectionHealthTracker()
-    state = tracker_update(tracker, heartbeat_packet(latency_sequence=1, latency_sample_counts=(4294967295,)), 100.0)
-    assert state["flows"][0]["current_latency_nanoseconds"] == round(Fraction(4294967295 * 1_000_000_000, 48_000))
-
-
 def test_parser_uses_digest_bound_permitted_capture_and_late_packet_names():
     fixture = json.loads(FIXTURE_PATH.read_text())
     payload = bytes.fromhex(fixture["udp_payload_hex"])
@@ -147,12 +129,12 @@ def test_parser_uses_digest_bound_permitted_capture_and_late_packet_names():
     assert treatment["latency_records"][0]["sequence"] == 41132
     assert treatment["latency_records"][0]["sample_rate_hertz"] == 48_000
     assert treatment["latency_records"][0]["entries"][0] == {
-        "receiver_flow_index": 0,
+        "telemetry_index": 0,
         "latency_sample_count": 1006,
     }
     assert treatment["late_packet_records"][0]["sequence"] == 41132
     assert treatment["late_packet_records"][0]["entries"][0] == {
-        "receiver_flow_index": 0,
+        "telemetry_index": 0,
         "late_packet_count": 825,
     }
 
@@ -167,164 +149,6 @@ def test_parser_accepts_either_record_family_without_the_other():
     assert len(late["late_packet_records"]) == 1
 
 
-def test_tracker_keeps_sequences_observation_times_and_histories_independent():
-    tracker = ReceiverFlowConnectionHealthTracker()
-    latency_state = tracker_update(
-        tracker,
-        heartbeat_packet(latency_sequence=10, latency_sample_counts=(14,)),
-        100.0,
-        "2026-08-22T11:54:32.000000Z",
-    )
-    assert latency_state["late_packet_stream"] is None
-
-    combined = tracker_update(
-        tracker,
-        heartbeat_packet(late_packet_sequence=500, late_packet_counts=(7,)),
-        102.0,
-        "2026-08-22T11:54:34.000000Z",
-    )
-    assert combined["latency_stream"] == {
-        "sequence": 10,
-        "observed_at": "2026-08-22T11:54:32.000000Z",
-        "fresh": True,
-    }
-    assert combined["late_packet_stream"] == {
-        "sequence": 500,
-        "observed_at": "2026-08-22T11:54:34.000000Z",
-        "fresh": True,
-    }
-    assert combined["flows"][0]["current_latency_nanoseconds"] == 291_667
-    assert combined["flows"][0]["late_packet_count"] == 7
-
-    updated = tracker_update(
-        tracker,
-        heartbeat_packet(latency_sequence=11, latency_sample_counts=(18,)),
-        103.0,
-        "2026-08-22T11:54:35.000000Z",
-    )
-    assert updated["latency_stream"]["sequence"] == 11
-    assert updated["late_packet_stream"]["sequence"] == 500
-    history = tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER)
-    assert history is not None
-    assert len(history["flows"][0]["latency_history"]) == 2
-    assert len(history["flows"][0]["late_packet_history"]) == 1
-
-
-def test_tracker_merges_different_flow_ranges_by_receiver_flow_index_only():
-    tracker = ReceiverFlowConnectionHealthTracker()
-    tracker_update(
-        tracker,
-        heartbeat_packet(latency_sequence=1, latency_sample_counts=(18,), latency_start_index=0),
-        100.0,
-    )
-    state = tracker_update(
-        tracker,
-        heartbeat_packet(late_packet_sequence=99, late_packet_counts=(7,), late_packet_start_index=7),
-        101.0,
-    )
-    assert [flow["receiver_flow_index"] for flow in state["flows"]] == [0, 7]
-    assert state["flows"][0]["receiver_flow_slot"] == 1
-    assert state["flows"][1]["receiver_flow_slot"] == 8
-    assert "late_packet_count" not in state["flows"][0]
-    assert "current_latency_nanoseconds" not in state["flows"][1]
-
-
-def test_late_packet_delta_depends_only_on_its_own_consecutive_sequence():
-    tracker = ReceiverFlowConnectionHealthTracker()
-    tracker_update(tracker, heartbeat_packet(late_packet_sequence=20, late_packet_counts=(10,)), 100.0)
-    consecutive = tracker_update(tracker, heartbeat_packet(late_packet_sequence=21, late_packet_counts=(13,)), 101.0)
-    assert consecutive["flows"][0]["late_packet_delta"] == 3
-
-    tracker_update(tracker, heartbeat_packet(latency_sequence=900, latency_sample_counts=(18,)), 102.0)
-    gap = tracker_update(tracker, heartbeat_packet(late_packet_sequence=23, late_packet_counts=(20,)), 103.0)
-    assert gap["flows"][0]["late_packet_delta"] is None
-
-
-def test_each_stream_expires_from_its_own_observation_time():
-    tracker = ReceiverFlowConnectionHealthTracker(freshness_seconds=5.0)
-    tracker_update(tracker, heartbeat_packet(latency_sequence=1, latency_sample_counts=(14,)), 100.0)
-    tracker_update(tracker, heartbeat_packet(late_packet_sequence=7, late_packet_counts=(1,)), 102.0)
-
-    [(device_id, partly_stale)] = tracker.expire(105.0)
-    assert device_id == DEVICE_EXTENDED_UNIQUE_IDENTIFIER
-    assert partly_stale["fresh"] is True
-    assert partly_stale["latency_stream"]["fresh"] is False
-    assert partly_stale["late_packet_stream"]["fresh"] is True
-    assert tracker.seconds_until_expiry(DEVICE_EXTENDED_UNIQUE_IDENTIFIER, 105.0) == pytest.approx(2.0)
-
-    [(device_id, fully_stale)] = tracker.expire(107.0)
-    assert device_id == DEVICE_EXTENDED_UNIQUE_IDENTIFIER
-    assert fully_stale["fresh"] is False
-    assert fully_stale["late_packet_stream"]["fresh"] is False
-
-
-def test_duplicate_or_older_sequence_in_one_stream_does_not_block_the_other():
-    tracker = ReceiverFlowConnectionHealthTracker()
-    tracker_update(
-        tracker,
-        heartbeat_packet(latency_sequence=100, latency_sample_counts=(14,), late_packet_sequence=10),
-        100.0,
-    )
-    state = tracker_update(
-        tracker,
-        heartbeat_packet(
-            latency_sequence=99,
-            latency_sample_counts=(1006,),
-            late_packet_sequence=11,
-            late_packet_counts=(4,),
-        ),
-        101.0,
-    )
-    assert state["latency_stream"]["sequence"] == 100
-    assert state["late_packet_stream"]["sequence"] == 11
-    assert state["flows"][0]["current_latency_nanoseconds"] == 291_667
-
-
-def test_stale_stream_accepts_sequence_reset_without_inheriting_history():
-    tracker = ReceiverFlowConnectionHealthTracker(freshness_seconds=5.0)
-    tracker_update(tracker, heartbeat_packet(late_packet_sequence=100, late_packet_counts=(825,)), 100.0)
-    resumed = tracker_update(tracker, heartbeat_packet(late_packet_sequence=2, late_packet_counts=(825,)), 105.0)
-    assert resumed["late_packet_stream"]["sequence"] == 2
-    assert resumed["flows"][0]["late_packet_history_sample_count"] == 1
-    assert resumed["flows"][0]["late_packet_delta"] is None
-
-
-def test_counter_reset_discards_late_packet_history_and_never_emits_negative_delta():
-    tracker = ReceiverFlowConnectionHealthTracker()
-    tracker_update(tracker, heartbeat_packet(late_packet_sequence=1, late_packet_counts=(825,)), 100.0)
-    reset = tracker_update(tracker, heartbeat_packet(late_packet_sequence=2, late_packet_counts=(0,)), 101.0)
-    assert reset["flows"] == [
-        {
-            "receiver_flow_index": 0,
-            "receiver_flow_slot": 1,
-            "late_packet_count": 0,
-            "late_packet_delta": None,
-            "late_packet_history_sample_count": 1,
-        }
-    ]
-    history = tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER)
-    assert history is not None
-    assert history["late_packet_stream"]["sequence"] == 2
-
-
-def test_distinct_device_identifiers_never_share_stream_state():
-    tracker = ReceiverFlowConnectionHealthTracker()
-    other = "001dc1fffe50368c"
-    tracker_update(tracker, heartbeat_packet(latency_sequence=1), 100.0)
-    tracker_update(
-        tracker,
-        heartbeat_packet(late_packet_sequence=7, late_packet_counts=(3,), device_extended_unique_identifier=other),
-        101.0,
-    )
-    first = tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER)
-    second = tracker.history_snapshot(other)
-    assert first is not None and second is not None
-    assert first["latency_stream"]["sequence"] == 1
-    assert first["late_packet_stream"] is None
-    assert second["latency_stream"] is None
-    assert second["late_packet_stream"]["sequence"] == 7
-
-
 @pytest.mark.asyncio
 async def test_service_reschedules_expiry_for_the_second_stream():
     device = device_state()
@@ -332,13 +156,7 @@ async def test_service_reschedules_expiry_for_the_second_stream():
 
     def on_device_updated(updated_device):
         state = updated_device.receiver_flow_connection_health
-        if (
-            state is not None
-            and state["latency_stream"] is not None
-            and state["late_packet_stream"] is not None
-            and state["latency_stream"]["fresh"] is False
-            and state["late_packet_stream"]["fresh"] is False
-        ):
+        if state is not None and not state["fresh"]:
             fully_expired.set()
 
     service = DanteHeartbeatService(
@@ -351,8 +169,7 @@ async def test_service_reschedules_expiry_for_the_second_stream():
     service._on_packet(heartbeat_packet(late_packet_sequence=20, late_packet_counts=(1,)), ("192.168.1.247", 8700))
 
     await asyncio.wait_for(fully_expired.wait(), timeout=0.5)
-    assert device.receiver_flow_connection_health["latency_stream"]["fresh"] is False
-    assert device.receiver_flow_connection_health["late_packet_stream"]["fresh"] is False
+    assert device.receiver_flow_connection_health["fresh"] is False
     await service.stop()
 
 

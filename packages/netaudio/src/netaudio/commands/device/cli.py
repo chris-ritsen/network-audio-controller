@@ -44,6 +44,46 @@ class ClearConfigurationMode(str, Enum):
 
 app.command("list")(status_command)
 
+
+@app.command("diagnostics")
+def diagnostics(
+    device: str = typer.Argument(..., help="Device name or server name."),
+    reset: bool = typer.Option(False, "--reset", help="Reset local display statistics."),
+    export: bool = typer.Option(False, "--export", help="Export retained raw observations as JSON."),
+):
+    """Show retained receiver-path and clock measurements from the daemon."""
+    import asyncio
+    import json
+    from netaudio.daemon.client import get_diagnostics_from_daemon
+    from netaudio.commands.device.display import _connection_health_rows
+
+    status, data = asyncio.run(get_diagnostics_from_daemon(device, reset=reset))
+    if status != 200 or data is None:
+        typer.echo((data or {}).get("error", "The daemon did not respond"), err=True)
+        raise typer.Exit(1)
+
+    if export:
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    rows = _connection_health_rows(data.get("receiver"))
+    for source, series in (data.get("clock") or {}).items():
+        if source not in ("heartbeat", "conmon") or not series.get("current"):
+            continue
+        stats = series.get("statistics") or {}
+        rows.append(
+            [
+                f"{source.title()} clock offset",
+                f"{series['current']['value']} ppm; {'fresh' if series['fresh'] else 'stale'}",
+            ]
+        )
+        rows.append(["Clock observations", str(stats.get("count", 0))])
+        rows.append(
+            ["Clock mean / deviation", f"{stats.get('mean')} / {stats.get('population_standard_deviation')} ppm"]
+        )
+    output_table(["Measurement", "Value"], rows, json_data=data, title=device)
+
+
 from netaudio.commands.device.controls import app as controls_app
 
 app.add_typer(controls_app, name="controls")

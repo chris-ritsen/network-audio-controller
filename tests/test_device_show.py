@@ -245,47 +245,30 @@ def test_device_show_distinguishes_receiver_flow_setting_from_measured_latency()
             "frames_per_packet": 48,
         }
     ]
-    device.receiver_flow_connection_health = {
-        "fresh": True,
-        "flows": [
-            {
-                "receiver_flow_slot": 1,
-                "current_latency_nanoseconds": 291_667,
-                "average_latency_nanoseconds": 300_000,
-                "peak_latency_nanoseconds": 500_000,
-            }
-        ],
-    }
+    from tests.test_receiver_diagnostics import ReceiverFlowConnectionHealthTracker, update
+
+    tracker = ReceiverFlowConnectionHealthTracker()
+    device.receiver_flow_connection_health = update(tracker, 1, (0, (14,)))
 
     rows = dict(device_commands._device_show_rows(device))
 
     assert rows["Receiver Flow 1 Setting"] == "latency 1 ms; frames per packet 48; unicast"
-    assert rows["Receiver Flow Slot 1 Latency"] == "current 0.291667 ms; average 0.3 ms; peak 0.5 ms"
+    assert rows["Audio flow 1 · network 1"] == "reported maximum 291 µs; fresh"
 
 
 def test_device_show_exposes_receiver_flow_latency_and_late_packet_counts():
     device = make_show_device()
-    device.receiver_flow_connection_health = {
-        "fresh": True,
-        "observed_at": "2026-08-22T11:54:36.273409Z",
-        "flows": [
-            {
-                "receiver_flow_index": 0,
-                "receiver_flow_slot": 1,
-                "current_latency_nanoseconds": 291667,
-                "average_latency_nanoseconds": 5458334,
-                "peak_latency_nanoseconds": 20958333,
-                "late_packet_count": 825,
-                "late_packet_delta": 0,
-            }
-        ],
-    }
+    from tests.test_receiver_diagnostics import ReceiverFlowConnectionHealthTracker, update
+
+    tracker = ReceiverFlowConnectionHealthTracker()
+    device.receiver_flow_connection_health = update(tracker, 1, (0, (14,)))
 
     rows = dict(device_commands._device_show_rows(device))
 
-    assert rows["Receiver Flow Connection Health"] == "fresh; received 2026-08-22T11:54:36.273409Z"
-    assert rows["Receiver Flow Slot 1 Latency"] == "current 0.291667 ms; average 5.45833 ms; peak 20.9583 ms"
-    assert rows["Receiver Flow Slot 1 Late Packets"] == "count 825; delta +0"
+    assert rows["Audio flow 1 · network 1"] == "reported maximum 291 µs; fresh"
+    device.receiver_flow_connection_health = update(tracker, 1, (0, (825,)), late=True)
+    rows = dict(device_commands._device_show_rows(device))
+    assert rows["Late packets"] == "counter 825; increase 0; fresh"
 
 
 def test_device_show_includes_clock_frequency_offset_in_controller_units():
@@ -559,7 +542,13 @@ def test_explicitly_fetched_empty_channel_inventory_clears_stale_channels():
     controls = device.controls_data_from_core(
         {
             "name": None,
-            "counts": (0, 0, None, 0),
+            "counts": {
+                "tx_count": 0,
+                "rx_count": 0,
+                "locked": None,
+                "transmit_flow_authoring_capability_word": 0,
+                "receiver_telemetry_capacity": None,
+            },
             "aes67": None,
             "settings": None,
             "rx": [],
@@ -845,12 +834,16 @@ async def test_summary_control_fetch_skips_channel_pages(monkeypatch):
     device = make_show_device()
     core_client = MagicMock()
     core_client.get_device_name.return_value = "lx-dante"
-    core_client.get_channel_count.return_value = (128, 128, False, 0)
     core_client.get_device_settings.return_value = {"sample_rate": 48_000, "performance_values": []}
     core_client.get_property_directory.return_value = None
     core_client.get_aes67_configured.return_value = False
     core_client.execute.return_value = bytes.fromhex(
         "28090094180011000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110010030300028021007c000000f08060008c002200010063000100000064000000650222138c0212003083210090000f4240000f4240000f42400135f1b4000f424000000000000000000000000000000000ef450000001e8480"
+    )
+
+    settings_response = core_client.execute.return_value
+    core_client.execute.side_effect = lambda spec: (
+        bytes.fromhex("28090010000110000001000000800080") if spec["command"] == "channel_count" else settings_response
     )
 
     async def call_core(operation, request_timeout_milliseconds=None, request_attempts=None):

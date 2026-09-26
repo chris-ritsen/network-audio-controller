@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from netaudio.dante.clock_control import clock_record_revision, clock_status_fresh
+from netaudio.dante.clock_control import clock_status_fresh
 
 logger = logging.getLogger("netaudio")
 
@@ -26,10 +26,6 @@ class ClockStatusMonitor:
             observed = datetime.fromisoformat(device.clock_observed_at.replace("Z", "+00:00"))
             if (now - observed).total_seconds() < self.interval:
                 return
-        try:
-            clock_record_revision(device)
-        except (RuntimeError, ValueError):
-            return
         try:
             await self.application.probe_clocking_status(device, timeout=1.0)
         except (RuntimeError, ValueError, OSError) as exception:

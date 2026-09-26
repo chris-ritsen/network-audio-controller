@@ -695,7 +695,7 @@ class TestMutationVerification:
         assert status == 200
         assert response["clock_source_code"] == 0
         assert response["clock_subdomain"] == [0] * 16
-        http_server.application.probe_clocking_status.assert_awaited_once_with(device, record_revision=None)
+        http_server.application.probe_clocking_status.assert_awaited_once_with(device, control_profile=None)
 
     @pytest.mark.asyncio
     async def test_reboot_is_reported_as_accepted_but_unverified(self):

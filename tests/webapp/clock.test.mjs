@@ -44,6 +44,20 @@ function device() {
   };
 }
 
+test("extended clock controls require fresh native availability and readback", () => {
+  const value = device();
+  value.clock_status.ptpv2_priority1 = 128;
+  value.clock_status.multicast_dscp = 46;
+  value.clock_control_availability = { ptpv2_priority1: true, multicast_dscp: false };
+  let form = render(h(DeviceConfigSection, { device: value }));
+  assert.match(form, /PTPv2 priority 1/);
+  assert.doesNotMatch(form, /Multicast DSCP/);
+  assert.doesNotMatch(form, /Enable PTPv[12]/);
+  value.clock_observed_at = "2000-01-01T00:00:00Z";
+  form = render(h(DeviceConfigSection, { device: value }));
+  assert.doesNotMatch(form, /PTPv2 priority 1/);
+});
+
 test("clock details keep identities and unavailable flags separate", () => {
   const html = render(h(StatusSection, { device: device() }));
   for (const text of [

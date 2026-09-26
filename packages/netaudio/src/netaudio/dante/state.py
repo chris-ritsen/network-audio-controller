@@ -132,6 +132,28 @@ def apply_audio_capability(device, status: dict, *, kind: str) -> bool:
 
 
 def apply_device_status(device, kind: str, status) -> bool:
+    if kind == STATUS_KIND_CLOCK and "_clock_received_monotonic" in status:
+        from netaudio import core
+
+        fields = dict(status)
+        received = fields.pop("_clock_received_monotonic")
+        previous = getattr(device, "clock_observations", None)
+        current = ((previous or {}).get("conmon") or {}).get("current") or {}
+        if current.get("observed_at") != fields["clock_observed_at"]:
+            observed = core.clock_observation_update(
+                {
+                    "previous": previous,
+                    "packet": None,
+                    "conmon_status": fields["clock_status"],
+                    "observed_at": fields["clock_observed_at"],
+                    "observed_monotonic": received,
+                    "freshness_seconds": 5.0,
+                    "history_limit": 300,
+                }
+            )
+            if observed is not None:
+                fields["clock_observations"] = observed
+        return _assign_changed(device, fields)
     if kind == "panel_status":
         from netaudio.dante.panel_state import observe_panel
 

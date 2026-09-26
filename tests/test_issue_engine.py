@@ -151,7 +151,15 @@ def test_engine_covers_device_health_configuration_and_telemetry_categories():
             "ddm_clocking_state": {"locked": "UNLOCKED", "follower_without_leader": True},
             "receiver_flow_connection_health": {
                 "fresh": False,
-                "flows": [{"receiver_flow_slot": 2, "connected": False, "error_code": 7}],
+                "paths": [
+                    {
+                        "audio_receiver_flow_id": 2,
+                        "network_interface_index": 0,
+                        "attribution_status": "resolved",
+                        "connected": False,
+                        "error_code": 7,
+                    }
+                ],
             },
             "network_interface_traffic": {"fresh": False, "interfaces": []},
             "is_licensed": False,
@@ -275,7 +283,16 @@ def test_partial_receiver_inventory_cannot_resolve_an_absent_flow_issue():
     value = snapshot()
     value["receiver_flow_completeness"] = "complete"
     value["receiver_flows"] = [{"global_flow_id": number} for number in range(1, 17)]
-    value["receiver_flow_connection_health"] = {"flows": [{"receiver_flow_slot": 16, "healthy": False}]}
+    value["receiver_flow_connection_health"] = {
+        "paths": [
+            {
+                "audio_receiver_flow_id": 16,
+                "network_interface_index": 0,
+                "attribution_status": "resolved",
+                "healthy": False,
+            }
+        ]
+    }
     transitions = engine.observe_snapshot(value, timestamp="2026-09-12T12:00:00Z")
     issue = next(
         transition.current
@@ -289,7 +306,7 @@ def test_partial_receiver_inventory_cannot_resolve_an_absent_flow_issue():
         "result_code": 0x8112,
         "flows": value["receiver_flows"][:15],
     }
-    partial["receiver_flow_connection_health"] = {"flows": []}
+    partial["receiver_flow_connection_health"] = {"paths": []}
     transitions = engine.observe_snapshot(partial, timestamp="2026-09-12T12:00:01Z")
     assert all(transition.kind is not IssueTransitionKind.RESOLVED for transition in transitions)
     assert any(current.issue_id == issue.issue_id for current in engine.list_issues(state="open"))

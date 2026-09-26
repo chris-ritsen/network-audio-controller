@@ -32,6 +32,8 @@ def _state_label(row: MeterRow) -> str:
         "signal_present": "signal",
         "below_threshold": "quiet",
         "muted": "MUTED",
+        "mute_or_floor": "FLOOR",
+        "framing_marker": "UNKNOWN",
         "unknown": "UNKNOWN",
     }.get(row.indication, _clean_terminal_text(row.indication))
 
@@ -42,9 +44,13 @@ def _dbfs_label(level: int | None, source: str | None) -> str:
     value = metering_value_dbfs(level, source)
     if value is not None:
         return f"{value:.1f}"
-    return {"clipping": "clip", "muted": "mute", "unknown": "unknown"}.get(
-        classify_signal_presence(level, source), "--"
-    )
+    return {
+        "clipping": "clip",
+        "muted": "mute",
+        "mute_or_floor": "floor",
+        "framing_marker": "unknown",
+        "unknown": "unknown",
+    }.get(classify_signal_presence(level, source), "--")
 
 
 def _source_label(source: str | None) -> str:
@@ -73,6 +79,8 @@ def _state_appearance(row: MeterRow) -> tuple[str, str, str]:
         "signal_present": ("●", "signal", "92;1"),
         "below_threshold": (" ", "quiet", "90"),
         "muted": ("○", "MUTED", "90"),
+        "mute_or_floor": ("○", "FLOOR", "90"),
+        "framing_marker": ("?", "UNKNOWN", "93;1"),
         "unknown": ("?", "UNKNOWN", "93;1"),
     }.get(row.indication, ("?", _state_label(row), "93;1"))
 

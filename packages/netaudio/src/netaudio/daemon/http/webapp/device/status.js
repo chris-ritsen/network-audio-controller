@@ -2,6 +2,7 @@ import { Fields, OnlineState, Panel, Value } from "../components.js";
 import { aes67Status } from "../aes67.js";
 import * as format from "../format.js";
 import { html } from "../lib/preact.js";
+import { DiagnosticsSection } from "./diagnostics.js";
 
 export function StatusSection({ device }) {
   const subscriptions = (device.subscriptions || []).filter(
@@ -14,6 +15,7 @@ export function StatusSection({ device }) {
   const fresh = format.clockStatusFresh(device);
   return html`
     <div class="flex flex-col gap-4">
+      <${DiagnosticsSection} device=${device} />
       <div class="split">
         <${Panel} title="Device">
           <${Fields}
@@ -142,12 +144,12 @@ export function StatusSection({ device }) {
               ["PTPv2 domain", String(clock.ptpv2_domain ?? "unavailable")],
               ["Word clock", clock.word_clock_state ?? "unavailable"],
               [
-                "Frequency offset",
-                clock.clock_frequency_offset_parts_per_billion == null
+                "Clock-status frequency offset",
+                !fresh || clock.clock_frequency_offset_parts_per_billion == null
                   ? "unavailable"
                   : `${clock.clock_frequency_offset_parts_per_billion} ppb`,
               ],
-              ["Clock role", html`<${Value} value=${device.clock_role} />`],
+              ["Clock role", html`<${Value} value=${fresh ? device.clock_role : null} />`],
               [
                 "Preferred leader",
                 format.preferredLeader(device.preferred_leader),

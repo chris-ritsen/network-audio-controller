@@ -8,6 +8,7 @@ import logging
 import socket
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import ifaddr
@@ -47,6 +48,9 @@ from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
 
 logger = logging.getLogger("netaudio")
+
+if TYPE_CHECKING:
+    from netaudio.dante.services.heartbeat import DanteHeartbeatService
 
 DAEMON_SERVICE_TYPE = "_netaudio-relay._tcp.local."
 BONJOUR_MONITOR_INTERVAL_SECONDS = 5
@@ -166,6 +170,7 @@ class DaemonHTTPServer(
         mcp_token: str | None = None,
     ):
         self.application = application
+        self.diagnostics: DanteHeartbeatService | None = None
         self.mcp_token = mcp_token if mcp_token is not None else ensure_mcp_token()
         self.oauth_store = OAuthStore()
         self.server_info = {**server_info(), "mcp": self.mcp_server_info()}
@@ -264,6 +269,8 @@ class DaemonHTTPServer(
             "/ddm/domains/update": self._handle_ddm_update_domain,
             "/device-lock-key": self._handle_device_lock_key,
             "/settings/monitoring": self._handle_monitoring_settings,
+            "/diagnostics/reset": self._handle_reset_diagnostics,
+            "/diagnostics/policy": self._handle_diagnostics_policy,
             "/event-journal/operations": self._handle_append_operation_event,
             "/shutdown": self._handle_shutdown,
         }
@@ -864,6 +871,8 @@ class DaemonHTTPServer(
                 await self._handle_metering_snapshot(writer, unquote(route[len("/metering/snapshot/") :]))
             elif route == "/event-journal":
                 await self._handle_get_event_journal(writer, query)
+            elif route.startswith("/diagnostics/"):
+                await self._handle_diagnostics(writer, unquote(route[len("/diagnostics/") :]))
             elif route == "/issues":
                 await self._handle_get_issues(writer, query)
             else:

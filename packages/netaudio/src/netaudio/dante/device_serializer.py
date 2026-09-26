@@ -138,9 +138,12 @@ DEVICE_SCALAR_FIELDS = (
     "product_version",
     "product_name",
     "receiver_flow_connection_health",
+    "receiver_telemetry_capacity",
+    "clock_observations",
     "receiver_flow_completeness",
     "receiver_flow_latency_nanoseconds",
     "receiver_flow_status_page",
+    "receiver_flow_partial_inventory",
     "receiver_flows",
     "receiver_flow_inventory_family",
     "requested_sample_rate_pullup_raw_value",
@@ -347,7 +350,11 @@ class DanteDeviceSerializer:
                 setattr(device, field_name, data[json_field_name])
 
         if isinstance(device.receiver_flow_status_page, dict):
+            partial = device.receiver_flow_partial_inventory
             device.apply_receiver_flow_status_page(device.receiver_flow_status_page)
+            if isinstance(partial, dict) and partial.get("complete") is False:
+                device.receiver_flow_partial_inventory = partial
+                device.receiver_flow_completeness = "partial"
 
         if data.get("interface_reboot_required"):
             device.interface_reboot_required = True

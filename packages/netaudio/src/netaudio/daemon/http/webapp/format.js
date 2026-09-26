@@ -154,6 +154,8 @@ export function macAddress(device) {
 }
 
 export function stateLabel(value) {
+  if (value === "mute_or_floor") return "Muted or below meter floor";
+  if (value === "framing_marker") return "Signal unavailable";
   if (value === null || value === undefined || value === "") return ABSENT;
   if (value === "OK") return "OK";
   const words = String(value).replaceAll("_", " ").toLowerCase();

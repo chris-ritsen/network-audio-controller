@@ -576,6 +576,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             on_device_updated=self._emit_heartbeat_device_updated,
         )
         await self.heartbeat.start()
+        self.http_api.diagnostics = self.heartbeat
 
         self._register_event_listeners()
 

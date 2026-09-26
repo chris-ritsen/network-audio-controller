@@ -357,6 +357,10 @@ class DaemonConfigurationHandlers:
         )
 
     async def _handle_set_clock_configuration(self, writer, params):
+        if "record_revision" in params:
+            await self._send_json(writer, {"error": "Use control_profile to select the local clock serializer."}, 400)
+            return
+
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
@@ -368,7 +372,7 @@ class DaemonConfigurationHandlers:
 
         try:
             result = await self.application.set_clock_configuration(
-                device, changes, record_revision=params.get("record_revision")
+                device, changes, control_profile=params.get("control_profile")
             )
         except NetaudioCoreError as exception:
             if exception.category != "json_input":
@@ -381,13 +385,17 @@ class DaemonConfigurationHandlers:
         await self._send_json(writer, _json_safe(result), 200 if result["success"] else 409)
 
     async def _handle_refresh_clock(self, writer, params):
+        if "record_revision" in params:
+            await self._send_json(writer, {"error": "Use control_profile to select the local clock serializer."}, 400)
+            return
+
         from netaudio.monitoring.model import _json_safe
 
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
         try:
-            parsed = await self.application.probe_clocking_status(device, record_revision=params.get("record_revision"))
+            parsed = await self.application.probe_clocking_status(device, control_profile=params.get("control_profile"))
         except NetaudioCoreError as exception:
             if exception.category != "json_input":
                 raise

@@ -134,8 +134,8 @@ class DanteCommands:
     def clock_control(self, control: dict, host_mac=None) -> dict:
         return self._with_message_id({"command": "clock_control", "control": control}, host_mac)
 
-    def refresh_clock_status(self, record_revision: int, host_mac=None, message_id: int | None = None) -> dict:
-        specification = {"command": "refresh_clock_status", "record_revision": record_revision}
+    def refresh_clock_status(self, control_profile: int, host_mac=None, message_id: int | None = None) -> dict:
+        specification = {"command": "refresh_clock_status", "control_profile": control_profile}
 
         if message_id is None:
             return self._with_message_id(specification, host_mac)

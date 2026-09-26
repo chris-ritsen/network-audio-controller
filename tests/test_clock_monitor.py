@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
@@ -32,7 +32,7 @@ async def test_clock_monitor_uses_only_read_only_probes_and_skips_fresh_managed_
         probe_clocking_status=AsyncMock(),
     )
     await ClockStatusMonitor(app).poll_once()
-    app.probe_clocking_status.assert_awaited_once_with(direct, timeout=1.0)
+    assert app.probe_clocking_status.await_args_list == [call(direct, timeout=1.0), call(unknown, timeout=1.0)]
 
 
 @pytest.mark.asyncio

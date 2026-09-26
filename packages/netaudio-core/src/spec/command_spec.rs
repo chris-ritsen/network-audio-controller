@@ -414,7 +414,8 @@ pub(super) enum CommandSpec {
         message_id: u16,
     },
     RefreshClockStatus {
-        record_revision: u16,
+        #[serde(default = "commands::default_clock_control_profile")]
+        control_profile: u16,
         #[serde(default)]
         host_mac: Option<String>,
         #[serde(default)]
@@ -1107,11 +1108,11 @@ pub(super) fn build_command(
             message_id,
         )?,
         CommandSpec::RefreshClockStatus {
-            record_revision,
+            control_profile,
             host_mac,
             message_id,
         } => commands::build_refresh_clock_status(
-            record_revision,
+            control_profile,
             parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,

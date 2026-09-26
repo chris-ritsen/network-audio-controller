@@ -250,6 +250,8 @@ function ClockingControls({ device, requestName }) {
   const source = useRef(null);
   const subdomain = useRef(null);
   const unicast = useRef(null);
+  const [extended, setExtended] = useState({});
+  const [portChanges, setPortChanges] = useState({});
   const [changeSubdomain, setChangeSubdomain] = useState(false);
   const allowed = device.clock_control_availability || {};
   const fresh = format.clockStatusFresh(device);
@@ -260,7 +262,14 @@ function ClockingControls({ device, requestName }) {
   const unicastAllowed =
     fresh && (perPort || allowed.global_unicast_delay_requests === true);
   const apply = async () => {
-    const changes = {};
+    const changes = Object.fromEntries(Object.entries(extended).filter(([name]) => fresh && allowed[name] === true));
+    if (fresh && allowed.ports === true) {
+      const ports = Object.entries(portChanges).map(([port_id, fields]) => ({
+        port_id: Number(port_id),
+        ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value != null)),
+      })).filter((port) => Object.keys(port).length > 1);
+      if (ports.length) changes.ports = ports;
+    }
     if (preferredAllowed && preferred.current?.value !== "keep")
       changes.preferred_leader = preferred.current.value === "true";
     if (source.current?.value !== "keep")
@@ -343,6 +352,43 @@ function ClockingControls({ device, requestName }) {
                 onRun=${apply}
                 >Apply clock settings<//
               >
+              ${fresh && html`<details><summary>Advanced clock settings</summary>
+                ${[
+                  ["follower_only", "Follower only", null],
+                  ["ptpv2_domain", "PTPv2 domain", 255],
+                  ["ptpv2_priority1", "PTPv2 priority 1", 255],
+                  ["ptpv2_priority2", "PTPv2 priority 2", 255],
+                  ["multicast_dscp", "Multicast DSCP", 63],
+                ].filter(([name]) => allowed[name] === true && device.clock_status?.[name] != null)
+                  .map(([name, label, maximum]) => html`<${FieldRow} label=${label}>
+                    ${maximum == null
+                      ? html`<select onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "keep" ? null : event.target.value === "true" })}>
+                          <option value="keep">Keep current setting</option><option value="true">On</option><option value="false">Off</option>
+                        </select>`
+                      : html`<input type="number" min="0" max=${maximum} step="1" placeholder=${device.clock_status[name]}
+                          onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "" ? null : Number(event.target.value) })} />`}
+                  <//>`)}
+                ${(device.clock_status?.extended_ports || []).filter((port) => allowed.ports === true && port.port_id >= 1 && port.port_id <= 64).map((port) => html`
+                  <fieldset><legend>Port ${port.port_id}</legend>
+                    ${[
+                      ["ttl", "Multicast TTL", 0, 255],
+                      ["sync_interval", "Sync interval (log seconds)", -128, 127],
+                      ["announce_interval", "Announce interval (log seconds)", -128, 127],
+                      ["delay_request_interval", "Delay-request interval (log seconds)", -128, 127],
+                      ["peer_delay_interval", "Peer-delay interval (log seconds)", -128, 127],
+                    ].filter(([name]) => port[name] != null).map(([name, label, minimum, maximum]) => html`
+                      <${FieldRow} label=${label}><input type="number" min=${minimum} max=${maximum} step="1" placeholder=${port[name]}
+                        onChange=${(event) => setPortChanges({ ...portChanges, [port.port_id]: {
+                          ...portChanges[port.port_id], [name]: event.target.value === "" ? null : Number(event.target.value),
+                        } })} /><//>`)}
+                    ${port.follower_only != null && html`<${FieldRow} label="Follower only"><select
+                      onChange=${(event) => setPortChanges({ ...portChanges, [port.port_id]: {
+                        ...portChanges[port.port_id], follower_only: event.target.value === "keep" ? null : event.target.value === "true",
+                      } })}>
+                      <option value="keep">Keep current setting</option><option value="true">On</option><option value="false">Off</option>
+                    </select><//>`}
+                  </fieldset>`)}
+              </details>`}
             `
       }
     <//>

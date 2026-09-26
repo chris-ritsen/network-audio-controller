@@ -12,6 +12,8 @@ const PRESENCE_LABELS = {
   signal_present: "Signal",
   clipping: "Clipping",
   muted: "Muted",
+  mute_or_floor: "Muted or below meter floor",
+  framing_marker: "Signal unavailable",
   unknown: "Unknown",
 };
 

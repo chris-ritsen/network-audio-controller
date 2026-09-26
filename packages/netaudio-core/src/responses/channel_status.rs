@@ -445,7 +445,7 @@ pub fn parse_modern_arc_receiver_flow_status_page(
 
     let maximum_flow_slots = *body.get(6)?;
     let reported_flow_count = *body.get(7)?;
-    if !(1..=32).contains(&maximum_flow_slots) || reported_flow_count > maximum_flow_slots {
+    if maximum_flow_slots == 0 || reported_flow_count > maximum_flow_slots {
         return None;
     }
     if reported_flow_count == 0 && envelope.result_code != RESULT_CODE_SUCCESS {

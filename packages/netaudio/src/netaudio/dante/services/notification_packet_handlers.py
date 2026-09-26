@@ -277,6 +277,7 @@ def _parse_ptp_clock_status(data: bytes, source_ip: str, device) -> ParsedStatus
     status["clock_subdomain"] = bytes(name) if name is not None else None
     status["clock_status"] = parsed
     status["clock_observed_at"] = datetime.now(timezone.utc).isoformat()
+    status["_clock_received_monotonic"] = time.monotonic()
     return ParsedStatus(STATUS_KIND_CLOCK, status, status)
 
 

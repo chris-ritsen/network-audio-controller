@@ -94,12 +94,12 @@ def test_authentic_non_8700_heartbeat_families_parse_and_update_devices(
     assert device.network_interface_traffic["device_extended_unique_identifier"] == expected_identifier
     assert device.network_interface_traffic["interface_entry_count"] == expected_interface_count
     assert device.receiver_flow_connection_health["device_extended_unique_identifier"] == expected_identifier
-    flows = device.receiver_flow_connection_health["flows"]
-    assert [flow["receiver_flow_index"] for flow in flows] == list(range(expected_receiver_flow_count))
+    flows = device.receiver_flow_connection_health["paths"]
+    assert [flow["telemetry_index"] for flow in flows] == list(range(expected_receiver_flow_count))
     assert [
-        flow["receiver_flow_index"] for flow in flows if flow["current_latency_nanoseconds"] > 0
+        flow["telemetry_index"] for flow in flows if flow["latency"]["current"]["value"] > 0
     ] == expected_active_receiver_flow_indices
-    assert [flow["receiver_flow_slot"] for flow in flows] == list(range(1, expected_receiver_flow_count + 1))
+    assert all(flow["audio_receiver_flow_id"] is None for flow in flows)
     assert device.update_last_seen.call_count == 2
     assert on_device_updated.call_count == 2
 
@@ -180,10 +180,10 @@ def test_replaced_device_object_starts_new_identity_owned_history():
     )
     source_address = (fixture["source_ipv4"], fixture["source_udp_port"])
     service._on_packet(connection_payload, source_address)
-    assert first_device.receiver_flow_connection_health["flows"][0]["latency_history_sample_count"] == 1
+    assert first_device.receiver_flow_connection_health["paths"][0]["latency"]["statistics"]["count"] == 1
 
     current_device = replacement_device
     service._on_packet(connection_payload, source_address)
 
     assert first_device.receiver_flow_connection_health is None
-    assert replacement_device.receiver_flow_connection_health["flows"][0]["latency_history_sample_count"] == 1
+    assert replacement_device.receiver_flow_connection_health["paths"][0]["latency"]["statistics"]["count"] == 1

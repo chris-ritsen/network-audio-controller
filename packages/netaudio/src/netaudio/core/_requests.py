@@ -110,6 +110,128 @@ class ChannelSlot(_extensions.TypedDict):
     transmitter_channel: int
 
 
+class ClockPortControl(_extensions.TypedDict):
+    announce_interval: _extensions.NotRequired[_typing.Union[int, None]]
+    delay_mechanism: _extensions.NotRequired[_typing.Union[int, None]]
+    delay_request_interval: _extensions.NotRequired[_typing.Union[int, None]]
+    follower_only: _extensions.NotRequired[_typing.Union[bool, None]]
+    peer_delay_interval: _extensions.NotRequired[_typing.Union[int, None]]
+    port_id: int
+    sync_interval: _extensions.NotRequired[_typing.Union[int, None]]
+    ttl: _extensions.NotRequired[_typing.Union[int, None]]
+
+
+class ClockControl(_extensions.TypedDict):
+    advanced: _extensions.NotRequired[bool]
+    aggregate_ptpv1_unicast_delay_requests: _extensions.NotRequired[_typing.Union[bool, None]]
+    aggregate_ptpv2_unicast_delay_requests: _extensions.NotRequired[_typing.Union[bool, None]]
+    clock_capabilities: _extensions.NotRequired[_typing.Union[int, None]]
+    clock_source: _extensions.NotRequired[_typing.Union[int, None]]
+    control_profile: _extensions.NotRequired[int]
+    extension_flags: _extensions.NotRequired[_typing.Union[int, None]]
+    follower_only: _extensions.NotRequired[_typing.Union[bool, None]]
+    global_unicast_delay_requests: _extensions.NotRequired[_typing.Union[bool, None]]
+    multicast_dscp: _extensions.NotRequired[_typing.Union[int, None]]
+    ports: _extensions.NotRequired[list[ClockPortControl]]
+    preferred_leader: _extensions.NotRequired[_typing.Union[bool, None]]
+    preferred_protocol: _extensions.NotRequired[_typing.Union[int, None]]
+    priority_mapping: _extensions.NotRequired[_typing.Union[int, None]]
+    ptpv1_enabled: _extensions.NotRequired[_typing.Union[bool, None]]
+    ptpv2_clock_class: _extensions.NotRequired[_typing.Union[int, None]]
+    ptpv2_domain: _extensions.NotRequired[_typing.Union[int, None]]
+    ptpv2_enabled: _extensions.NotRequired[_typing.Union[bool, None]]
+    ptpv2_priority1: _extensions.NotRequired[_typing.Union[int, None]]
+    ptpv2_priority2: _extensions.NotRequired[_typing.Union[int, None]]
+    status_revision: _extensions.NotRequired[_typing.Union[int, None]]
+    subdomain: _extensions.NotRequired[_typing.Union[list[int], None]]
+    supported_clock_sources: _extensions.NotRequired[list[int]]
+
+
+class Observation(_extensions.TypedDict):
+    clock_state_evidence: _extensions.NotRequired[JsonValue]
+    display_epoch: int
+    epoch: int
+    evidence: JsonValue
+    latency_microseconds: _extensions.NotRequired[_typing.Union[int, None]]
+    observed_at: str
+    observed_monotonic: float
+    raw: int
+    raw_record: list[int]
+    record_type: int
+    sample_rate_hertz: _extensions.NotRequired[_typing.Union[int, None]]
+    sequence: _extensions.NotRequired[_typing.Union[int, None]]
+    sequence_gap: int
+    source: str
+    timestamp_provenance: str
+    value: _extensions.NotRequired[_typing.Union[float, None]]
+    value_unit: str
+
+
+class Series(_extensions.TypedDict):
+    baseline: _extensions.NotRequired[_typing.Union[int, None]]
+    current: _extensions.NotRequired[_typing.Union[Observation, None]]
+    delta: _extensions.NotRequired[_typing.Union[int, None]]
+    display_epoch: int
+    fresh: bool
+    histogram: JsonValue
+    history: list[Observation]
+    increase_since_baseline: _extensions.NotRequired[_typing.Union[int, None]]
+    statistics: JsonValue
+
+
+class Diagnostic(_extensions.TypedDict):
+    evidence: JsonValue
+    kind: str
+
+
+class ClockVariation(_extensions.TypedDict):
+    active: bool
+    deviation_ppb: _extensions.NotRequired[_typing.Union[float, None]]
+    last_epoch: _extensions.NotRequired[_typing.Union[int, None]]
+    last_observed_monotonic: _extensions.NotRequired[_typing.Union[float, None]]
+    observable: bool
+    recovered: bool
+    recovery_since: _extensions.NotRequired[_typing.Union[float, None]]
+    threshold_ppb: int
+    window_size: int
+
+
+class ClockObservations(_extensions.TypedDict):
+    conmon: Series
+    diagnostics: list[Diagnostic]
+    heartbeat: Series
+    variation: _extensions.NotRequired[dict[str, ClockVariation]]
+    warning_enabled: _extensions.NotRequired[bool]
+
+
+class ClockObservationRequest(_extensions.TypedDict):
+    conmon_status: _extensions.NotRequired[JsonValue]
+    freshness_seconds: float
+    history_limit: int
+    observed_at: str
+    observed_monotonic: float
+    packet: _extensions.NotRequired[_typing.Union[list[int], None]]
+    previous: _extensions.NotRequired[_typing.Union[ClockObservations, None]]
+    reset: _extensions.NotRequired[bool]
+    warning_enabled: _extensions.NotRequired[_typing.Union[bool, None]]
+
+
+class ClockPlanRequest(_extensions.TypedDict):
+    changes: dict[str, JsonValue]
+    control_profile: _extensions.NotRequired[_typing.Union[int, None]]
+    status: dict[str, JsonValue]
+    supported_clock_sources: _extensions.NotRequired[list[int]]
+
+
+class ClockProfile(_extensions.TypedDict):
+    control_profile: _extensions.NotRequired[_typing.Union[int, None]]
+
+
+class ClockReadbackRequest(_extensions.TypedDict):
+    requested: dict[str, JsonValue]
+    status: dict[str, JsonValue]
+
+
 class ClockSourceFacts(_extensions.TypedDict):
     current: _extensions.NotRequired[JsonValue]
     supported: list[JsonValue]
@@ -141,61 +263,76 @@ class ConmonExportFragment(_extensions.TypedDict):
     total_encoded_size: int
 
 
+class ReceiverPath(_extensions.TypedDict):
+    attribution_epoch: int
+    attribution_reason: _extensions.NotRequired[_typing.Union[str, None]]
+    attribution_status: str
+    audio_receiver_flow_id: _extensions.NotRequired[_typing.Union[int, None]]
+    evidence: JsonValue
+    global_flow_id: _extensions.NotRequired[_typing.Union[int, None]]
+    late_packets: Series
+    latency: Series
+    media_type: _extensions.NotRequired[_typing.Union[str, None]]
+    network_interface_index: _extensions.NotRequired[_typing.Union[int, None]]
+    telemetry_index: int
+
+
+class ConnectionHealthUpdate(_extensions.TypedDict):
+    complete: bool
+    device_extended_unique_identifier: str
+    diagnostics: list[Diagnostic]
+    fresh: bool
+    paths: list[ReceiverPath]
+    retention_limit: int
+
+
 class HeartbeatLatePacketEntry(_extensions.TypedDict):
     late_packet_count: int
-    receiver_flow_index: int
-
-
-class PreviousStream(_extensions.TypedDict):
-    elapsed_seconds: float
-    fresh: bool
-    late_counts: list[HeartbeatLatePacketEntry]
-    sequence: int
+    telemetry_index: int
 
 
 class HeartbeatLatePacketRecord(_extensions.TypedDict):
     entries: list[HeartbeatLatePacketEntry]
-    entry_count: int
-    extension_length: int
-    payload_length: int
-    record_length: int
+    raw_record: list[int]
     sequence: int
-    start_receiver_flow_index: int
-    unknown_word_at_offset_10: int
-    unknown_word_at_offset_18: int
-    vector_offset: int
 
 
 class HeartbeatFlowLatencyEntry(_extensions.TypedDict):
     latency_sample_count: int
-    receiver_flow_index: int
+    telemetry_index: int
 
 
 class HeartbeatFlowLatencyRecord(_extensions.TypedDict):
     entries: list[HeartbeatFlowLatencyEntry]
-    entry_count: int
-    extension_length: int
-    payload_length: int
-    record_length: int
+    raw_record: list[int]
     sample_rate_hertz: int
     sequence: int
-    start_receiver_flow_index: int
-    unknown_word_at_offset_10: int
-    unknown_word_at_offset_18: int
-    vector_offset: int
 
 
 class HeartbeatConnectionHealthRecords(_extensions.TypedDict):
     device_extended_unique_identifier: str
+    diagnostics: list[Diagnostic]
     late_packet_records: list[HeartbeatLatePacketRecord]
     latency_records: list[HeartbeatFlowLatencyRecord]
 
 
+class Topology(_extensions.TypedDict):
+    capacity: _extensions.NotRequired[JsonValue]
+    complete: _extensions.NotRequired[bool]
+    flows: _extensions.NotRequired[list[JsonValue]]
+    inventory_family: _extensions.NotRequired[_typing.Union[str, None]]
+
+
 class ConnectionHealthUpdateRequest(_extensions.TypedDict):
     freshness_seconds: float
-    late_previous: _extensions.NotRequired[_typing.Union[PreviousStream, None]]
-    latency_previous: _extensions.NotRequired[_typing.Union[PreviousStream, None]]
+    history_limit: int
+    observed_at: str
+    observed_monotonic: float
+    previous: _extensions.NotRequired[_typing.Union[ConnectionHealthUpdate, None]]
     records: HeartbeatConnectionHealthRecords
+    refresh_only: _extensions.NotRequired[bool]
+    reset: _extensions.NotRequired[bool]
+    topology: Topology
 
 
 class Destination(_extensions.TypedDict):

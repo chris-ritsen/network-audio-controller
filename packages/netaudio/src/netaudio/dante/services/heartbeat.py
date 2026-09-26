@@ -12,6 +12,7 @@ from netaudio.dante.heartbeat_connection_health import (
     CONNECTION_HEALTH_FRESHNESS_SECONDS,
     ReceiverFlowConnectionHealthTracker,
 )
+from netaudio import core
 from netaudio.dante.service import DanteMulticastService
 
 logger = logging.getLogger("netaudio")
@@ -141,12 +142,23 @@ class DanteHeartbeatService(DanteMulticastService):
                 logger.info(f"Device back online (heartbeat received): {device.server_name}")
                 device.online = True
 
-            clock_records = parse_clock_frequency_offset_records(data)
-            if clock_records:
-                clock_frequency_offset = clock_records[-1]["clock_frequency_offset_parts_per_billion"]
-                if device.clock_frequency_offset_parts_per_billion != clock_frequency_offset:
-                    device.clock_frequency_offset_parts_per_billion = clock_frequency_offset
-                    device_state_changed = True
+            clock_update = core.clock_observation_update(
+                {
+                    "previous": getattr(device, "clock_observations", None),
+                    "packet": list(data),
+                    "conmon_status": None,
+                    "observed_at": self._observation_timestamp(observed_wall_time),
+                    "observed_monotonic": observed_monotonic,
+                    "freshness_seconds": CONNECTION_HEALTH_FRESHNESS_SECONDS,
+                    "history_limit": 300,
+                }
+            )
+            if clock_update is not None:
+                device.clock_observations = clock_update
+                current = clock_update["heartbeat"]["current"]
+                if current is not None:
+                    device.clock_frequency_offset_parts_per_billion = current["raw"]
+                device_state_changed = True
 
             interface_traffic_records = parse_interface_traffic_records(data)
             if interface_traffic_records and self._update_interface_traffic(
@@ -165,6 +177,12 @@ class DanteHeartbeatService(DanteMulticastService):
                     connection_health_records,
                     self._observation_timestamp(observed_wall_time),
                     observed_monotonic,
+                    topology={
+                        "inventory_family": getattr(device, "receiver_flow_inventory_family", None),
+                        "capacity": getattr(device, "receiver_telemetry_capacity", None),
+                        "complete": getattr(device, "receiver_flow_completeness", None) == "complete",
+                        "flows": getattr(device, "receiver_flows", None) or [],
+                    },
                 )
                 if state is not None:
                     device.receiver_flow_connection_health = state
@@ -230,7 +248,9 @@ class DanteHeartbeatService(DanteMulticastService):
                 identity_changed = True
         known_device = self._heartbeat_devices.get(device_extended_unique_identifier)
         if known_device is not None and known_device is not device:
-            self._discard_device_identity(device_extended_unique_identifier)
+            device.receiver_flow_connection_health = getattr(known_device, "receiver_flow_connection_health", None)
+            device.clock_observations = getattr(known_device, "clock_observations", None)
+            known_device.receiver_flow_connection_health = None
             identity_changed = True
         self._heartbeat_devices[device_extended_unique_identifier] = device
         return identity_changed
@@ -274,6 +294,47 @@ class DanteHeartbeatService(DanteMulticastService):
 
     def connection_health_history(self, device_extended_unique_identifier: str) -> dict | None:
         return self._connection_health.history_snapshot(device_extended_unique_identifier)
+
+    def diagnostics_snapshot(self, device, *, reset=False, warning_enabled=None):
+        now = self._monotonic_clock()
+        identity = next((key for key, value in self._heartbeat_devices.items() if value is device), None)
+        receiver = None
+        if identity is not None:
+            if reset:
+                self._connection_health.reset(identity, now)
+            else:
+                self._connection_health.expire_device(identity, now)
+            receiver = self._connection_health.history_snapshot(identity)
+
+        clock = getattr(device, "clock_observations", None)
+        updated = core.clock_observation_update(
+            {
+                "previous": clock,
+                "packet": None,
+                "conmon_status": None,
+                "observed_at": self._observation_timestamp(self._wall_clock()),
+                "observed_monotonic": now,
+                "freshness_seconds": CONNECTION_HEALTH_FRESHNESS_SECONDS,
+                "history_limit": 300,
+                "reset": reset,
+                "warning_enabled": warning_enabled,
+            }
+        )
+        if updated is not None:
+            device.clock_observations = clock = updated
+            if warning_enabled is not None:
+                self._notify_device_updated(device)
+
+        return {
+            "device": device.server_name,
+            "device_identity": identity,
+            "receiver": receiver,
+            "clock": clock,
+            "clock_state": getattr(device, "clock_status", None),
+            "clock_state_observed_at": getattr(device, "clock_observed_at", None),
+            "retention_limit": 300,
+            "timestamp_provenance": "local_receive_time",
+        }
 
     def _schedule_connection_health_expiry(
         self,
@@ -342,6 +403,22 @@ class DanteHeartbeatService(DanteMulticastService):
         observed_monotonic = self._monotonic_clock()
 
         for device_extended_unique_identifier, device in self._heartbeat_devices.items():
+            clock = getattr(device, "clock_observations", None)
+            if clock is not None:
+                updated = core.clock_observation_update(
+                    {
+                        "previous": clock,
+                        "packet": None,
+                        "conmon_status": None,
+                        "observed_at": self._observation_timestamp(now),
+                        "observed_monotonic": observed_monotonic,
+                        "freshness_seconds": CONNECTION_HEALTH_FRESHNESS_SECONDS,
+                        "history_limit": 300,
+                    }
+                )
+                if updated is not None:
+                    device.clock_observations = updated
+                    self._notify_device_updated(device)
             traffic = getattr(device, "network_interface_traffic", None)
             traffic_observed = self._interface_traffic_observed_monotonic.get(device_extended_unique_identifier)
             if (
