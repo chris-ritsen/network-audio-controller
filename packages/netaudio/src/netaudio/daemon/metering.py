@@ -470,14 +470,11 @@ class MeteringManager:
         if event:
             event.set()
 
-    def record_signal_presence(self, record: dict, source_address: tuple, *, server_name: str | None = None) -> None:
+    @staticmethod
+    def _signal_presence_sample(record: dict, source_address: tuple) -> dict | None:
         try:
             source_ip = source_address[0]
             source_port = source_address[1]
-            server_name = server_name or self._server_name_for_ip(source_ip)
-            if not server_name:
-                return
-
             tx_levels = list(record["tx_levels"])
             rx_levels = list(record["rx_levels"])
             tx_count = int(record["tx_count"])
@@ -522,6 +519,38 @@ class MeteringManager:
             logger.debug(f"Discarding malformed signal-presence record from {source_address}: {exception}")
             return
 
+        return sample
+
+    def record_signal_presence(
+        self, records: list[dict], source_address: tuple, *, server_name: str | None = None
+    ) -> None:
+        server_name = server_name or self._server_name_for_ip(source_address[0])
+        if not server_name or not records:
+            return
+
+        samples = []
+        for record in records:
+            sample = self._signal_presence_sample(record, source_address)
+            if sample is None:
+                return
+            samples.append(sample)
+
+        sample = samples[-1]
+        if len(samples) > 1:
+            # These blocks belong to one observation. Never merge separate packets.
+            sample = {
+                key: sample[key] for key in ("timestamp", "wall_time", "source_ip", "source_port", "metering_source")
+            }
+            for key in ("tx", "rx", "tx_signal_presence", "rx_signal_presence"):
+                values = {}
+                for block in samples:
+                    for channel, value in block[key].items():
+                        if channel in values and values[channel] != value:
+                            return
+                        values[channel] = value
+                sample[key] = values
+
+        now = sample["timestamp"]
         self._signal_presence_levels[server_name] = sample
         selected = self._selected_sample(server_name, now)
         if selected is not sample:

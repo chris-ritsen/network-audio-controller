@@ -118,5 +118,4 @@ class ManagedSignalReceiver:
             return
         if normalize_device_id(device.ddm_device_id) != publication.get("device_id"):
             return
-        for record in publication["records"]:
-            self.metering.record_signal_presence(record, source, server_name=server_name)
+        self.metering.record_signal_presence(publication["records"], source, server_name=server_name)

@@ -40,7 +40,7 @@ def test_successive_avio_publications_are_forwarded_with_exact_identity():
     service.accept(key, publication, source)
     service.accept(key, publication, source)
     assert service.metering.record_signal_presence.call_count == 2
-    service.metering.record_signal_presence.assert_called_with(publication["records"][0], source, server_name="input")
+    service.metering.record_signal_presence.assert_called_with(publication["records"], source, server_name="input")
     device.ddm_domain_id = "different"
     service.accept(key, publication, source)
     assert service.metering.record_signal_presence.call_count == 2

@@ -10,6 +10,7 @@ from netaudio.daemon import metering as metering_module
 from netaudio.daemon.metering import MeteringManager
 from netaudio.dante.events import EventType
 from netaudio.dante.metering import classify_signal_presence, metering_value_dbfs, parse_metering_levels
+from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from tests.http_api_test_support import make_http_server
 
 METERING_FRAME = bytes.fromhex("ffff00211f810000001dc119245c0000417564696e617465020302fefe7da08800")
@@ -233,7 +234,7 @@ async def test_metering_manager_start_does_not_resolve_a_global_host_identity(mo
 def test_passive_sample_reaches_transient_cache_with_raw_values_and_source_metadata():
     manager, _, _ = make_manager()
 
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
 
     cached = manager.get_cached_levels("avio-bt-1")
     assert cached["metering_source"] == "signal_presence"
@@ -251,7 +252,7 @@ async def test_passive_sample_completes_waiting_snapshot_consumer():
     snapshot_task = asyncio.create_task(manager.snapshot("avio-bt-1", timeout=1.0))
     await asyncio.sleep(0)
 
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
 
     result = await snapshot_task
     assert result["metering_source"] == "signal_presence"
@@ -264,7 +265,7 @@ def test_fresh_detailed_sample_takes_precedence_over_newer_passive_sample():
     manager, _, _ = make_manager()
     manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
 
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
 
     cached = manager.get_cached_levels("avio-bt-1")
     assert cached["metering_source"] == "detailed"
@@ -277,14 +278,14 @@ def test_stale_detailed_sample_falls_back_to_fresh_passive_sample():
     manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
     manager._detailed_levels["avio-bt-1"]["timestamp"] -= 3.0
 
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
 
     assert manager.get_cached_levels("avio-bt-1")["metering_source"] == "signal_presence"
 
 
 def test_stale_passive_sample_is_not_returned():
     manager, _, _ = make_manager()
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
     manager._signal_presence_levels["avio-bt-1"]["timestamp"] -= 3.0
 
     assert manager.get_cached_levels("avio-bt-1") is None
@@ -298,17 +299,49 @@ def test_nonzero_first_channel_indexes_map_to_existing_one_based_interface():
         "rx_first_channel_index": 8,
     }
 
-    manager.record_signal_presence(record, ("192.168.1.61", 8700))
+    manager.record_signal_presence([record], ("192.168.1.61", 8700))
 
     cached = manager.get_cached_levels("avio-bt-1")
     assert cached["tx"] == {5: 0xFE, 6: 0xFE}
     assert cached["rx"] == {9: 0x6D}
 
 
+def test_heartbeat_channel_blocks_reach_meter_cache_without_losing_earlier_channels():
+    manager, _, _ = make_manager()
+    service = DanteHeartbeatService(on_signal_presence=manager.record_signal_presence)
+    # Synthetic multi-block packet using the existing signal-record layout.
+    first = bytes.fromhex("001c80020004001000010000000200000001000000180000283cff00")
+    second = bytes.fromhex("001c80020004001000010000000200040001000800180000fec15000")
+
+    def packet(records):
+        header = bytearray(32)
+        header[:4] = b"\xff\xfe" + (32 + len(records)).to_bytes(2, "big")
+        header[8:16] = bytes.fromhex("0200000000010000")
+        return bytes(header) + records
+
+    service._on_packet(packet(first + second), ("192.168.1.61", 49153))
+    cached = manager.get_cached_levels("avio-bt-1")
+    assert cached["tx"] == {1: 40, 2: 60, 5: 254, 6: 193}
+    assert cached["rx"] == {1: 255, 9: 80}
+    assert cached["rx_signal_presence"][1] == "unknown"
+    assert cached["tx_signal_presence"][5] == "muted"
+    assert cached["tx_signal_presence"][6] == "below_threshold"
+
+    # A new packet is a new observation, not permission to retain old channels.
+    service._on_packet(packet(first), ("192.168.1.61", 49153))
+    assert manager.get_cached_levels("avio-bt-1")["tx"] == {1: 40, 2: 60}
+
+    # An offset into the neighboring block must never read its header as levels.
+    malformed = bytearray(first)
+    malformed[20:22] = (28).to_bytes(2, "big")
+    service._on_packet(packet(malformed + second), ("192.168.1.61", 49153))
+    assert manager.get_cached_levels("avio-bt-1")["tx"] == {5: 254, 6: 193}
+
+
 @pytest.mark.asyncio
 async def test_fresh_passive_snapshot_sends_no_metering_start_or_stop_request():
     manager, application, _ = make_manager()
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
 
     result = await manager.snapshot("avio-bt-1", timeout=0.1)
 
@@ -320,7 +353,7 @@ async def test_fresh_passive_snapshot_sends_no_metering_start_or_stop_request():
 def test_passive_values_emit_meter_event_without_detailed_reference_or_cmc_commands():
     manager, application, _ = make_manager()
 
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
     manager._broadcast_pending()
 
     event = application.dispatcher.emit_nowait.call_args.args[0]
@@ -335,12 +368,12 @@ def test_passive_values_emit_meter_event_without_detailed_reference_or_cmc_comma
 
 def test_each_passive_heartbeat_emits_even_when_levels_are_unchanged():
     manager, application, _ = make_manager()
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
     manager._broadcast_pending()
     application.dispatcher.emit_nowait.reset_mock()
 
     same_values_new_sequence = {**PASSIVE_RECORD, "sequence": PASSIVE_RECORD["sequence"] + 1}
-    manager.record_signal_presence(same_values_new_sequence, ("192.168.1.61", 8700))
+    manager.record_signal_presence([same_values_new_sequence], ("192.168.1.61", 8700))
     manager._broadcast_pending()
 
     event = application.dispatcher.emit_nowait.call_args.args[0]
@@ -349,7 +382,7 @@ def test_each_passive_heartbeat_emits_even_when_levels_are_unchanged():
 
 def test_cache_by_server_is_fresh_cache_only_and_preserves_detailed_precedence():
     manager, application, _ = make_manager()
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
 
     cached = manager.get_cached_levels_by_server()
 
@@ -372,7 +405,7 @@ def test_read_promotion_does_not_hide_detailed_to_passive_notification_transitio
     manager, application, _ = make_manager()
     manager._persistent_refs["avio-bt-1"] = {"client"}
     manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
     manager._broadcast_pending()
     assert application.dispatcher.emit_nowait.call_args.args[0].data["metering_source"] == "detailed"
     application.dispatcher.emit_nowait.reset_mock()
@@ -380,7 +413,7 @@ def test_read_promotion_does_not_hide_detailed_to_passive_notification_transitio
 
     assert manager.get_cached_levels("avio-bt-1")["metering_source"] == "signal_presence"
     same_values_new_sequence = {**PASSIVE_RECORD, "sequence": PASSIVE_RECORD["sequence"] + 1}
-    manager.record_signal_presence(same_values_new_sequence, ("192.168.1.61", 8700))
+    manager.record_signal_presence([same_values_new_sequence], ("192.168.1.61", 8700))
     manager._broadcast_pending()
 
     event = application.dispatcher.emit_nowait.call_args.args[0]
@@ -389,11 +422,11 @@ def test_read_promotion_does_not_hide_detailed_to_passive_notification_transitio
 
 def test_passive_record_validation_is_atomic_before_cache_update():
     manager, _, _ = make_manager()
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
     previous = manager.get_cached_levels("avio-bt-1")
     malformed = {**PASSIVE_RECORD, "rx_count": 2}
 
-    manager.record_signal_presence(malformed, ("192.168.1.61", 8700))
+    manager.record_signal_presence([malformed], ("192.168.1.61", 8700))
 
     assert manager.get_cached_levels("avio-bt-1") == previous
 
@@ -547,7 +580,7 @@ async def test_cmc_metering_stop_preserves_start_identity_and_port():
 async def test_passive_indicators_do_not_disable_detailed_metering_on_other_devices():
     manager, application, device = make_manager()
     device.model_id = "LX-DANTE"
-    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.record_signal_presence([PASSIVE_RECORD], ("192.168.1.61", 8700))
     manager.add_persistent("avio-bt-1", "client")
     await drain_sends(manager)
     application.cmc.start_metering.assert_awaited_once()
