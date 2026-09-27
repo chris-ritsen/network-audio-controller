@@ -153,6 +153,8 @@ typedef struct NetaudioExportCollector NetaudioExportCollector;
 
 typedef struct NetaudioInventory NetaudioInventory;
 
+typedef struct NetaudioReceiverTracker NetaudioReceiverTracker;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -807,6 +809,33 @@ NetaudioStatus netaudio_inventory_state(NetaudioInventory *inventory,
                                         uint8_t *out_buffer,
                                         uintptr_t out_capacity,
                                         uintptr_t *out_length);
+
+/**
+ * Create a receiver history owner. Free exactly once after all calls finish.
+ */
+NetaudioStatus netaudio_receiver_tracker_new(NetaudioReceiverTracker **out_tracker);
+
+/**
+ * Free retained observations. Passing null is allowed; concurrent use is not.
+ */
+void netaudio_receiver_tracker_free(NetaudioReceiverTracker *tracker);
+
+/**
+ * Accept an incremental receiver UpdateRequest with previous=null.
+ * The accepted device identity cannot change during the tracker's lifetime.
+ */
+NetaudioStatus netaudio_receiver_tracker_accept(NetaudioReceiverTracker *tracker,
+                                                const char *json,
+                                                bool *out_changed);
+
+/**
+ * Read current paths, optionally including retained history. Retries are read-only.
+ */
+NetaudioStatus netaudio_receiver_tracker_snapshot(NetaudioReceiverTracker *tracker,
+                                                  bool include_history,
+                                                  uint8_t *out_buffer,
+                                                  uintptr_t out_capacity,
+                                                  uintptr_t *out_length);
 
 /**
  * Create a bounded clock observation owner. Free exactly once after all calls finish.

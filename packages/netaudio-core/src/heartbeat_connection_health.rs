@@ -5,6 +5,7 @@ use crate::heartbeat::{
 use crate::observation::{Diagnostic, Observation, Series};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -151,6 +152,22 @@ pub struct ReceiverPath {
 }
 
 impl ReceiverPath {
+    fn summary(&self) -> Self {
+        Self {
+            attribution_epoch: self.attribution_epoch,
+            telemetry_index: self.telemetry_index,
+            network_interface_index: self.network_interface_index,
+            audio_receiver_flow_id: self.audio_receiver_flow_id,
+            media_type: self.media_type.clone(),
+            global_flow_id: self.global_flow_id,
+            attribution_status: self.attribution_status.clone(),
+            attribution_reason: self.attribution_reason.clone(),
+            evidence: self.evidence.clone(),
+            latency: self.latency.summary(),
+            late_packets: self.late_packets.summary(),
+        }
+    }
+
     fn new(index: u16) -> Self {
         Self {
             attribution_epoch: 0,
@@ -247,6 +264,19 @@ pub struct ConnectionHealthUpdate {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+impl ConnectionHealthUpdate {
+    pub fn summary(&self) -> Self {
+        Self {
+            device_extended_unique_identifier: self.device_extended_unique_identifier.clone(),
+            complete: self.complete,
+            fresh: self.fresh,
+            retention_limit: self.retention_limit,
+            paths: self.paths.iter().map(ReceiverPath::summary).collect(),
+            diagnostics: self.diagnostics.clone(),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -265,6 +295,16 @@ pub struct UpdateRequest {
 }
 
 pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpdate>, String> {
+    let mut request = request;
+    let mut state = request.previous.take().unwrap_or_default();
+    let changed = update_in_place(&mut state, request)?;
+    Ok(changed.then_some(state))
+}
+
+pub fn update_in_place(
+    state: &mut ConnectionHealthUpdate,
+    request: UpdateRequest,
+) -> Result<bool, String> {
     crate::observation::validate_limits(
         request.observed_monotonic,
         request.freshness_seconds,
@@ -277,7 +317,9 @@ pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpda
     {
         return Err("Invalid monitoring identity".into());
     }
-    let mut state = request.previous.unwrap_or_default();
+    if request.previous.is_some() {
+        return Err("A retained receiver tracker cannot replace its history".into());
+    }
     if !state.device_extended_unique_identifier.is_empty()
         && state.device_extended_unique_identifier != *identity
     {
@@ -289,6 +331,7 @@ pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpda
     let diagnostic_count = state.diagnostics.len();
     let mut observations = Vec::new();
     for record in request.records.latency_records {
+        let raw_record = Arc::new(record.raw_record);
         for entry in record.entries {
             observations.push((
                 entry.telemetry_index,
@@ -300,12 +343,13 @@ pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpda
                     "receiver_latency",
                     &request.observed_at,
                     request.observed_monotonic,
-                    record.raw_record.clone(),
+                    raw_record.clone(),
                 ),
             ));
         }
     }
     for record in request.records.late_packet_records {
+        let raw_record = Arc::new(record.raw_record);
         for entry in record.entries {
             observations.push((
                 entry.telemetry_index,
@@ -317,7 +361,7 @@ pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpda
                     "late_packets",
                     &request.observed_at,
                     request.observed_monotonic,
-                    record.raw_record.clone(),
+                    raw_record.clone(),
                 ),
             ));
         }
@@ -337,14 +381,15 @@ pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpda
                 state.paths.len() - 1
             });
         let path = &mut state.paths[position];
-        let previous_path = path.clone();
-        path.attribute(&request.topology);
-        if !previous_path.evidence.is_null()
-            && previous_path.evidence["comparison_key"] != path.evidence["comparison_key"]
+        let mut attributed = ReceiverPath::new(index);
+        attributed.attribution_epoch = path.attribution_epoch;
+        attributed.attribute(&request.topology);
+        if !path.evidence.is_null()
+            && path.evidence["comparison_key"] != attributed.evidence["comparison_key"]
         {
-            path.attribution_epoch += 1;
+            attributed.attribution_epoch += 1;
         }
-        observation.evidence = path.evidence.clone();
+        observation.evidence = attributed.evidence.clone();
         let series = if late {
             &mut path.late_packets
         } else {
@@ -356,8 +401,10 @@ pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpda
             request.history_limit,
             &mut state.diagnostics,
         );
-        if !accepted {
-            *path = previous_path;
+        if accepted {
+            attributed.latency = std::mem::take(&mut path.latency);
+            attributed.late_packets = std::mem::take(&mut path.late_packets);
+            *path = attributed;
         }
         changed |= accepted;
     }
@@ -381,5 +428,5 @@ pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpda
             .diagnostics
             .drain(..state.diagnostics.len() - request.history_limit);
     }
-    Ok((changed || request.refresh_only).then_some(state))
+    Ok(changed || request.refresh_only)
 }

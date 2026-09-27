@@ -1,5 +1,91 @@
 use super::*;
 
+pub struct NetaudioReceiverTracker {
+    inner: Mutex<crate::heartbeat_connection_health::ConnectionHealthUpdate>,
+}
+
+unsafe fn receiver_tracker_lock<'a>(
+    tracker: *mut NetaudioReceiverTracker,
+) -> Result<MutexGuard<'a, crate::heartbeat_connection_health::ConnectionHealthUpdate>, FfiError> {
+    unsafe { tracker.as_ref() }
+        .ok_or(NetaudioStatus::NullPointer)?
+        .inner
+        .lock()
+        .map_err(|_| {
+            FfiError::new(
+                NetaudioStatus::InternalPanic,
+                "receiver tracker is poisoned",
+            )
+        })
+}
+
+/// Create a receiver history owner. Free exactly once after all calls finish.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_receiver_tracker_new(
+    out_tracker: *mut *mut NetaudioReceiverTracker,
+) -> NetaudioStatus {
+    guard(|| {
+        if out_tracker.is_null() {
+            return Err(NetaudioStatus::NullPointer.into());
+        }
+        unsafe {
+            *out_tracker = Box::into_raw(Box::new(NetaudioReceiverTracker {
+                inner: Mutex::new(Default::default()),
+            }));
+        }
+        Ok(())
+    })
+}
+
+/// Free retained observations. Passing null is allowed; concurrent use is not.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_receiver_tracker_free(tracker: *mut NetaudioReceiverTracker) {
+    if !tracker.is_null() {
+        drop(unsafe { Box::from_raw(tracker) });
+    }
+}
+
+/// Accept an incremental receiver UpdateRequest with previous=null.
+/// The accepted device identity cannot change during the tracker's lifetime.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_receiver_tracker_accept(
+    tracker: *mut NetaudioReceiverTracker,
+    json: *const c_char,
+    out_changed: *mut bool,
+) -> NetaudioStatus {
+    guard(|| {
+        if out_changed.is_null() {
+            return Err(NetaudioStatus::NullPointer.into());
+        }
+        unsafe { *out_changed = false };
+        let request = unsafe { decode_json(c_string(json)?)? };
+        let mut state = unsafe { receiver_tracker_lock(tracker)? };
+        let changed = crate::heartbeat_connection_health::update_in_place(&mut state, request)
+            .map_err(|error| FfiError::new(NetaudioStatus::InvalidJson, error))?;
+        unsafe { *out_changed = changed };
+        Ok(())
+    })
+}
+
+/// Read current paths, optionally including retained history. Retries are read-only.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_receiver_tracker_snapshot(
+    tracker: *mut NetaudioReceiverTracker,
+    include_history: bool,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    guard(|| {
+        unsafe { prepare_output(out_buffer, out_capacity, out_length)? };
+        let state = unsafe { receiver_tracker_lock(tracker)? };
+        if include_history {
+            return unsafe { write_json(&*state, out_buffer, out_capacity, out_length) };
+        }
+        unsafe { write_json(&state.summary(), out_buffer, out_capacity, out_length) }
+    })
+}
+
 pub struct NetaudioClockTracker {
     inner: Mutex<crate::heartbeat_clock::ClockObservations>,
 }

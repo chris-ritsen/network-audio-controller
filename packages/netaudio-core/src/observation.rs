@@ -1,5 +1,33 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Arc;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retained_observation_clones_share_immutable_wire_evidence() {
+        let observation = Observation::new(
+            24,
+            Some(48000),
+            Some(1),
+            "receiver_latency",
+            "now",
+            1.0,
+            vec![1; 4096],
+        );
+        let retained = observation.clone();
+        assert_eq!(
+            observation.raw_record.as_ptr(),
+            retained.raw_record.as_ptr()
+        );
+        assert_eq!(
+            serde_json::to_value(&observation).unwrap()["raw_record"],
+            json!(vec![1; 4096])
+        );
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -24,8 +52,8 @@ pub struct Observation {
     pub epoch: u64,
     pub display_epoch: u64,
     pub evidence: Value,
-    pub clock_state_evidence: Option<Value>,
-    pub raw_record: Vec<u8>,
+    pub clock_state_evidence: Option<Arc<Value>>,
+    pub raw_record: Arc<Vec<u8>>,
     pub value: Option<f64>,
     pub latency_microseconds: Option<u64>,
 }
@@ -38,7 +66,7 @@ impl Observation {
         source: &str,
         at: &str,
         monotonic: f64,
-        bytes: Vec<u8>,
+        bytes: impl Into<Arc<Vec<u8>>>,
     ) -> Self {
         let value = match source {
             "receiver_latency" => rate
@@ -72,7 +100,7 @@ impl Observation {
             display_epoch: 0,
             evidence: Value::Null,
             clock_state_evidence: None,
-            raw_record: bytes,
+            raw_record: bytes.into(),
             value,
             latency_microseconds: rate.filter(|r| *r > 0).and_then(|r| {
                 u64::try_from(raw)

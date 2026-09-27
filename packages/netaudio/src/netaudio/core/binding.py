@@ -265,21 +265,25 @@ def clock_observation_update(request: _requests.ClockObservationRequest) -> _typ
     return _call_json(require().netaudio_clock_observation_update, request, "clock observation")
 
 
-class ClockTracker:
+class _ObservationTracker:
     """Own native history; only export it on an explicit diagnostic read."""
 
-    def __init__(self):
+    def __init__(self, kind):
         self._native_lock = threading.RLock()
         self._handle = ctypes.c_void_p()
         self._lib = require()
-        status = self._lib.netaudio_clock_tracker_new(ctypes.byref(self._handle))
+        self._new = getattr(self._lib, f"netaudio_{kind}_tracker_new")
+        self._free = getattr(self._lib, f"netaudio_{kind}_tracker_free")
+        self._accept = getattr(self._lib, f"netaudio_{kind}_tracker_accept")
+        self._snapshot = getattr(self._lib, f"netaudio_{kind}_tracker_snapshot")
+        status = self._new(ctypes.byref(self._handle))
         if status != STATUS_OK:
-            raise NetaudioCoreError(status, "clock tracker")
+            raise NetaudioCoreError(status, "observation tracker")
 
     def close(self):
         with self._native_lock:
             if self._handle:
-                self._lib.netaudio_clock_tracker_free(self._handle)
+                self._free(self._handle)
                 self._handle = ctypes.c_void_p()
 
     def __del__(self):
@@ -287,30 +291,48 @@ class ClockTracker:
 
     def _require_open(self):
         if not self._handle:
-            raise RuntimeError("clock tracker is closed")
+            raise RuntimeError("observation tracker is closed")
 
-    def update(self, request: _requests.ClockObservationRequest) -> _types.ClockObservations | None:
+    def _update(self, request):
         with self._native_lock:
             self._require_open()
             changed = ctypes.c_bool()
-            status = self._lib.netaudio_clock_tracker_accept(
-                self._handle, _encode_command_spec(dict(request)), ctypes.byref(changed)
-            )
+            status = self._accept(self._handle, _encode_command_spec(dict(request)), ctypes.byref(changed))
             if status != STATUS_OK:
-                raise NetaudioCoreError(status, "clock observation")
+                raise NetaudioCoreError(status, "observation")
 
-            return self.snapshot() if changed.value else None
+            return self._read_snapshot() if changed.value else None
 
-    def snapshot(self, *, include_history=False) -> _types.ClockObservations:
+    def _read_snapshot(self, *, include_history=False):
         with self._native_lock:
             self._require_open()
-            status, data = _call_buffer(
-                self._lib.netaudio_clock_tracker_snapshot, self._handle, include_history, capacity=32768
-            )
+            status, data = _call_buffer(self._snapshot, self._handle, include_history, capacity=32768)
             if status != STATUS_OK:
-                raise NetaudioCoreError(status, "clock snapshot")
+                raise NetaudioCoreError(status, "observation snapshot")
 
-            return _decode_json_output(data, "clock snapshot")
+            return _decode_json_output(data, "observation snapshot")
+
+
+class ClockTracker(_ObservationTracker):
+    def __init__(self):
+        super().__init__("clock")
+
+    def update(self, request: _requests.ClockObservationRequest) -> _types.ClockObservations | None:
+        return self._update(request)
+
+    def snapshot(self, *, include_history=False) -> _types.ClockObservations:
+        return self._read_snapshot(include_history=include_history)
+
+
+class ReceiverTracker(_ObservationTracker):
+    def __init__(self):
+        super().__init__("receiver")
+
+    def update(self, request: _requests.ConnectionHealthUpdateRequest) -> _types.ConnectionHealthUpdate | None:
+        return self._update(request)
+
+    def snapshot(self, *, include_history=False) -> _types.ConnectionHealthUpdate:
+        return self._read_snapshot(include_history=include_history)
 
 
 def sample_rate_status_evidence(status: _requests.SampleRateStatus) -> _types.SampleRateStatus:

@@ -33,6 +33,37 @@ def test_invalid_shure_correlations_are_reported(monkeypatch, tmp_path, caplog):
     assert f"Unable to load Shure correlations from {config_path}" in caplog.text
 
 
+def test_shure_correlation_cache_reloads_replacements_and_deletions(monkeypatch, tmp_path):
+    from pathlib import Path
+    from netaudio.common import config_loader
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[shure.correlations]\nreceiver = "first"\n')
+    monkeypatch.setattr(config_loader, "default_config_path", lambda: config_path)
+    read_text = Path.read_text
+    reads = []
+
+    def read(path, *args, **kwargs):
+        reads.append(path)
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    daemon = object.__new__(NetaudioDaemon)
+    for _ in range(50):
+        assert daemon._load_shure_correlations() == {"receiver": "first"}
+    assert len(reads) == 1
+
+    replacement = tmp_path / "replacement.toml"
+    replacement.write_text('[shure.correlations]\nreceiver = "second"\n')
+    replacement.replace(config_path)
+    assert daemon._load_shure_correlations() == {"receiver": "second"}
+    assert len(reads) == 2
+    config_path.unlink()
+    assert daemon._load_shure_correlations() == {}
+    config_path.write_text('[shure.correlations]\nreceiver = "third"\n')
+    assert daemon._load_shure_correlations() == {"receiver": "third"}
+
+
 @pytest.mark.asyncio
 async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
     daemon = object.__new__(NetaudioDaemon)

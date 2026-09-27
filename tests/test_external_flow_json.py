@@ -6,6 +6,18 @@ from netaudio.daemon.http.api import _encode_sse
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 
 
+def test_session_conversion_does_not_copy_unchanged_device_payloads():
+    from netaudio.daemon.http.json_values import browser_values
+
+    devices = {"receiver": {"channels": [{"number": number} for number in range(256)]}}
+    payload = {"devices": devices, "flows": [{"session_id": 9007199254740993}]}
+    converted = browser_values(payload)
+    assert converted["devices"] is devices
+    assert converted["flows"][0]["session_id"] == "9007199254740993"
+    assert payload["flows"][0]["session_id"] == 9007199254740993
+    assert browser_values(devices) is devices
+
+
 @pytest.mark.parametrize("session_id", [9007199254740993, 18446744073709551615])
 def test_sse_preserves_external_session_identity(session_id):
     payload = {

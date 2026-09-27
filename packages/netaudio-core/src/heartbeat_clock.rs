@@ -169,7 +169,7 @@ pub fn observe_in_place(
             vec![],
         );
         sample.clock_state_evidence =
-            Some(json!({"status": status, "observed_at": request.observed_at}));
+            Some(json!({"status": status, "observed_at": request.observed_at}).into());
         changed |= state.conmon.accept(
             sample,
             request.freshness_seconds,

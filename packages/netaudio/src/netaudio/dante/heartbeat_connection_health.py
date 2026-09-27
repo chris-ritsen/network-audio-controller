@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import cast
 from netaudio import core
 from netaudio.core import _requests
@@ -20,6 +19,7 @@ class ReceiverFlowConnectionHealthTracker:
         self._freshness_seconds = freshness_seconds
         self._history_limit = history_limit
         self._devices = {}
+        self._trackers = {}
 
     @property
     def freshness_seconds(self):
@@ -40,10 +40,13 @@ class ReceiverFlowConnectionHealthTracker:
 
         identity = parsed_records.get("device_extended_unique_identifier")
         try:
-            state = core.connection_health_update(
+            tracker = self._trackers.get(identity)
+            if tracker is None:
+                tracker = core.ReceiverTracker()
+            state = tracker.update(
                 {
                     "records": cast(_requests.HeartbeatConnectionHealthRecords, parsed_records),
-                    "previous": self._devices.get(identity),
+                    "previous": None,
                     "topology": topology or {"capacity": None, "complete": False, "flows": []},
                     "observed_at": observed_at,
                     "observed_monotonic": observed_monotonic,
@@ -56,24 +59,21 @@ class ReceiverFlowConnectionHealthTracker:
         except (core.NetaudioCoreError, core.NetaudioCoreJsonError):
             return None
 
+        self._trackers[identity] = tracker
         if state is not None:
             self._devices[identity] = state
-            return self._snapshot(state)
+            return state
 
         return None
 
-    @staticmethod
-    def _snapshot(state):
-        result = deepcopy(state)
-        for path in result["paths"]:
-            for name in ("latency", "late_packets"):
-                path[name].pop("history", None)
-        return result
-
     def history_snapshot(self, identity):
-        return deepcopy(self._devices.get(identity))
+        tracker = self._trackers.get(identity)
+        return tracker.snapshot(include_history=True) if identity in self._devices and tracker is not None else None
 
     def remove_device(self, identity):
+        tracker = self._trackers.pop(identity, None)
+        if tracker is not None:
+            tracker.close()
         return self._devices.pop(identity, None) is not None
 
     def seconds_until_expiry(self, identity, now):

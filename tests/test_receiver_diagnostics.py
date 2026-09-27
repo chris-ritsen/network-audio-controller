@@ -1,6 +1,7 @@
 """Synthetic monitoring inputs through the native parser and observation tracker."""
 
 from copy import deepcopy
+import json
 
 import pytest
 
@@ -29,6 +30,48 @@ TOPOLOGY = {
         },
     ],
 }
+
+
+def test_receiver_history_retention_does_not_inflate_native_update_requests(monkeypatch, tmp_path):
+    from netaudio.core import binding
+
+    original = binding._encode_command_spec
+    request_sizes = []
+
+    def encode(request):
+        result = original(request)
+        if isinstance(request, dict) and "records" in request and "history_limit" in request:
+            request_sizes.append(len(result))
+        return result
+
+    monkeypatch.setattr(binding, "_encode_command_spec", encode)
+    tracker = ReceiverFlowConnectionHealthTracker(history_limit=300)
+    for sequence in range(305):
+        result = update(tracker, sequence, (0, (24, 48, 72, 96)), now=100 + sequence / 100)
+
+    history = tracker.history_snapshot(DEVICE)
+    assert len(history["paths"]) == 4
+    for path in history["paths"]:
+        assert len(path["latency"]["history"]) == 300
+        assert path["latency"]["history"][0]["sequence"] == 5
+        assert path["latency"]["history"][-1]["sequence"] == 304
+    assert all(not path["latency"].get("history") for path in result["paths"])
+    assert max(request_sizes) < 5000
+    assert update(tracker, 304, (0, (24, 48, 72, 96)), now=103.1) is None
+    tracker.expire(110)
+    update(tracker, 1, (0, (25, 49, 73, 97)), now=111)
+    resumed = tracker.history_snapshot(DEVICE)
+    assert resumed["paths"][0]["latency"]["history"][-1]["epoch"] == 1
+    assert len(resumed["paths"][0]["latency"]["history"]) == 300
+    (tmp_path / "receiver-history-cost.json").write_text(
+        json.dumps(
+            {
+                "maximum_request_bytes": max(request_sizes),
+                "paths": 4,
+                "samples_per_path": 300,
+            }
+        )
+    )
 
 
 @pytest.mark.parametrize("length", [16, 26, 32, 40, 46])

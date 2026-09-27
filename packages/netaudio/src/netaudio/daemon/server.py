@@ -343,17 +343,31 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             import tomli as tomllib
 
         path = default_config_path()
-        if not path.exists():
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            self._shure_correlation_cache = None
             return {}
+        except OSError as exception:
+            logger.warning(f"Unable to load Shure correlations from {path}: {exception}")
+            return {}
+
+        signature = (path, stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+        cached = getattr(self, "_shure_correlation_cache", None)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+
         try:
             data = tomllib.loads(path.read_text())
             correlations = data.get("shure", {}).get("correlations", {})
             if not isinstance(correlations, dict):
                 raise TypeError("shure.correlations must be a table")
-            return correlations
         except (OSError, UnicodeError, tomllib.TOMLDecodeError, AttributeError, TypeError) as exception:
             logger.warning(f"Unable to load Shure correlations from {path}: {exception}")
-            return {}
+            correlations = {}
+
+        self._shure_correlation_cache = (signature, correlations)
+        return correlations
 
     @staticmethod
     def _normalize_mac(mac):
