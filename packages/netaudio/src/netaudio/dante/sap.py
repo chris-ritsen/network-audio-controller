@@ -92,6 +92,7 @@ class DiscoveredExternalFlow:
     routable: bool
     routability_errors: tuple[str, ...]
     announcement_interface: str
+    announcement_interfaces: tuple[str, ...]
     packet_source_ipv4: str
     packet_source_port: int
     discovered_at: str
@@ -148,6 +149,7 @@ class DiscoveredExternalFlow:
             routable=packet.sdp["routable"],
             routability_errors=tuple(packet.sdp["routability_errors"]),
             announcement_interface=announcement_interface,
+            announcement_interfaces=(announcement_interface,),
             packet_source_ipv4=packet_source_ipv4,
             packet_source_port=packet_source_port,
             discovered_at=_timestamp(wall_time),
@@ -175,6 +177,7 @@ class DiscoveredExternalFlow:
         return replace(
             self,
             announcement_interface=announcement_interface,
+            announcement_interfaces=tuple(sorted(set(self.announcement_interfaces) | {announcement_interface})),
             packet_source_ipv4=packet_source_ipv4,
             packet_source_port=packet_source_port,
             refreshed_at=_timestamp(wall_time),
@@ -214,6 +217,7 @@ class DiscoveredExternalFlow:
             "routability_errors": list(self.routability_errors),
             "advertisement_supports_multiple_interfaces": self.secondary_destination_address is not None,
             "announcement_interface": self.announcement_interface,
+            "announcement_interfaces": list(self.announcement_interfaces),
             "packet_source_ipv4": self.packet_source_ipv4,
             "packet_source_port": self.packet_source_port,
             "discovered_at": self.discovered_at,

@@ -53,23 +53,15 @@ const PCM_ENCODINGS: [(u16, u16); 3] = [
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ReceiverFlowInventoryFamily {
-    Legacy,
-    Modern,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FlowAuthoringCapabilities {
-    pub receiver_flow_inventory_family: ReceiverFlowInventoryFamily,
     pub transmit_flow_authoring: FlowAuthoringProfile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FlowAuthoringProfile {
-    pub protocol_id: u16,
+    pub family: &'static str,
+    pub opcode: u16,
     pub identity_field: &'static str,
     pub identifier_max: u16,
     pub media_modes: Vec<&'static str>,
@@ -77,14 +69,11 @@ pub struct FlowAuthoringProfile {
 }
 
 pub fn flow_authoring_capabilities(capability_word: u16) -> FlowAuthoringCapabilities {
-    use crate::commands::PROTOCOL_DANTE_FLOW;
-    use crate::protocol::PROTOCOL_ARC_2809;
-
     if capability_word & 0x1000 != 0 {
         FlowAuthoringCapabilities {
-            receiver_flow_inventory_family: ReceiverFlowInventoryFamily::Modern,
             transmit_flow_authoring: FlowAuthoringProfile {
-                protocol_id: PROTOCOL_ARC_2809,
+                family: "segmented",
+                opcode: crate::commands::OPCODE_CREATE_TX_FLOW_2809,
                 identity_field: "media_local_flow_id",
                 identifier_max: u16::MAX,
                 media_modes: vec!["native_dante", "rtp_aes67"],
@@ -93,13 +82,13 @@ pub fn flow_authoring_capabilities(capability_word: u16) -> FlowAuthoringCapabil
         }
     } else {
         FlowAuthoringCapabilities {
-            receiver_flow_inventory_family: ReceiverFlowInventoryFamily::Legacy,
             transmit_flow_authoring: FlowAuthoringProfile {
-                protocol_id: PROTOCOL_DANTE_FLOW,
+                family: "fixed",
+                opcode: crate::commands::OPCODE_CREATE_TX_FLOW,
                 identity_field: "global_flow_id",
                 identifier_max: crate::commands::MAX_LEGACY_FLOW_ID,
-                media_modes: vec!["native_dante"],
-                supports_flow_options: false,
+                media_modes: vec!["native_dante", "rtp_aes67"],
+                supports_flow_options: true,
             },
         }
     }
@@ -295,8 +284,8 @@ pub fn parse_channel_count(response: &[u8]) -> Option<ChannelCount> {
             transmit_flow_authoring_capability_word,
         )
         .transmit_flow_authoring
-        .protocol_id
-            == crate::protocol::PROTOCOL_ARC_2809,
+        .family
+            == "segmented",
         tx_count: read_u16(response, CHANNEL_COUNT_TX_OFFSET)?,
         rx_count: read_u16(response, CHANNEL_COUNT_RX_OFFSET)?,
         locked: None,

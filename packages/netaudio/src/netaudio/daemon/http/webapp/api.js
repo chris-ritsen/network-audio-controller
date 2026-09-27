@@ -173,6 +173,7 @@ export const api = {
   forgetDevice: (name) => remove(`/devices/${encodeURIComponent(name)}`),
 
   subscribe: (body) => post("/subscribe", body),
+  subscribeExternal: (body) => post("/external-flows/subscribe", body),
   unsubscribe: (body) => post("/unsubscribe", body),
   identify: (device) => post("/identify", { device }),
   renameDevice: (device, name) => post("/rename-device", { device, name }),

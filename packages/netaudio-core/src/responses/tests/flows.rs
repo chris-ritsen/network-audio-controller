@@ -15,6 +15,9 @@ pub(super) fn flow_query_response() -> Vec<u8> {
     unicast_record[8..12].copy_from_slice(&24u32.to_be_bytes());
     unicast_record[12..14].copy_from_slice(&1u16.to_be_bytes());
     unicast_record[14..16].copy_from_slice(&1u16.to_be_bytes());
+    unicast_record[16..18].copy_from_slice(&80u16.to_be_bytes());
+    unicast_record[18..20].copy_from_slice(&1u16.to_be_bytes());
+    unicast_record[36..44].copy_from_slice(&[8, 2, 0x13, 0x8c, 192, 0, 2, 1]);
     response.extend_from_slice(&unicast_record);
 
     let mut multicast_record = vec![0u8; 64];
@@ -26,6 +29,10 @@ pub(super) fn flow_query_response() -> Vec<u8> {
     multicast_record[14..16].copy_from_slice(&2u16.to_be_bytes());
     multicast_record[20..22].copy_from_slice(&1u16.to_be_bytes());
     multicast_record[22..24].copy_from_slice(&2u16.to_be_bytes());
+    multicast_record[16..18].copy_from_slice(&148u16.to_be_bytes());
+    multicast_record[18..20].copy_from_slice(&156u16.to_be_bytes());
+    multicast_record[36..44].copy_from_slice(&[8, 2, 0x13, 0x8c, 239, 1, 1, 1]);
+    multicast_record[44..52].copy_from_slice(&[8, 2, 0x13, 0x8c, 239, 1, 1, 2]);
     response.extend_from_slice(&multicast_record);
     stamp_arc_response(
         &mut response,
@@ -444,13 +451,13 @@ fn tx_flows_parser_decodes_multicast_record() {
     assert_eq!(flows[0].flow_number, 1);
     assert_eq!(flows[0].flow_type, "unicast");
     assert_eq!(flows[0].channel_count, 1);
-    assert!(flows[0].channels.is_empty());
+    assert_eq!(flows[0].channels, vec![1]);
     let flow = &flows[1];
     assert_eq!(flow.flow_number, 17);
     assert_eq!(flow.flow_type, "multicast");
     assert_eq!(flow.sample_rate, 48_000);
     assert_eq!(flow.encoding, 24);
-    assert_eq!(flow.frames_per_packet, 2);
+    assert_eq!(flow.frames_per_packet, None);
     assert_eq!(flow.channel_count, 2);
     assert_eq!(flow.channels, vec![1, 2]);
 }
@@ -471,6 +478,8 @@ fn tx_flows_parser_uses_variable_channel_offset_in_short_records() {
     record[14..16].copy_from_slice(&2u16.to_be_bytes());
     record[18..20].copy_from_slice(&7u16.to_be_bytes());
     record[20..22].copy_from_slice(&8u16.to_be_bytes());
+    record[16..18].copy_from_slice(&80u16.to_be_bytes());
+    record[36..44].copy_from_slice(&[8, 2, 0x13, 0x8c, 239, 1, 1, 1]);
     response.extend_from_slice(&record);
     stamp_arc_response(
         &mut response,

@@ -623,6 +623,7 @@ pub struct FlowTopology {
 
 #[derive(Deserialize)]
 struct InventoryRecord {
+    inventory_layout: Option<String>,
     flow_type: FlowType,
     media_mode: Option<MediaMode>,
     flow_name: Option<String>,
@@ -666,6 +667,7 @@ impl FlowReadbackRequest {
 pub fn transmit_flow_topology(request: &FlowReadbackRequest) -> Result<FlowTopology, String> {
     let (_, modern) = readback_protocol(request.protocol_id)?;
     let record = request.record()?;
+    let modern = modern && record.inventory_layout.as_deref() != Some("fixed");
     let (identifier, count, members) = if modern {
         if record.media_type_code != Some(3) {
             return Err("transmitter flow is not a supported audio flow".into());
@@ -687,10 +689,6 @@ pub fn transmit_flow_topology(request: &FlowReadbackRequest) -> Result<FlowTopol
         && members.len() != usize::from(count.get())
     {
         return Err("transmitter flow member count does not match its channel count".into());
-    }
-
-    if !modern && matches!(record.flow_type, FlowType::Unicast) && !members.is_empty() {
-        return Err("legacy unicast flow unexpectedly contains decoded channel members".into());
     }
 
     let mut seen = HashSet::new();
@@ -744,7 +742,7 @@ pub struct ObservedTransmitFlowSpecification {
 pub fn transmit_flow_specification(
     request: &FlowReadbackRequest,
 ) -> Result<ObservedTransmitFlowSpecification, String> {
-    let (cohort, modern) = readback_protocol(request.protocol_id)?;
+    let (cohort, _) = readback_protocol(request.protocol_id)?;
     let record = request.record()?;
     let channels = record
         .transmitter_channel_ids_by_slot
@@ -793,11 +791,7 @@ pub fn transmit_flow_specification(
         record.flow_number
     };
 
-    let media_mode = record.media_mode.unwrap_or(if modern {
-        MediaMode::Unknown
-    } else {
-        MediaMode::NativeDante
-    });
+    let media_mode = record.media_mode.unwrap_or(MediaMode::Unknown);
     let observed_fields: Vec<&str> = [
         ("media_mode", !matches!(media_mode, MediaMode::Unknown)),
         ("flow_type", true),

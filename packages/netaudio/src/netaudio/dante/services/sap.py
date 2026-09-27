@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import logging
 import socket
+from ipaddress import IPv4Address
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 
@@ -55,6 +56,7 @@ class SapDiscoveryService:
         inventory: SapFlowInventory | None = None,
         *,
         interface_name: str | None = None,
+        multicast_groups: Iterable[str] = (SAP_MULTICAST_ADDRESS, "224.0.0.56"),
         interface_provider: Callable[[], Iterable[SapInterface]] | None = None,
         socket_factory: Callable[..., socket.socket] = socket.socket,
         endpoint_factory: Callable[..., Awaitable[tuple[asyncio.DatagramTransport, asyncio.DatagramProtocol]]]
@@ -66,6 +68,14 @@ class SapDiscoveryService:
         if expiry_check_seconds <= 0:
             raise ValueError("SAP expiry check interval must be positive")
         self.inventory = inventory or SapFlowInventory()
+        self.multicast_groups = tuple(dict.fromkeys(str(IPv4Address(group)) for group in multicast_groups))
+        if not self.multicast_groups or any(not IPv4Address(group).is_multicast for group in self.multicast_groups):
+            raise ValueError("SAP groups must be nonempty IPv4 multicast addresses")
+        self.listener_errors: dict[str, str] = {}
+        self.received_count = 0
+        self.rejected_count = 0
+        self.accepted_count = 0
+        self.latest_error: str | None = None
         self._interface_provider = interface_provider or (lambda: active_sap_interfaces(interface_name))
         self._socket_factory = socket_factory
         self._endpoint_factory = endpoint_factory
@@ -98,8 +108,20 @@ class SapDiscoveryService:
                 except OSError:
                     pass
             multicast_socket.bind(("", SAP_PORT))
-            membership = socket.inet_aton(SAP_MULTICAST_ADDRESS) + socket.inet_aton(interface.address)
-            multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+            joined = 0
+            for group in self.multicast_groups:
+                key = f"{interface.name}/{interface.address}/{group}"
+                membership = socket.inet_aton(group) + socket.inet_aton(interface.address)
+                try:
+                    multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+                except OSError as exception:
+                    self.listener_errors[key] = str(exception)
+                else:
+                    self.listener_errors.pop(key, None)
+                    joined += 1
+
+            if joined == 0:
+                raise OSError("no SAP multicast membership could be joined")
             multicast_socket.setblocking(False)
 
             def protocol_factory():
@@ -150,6 +172,7 @@ class SapDiscoveryService:
             logger.exception("SAP inventory callback failed")
 
     def _datagram_received(self, data: bytes, address, interface: SapInterface) -> None:
+        self.received_count += 1
         try:
             packet_source_ipv4, packet_source_port = address[:2]
             change = self.inventory.ingest(
@@ -159,10 +182,25 @@ class SapDiscoveryService:
                 packet_source_port=packet_source_port,
             )
         except (SapParseError, ValueError) as exception:
+            self.rejected_count += 1
+            self.latest_error = str(exception)
             logger.debug(f"Ignored invalid SAP packet on {interface.name}: {exception}")
             return
+        self.accepted_count += 1
         if change is not None:
             self._emit(change)
+
+    def diagnostics(self) -> dict:
+        return {
+            "groups": self.multicast_groups,
+            "interfaces": [{"name": item.name, "address": item.address} for item in self.listening_interfaces],
+            "listener_errors": dict(self.listener_errors),
+            "received": self.received_count,
+            "accepted": self.accepted_count,
+            "rejected": self.rejected_count,
+            "latest_error": self.latest_error,
+            "source_count": len(self.inventory.flows()),
+        }
 
     def _interfaces_changed(self) -> None:
         if not self._started:

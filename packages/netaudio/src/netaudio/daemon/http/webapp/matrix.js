@@ -3,10 +3,11 @@ import { channelGroups, groupChannels, setGroupsExpanded } from "./channel-group
 import { Icon } from "./icons.js";
 import * as format from "./format.js";
 import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
-import { deviceRequestName, pendingKey } from "./store.js";
+import { deviceRequestName, pendingKey, markExternalPending } from "./store.js";
 import { MatrixTooltip } from "./matrix-tooltip.js";
 import { runAction as performAction } from "./actions.js";
 import { selfConnectionTargetState } from "./self-connection.js";
+import { externalColumns, externalCellState, externalSubscriptionRequest, externalSourcesWithAssignments } from "./external-sources.js";
 
 const CELL = 30;
 const GUTTER_PADDING = 12;
@@ -157,7 +158,7 @@ function buildAxis(devices, direction, expandedSet, filter, subscriptionsFor, gr
   return entries;
 }
 
-export function buildMatrixModel({ devices, expandedReceivers, expandedTransmitters, receiverFilter, transmitterFilter,
+export function buildMatrixModel({ devices, externalFlows = {}, expandedReceivers, expandedTransmitters, receiverFilter, transmitterFilter,
   groups = { enabled: false, receivers: new Set(), transmitters: new Set() }, pending = {} }) {
   const sorted = format.sortedDevices(devices);
   const subscriptionIndex = new Map();
@@ -173,6 +174,7 @@ export function buildMatrixModel({ devices, expandedReceivers, expandedTransmitt
   const subscriptionsFor = (device, channelNumber) =>
     subscriptionIndex.get(format.deviceLabel(device)).get(channelNumber) || null;
   const columns = buildAxis(sorted, "transmitters", expandedTransmitters, transmitterFilter, null, groups);
+  columns.push(...externalColumns(externalSourcesWithAssignments(externalFlows, devices), transmitterFilter));
   const rows = buildAxis(sorted, "receivers", expandedReceivers, receiverFilter, subscriptionsFor, groups);
   for (const entry of rows) {
     if (entry.kind !== "channel" && entry.expanded) continue;
@@ -228,6 +230,8 @@ function severityName(rank) {
 
 export function cellState(row, column, subscriptionIndex, pending, flipped = false) {
   if (flipped) [row, column] = [column, row];
+  if (column.sourceKind === "external") return externalCellState(row, column,
+    row.kind === "channel" ? pending[pendingKey(deviceRequestName(row.device), row.number)] : null);
   const receiverSubscriptions = subscriptionIndex.get(row.label) || new Map();
   if (row.kind === "channel" && column.kind === "channel") {
     const pendingEntry = pending[pendingKey(deviceRequestName(row.device), row.number)] || pending[pendingKey(row.label, row.number)];
@@ -453,7 +457,7 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
       } else if (row.kind === "group") {
         const side = flipped ? "transmitters" : "receivers";
         setGroupsExpanded(side, [row.key], !channelGroups.value[side].has(row.key));
-      } else if (onOpenDevice) {
+      } else if (onOpenDevice && row.sourceKind !== "external") {
         onOpenDevice(row.label, flipped ? "transmit" : "receive");
       }
       return;
@@ -465,7 +469,7 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
       } else if (column.kind === "group") {
         const side = flipped ? "receivers" : "transmitters";
         setGroupsExpanded(side, [column.key], !channelGroups.value[side].has(column.key));
-      } else if (onOpenDevice) {
+      } else if (onOpenDevice && column.sourceKind !== "external") {
         onOpenDevice(column.label, flipped ? "receive" : "transmit");
       }
       return;
@@ -481,7 +485,7 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
       }
       return;
     }
-    if (!row.device.online || !column.device.online) {
+    if (!row.device.online || (column.sourceKind !== "external" && !column.device.online)) {
       setError("Both devices must be online to change this connection.");
       return;
     }
@@ -500,6 +504,14 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     try {
       if (row.kind === "channel" && column.kind === "channel") {
         const subscribed = Boolean(state.subscription);
+        if (column.sourceKind === "external") {
+          const outcome = await runAction(`Route external audio to ${row.label} ${row.name}`, () =>
+            api.subscribeExternal(externalSubscriptionRequest(column, requestName, row.number, subscribed)));
+          if (outcome.ok && outcome.result.arc_effective_state_confirmed !== true) {
+            markExternalPending(requestName, row.number, column.sourceKey, column.number, subscribed);
+          }
+          return;
+        }
         await runAction(
           subscribed
             ? `unsubscribe ${row.label} ${row.name}`
@@ -612,6 +624,9 @@ export function describeHover(hover, rows, columns, subscriptionIndex, pending, 
     return `${receiver} ← ${transmitter}\nSubscription change pending`;
   }
   if (state.kind === "partial") {
+    if (column.sourceKind === "external") {
+      return `${receiver} ← ${transmitter}\n${state.reason}`;
+    }
     return `${receiver} ← ${state.subscription.tx_channel}@${state.subscription.tx_device}\n${format.subscriptionStatusText(state.subscription)}`;
   }
   if (state.kind === "self-unsupported" || state.kind === "self-unavailable") {

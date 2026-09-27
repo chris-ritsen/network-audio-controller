@@ -178,7 +178,7 @@ def _call_buffer(function, *leading_args, capacity=8192):
         out = (ctypes.c_uint8 * length.value)()
         capacity = length.value
         status = function(*leading_args, out, capacity, ctypes.byref(length))
-    return status, bytes(out[: length.value])
+    return status, ctypes.string_at(out, min(length.value, capacity))
 
 
 def last_error_message() -> str:
@@ -263,6 +263,54 @@ def connection_health_update(request: _requests.ConnectionHealthUpdateRequest) -
 
 def clock_observation_update(request: _requests.ClockObservationRequest) -> _types.ClockObservations | None:
     return _call_json(require().netaudio_clock_observation_update, request, "clock observation")
+
+
+class ClockTracker:
+    """Own native history; only export it on an explicit diagnostic read."""
+
+    def __init__(self):
+        self._native_lock = threading.RLock()
+        self._handle = ctypes.c_void_p()
+        self._lib = require()
+        status = self._lib.netaudio_clock_tracker_new(ctypes.byref(self._handle))
+        if status != STATUS_OK:
+            raise NetaudioCoreError(status, "clock tracker")
+
+    def close(self):
+        with self._native_lock:
+            if self._handle:
+                self._lib.netaudio_clock_tracker_free(self._handle)
+                self._handle = ctypes.c_void_p()
+
+    def __del__(self):
+        self.close()
+
+    def _require_open(self):
+        if not self._handle:
+            raise RuntimeError("clock tracker is closed")
+
+    def update(self, request: _requests.ClockObservationRequest) -> _types.ClockObservations | None:
+        with self._native_lock:
+            self._require_open()
+            changed = ctypes.c_bool()
+            status = self._lib.netaudio_clock_tracker_accept(
+                self._handle, _encode_command_spec(dict(request)), ctypes.byref(changed)
+            )
+            if status != STATUS_OK:
+                raise NetaudioCoreError(status, "clock observation")
+
+            return self.snapshot() if changed.value else None
+
+    def snapshot(self, *, include_history=False) -> _types.ClockObservations:
+        with self._native_lock:
+            self._require_open()
+            status, data = _call_buffer(
+                self._lib.netaudio_clock_tracker_snapshot, self._handle, include_history, capacity=32768
+            )
+            if status != STATUS_OK:
+                raise NetaudioCoreError(status, "clock snapshot")
+
+            return _decode_json_output(data, "clock snapshot")
 
 
 def sample_rate_status_evidence(status: _requests.SampleRateStatus) -> _types.SampleRateStatus:

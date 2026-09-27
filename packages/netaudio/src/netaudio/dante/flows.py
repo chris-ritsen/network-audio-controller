@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import cast
 
@@ -17,6 +18,7 @@ from netaudio.dante.arc_protocol import (
     flow_inventory_protocol_identifier_for_device,
 )
 from netaudio.dante.channel import channel_by_number
+from netaudio.dante.flow_preconditions import refresh_flow_state
 
 logger = logging.getLogger("netaudio")
 
@@ -56,6 +58,17 @@ def external_receiver_subscription_specification(
         specification = core.plan_external_subscription(
             {
                 "device_protocol": device_protocol,
+                "receiver": {
+                    "locked": getattr(device, "is_locked", None),
+                    "aes67_supported": getattr(device, "aes67_configuration_supported", None),
+                    "aes67_enabled": getattr(device, "aes67_current", None),
+                    "sample_rate": getattr(device, "sample_rate", None),
+                    "encoding": getattr(device, "encoding", None),
+                    "redundancy_supported": getattr(device, "switch_redundancy_supported", None),
+                },
+                "source_sample_rate": flow.sample_rate,
+                "source_encoding": flow.encoding,
+                "source_direction": flow.direction,
                 "receiver_channel_ids": list(receiver_channel_ids),
                 "flow_slot_assignments": list(flow_slot_assignments),
                 "advertised_flow_slot_count": flow.channel_count,
@@ -133,11 +146,48 @@ async def subscribe_external_rtp(
                 "receiver_flow_after": None,
             }
 
+        current = application.external_flows.get(flow.source_ipv4, flow.session_id)
+        if (
+            current is None
+            or current.content_sha256 != flow.content_sha256
+            or current.expires_monotonic <= time.monotonic()
+        ):
+            raise FlowValidationError("source announcement expired or changed; refresh the source", status=409)
+
+        reason = await refresh_flow_state(device, rtp=True)
+        if reason is not None:
+            raise FlowValidationError(f"{reason}; no request was sent", status=409)
+
+        current = application.external_flows.get(flow.source_ipv4, flow.session_id)
+        if (
+            current is None
+            or current.content_sha256 != flow.content_sha256
+            or current.expires_monotonic <= time.monotonic()
+        ):
+            raise FlowValidationError("source announcement expired or changed; refresh the source", status=409)
+
+        specification = external_receiver_subscription_specification(
+            device,
+            current,
+            receiver_channel_ids,
+            flow_slot_assignments,
+            receiver_supports_multiple_interfaces=receiver_supports_multiple_interfaces,
+        )
         response = await device.execute(specification)
         acknowledgement = core.command_acknowledgement(response)
         result_code = acknowledgement.get("result_code") if acknowledgement is not None else None
         acknowledged = acknowledgement is not None and acknowledgement.get("accepted") is True
-        after = await query_preferred_receiver_flow_inventory(device) if acknowledged else None
+        after = None
+        if acknowledged:
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while True:
+                after = await query_preferred_receiver_flow_inventory(device)
+                evidence = core.external_subscription_readback(
+                    {"kind": "command", "specification": specification, "inventory": after}
+                )
+                if evidence["arc_effective_state_confirmed"] is True or asyncio.get_running_loop().time() >= deadline:
+                    break
+                await asyncio.sleep(0.1)
 
     readback = core.external_subscription_readback(
         {"kind": "command", "specification": specification, "inventory": after}
@@ -369,6 +419,26 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
     application = device.application
     inventory_family = getattr(device, "receiver_flow_inventory_family", None)
 
+    if inventory_family is None:
+        protocol_id = flow_inventory_protocol_identifier_for_device(device)
+        if protocol_id is None:
+            return None
+
+        with core.ReceiverFlowInventory(protocol_id) as inventory:
+            command = inventory.state()["next_command"]
+
+        if command is None:
+            return None
+
+        command_name = command["command"]
+        if not isinstance(command_name, str):
+            return None
+
+        inventory_family = {
+            "query_modern_arc_receiver_flow_status": "modern",
+            "query_receiver_flows": "legacy",
+        }.get(command_name)
+
     if inventory_family == "modern":
         modern_query = getattr(application, "query_modern_arc_receiver_flow_status", None)
 
@@ -392,6 +462,8 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
         if status_page.get("page_disposition") != "complete":
             return None
 
+        device.receiver_flow_inventory_family = "modern"
+
         return correlate_receiver_flow_inventory(
             status_page,
             getattr(application, "external_flows", None),
@@ -409,6 +481,8 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
 
     if inventory is None:
         return None
+
+    device.receiver_flow_inventory_family = "legacy"
 
     return correlate_receiver_flow_inventory(inventory, getattr(application, "external_flows", None))
 

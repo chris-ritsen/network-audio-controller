@@ -109,6 +109,21 @@ pub fn validate_limits(now: f64, freshness: f64, limit: usize) -> Result<(), Str
 }
 
 impl Series {
+    /// Current state without walking or cloning retained observations.
+    pub fn summary(&self) -> Self {
+        Self {
+            fresh: self.fresh,
+            history: Vec::new(),
+            current: self.current.clone(),
+            delta: self.delta,
+            baseline: self.baseline,
+            increase_since_baseline: self.increase_since_baseline,
+            display_epoch: self.display_epoch,
+            statistics: self.statistics.clone(),
+            histogram: self.histogram.clone(),
+        }
+    }
+
     pub fn accept(
         &mut self,
         mut sample: Observation,

@@ -13,6 +13,7 @@ export async function serveWebapp(
   {
     devices = deviceFixture,
     metering = {},
+    externalFlows = {},
     eventJournal = {
       schema_version: 1,
       retention_limit: 1000,
@@ -30,7 +31,7 @@ export async function serveWebapp(
     if (url.pathname === "/events" && request.resourceType() !== "document") {
       return route.fulfill({
         contentType: "text/event-stream",
-        body: `data: ${JSON.stringify({ event: "snapshot", devices, metering })}\n\n`,
+        body: `data: ${JSON.stringify({ event: "snapshot", devices, metering, external_flows: externalFlows })}\n\n`,
       });
     }
     if (url.pathname === "/event-journal") {

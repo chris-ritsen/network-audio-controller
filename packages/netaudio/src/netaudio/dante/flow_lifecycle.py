@@ -7,7 +7,12 @@ from typing import Any
 from netaudio import core
 from netaudio.core import _requests, _types
 from netaudio.dante import flows
-from netaudio.dante.arc_protocol import flow_inventory_protocol_identifier_for_device
+from netaudio.dante.performance_configuration import observed_performance_configuration
+from netaudio.dante.flow_preconditions import refresh_flow_state
+from netaudio.dante.arc_protocol import (
+    advertised_arc_protocol_identifier_for_device,
+    flow_inventory_protocol_identifier_for_device,
+)
 from netaudio.dante.transmit_flow import (
     FlowLifecycleState,
     FlowOperationPlan,
@@ -31,9 +36,10 @@ def _readback_protocol_id(device) -> int | None:
 
 
 def _protocol_id(device, specification: _requests.TransmitFlowSpecification | None = None) -> int | None:
-    required = specification.get("protocol", {}).get("protocol_id") if specification is not None else None
-    advertised = (getattr(device, "transmit_flow_authoring", None) or {}).get("protocol_id")
-    return required if required is not None else advertised
+    try:
+        return advertised_arc_protocol_identifier_for_device(device)
+    except (AttributeError, RuntimeError):
+        return None
 
 
 def _device_protocol_version(device) -> str | None:
@@ -46,17 +52,26 @@ def _device_protocol_version(device) -> str | None:
 
 def _flow_device_facts(device, required_capabilities=()) -> _requests.FlowDeviceFacts:
     channels = getattr(device, "tx_channels", None)
+    performance = observed_performance_configuration(device).get("transmit_flow_performance")
     return {
         "managed": bool(getattr(device, "requires_managed_control", False)),
         "locked": getattr(device, "is_locked", None),
         "capability_word": getattr(device, "transmit_flow_authoring_capability_word", None),
-        "advertised_protocol": (getattr(device, "transmit_flow_authoring", None) or {}).get("protocol_id"),
+        "advertised_protocol": _protocol_id(device),
         "protocol_version": _device_protocol_version(device),
         "sample_rate": getattr(device, "sample_rate", None),
         "encoding": getattr(device, "encoding", None),
         "channels": [int(number) for number in channels] if isinstance(channels, dict) else None,
         "channel_capacity": getattr(device, "routing_capacity_transmit_channel_count", None),
-        "capabilities": {name: getattr(device, name, None) for name in required_capabilities},
+        "capabilities": {
+            **{name: getattr(device, name, None) for name in required_capabilities},
+            "aes67_configuration_supported": getattr(device, "aes67_configuration_supported", None),
+            "aes67_current": getattr(device, "aes67_current", None),
+            "redundancy_supported": getattr(device, "switch_redundancy_supported", None),
+            "transmit_performance": {"frames_per_packet": performance["frames_per_packet"]}
+            if performance is not None
+            else None,
+        },
     }
 
 
@@ -199,11 +214,15 @@ def _concurrent_topology_activity(
 
 
 async def _read_inventory(device, protocol_id: int) -> dict | None:
-    return await flows.query_tx_flow_inventory(str(device.ipv4), device._arc_port(), protocol_id, device=device)
+    inventory_protocol = _readback_protocol_id(device)
+    if inventory_protocol is None:
+        return None
+
+    return await flows.query_tx_flow_inventory(str(device.ipv4), device._arc_port(), inventory_protocol, device=device)
 
 
 async def _fresh_authoring_protocol(device) -> tuple[int, int] | None:
-    protocol_id = _readback_protocol_id(device)
+    protocol_id = _protocol_id(device)
     if protocol_id is None:
         return None
     try:
@@ -225,7 +244,7 @@ async def _fresh_authoring_protocol(device) -> tuple[int, int] | None:
     for name, value in capabilities.items():
         setattr(device, name, value)
 
-    return capability_word, capabilities["transmit_flow_authoring"]["protocol_id"]
+    return capability_word, protocol_id
 
 
 async def _refresh_authoring_family(device) -> dict | None:
@@ -430,9 +449,32 @@ async def create_transmit_flow(device, specification: _requests.TransmitFlowSpec
     assert command_specification is not None
 
     observations: list[dict[str, Any]] = []
+    planned_capability = getattr(device, "transmit_flow_authoring_capability_word", None)
     async with device.topology_mutation_lock:
+        reason = await refresh_flow_state(device, rtp=specification.get("media_mode") == "rtp_aes67")
+        if reason is not None:
+            return _operation_result(
+                operation="create",
+                state=FlowLifecycleState.PENDING,
+                transport=plan.transport,
+                acknowledgement=None,
+                effective_confirmation=None,
+                requested=specification,
+                effective=None,
+                comparison=None,
+                message=f"{reason}; no request was sent",
+                observations=[
+                    _observation(
+                        phase="authoring_preconditions",
+                        attempt=1,
+                        inventory=None,
+                        outcome="unavailable",
+                        details={"reason": reason},
+                    )
+                ],
+            )
         fresh_authoring = await _fresh_authoring_protocol(device)
-        if fresh_authoring is None or fresh_authoring[1] != protocol_id:
+        if fresh_authoring is None or fresh_authoring != (planned_capability, protocol_id):
             return _operation_result(
                 operation="create",
                 state=FlowLifecycleState.PENDING,
@@ -528,6 +570,21 @@ async def create_transmit_flow(device, specification: _requests.TransmitFlowSpec
                     message="fresh device state contradicts the requested sample-rate or encoding precondition; no request was sent",
                     observations=observations,
                 )
+
+        refreshed_plan = plan_create_transmit_flow(device, specification)
+        if not refreshed_plan.supported or refreshed_plan.command_specification != command_specification:
+            return _operation_result(
+                operation="create",
+                state=FlowLifecycleState.REJECTED,
+                transport=plan.transport,
+                acknowledgement=None,
+                effective_confirmation=None,
+                requested=specification,
+                effective=None,
+                comparison=None,
+                message="; ".join(refreshed_plan.reasons) or "flow facts changed; validate the request again",
+                observations=observations,
+            )
 
         response = await _send_once(device, command_specification)
         acknowledgement = core.command_acknowledgement(response)

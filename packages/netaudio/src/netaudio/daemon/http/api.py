@@ -124,7 +124,9 @@ class _SseClient:
 
 
 def _encode_sse(data) -> bytes:
-    return f"data: {json.dumps(data, default=str)}\n\n".encode()
+    from netaudio.daemon.http.json_values import browser_values
+
+    return f"data: {json.dumps(browser_values(data), default=str)}\n\n".encode()
 
 
 async def _bounded(awaitable, timeout: float):
@@ -847,6 +849,8 @@ class DaemonHTTPServer(
                 await self._handle_get_devices(writer, context_name)
             elif route == "/external-flows":
                 await self._send_json(writer, self.application.external_flows.to_dict())
+            elif route == "/external-flows/diagnostics":
+                await self._send_json(writer, self.application.sap.diagnostics())
             elif route == "/ddm/devices":
                 await self._handle_get_ddm_devices(writer, context_name)
             elif route == "/ddm/domains":

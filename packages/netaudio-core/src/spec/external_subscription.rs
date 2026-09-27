@@ -92,6 +92,22 @@ pub struct ExternalSubscriptionPlanRequest {
     pub secondary_address: Option<String>,
     pub secondary_port: Option<u16>,
     pub receiver_supports_multiple_interfaces: bool,
+    pub receiver: ExternalReceiverFacts,
+    pub source_sample_rate: Option<u32>,
+    pub source_encoding: Option<String>,
+    pub source_direction: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ExternalReceiverFacts {
+    pub locked: Option<bool>,
+    pub aes67_supported: Option<bool>,
+    pub aes67_enabled: Option<bool>,
+    pub sample_rate: Option<u32>,
+    pub encoding: Option<u16>,
+    pub redundancy_supported: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -104,13 +120,50 @@ pub enum ExternalSubscriptionCommand {
 pub fn plan_external_subscription(
     request: ExternalSubscriptionPlanRequest,
 ) -> Result<ExternalSubscriptionCommand, SpecError> {
+    let reject = |reason: &str| SpecError::InvalidJson(reason.to_owned());
+    if request.receiver.locked != Some(false) {
+        return Err(reject("receiver lock state is locked or unknown"));
+    }
+    if request.receiver.aes67_supported != Some(true)
+        || request.receiver.aes67_enabled != Some(true)
+    {
+        return Err(reject(
+            "receiver AES67 support and current enablement must be confirmed",
+        ));
+    }
+    if !matches!(
+        request.source_direction.as_deref(),
+        None | Some("sendonly" | "sendrecv")
+    ) {
+        return Err(reject("announcement does not describe an active sender"));
+    }
+    if request.source_sample_rate.is_none()
+        || request.source_sample_rate != request.receiver.sample_rate
+    {
+        return Err(reject(
+            "source and receiver sample rates are unavailable or incompatible",
+        ));
+    }
+    let encoding = match request.source_encoding.as_deref() {
+        Some("L16") => Some(16),
+        Some("L24") => Some(24),
+        Some("L32") => Some(32),
+        _ => None,
+    };
+    if encoding.is_none() || encoding != request.receiver.encoding {
+        return Err(reject(
+            "source and receiver PCM encodings are unavailable or incompatible",
+        ));
+    }
     let advertised = request.secondary_address.zip(request.secondary_port);
+    let multiple_interfaces = request.receiver_supports_multiple_interfaces
+        && request.receiver.redundancy_supported == Some(true);
     let specification = ExternalSubscriptionSpec {
         parameters: request.parameters,
         advertisement_supports_multiple_interfaces: advertised.is_some(),
-        receiver_supports_multiple_interfaces: request.receiver_supports_multiple_interfaces,
+        receiver_supports_multiple_interfaces: multiple_interfaces,
         secondary_destination: advertised
-            .filter(|_| request.receiver_supports_multiple_interfaces)
+            .filter(|_| multiple_interfaces)
             .map(|(address, port)| ExternalRtpDestinationSpec { address, port }),
     };
     specification.build()?;

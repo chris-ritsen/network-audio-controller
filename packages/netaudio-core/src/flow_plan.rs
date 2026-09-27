@@ -77,12 +77,11 @@ impl FlowDeviceFacts {
         if protocol.is_none() {
             reasons.push("flow protocol is unknown".into());
         }
-        if self.advertised_protocol.is_some()
-            && request.protocol.protocol_id.is_some()
-            && self.advertised_protocol != protocol
-        {
+        if self.advertised_protocol.is_none() {
+            reasons.push("device ARC envelope revision is unknown".into());
+        } else if self.advertised_protocol != protocol {
             reasons.push(
-                "requested flow protocol does not match the device's advertised authoring protocol"
+                "requested flow protocol does not match the device's advertised ARC envelope"
                     .into(),
             );
         }
@@ -141,6 +140,41 @@ impl FlowDeviceFacts {
         if let Some(capacity) = self.channel_capacity.as_ref().and_then(Value::as_u64) {
             if request.channel_slots.len() as u64 > capacity {
                 reasons.push(format!("requested channel-slot count exceeds the advertised audio transmit capacity of {capacity}"));
+            }
+        } else {
+            reasons.push("audio transmit channel capacity is unknown".into());
+        }
+        if self.sample_rate.is_none() || self.encoding.is_none() {
+            reasons.push("current audio format is unknown".into());
+        }
+        if matches!(request.media_mode, MediaMode::RtpAes67) {
+            for (key, label) in [
+                ("aes67_configuration_supported", "AES67 support"),
+                ("aes67_current", "AES67 current enablement"),
+            ] {
+                match self.capabilities.get(key) {
+                    Some(Value::Bool(true)) => {}
+                    Some(Value::Bool(false)) => {
+                        reasons.push(format!("{label} is disabled or unsupported"))
+                    }
+                    _ => reasons.push(format!("{label} is unknown")),
+                }
+            }
+        }
+        if request.secondary_destination.is_some()
+            && self.capabilities.get("redundancy_supported") != Some(&Value::Bool(true))
+        {
+            reasons.push("two destinations require advertised interface/redundancy support".into());
+        }
+        if let Some(fpp) = request.frames_per_packet {
+            if self
+                .capabilities
+                .get("transmit_performance")
+                .and_then(|value| value.get("frames_per_packet"))
+                .and_then(Value::as_u64)
+                != Some(u64::from(fpp.get()))
+            {
+                reasons.push("requested frames per packet does not match observed transmit performance; leave it unspecified or refresh the device settings".into());
             }
         }
         reasons
@@ -239,10 +273,29 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
         .iter()
         .map(|slot| slot.transmitter_channel.get())
         .collect();
-    let command = match input.protocol_id {
-        Some(crate::commands::PROTOCOL_DANTE_FLOW) => {
-            plan.serializer_cohort = Some("legacy_2729_explicit_slot_multicast");
-            plan.wire_authored_fields = vec!["identity.global_flow_id", "channel_slots"];
+    let family = input
+        .device
+        .capability_word
+        .as_ref()
+        .and_then(Value::as_u64)
+        .map(|word| word & 0x1000 != 0);
+    let command = match (family, input.protocol_id) {
+        (
+            Some(false),
+            Some(crate::commands::PROTOCOL_DANTE_FLOW | crate::protocol::PROTOCOL_ARC_2809),
+        ) => {
+            plan.serializer_cohort = Some("fixed_audio_multicast");
+            plan.wire_authored_fields = vec![
+                "identity.global_flow_id",
+                "channel_slots",
+                "media_mode",
+                "name",
+                "sample_rate_hz",
+                "encoding_bits",
+                "frames_per_packet",
+                "primary_destination",
+                "secondary_destination",
+            ];
 
             if request.identity.global_flow_id.is_none() {
                 plan.reject("legacy creation requires an explicit global flow identifier");
@@ -252,30 +305,35 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
                 plan.reject("legacy creation does not accept request_options_word");
             }
 
-            if !matches!(request.media_mode, MediaMode::NativeDante) {
-                plan.reject("legacy creation supports only native Dante audio");
+            if matches!(request.media_mode, MediaMode::Unknown) {
+                plan.reject("creation requires an explicit audio media mode");
             }
 
             if request.identity.media_local_flow_id.is_some() {
                 plan.reject("legacy creation does not encode a media-local flow identifier");
             }
 
-            if request.name.is_some() {
-                plan.reject("legacy creation does not encode a flow name");
+            if input.protocol_id == Some(crate::commands::PROTOCOL_DANTE_FLOW)
+                && matches!(request.media_mode, MediaMode::NativeDante)
+                && request.name.is_none()
+                && request.frames_per_packet.is_none()
+                && destinations.is_empty()
+            {
+                plan.serializer_cohort = Some("legacy_2729_explicit_slot_multicast");
+                plan.wire_authored_fields = vec!["identity.global_flow_id", "channel_slots"];
+                json!({"command": "create_tx_flow", "flow_protocol_id": input.protocol_id,
+                    "flow_slot": request.identity.global_flow_id, "channels": channels})
+            } else {
+                json!({"command": "create_tx_flow", "flow_protocol_id": input.protocol_id,
+                "flow_slot": request.identity.global_flow_id, "channels": channels,
+                "configuration": {"sample_rate": input.device.sample_rate, "encoding": input.device.encoding,
+                    "media_class": if matches!(request.media_mode, MediaMode::RtpAes67) {3} else {1},
+                    "frames_per_packet":request.frames_per_packet.map_or(0, |v| v.get()),
+                    "label":request.name,"persistent":true,"advertised":true,
+                    "destinations":destinations.iter().map(|d| json!({"address":d.address,"port":d.port})).collect::<Vec<_>>()}})
             }
-
-            if request.frames_per_packet.is_some() {
-                plan.reject("legacy creation does not encode frames per packet");
-            }
-
-            if !destinations.is_empty() {
-                plan.reject("legacy creation does not encode caller-selected destinations");
-            }
-
-            json!({"command": "create_tx_flow", "flow_protocol_id": input.protocol_id,
-                "flow_slot": request.identity.global_flow_id, "channels": channels})
         }
-        Some(crate::protocol::PROTOCOL_ARC_2809) => {
+        (Some(true), Some(crate::protocol::PROTOCOL_ARC_2809)) => {
             plan.serializer_cohort = Some(if matches!(request.media_mode, MediaMode::RtpAes67) {
                 "modern_2809_static_rtp_aes67"
             } else {
@@ -330,7 +388,7 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
                 "flow_name": request.name, "frames_per_packet": request.frames_per_packet.map_or(0, |value| value.get()),
                 "destinations": destinations, "request_options_word": request_options_word.cloned().unwrap_or(json!(0))})
         }
-        Some(crate::commands::PROTOCOL_DANTE_FLOW_2801) => {
+        (_, Some(crate::commands::PROTOCOL_DANTE_FLOW_2801)) => {
             plan.reject("this revision has no digest-bound create request/acknowledgement fixture");
             Value::Null
         }
@@ -359,6 +417,16 @@ pub fn plan_delete(request: &FlowDeleteRequest) -> FlowCommandPlan {
         reasons: request.device.reasons(true),
         ..Default::default()
     };
+    if request.protocol_id == Some(crate::protocol::PROTOCOL_ARC_2809)
+        && request
+            .device
+            .capability_word
+            .as_ref()
+            .and_then(Value::as_u64)
+            .is_some_and(|word| word & 0x1000 == 0)
+    {
+        plan.reject("fixed-format deletion with this ARC envelope has not been established");
+    }
     plan.serializer_cohort = match request.protocol_id {
         Some(crate::commands::PROTOCOL_DANTE_FLOW) => Some("legacy_2729_explicit_slot_delete"),
         Some(crate::protocol::PROTOCOL_ARC_2809) => Some("modern_2809_global_flow_2_delete"),

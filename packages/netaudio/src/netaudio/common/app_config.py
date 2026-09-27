@@ -36,6 +36,11 @@ class AppSettings:
         self.no_color: bool = False
         self._interface: str = DEFAULT_INTERFACE
         self.refresh: bool = False
+        self.sap_groups = tuple(
+            group.strip()
+            for group in os.environ.get("NETAUDIO_SAP_GROUPS", "239.255.255.255,224.0.0.56").split(",")
+            if group.strip()
+        )
         self.metering_port: int = int(os.environ.get("NETAUDIO_METERING_PORT", DEFAULT_MULTICAST_METERING_PORT))
         self.daemon_port: int = int(os.environ.get("NETAUDIO_DAEMON_PORT", DEFAULT_DAEMON_PORT))
         self.dbus_enabled: bool = os.environ.get("NETAUDIO_DBUS", "").lower() in ("1", "true", "yes")

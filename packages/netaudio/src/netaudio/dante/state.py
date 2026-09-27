@@ -133,16 +133,16 @@ def apply_audio_capability(device, status: dict, *, kind: str) -> bool:
 
 def apply_device_status(device, kind: str, status) -> bool:
     if kind == STATUS_KIND_CLOCK and "_clock_received_monotonic" in status:
-        from netaudio import core
+        from netaudio.dante.clock_observations import clock_tracker
 
         fields = dict(status)
         received = fields.pop("_clock_received_monotonic")
         previous = getattr(device, "clock_observations", None)
         current = ((previous or {}).get("conmon") or {}).get("current") or {}
         if current.get("observed_at") != fields["clock_observed_at"]:
-            observed = core.clock_observation_update(
+            observed = clock_tracker(device).update(
                 {
-                    "previous": previous,
+                    "previous": None,
                     "packet": None,
                     "conmon_status": fields["clock_status"],
                     "observed_at": fields["clock_observed_at"],

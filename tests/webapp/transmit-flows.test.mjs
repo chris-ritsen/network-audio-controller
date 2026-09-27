@@ -36,7 +36,7 @@ test("browser creates the canonical legacy flow schema", () => {
     { slot: 2, transmitter_channel: 4 },
   ]);
   assert.equal(result.identity.global_flow_id, 3);
-  assert.equal(result.protocol.protocol_id, 0x2729);
+  assert.equal(result.protocol.protocol_id, null);
   assert.deepEqual(result.raw_fields, {});
 });
 
@@ -50,8 +50,18 @@ test("browser emits an allocation request for the observed ARC 2.8.9 cohort", ()
   });
   assert.equal(result.identity.global_flow_id, null);
   assert.equal(result.identity.media_local_flow_id, 31);
-  assert.equal(result.protocol.protocol_id, 0x2809);
+  assert.equal(result.protocol.protocol_id, null);
   assert.deepEqual(result.raw_fields, {});
+});
+
+test("fixed authoring is independent of inventory envelope and accepts RTP intent", () => {
+  const authoring = {family: "fixed", opcode: 0x2201, identity_field: "global_flow_id",
+    identifier_max: 32, media_modes: ["native_dante", "rtp_aes67"], supports_flow_options: true};
+  const result = canonicalFlowRequest({authoring, channels: "1,2", flowId: "1",
+    mediaMode: "rtp_aes67", primaryAddress: "239.69.150.243", primaryPort: "5004"});
+  assert.equal(result.identity.global_flow_id, 1);
+  assert.equal(result.identity.media_local_flow_id, null);
+  assert.equal(result.protocol.protocol_id, null);
 });
 
 test("browser emits scoped RTP fields without treating device format as a wire mutation", () => {
@@ -136,6 +146,8 @@ test("flow editor uses advertised authoring independently of inventory revision"
       device: {
         server_name: "desk.local.",
         flow_protocol_id: 0x2729,
+        aes67_configuration_supported: true,
+        aes67_current: true,
         transmit_flow_authoring: modernAuthoring,
       },
     }),
@@ -148,6 +160,12 @@ test("flow editor uses advertised authoring independently of inventory revision"
     () => canonicalFlowRequest({ channels: "1", flowId: 1 }),
     /unavailable/,
   );
+});
+
+test("flow editor disables RTP authoring without observed AES67 enablement", () => {
+  const markup = render(h(TransmitFlows, {device: {server_name: "desk.local.",
+    transmit_flow_authoring: modernAuthoring, aes67_configuration_supported: true, aes67_current: false}}));
+  assert.match(markup, /value="rtp_aes67" disabled/);
 });
 
 test("browser keeps acknowledgement, device, effective-state, and persistence evidence separate", () => {

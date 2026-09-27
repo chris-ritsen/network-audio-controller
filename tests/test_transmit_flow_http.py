@@ -46,7 +46,30 @@ def server():
     device.tx_channels = {1: object()}
     device.sample_rate = 48_000
     device.encoding = 24
+    device.settings_properties = [{"property_id": 0x210}, {"property_id": 0x8204}]
+    device.performance_settings = {0x210: 48, 0x8204: 1000000}
+    device.routing_capacity_transmit_channel_count = 32
+    device.services = {"arc": {"type": "_netaudio-arc._udp.local.", "properties": {"arcp_vers": "2.7.41"}}}
     return make_http_server({"dev1": device})
+
+
+@pytest.mark.asyncio
+async def test_invalid_apply_has_event_identity_and_never_invokes_mutation():
+    instance = server()
+    instance.application.create_transmit_flow = AsyncMock()
+    status, payload = await post(
+        instance,
+        "/transmit-flows/create",
+        {
+            "device": "dev1",
+            "confirmed": True,
+            "specification": {"media_mode": "unknown"},
+        },
+    )
+    assert status == 400
+    assert payload["operation_id"]
+    assert payload["mutation_sent"] is False
+    instance.application.create_transmit_flow.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -65,6 +88,22 @@ async def test_http_plan_uses_the_canonical_specification_without_mutation():
 
 
 @pytest.mark.asyncio
+async def test_explicit_rejected_plan_has_a_durable_operation_identity():
+    instance = server()
+    status, payload = await post(
+        instance,
+        "/transmit-flows/plan",
+        {
+            "device": "dev1",
+            "specification": {"media_mode": "unknown"},
+        },
+    )
+    assert status == 400
+    assert payload["operation_id"]
+    assert payload["mutation_sent"] is False
+
+
+@pytest.mark.asyncio
 async def test_http_plan_preserves_modern_rtp_authoring_scope_and_preconditions():
     instance = server()
     device = instance.application.devices["dev1"]
@@ -72,6 +111,9 @@ async def test_http_plan_preserves_modern_rtp_authoring_scope_and_preconditions(
     device.transmit_flow_authoring_capability_word = 0x1000
     device.transmit_flow_authoring = core.flow_authoring_capabilities(0x1000)["transmit_flow_authoring"]
     device.receiver_flow_inventory_family = "modern"
+    device.services["arc"]["properties"]["arcp_vers"] = "2.8.9"
+    device.aes67_current = True
+    device.aes67_configuration_supported = True
     source = canonical_specification()
     source.update(
         {

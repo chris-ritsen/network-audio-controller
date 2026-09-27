@@ -68,6 +68,7 @@ pub fn parse_tx_flow_page(response: &[u8]) -> Option<TxFlowPage> {
         &[
             (PROTOCOL_DANTE_FLOW, OPCODE_QUERY_TX_FLOWS),
             (PROTOCOL_DANTE_FLOW_2801, OPCODE_QUERY_TX_FLOWS),
+            (PROTOCOL_ARC_2809, OPCODE_QUERY_TX_FLOWS),
         ],
         &[RESULT_CODE_SUCCESS, crate::protocol::RESULT_CODE_MORE_PAGES],
     )?;
@@ -101,11 +102,35 @@ pub fn parse_tx_flow_page(response: &[u8]) -> Option<TxFlowPage> {
         return None;
     }
 
+    let mut record_regions = Vec::with_capacity(active_count + 1);
+    record_regions.push(0..records_start + RESPONSE_HEADER_SIZE);
+    for offset in &record_offsets {
+        let start = offset.checked_add(RESPONSE_HEADER_SIZE)?;
+        let destinations = usize::from(read_u16(response, start + 12)?);
+        let channels = usize::from(read_u16(response, start + 14)?);
+        let end = start
+            .checked_add(18)?
+            .checked_add(destinations.checked_add(channels)?.checked_mul(2)?)?;
+        response.get(start..end)?;
+        if record_regions
+            .iter()
+            .any(|region| start < region.end && region.start < end)
+        {
+            return None;
+        }
+        record_regions.push(start..end);
+    }
+
     let mut flows = Vec::with_capacity(active_count);
     let mut flow_numbers = HashSet::with_capacity(active_count);
     for (index, record_offset) in record_offsets.iter().copied().enumerate() {
         let record_end = record_offsets.get(index + 1).copied().unwrap_or(body.len());
-        let flow = parse_flow_record(body, record_offset, record_end)?;
+        let flow = parse_flow_record(
+            response,
+            record_offset + RESPONSE_HEADER_SIZE,
+            record_end + RESPONSE_HEADER_SIZE,
+            &record_regions,
+        )?;
         if !(1..=32).contains(&flow.flow_number) || !flow_numbers.insert(flow.flow_number) {
             return None;
         }
@@ -812,37 +837,114 @@ pub(super) fn receiver_channel_numbers(descriptor: &[u8]) -> Option<Vec<u16>> {
     Some(receiver_channel_numbers)
 }
 
-fn parse_flow_record(body: &[u8], offset: usize, record_end: usize) -> Option<TxFlow> {
+fn parse_flow_record(
+    body: &[u8],
+    offset: usize,
+    record_end: usize,
+    record_regions: &[std::ops::Range<usize>],
+) -> Option<TxFlow> {
+    let object = |start: usize, length: usize| {
+        let end = start.checked_add(length)?;
+        if record_regions
+            .iter()
+            .any(|region| start < region.end && region.start < end)
+        {
+            return None;
+        }
+        body.get(start..end)
+    };
     let fixed_end = offset.checked_add(FLOW_RECORD_FIXED_SIZE)?;
     if fixed_end > record_end {
         return None;
     }
     body.get(offset..record_end)?;
     let flow_number = read_u16(body, offset)?;
-    let flow_type_code = u16_at(body, offset + FLOW_RECORD_FLOW_TYPE);
+    let configuration_flags = read_u16(body, offset + 2)?;
     let sample_rate = read_u32(body, offset + FLOW_RECORD_SAMPLE_RATE)?;
-    let encoding = u16::try_from(read_u32(body, offset + FLOW_RECORD_ENCODING)?).ok()?;
-    let frames_per_packet = u16_at(body, offset + FLOW_RECORD_FRAMES_PER_PACKET);
+    let encoding = read_u16(body, offset + 10)?;
+    let destination_count = read_u16(body, offset + 12)?;
     let channel_count = read_u16(body, offset + FLOW_RECORD_CHANNEL_COUNT)?;
     if channel_count == 0 {
         return None;
     }
 
-    let (flow_type, channels) = match flow_type_code {
-        FLOW_TYPE_MULTICAST => (
-            "multicast".to_owned(),
-            flow_channel_list(body, offset, record_end, frames_per_packet, channel_count)?,
-        ),
-        FLOW_TYPE_UNICAST => ("unicast".to_owned(), Vec::new()),
-        _ => return None,
+    let channels = flow_channel_list(body, offset, record_end, destination_count, channel_count)?;
+    let extension_pointer_offset = offset
+        .checked_add(16)?
+        .checked_add(usize::from(destination_count).checked_mul(2)?)?
+        .checked_add(usize::from(channel_count).checked_mul(2)?)?;
+    if extension_pointer_offset.checked_add(2)? > record_end {
+        return None;
+    }
+    let extension_pointer = usize::from(read_u16(body, extension_pointer_offset)?);
+    let mut raw_extension = Vec::new();
+    let mut frames_per_packet = None;
+    let mut media_class = None;
+    let mut flow_name = None;
+    if extension_pointer != 0 {
+        let length = usize::from(*body.get(extension_pointer)?).checked_mul(2)?;
+        if length < 2 {
+            return None;
+        }
+        let extension = object(extension_pointer, length)?;
+        raw_extension = extension.to_vec();
+        frames_per_packet = read_u16(extension, 8).filter(|v| *v != 0);
+        media_class = read_u16(extension, 16);
+        if let Some(pointer) = read_u16(extension, 10).filter(|p| *p != 0) {
+            let tail = body.get(usize::from(pointer)..)?;
+            let end = tail.iter().position(|v| *v == 0)?;
+            object(usize::from(pointer), end.checked_add(1)?)?;
+            flow_name = Some(std::str::from_utf8(&tail[..end]).ok()?.to_owned());
+        }
+    }
+    let mut destinations = Vec::with_capacity(usize::from(destination_count));
+    let mut multicast = true;
+    let mut unicast = true;
+    for index in 0..usize::from(destination_count) {
+        let pointer = usize::from(read_u16(body, offset + 16 + index * 2)?);
+        let socket = object(pointer, 8)?;
+        if socket[0] < 8 || socket[1] != 2 {
+            return None;
+        }
+        object(pointer, usize::from(socket[0]))?;
+        let address = std::net::Ipv4Addr::new(socket[4], socket[5], socket[6], socket[7]);
+        multicast &= address.is_multicast();
+        unicast &= !address.is_multicast();
+        destinations.push(
+            serde_json::json!({"address":address,"port":read_u16(socket,2)?,"interface":null}),
+        );
+    }
+    let flow_type = if destination_count == 0 {
+        "unknown"
+    } else if multicast {
+        "multicast"
+    } else if unicast {
+        "unicast"
+    } else {
+        "unknown"
+    }
+    .to_owned();
+    let media_mode = match media_class {
+        Some(1) => Some("native_dante".into()),
+        Some(3) => Some("rtp_aes67".into()),
+        _ => None,
     };
 
     Some(TxFlow {
+        inventory_layout: "fixed",
         flow_number,
         flow_type,
         sample_rate,
         encoding,
         frames_per_packet,
+        configuration_flags,
+        media_class,
+        media_mode,
+        flow_name,
+        primary_destination: destinations.first().cloned(),
+        secondary_destination: destinations.get(1).cloned(),
+        destinations,
+        raw_extension,
         channel_count,
         channels,
     })
@@ -852,11 +954,11 @@ fn flow_channel_list(
     body: &[u8],
     record_offset: usize,
     record_end: usize,
-    frames_per_packet: u16,
+    destination_count: u16,
     channel_count: u16,
 ) -> Option<Vec<u16>> {
     let channel_bytes = usize::from(channel_count).checked_mul(2)?;
-    let variable_prefix_bytes = usize::from(frames_per_packet).checked_mul(2)?;
+    let variable_prefix_bytes = usize::from(destination_count).checked_mul(2)?;
     let channels_start = record_offset
         .checked_add(FLOW_RECORD_FIXED_SIZE)?
         .checked_add(variable_prefix_bytes)?;

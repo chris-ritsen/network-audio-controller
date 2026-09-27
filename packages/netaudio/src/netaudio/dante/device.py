@@ -771,7 +771,6 @@ class DanteDevice:
             controls.update(core.flow_authoring_capabilities(transmit_flow_authoring_capability_word))
         else:
             controls["transmit_flow_authoring"] = None
-            controls["receiver_flow_inventory_family"] = None
         if locked is not None:
             controls["is_locked"] = locked
         if data.get("aes67") is not None:

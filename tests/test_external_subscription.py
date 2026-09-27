@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -175,6 +176,17 @@ def test_native_external_planner_selects_only_mutually_supported_destinations(re
         if key not in {"command", "advertisement_supports_multiple_interfaces", "receiver_supports_multiple_interfaces"}
     }
     request.update(
+        receiver={
+            "locked": False,
+            "aes67_supported": True,
+            "aes67_enabled": True,
+            "sample_rate": 48000,
+            "encoding": 24,
+            "redundancy_supported": receiver_supports,
+        },
+        source_sample_rate=48000,
+        source_encoding="L24",
+        source_direction="sendonly",
         secondary_address=secondary[0],
         secondary_port=secondary[1],
         receiver_supports_multiple_interfaces=receiver_supports,
@@ -208,7 +220,7 @@ def discovered_flow():
         SAP_FIXTURE.read_bytes(),
         announcement_interface="eth0",
         packet_source_ipv4="192.0.2.44",
-        received_monotonic=1,
+        received_monotonic=time.monotonic(),
         wall_time=1,
     )
     return change.flow
@@ -216,6 +228,12 @@ def discovered_flow():
 
 def device(*, protocol="2.8.9", rx_channels=None, managed=False):
     return SimpleNamespace(
+        is_locked=False,
+        aes67_current=True,
+        aes67_configuration_supported=True,
+        sample_rate=48000,
+        encoding=24,
+        switch_redundancy_supported=True,
         _arc_port=lambda: 4440,
         name="Receiver",
         server_name="receiver.local.",
@@ -232,7 +250,29 @@ def device(*, protocol="2.8.9", rx_channels=None, managed=False):
         },
         topology_mutation_lock=DeferredAsyncioLock(),
         execute=AsyncMock(),
+        populate_from_core=AsyncMock(return_value=True),
     )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("is_locked", True),
+        ("is_locked", None),
+        ("aes67_current", False),
+        ("aes67_current", None),
+        ("sample_rate", 44100),
+        ("encoding", 16),
+    ],
+)
+def test_external_subscription_rejects_incompatible_receiver_facts(field, value):
+    target = device()
+    setattr(target, field, value)
+    with pytest.raises(FlowValidationError):
+        external_receiver_subscription_specification(
+            target, discovered_flow(), [1], [2], receiver_supports_multiple_interfaces=False
+        )
+    target.execute.assert_not_called()
 
 
 def test_discovered_flow_maps_to_external_subscription_and_gates_secondary_destination():
@@ -354,6 +394,10 @@ async def test_external_subscription_reports_arc_sdp_and_media_evidence_separate
     target = device()
     target.execute.return_value = bytes.fromhex("280900144a263410000100000000000001000000")
     application = SimpleNamespace(commands=DanteCommands(), external_flows=populated_inventory())
+    application.probe_lock_status = AsyncMock(return_value=SimpleNamespace(is_locked=False))
+    application.probe_aes67_state = AsyncMock(return_value=(True, None))
+    application.probe_sample_rate_status = AsyncMock(return_value={"current_value": 48000})
+    application.probe_encoding_status = AsyncMock(return_value={"current_value": 24})
     target.application = application
     expected_identity = {
         "receiver_channel": 1,
@@ -431,6 +475,45 @@ async def test_external_subscription_does_not_send_without_complete_fresh_baseli
     target.execute.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_source_changed_during_fresh_readback_is_not_sent(monkeypatch):
+    target = device()
+    original = discovered_flow()
+    application = SimpleNamespace(external_flows=SimpleNamespace(get=lambda *_: original))
+    target.application = application
+
+    async def refresh(_device, **_kwargs):
+        application.external_flows.get = lambda *_: replace(original, content_sha256="changed")
+
+    monkeypatch.setattr(flows, "refresh_flow_state", refresh)
+    monkeypatch.setattr(
+        flows, "query_preferred_receiver_flow_inventory", AsyncMock(return_value={"complete": True, "flows": []})
+    )
+    with pytest.raises(FlowValidationError, match="expired or changed"):
+        await subscribe_external_rtp(
+            application, target, original, [1], [2], receiver_supports_multiple_interfaces=False
+        )
+    target.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_external_subscription_rechecks_replaced_source_before_sending(monkeypatch):
+    target = device()
+    original = discovered_flow()
+    application = SimpleNamespace(
+        external_flows=SimpleNamespace(get=lambda *_: replace(original, content_sha256="changed"))
+    )
+    target.application = application
+    monkeypatch.setattr(
+        flows, "query_preferred_receiver_flow_inventory", AsyncMock(return_value={"complete": True, "flows": []})
+    )
+    with pytest.raises(FlowValidationError, match="expired or changed"):
+        await subscribe_external_rtp(
+            application, target, original, [1], [2], receiver_supports_multiple_interfaces=False
+        )
+    target.execute.assert_not_awaited()
+
+
 def test_managed_only_device_is_rejected_before_build_or_send():
     target = device(managed=True)
     with pytest.raises(FlowValidationError, match="managed-only"):
@@ -474,7 +557,7 @@ def populated_inventory() -> SapFlowInventory:
         SAP_FIXTURE.read_bytes(),
         announcement_interface="eth0",
         packet_source_ipv4="192.0.2.44",
-        received_monotonic=1,
+        received_monotonic=time.monotonic(),
         wall_time=1,
     )
     return inventory
@@ -496,6 +579,71 @@ def acknowledged_result() -> dict:
         "receiver_channel_ids": [1, 2],
         "flow_slot_assignments": [1, 2],
     }
+
+
+@pytest.mark.asyncio
+async def test_sap_http_slot_routing_through_native_core_has_one_write_and_readback(monkeypatch, tmp_path):
+    target = device(rx_channels=[7])
+    server = make_http_server({target.server_name: target})
+    application = server.application
+    application.external_flows = populated_inventory()
+    application.probe_lock_status = AsyncMock(return_value=SimpleNamespace(is_locked=False))
+    application.probe_aes67_state = AsyncMock(return_value=(True, None))
+    application.probe_sample_rate_status = AsyncMock(return_value={"current_value": 48000})
+    application.probe_encoding_status = AsyncMock(return_value={"current_value": 24})
+    target.application = application
+    writes = []
+
+    async def execute(command):
+        packet = core.build_command(command)
+        writes.append({"command": command, "packet": packet.hex()})
+        return bytes.fromhex("2809000a000132010001")
+
+    target.execute.side_effect = execute
+
+    async def inventory(_device):
+        identities = (
+            core.external_subscription_readback(
+                {"kind": "command", "specification": writes[0]["command"], "inventory": None}
+            )["requested_effective_identities"]
+            if writes
+            else []
+        )
+        return {
+            "result_code": 1,
+            "page_disposition": "complete",
+            "flows": [{"effective_subscription_identities": identities, "sdp_correlation": {"matched": True}}]
+            if writes
+            else [],
+        }
+
+    monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", inventory)
+
+    async def subscribe(device, flow, receivers, slots, **options):
+        return await subscribe_external_rtp(application, device, flow, receivers, slots, **options)
+
+    application.subscribe_external_rtp = subscribe
+    status, snapshot = await get(server, "/external-flows")
+    assert status == 200
+    source = next(iter(snapshot.values()))
+    request = {
+        "rx_device": target.server_name,
+        "source_ipv4": source["source_ipv4"],
+        "session_id": source["session_id"],
+        "content_sha256": source["content_sha256"],
+        "receiver_channel_ids": [7],
+        "flow_slot_assignments": [2],
+    }
+    status, result = await post(server, "/external-flows/subscribe", request)
+    assert status == 200
+    assert result["arc_effective_state_confirmed"] is True
+    assert result["decoded_audio_confirmed"] is None
+    assert len(writes) == 1
+    assert writes[0]["command"]["receiver_channel_ids"] == [7]
+    assert writes[0]["command"]["flow_slot_assignments"] == [2]
+    (tmp_path / "sap-routing-evidence.json").write_text(
+        json.dumps({"source": source, "request": request, "writes": writes, "result": result}, indent=2)
+    )
 
 
 def test_cli_external_list_reports_discovered_flow_without_device_discovery():
@@ -575,7 +723,8 @@ async def test_http_external_flow_inventory_and_subscription_preserve_verificati
         {
             "rx_device": "receiver.local.",
             "source_ipv4": "192.0.2.44",
-            "session_id": 123456789012,
+            "session_id": "123456789012",
+            "content_sha256": server.application.external_flows.get("192.0.2.44", 123456789012).content_sha256,
             "receiver_channel_ids": [1, 2],
             "flow_slot_assignments": [1, 2],
             "receiver_supports_multiple_interfaces": True,

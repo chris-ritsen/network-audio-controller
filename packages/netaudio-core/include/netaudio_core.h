@@ -147,6 +147,8 @@ typedef uint16_t NetaudioNotification;
 
 typedef struct NetaudioClient NetaudioClient;
 
+typedef struct NetaudioClockTracker NetaudioClockTracker;
+
 typedef struct NetaudioExportCollector NetaudioExportCollector;
 
 typedef struct NetaudioInventory NetaudioInventory;
@@ -805,6 +807,33 @@ NetaudioStatus netaudio_inventory_state(NetaudioInventory *inventory,
                                         uint8_t *out_buffer,
                                         uintptr_t out_capacity,
                                         uintptr_t *out_length);
+
+/**
+ * Create a bounded clock observation owner. Free exactly once after all calls finish.
+ */
+NetaudioStatus netaudio_clock_tracker_new(NetaudioClockTracker **out_tracker);
+
+/**
+ * Free retained observations. Passing null is allowed; concurrent use is not.
+ */
+void netaudio_clock_tracker_free(NetaudioClockTracker *tracker);
+
+/**
+ * Accept an incremental ClockObservationRequest with previous=null.
+ * Mutations have no output-buffer retry; read snapshots separately.
+ */
+NetaudioStatus netaudio_clock_tracker_accept(NetaudioClockTracker *tracker,
+                                             const char *json,
+                                             bool *out_changed);
+
+/**
+ * Read current state, optionally including retained history. Buffer retries are read-only.
+ */
+NetaudioStatus netaudio_clock_tracker_snapshot(NetaudioClockTracker *tracker,
+                                               bool include_history,
+                                               uint8_t *out_buffer,
+                                               uintptr_t out_capacity,
+                                               uintptr_t *out_length);
 
 /**
  * Accept source-specific clock observations and compute bounded statistics.

@@ -338,6 +338,42 @@ class FakeSocket:
         self.closed = True
 
 
+def test_duplicate_sap_retains_reception_interfaces_without_duplicate_sources():
+    inventory = SapFlowInventory()
+    for interface in ("eth0", "eth1", "eth0"):
+        inventory.ingest(sap_packet(), announcement_interface=interface, packet_source_ipv4="192.0.2.44")
+    assert len(inventory.flows()) == 1
+    assert inventory.flows()[0].to_dict()["announcement_interfaces"] == ["eth0", "eth1"]
+
+
+@pytest.mark.asyncio
+async def test_partial_sap_membership_failure_keeps_healthy_group_and_reports_error():
+    class PartialSocket(FakeSocket):
+        def setsockopt(self, *arguments):
+            if arguments[:2] == (socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP) and arguments[2][:4] == socket.inet_aton(
+                "224.0.0.56"
+            ):
+                raise OSError("membership denied")
+            super().setsockopt(*arguments)
+
+    async def endpoint_factory(protocol_factory, *, sock):
+        return FakeTransport(), protocol_factory()
+
+    interface = SapInterface("eth0", "192.0.2.10")
+    service = SapDiscoveryService(
+        interface_provider=lambda: [interface],
+        socket_factory=PartialSocket,
+        endpoint_factory=endpoint_factory,
+        network_changes=FakeNetworkChanges(),
+    )
+    await service.start()
+    try:
+        assert service.listening_interfaces == (interface,)
+        assert service.diagnostics()["listener_errors"] == {"eth0/192.0.2.10/224.0.0.56": "membership denied"}
+    finally:
+        await service.stop()
+
+
 class FakeTransport:
     def __init__(self) -> None:
         self.closed = False
@@ -399,6 +435,8 @@ async def test_service_joins_sap_group_separately_on_every_active_ipv4_interface
             assert multicast_socket.blocking is False
             membership = socket.inet_aton(SAP_MULTICAST_ADDRESS) + socket.inet_aton(interface.address)
             assert (socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership) in multicast_socket.options
+            pipewire = socket.inet_aton("224.0.0.56") + socket.inet_aton(interface.address)
+            assert (socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, pipewire) in multicast_socket.options
 
         endpoints[1][1].datagram_received(sap_packet(), ("192.0.2.44", SAP_PORT))
         assert changes[0].kind is SapInventoryChangeKind.ADDED

@@ -167,6 +167,7 @@ class DanteApplication:
             self.sap = SapDiscoveryService(
                 self.external_flows,
                 interface_name=app_settings.interface,
+                multicast_groups=app_settings.sap_groups,
                 on_change=self._on_external_flow_change,
             )
         else:

@@ -83,6 +83,16 @@ pub struct ClockObservationRequest {
 }
 
 pub fn observe(request: ClockObservationRequest) -> Result<Option<ClockObservations>, String> {
+    let mut request = request;
+    let mut state = request.previous.take().unwrap_or_default();
+    let changed = observe_in_place(&mut state, request)?;
+    Ok(changed.then_some(state))
+}
+
+pub fn observe_in_place(
+    state: &mut ClockObservations,
+    request: ClockObservationRequest,
+) -> Result<bool, String> {
     use crate::observation::{Diagnostic, Observation};
     use serde_json::json;
     crate::observation::validate_limits(
@@ -90,7 +100,19 @@ pub fn observe(request: ClockObservationRequest) -> Result<Option<ClockObservati
         request.freshness_seconds,
         request.history_limit,
     )?;
-    let mut state = request.previous.unwrap_or_default();
+    if request.previous.is_some() {
+        return Err("A retained clock tracker cannot replace its history".into());
+    }
+    // Validate all fallible inputs before changing retained state.
+    if let Some(packet) = &request.packet {
+        parse_heartbeat_records(packet).ok_or("Malformed heartbeat envelope")?;
+    }
+    if let Some(status) = &request.conmon_status {
+        status["clock_frequency_offset_parts_per_billion"]
+            .as_i64()
+            .and_then(|v| i32::try_from(v).ok())
+            .ok_or("Missing clock offset")?;
+    }
     let mut changed = false;
     if let Some(enabled) = request.warning_enabled {
         changed |= state.warning_enabled != enabled;
@@ -217,7 +239,7 @@ pub fn observe(request: ClockObservationRequest) -> Result<Option<ClockObservati
             .diagnostics
             .drain(..state.diagnostics.len() - request.history_limit);
     }
-    Ok(changed.then_some(state))
+    Ok(changed)
 }
 
 pub fn parse_heartbeat_clock_frequency_offset_packet(

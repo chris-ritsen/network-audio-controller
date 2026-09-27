@@ -40,10 +40,7 @@ const METERING_V3_RX_COUNT_OFFSET: usize = 28;
 const METERING_V3_LEVELS_OFFSET: usize = 30;
 
 const FLOW_RECORD_FIXED_SIZE: usize = 16;
-const FLOW_RECORD_FLOW_TYPE: usize = 2;
 const FLOW_RECORD_SAMPLE_RATE: usize = 4;
-const FLOW_RECORD_ENCODING: usize = 8;
-const FLOW_RECORD_FRAMES_PER_PACKET: usize = 12;
 const FLOW_RECORD_CHANNEL_COUNT: usize = 14;
 const FLOW_TYPE_UNICAST: u16 = 0x0011;
 const MODERN_ARC_POINTER_TABLE_OFFSET: usize = 18;
@@ -264,11 +261,20 @@ pub struct MeteringFrame {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TxFlow {
+    pub inventory_layout: &'static str,
     pub flow_number: u16,
     pub flow_type: String,
     pub sample_rate: u32,
     pub encoding: u16,
-    pub frames_per_packet: u16,
+    pub frames_per_packet: Option<u16>,
+    pub configuration_flags: u16,
+    pub media_class: Option<u16>,
+    pub media_mode: Option<String>,
+    pub flow_name: Option<String>,
+    pub primary_destination: Option<serde_json::Value>,
+    pub secondary_destination: Option<serde_json::Value>,
+    pub destinations: Vec<serde_json::Value>,
+    pub raw_extension: Vec<u8>,
     pub channel_count: u16,
     pub channels: Vec<u16>,
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 
 from netaudio import core
 from netaudio.common.app_config import settings as app_settings
@@ -354,12 +355,18 @@ class DaemonDeviceHandlers:
         if not device:
             return
         try:
-            flow = self.application.external_flows.get(params.get("source_ipv4"), params.get("session_id"))
+            session_id = params.get("session_id")
+            if not isinstance(session_id, str) or not session_id.isascii() or not session_id.isdecimal():
+                raise ValueError("external session ID must be a decimal string")
+            flow = self.application.external_flows.get(params.get("source_ipv4"), int(session_id))
         except (TypeError, ValueError) as exception:
             await self._send_json(writer, {"error": str(exception)}, 400)
             return
         if flow is None:
             await self._send_json(writer, {"error": "external flow not found"}, 404)
+            return
+        if flow.expires_monotonic <= time.monotonic() or params.get("content_sha256") != flow.content_sha256:
+            await self._send_json(writer, {"error": "source announcement expired or changed; refresh the source"}, 409)
             return
         try:
             result = await self.application.subscribe_external_rtp(
@@ -367,10 +374,7 @@ class DaemonDeviceHandlers:
                 flow,
                 params.get("receiver_channel_ids"),
                 params.get("flow_slot_assignments"),
-                receiver_supports_multiple_interfaces=params.get(
-                    "receiver_supports_multiple_interfaces",
-                    False,
-                ),
+                receiver_supports_multiple_interfaces=getattr(device, "switch_redundancy_supported", None) is True,
             )
         except FlowValidationError as exception:
             await self._send_json(writer, {"error": str(exception)}, exception.status)

@@ -37,6 +37,7 @@ pub struct FlowInventory {
     receiver_pages: Vec<Value>,
     raw_pages: Vec<Vec<u8>>,
     complete: Option<Value>,
+    observed_opcode: Option<u16>,
 }
 
 impl FlowInventory {
@@ -68,6 +69,7 @@ impl FlowInventory {
             receiver_pages: Vec::new(),
             raw_pages: Vec::new(),
             complete: None,
+            observed_opcode: None,
         })
     }
 
@@ -86,6 +88,13 @@ impl FlowInventory {
             return Err("flow page protocol changed during pagination");
         }
 
+        if self
+            .observed_opcode
+            .is_some_and(|opcode| opcode != envelope.opcode)
+        {
+            return Err("flow inventory layout changed during pagination");
+        }
+
         if !matches!(
             envelope.result_code,
             RESULT_CODE_SUCCESS | RESULT_CODE_MORE_PAGES
@@ -93,7 +102,8 @@ impl FlowInventory {
             return Err("device rejected flow inventory request");
         }
 
-        if self.direction == FlowDirection::Transmitter && is_modern_arc_protocol(self.protocol_id)
+        if self.direction == FlowDirection::Transmitter
+            && envelope.opcode == crate::commands::OPCODE_QUERY_TX_FLOWS_2809
         {
             let page = parse_transmitter_flow_status_page(response)
                 .ok_or("malformed transmitter flow status page")?;
@@ -146,6 +156,7 @@ impl FlowInventory {
 
         // Commit only after validating the entire response and continuation.
         self.capacity = Some(page.capacity);
+        self.observed_opcode = Some(envelope.opcode);
         self.identifiers.extend(numbers);
         self.records.extend(page.records);
         self.pages += 1;
@@ -229,6 +240,12 @@ impl FlowInventory {
 
         if let Some(field) = protocol_field {
             command.insert(field.into(), json!(self.protocol_id));
+        }
+
+        if self.direction == FlowDirection::Transmitter
+            && self.observed_opcode == Some(crate::commands::OPCODE_QUERY_TX_FLOWS)
+        {
+            command.insert("inventory_layout".into(), json!("fixed"));
         }
 
         if self.direction == FlowDirection::Receiver && self.pages > 0 {

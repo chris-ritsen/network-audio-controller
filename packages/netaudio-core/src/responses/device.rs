@@ -716,6 +716,14 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
     };
     let modern_receiver_port_ranges = envelope.protocol_id == PROTOCOL_ARC_2809
         && envelope.opcode == OPCODE_QUERY_RECEIVER_PORT_RANGES;
+    let fixed_transmitter = envelope.protocol_id == PROTOCOL_ARC_2809
+        && matches!(
+            envelope.opcode,
+            OPCODE_QUERY_TX_FLOWS | OPCODE_CREATE_TX_FLOW
+        );
+    let external_subscription = crate::protocol::is_supported_arc_protocol(envelope.protocol_id)
+        && envelope.protocol_id <= PROTOCOL_ARC_2809
+        && envelope.opcode == crate::commands::OPCODE_EXTERNAL_RECEIVER_SUBSCRIPTION;
     let device_settings_protocol =
         crate::protocol::DEVICE_SETTINGS_ARC_PROTOCOL_IDS.contains(&envelope.protocol_id);
     let device_settings_opcode = matches!(
@@ -728,6 +736,8 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
     let valid = (is_common_arc_protocol(envelope.protocol_id) && common_opcode)
         || flow_opcode
         || modern_receiver_port_ranges
+        || fixed_transmitter
+        || external_subscription
         || device_settings_result
         || configuration_storage;
     valid.then_some(envelope.result_code)

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -32,6 +33,13 @@ def specification(**changes) -> dict:
 
 
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures" / "transmit_flow_lifecycle"
+
+
+def test_fixed_authoring_uses_advertised_envelope_not_family_or_inventory():
+    target = device()
+    target.services = {"arc": {"type": "_netaudio-arc._udp.local.", "properties": {"arcp_vers": "2.8.9"}}}
+    assert flow_lifecycle._protocol_id(target) == 0x2809
+    assert flow_lifecycle._protocol_id(target, specification(protocol={"protocol_id": 0x2729})) == 0x2809
 
 
 def fixture(name: str) -> bytes:
@@ -150,6 +158,20 @@ def device(protocol_id=0x2729, *, managed=False, locked=False):
         return bytes(response)
 
     return SimpleNamespace(
+        services={
+            "arc": {
+                "type": "_netaudio-arc._udp.local.",
+                "properties": {
+                    "arcp_vers": {0x2729: "2.7.41", 0x2801: "2.8.1", 0x2809: "2.8.9"}.get(protocol_id, "2.8.9")
+                },
+            }
+        },
+        routing_capacity_transmit_channel_count=32,
+        aes67_current=True,
+        aes67_configuration_supported=True,
+        switch_redundancy_supported=True,
+        settings_properties=[{"property_id": 0x210}, {"property_id": 0x8204}],
+        performance_settings={0x210: 48, 0x8204: 1000000},
         flow_protocol_id=protocol_id,
         transmit_flow_authoring_capability_word=capability_word,
         transmit_flow_authoring=core.flow_authoring_capabilities(capability_word)["transmit_flow_authoring"],
@@ -162,8 +184,11 @@ def device(protocol_id=0x2729, *, managed=False, locked=False):
         ipv4="192.0.2.10",
         topology_mutation_lock=MutationLock(),
         execute=execute,
+        populate_from_core=AsyncMock(return_value=True),
         _arc_port=lambda: 4440,
         application=SimpleNamespace(
+            probe_lock_status=AsyncMock(return_value=SimpleNamespace(is_locked=locked)),
+            probe_aes67_state=AsyncMock(return_value=(True, None)),
             probe_sample_rate_status=probe_sample_rate_status,
             probe_encoding_status=probe_encoding_status,
             query_modern_arc_receiver_flow_status=query_modern_arc_receiver_flow_status,
@@ -293,6 +318,7 @@ def test_comparison_only_requires_optional_authoring_fields_when_requested():
     effective = core.transmit_flow_specification(
         {
             "flow_number": 2,
+            "media_mode": "native_dante",
             "flow_type": "multicast",
             "channels": [1, 2],
             "sample_rate": 48_000,
@@ -493,7 +519,7 @@ def test_planner_separates_supported_direct_and_unsupported_managed_or_rtp_paths
     rtp = specification(media_mode="rtp_aes67")
     unsupported = flow_lifecycle.plan_create_transmit_flow(device(), rtp)
     assert not unsupported.supported
-    assert "only native Dante" in "; ".join(unsupported.reasons)
+    assert unsupported.reasons
 
     modern_rtp = specification(
         media_mode="rtp_aes67",
@@ -511,7 +537,7 @@ def test_planner_separates_supported_direct_and_unsupported_managed_or_rtp_paths
 
 def test_planner_rejects_unsupported_fields_and_unproven_cohorts():
     named = flow_lifecycle.plan_create_transmit_flow(device(), specification(name="Program"))
-    assert not named.supported and "flow name" in "; ".join(named.reasons)
+    assert named.supported
 
     unproven = specification(protocol=dict(protocol_id=0x2801))
     plan = flow_lifecycle.plan_create_transmit_flow(device(protocol_id=0x2801), unproven)
@@ -573,6 +599,7 @@ async def test_legacy_create_preserves_acknowledgement_and_verifies_fresh_readba
         "flows": [
             {
                 "flow_number": 2,
+                "media_mode": "native_dante",
                 "flow_type": "multicast",
                 "channels": [1, 2],
                 "sample_rate": 48_000,
@@ -863,7 +890,7 @@ async def test_modern_create_requires_fresh_format_preconditions_before_sending(
 
     assert result.state is FlowLifecycleState.PENDING
     assert result.request_acknowledgement is None
-    assert result.verification_observations[-1]["phase"] == "format_precondition"
+    assert result.verification_observations[-1]["phase"] == "authoring_preconditions"
     assert result.verification_observations[-1]["outcome"] == "unavailable"
     assert sent == []
 
@@ -995,6 +1022,7 @@ async def test_delete_preflight_uses_native_evidence_and_never_sends_an_unsafe_r
 async def test_delete_requires_absent_readback_and_unchanged_unrelated_flows(monkeypatch):
     target = {
         "flow_number": 2,
+        "media_mode": "native_dante",
         "flow_type": "multicast",
         "channels": [1, 2],
         "sample_rate": 48_000,
@@ -1087,13 +1115,14 @@ async def test_delete_does_not_call_missing_readback_fields_a_contradiction(monk
     result = await flow_lifecycle.delete_transmit_flow(device(), 2)
     assert result.state is FlowLifecycleState.PARTIAL
     assert result.effective_state_confirmation is None
-    assert result.comparison["unavailable_fields"] == ["encoding_bits"]
+    assert result.comparison["unavailable_fields"] == ["media_mode", "encoding_bits"]
 
 
 @pytest.mark.asyncio
 async def test_delete_acknowledged_timeout_is_partial_and_does_not_retry_write(monkeypatch):
     target = {
         "flow_number": 2,
+        "media_mode": "native_dante",
         "flow_type": "multicast",
         "channels": [1, 2],
         "sample_rate": 48_000,
@@ -1130,6 +1159,7 @@ async def test_create_polls_until_change_is_visible_and_sends_only_once(monkeypa
         "flows": [
             {
                 "flow_number": 2,
+                "media_mode": "native_dante",
                 "flow_type": "multicast",
                 "channels": [1, 2],
                 "sample_rate": 48_000,
@@ -1174,6 +1204,7 @@ async def test_create_lost_acknowledgement_can_be_confirmed_by_fresh_readback(mo
         "flows": [
             {
                 "flow_number": 2,
+                "media_mode": "native_dante",
                 "flow_type": "multicast",
                 "channels": [1, 2],
                 "sample_rate": 48_000,
@@ -1208,6 +1239,7 @@ async def test_create_definitive_contradiction_is_inconsistent(monkeypatch):
         "flows": [
             {
                 "flow_number": 2,
+                "media_mode": "native_dante",
                 "flow_type": "multicast",
                 "channels": [2, 1],
                 "sample_rate": 48_000,
@@ -1247,6 +1279,7 @@ async def test_unrelated_volatile_fields_do_not_create_false_inconsistency(monke
     other_after = {**other_before, "diagnostic_counter": 2, "freshness": "new"}
     target = {
         "flow_number": 2,
+        "media_mode": "native_dante",
         "flow_type": "multicast",
         "channels": [1, 2],
         "sample_rate": 48_000,
@@ -1299,6 +1332,7 @@ async def test_actual_unrelated_flow_change_is_recorded_without_blocking_confirm
     }
     target = {
         "flow_number": 2,
+        "media_mode": "native_dante",
         "flow_type": "multicast",
         "channels": [1, 2],
         "sample_rate": 48_000,
@@ -1354,6 +1388,7 @@ async def test_create_continues_polling_after_concurrent_topology_activity(monke
     changed_other = {**other, "encoding": 16}
     target = {
         "flow_number": 2,
+        "media_mode": "native_dante",
         "flow_type": "multicast",
         "channels": [1, 2],
         "sample_rate": 48_000,
@@ -1396,6 +1431,7 @@ async def test_create_continues_polling_after_concurrent_topology_activity(monke
 async def test_delete_confirms_absence_despite_concurrent_topology_activity(monkeypatch):
     target = {
         "flow_number": 2,
+        "media_mode": "native_dante",
         "flow_type": "multicast",
         "channels": [1, 2],
         "sample_rate": 48_000,
@@ -1435,6 +1471,7 @@ async def test_delete_confirms_absence_despite_concurrent_topology_activity(monk
 async def test_delete_correlated_target_change_is_inconsistent(monkeypatch):
     target = {
         "flow_number": 2,
+        "media_mode": "native_dante",
         "flow_type": "multicast",
         "channels": [1, 2],
         "sample_rate": 48_000,

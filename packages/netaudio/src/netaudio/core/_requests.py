@@ -452,6 +452,15 @@ class ExternalReadbackRequestIdentities(_extensions.TypedDict):
 ExternalReadbackRequest = _typing.Union[ExternalReadbackRequestCommand, ExternalReadbackRequestIdentities]
 
 
+class ExternalReceiverFacts(_extensions.TypedDict):
+    aes67_enabled: _extensions.NotRequired[_typing.Union[bool, None]]
+    aes67_supported: _extensions.NotRequired[_typing.Union[bool, None]]
+    encoding: _extensions.NotRequired[_typing.Union[int, None]]
+    locked: _extensions.NotRequired[_typing.Union[bool, None]]
+    redundancy_supported: _extensions.NotRequired[_typing.Union[bool, None]]
+    sample_rate: _extensions.NotRequired[_typing.Union[int, None]]
+
+
 class ExternalSubscriptionPlanRequest(_extensions.TypedDict):
     advertised_flow_slot_count: int
     clock_offset: _extensions.NotRequired[_typing.Union[int, None]]
@@ -459,12 +468,16 @@ class ExternalSubscriptionPlanRequest(_extensions.TypedDict):
     flow_slot_assignments: list[int]
     message_id: _extensions.NotRequired[int]
     primary_destination: ExternalRtpDestinationSpec
+    receiver: ExternalReceiverFacts
     receiver_channel_ids: list[int]
     receiver_supports_multiple_interfaces: bool
     secondary_address: _extensions.NotRequired[_typing.Union[str, None]]
     secondary_port: _extensions.NotRequired[_typing.Union[int, None]]
     session_id: int
     source_address: str
+    source_direction: _extensions.NotRequired[_typing.Union[str, None]]
+    source_encoding: _extensions.NotRequired[_typing.Union[str, None]]
+    source_sample_rate: _extensions.NotRequired[_typing.Union[int, None]]
 
 
 class FlowInventoryEvidence(_extensions.TypedDict):

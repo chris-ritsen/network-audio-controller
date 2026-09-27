@@ -265,6 +265,7 @@ class MutationAuditRecorder:
             "persistence_confirmation": persistence_confirmation,
             "evidence": {
                 "message": payload.get("message"),
+                "mutation_sent": payload.get("mutation_sent"),
                 "acknowledgement": acknowledgement,
                 "verification_observations": payload.get("verification_observations", []),
                 "device_confirmation": payload.get("device_confirmation"),

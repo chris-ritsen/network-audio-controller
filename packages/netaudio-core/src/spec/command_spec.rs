@@ -178,6 +178,7 @@ pub(super) enum CommandSpec {
         channels: Vec<u16>,
         flow_protocol_id: u16,
         flow_slot: u16,
+        configuration: Option<commands::FixedFlowConfiguration>,
         #[serde(default)]
         message_id: u16,
     },
@@ -378,6 +379,8 @@ pub(super) enum CommandSpec {
     },
     QueryTxFlows {
         flow_protocol_id: u16,
+        #[serde(default)]
+        inventory_layout: Option<String>,
         #[serde(default)]
         message_id: u16,
         #[serde(default = "default_flow_start")]
@@ -895,8 +898,20 @@ pub(super) fn build_command(
             flow_protocol_id,
             flow_slot,
             channels,
+            configuration,
             message_id,
-        } => commands::build_create_tx_flow(flow_protocol_id, flow_slot, &channels, message_id)?,
+        } => match configuration {
+            Some(configuration) => commands::build_fixed_multicast_flow(
+                flow_protocol_id,
+                flow_slot,
+                &channels,
+                &configuration,
+                message_id,
+            )?,
+            None => {
+                commands::build_create_tx_flow(flow_protocol_id, flow_slot, &channels, message_id)?
+            }
+        },
         CommandSpec::DanteModel { mac } => commands::build_dante_model(parse_mac_required(&mac)?)?,
         CommandSpec::DeleteTxFlow {
             flow_protocol_id,
@@ -1062,9 +1077,24 @@ pub(super) fn build_command(
         )?,
         CommandSpec::QueryTxFlows {
             flow_protocol_id,
+            inventory_layout,
             starting_flow,
             message_id,
-        } => commands::build_query_tx_flows_from(flow_protocol_id, starting_flow, message_id)?,
+        } => match inventory_layout.as_deref() {
+            None => {
+                commands::build_query_tx_flows_from(flow_protocol_id, starting_flow, message_id)?
+            }
+            Some("fixed") => commands::build_query_fixed_tx_flows_from(
+                flow_protocol_id,
+                starting_flow,
+                message_id,
+            )?,
+            _ => {
+                return Err(SpecError::InvalidJson(
+                    "unsupported transmitter inventory layout".into(),
+                ))
+            }
+        },
         CommandSpec::Reboot {
             host_mac,
             message_id,

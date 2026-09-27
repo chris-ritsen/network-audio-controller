@@ -362,19 +362,16 @@ class ExternalSubscriptionReadback(_extensions.TypedDict):
     sdp_correlation_confirmed: _typing.Union[bool, None]
 
 
-ReceiverFlowInventoryFamily = _typing.Literal["legacy", "modern"]
-
-
 class FlowAuthoringProfile(_extensions.TypedDict):
+    family: str
     identifier_max: int
     identity_field: str
     media_modes: list[str]
-    protocol_id: int
+    opcode: int
     supports_flow_options: bool
 
 
 class FlowAuthoringCapabilities(_extensions.TypedDict):
-    receiver_flow_inventory_family: ReceiverFlowInventoryFamily
     transmit_flow_authoring: FlowAuthoringProfile
 
 

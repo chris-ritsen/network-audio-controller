@@ -4,6 +4,7 @@ import ipaddress
 import json
 
 from netaudio import core
+from netaudio.daemon.http.json_values import browser_values
 from netaudio.core import NetaudioCoreError
 from netaudio.dante import flows
 from netaudio.dante.flow_lifecycle import (
@@ -142,13 +143,45 @@ class DaemonConfigurationHandlers:
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
+        handle = await self.operation_recorder.begin_operation(
+            device, "validate_transmit_flow", params.get("specification")
+        )
         try:
             specification = parse_transmit_flow_specification(params.get("specification"))
             plan = plan_create_transmit_flow(device, specification)
         except (TypeError, ValueError) as exception:
-            await self._send_json(writer, {"error": str(exception)}, 400)
+            await self.operation_recorder.complete_operation(
+                device,
+                handle,
+                {
+                    "state": "rejected",
+                    "mutation_sent": False,
+                    "message": str(exception),
+                },
+            )
+            await self._send_json(
+                writer, {"error": str(exception), "operation_id": handle.operation_id, "mutation_sent": False}, 400
+            )
             return
-        await self._send_json(writer, {"device": device.server_name, "plan": plan.to_dict()})
+        await self.operation_recorder.complete_operation(
+            device,
+            handle,
+            {
+                "state": "planned" if plan.supported else "rejected",
+                "mutation_sent": False,
+                "message": "; ".join(plan.reasons),
+                "requested": plan.specification,
+            },
+        )
+        await self._send_json(
+            writer,
+            {
+                "device": device.server_name,
+                "plan": plan.to_dict(),
+                "operation_id": handle.operation_id,
+                "mutation_sent": False,
+            },
+        )
 
     @staticmethod
     def _transmit_flow_result_status(result) -> int:
@@ -170,9 +203,28 @@ class DaemonConfigurationHandlers:
         if not device:
             return
         try:
+            specification = parse_transmit_flow_specification(params.get("specification"))
+        except (TypeError, ValueError) as exception:
+            handle = await self.operation_recorder.begin_operation(
+                device, "create_transmit_flow", params.get("specification")
+            )
+            await self.operation_recorder.complete_operation(
+                device,
+                handle,
+                {
+                    "state": "rejected",
+                    "mutation_sent": False,
+                    "message": str(exception),
+                },
+            )
+            await self._send_json(
+                writer, {"error": str(exception), "operation_id": handle.operation_id, "mutation_sent": False}, 400
+            )
+            return
+
+        try:
             operation = getattr(self.application, "create_transmit_flow", None)
             if operation is None:
-                specification = parse_transmit_flow_specification(params.get("specification"))
                 result = await self.operation_recorder.run_operation(
                     device,
                     "create_transmit_flow",
@@ -663,7 +715,7 @@ class DaemonConfigurationHandlers:
         return matches[0] if len(matches) == 1 else None
 
     async def _send_json(self, writer, data, status=200):
-        body = json.dumps(data, default=str).encode()
+        body = json.dumps(browser_values(data), default=str).encode()
         status_text = STATUS_TEXT.get(status, "Error")
         response = (
             f"HTTP/1.1 {status} {status_text}\r\n"

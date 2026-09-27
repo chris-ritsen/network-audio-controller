@@ -6,7 +6,7 @@ import { Icon } from "../icons.js";
 import { buildMatrixModel, expanded, ExpansionButtons, initializeExpansion, RoutingMatrix, setAllExpanded } from "../matrix.js";
 import { channelGroups, enableChannelGroups, groupChannels, setGroupsExpanded } from "../channel-groups.js";
 import { devicePath, navigate } from "../router.js";
-import { contextDevices, deviceRequestName, pendingSubscriptions, scopedDevices as devices } from "../store.js";
+import { contextDevices, contextExternalFlows, deviceRequestName, pendingSubscriptions, scopedDevices as devices } from "../store.js";
 import { inventoryFilters, saveRoutingFilters } from "../device-filters.js";
 import { useDropdownDismissal } from "../dropdown.js";
 
@@ -43,6 +43,7 @@ function RoutingView() {
   const showList = compact || listMode;
   const model = buildMatrixModel({
     devices: filteredDevices,
+    externalFlows: contextExternalFlows.value,
     expandedReceivers: state.receivers,
     expandedTransmitters: state.transmitters,
     receiverFilter,
@@ -54,7 +55,7 @@ function RoutingView() {
   const transmitterLabels = model.columns.filter((column) => column.kind === "device").map((column) => column.label);
   const expandGroups = (side, value) => {
     const axis = side === "receivers" ? model.rows : model.columns;
-    const keys = axis.filter((entry) => entry.kind === "device").flatMap((entry) =>
+    const keys = axis.filter((entry) => entry.kind === "device" && entry.sourceKind !== "external").flatMap((entry) =>
       groupChannels(deviceRequestName(entry.device), entry.channels).map((group) => group.key));
     setGroupsExpanded(side, keys, value);
   };

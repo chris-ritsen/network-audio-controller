@@ -8,11 +8,11 @@ from datetime import datetime, timezone
 from netaudio.core import _requests
 
 from netaudio.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
+from netaudio.dante.clock_observations import clock_tracker
 from netaudio.dante.heartbeat_connection_health import (
     CONNECTION_HEALTH_FRESHNESS_SECONDS,
     ReceiverFlowConnectionHealthTracker,
 )
-from netaudio import core
 from netaudio.dante.service import DanteMulticastService
 
 logger = logging.getLogger("netaudio")
@@ -142,9 +142,9 @@ class DanteHeartbeatService(DanteMulticastService):
                 logger.info(f"Device back online (heartbeat received): {device.server_name}")
                 device.online = True
 
-            clock_update = core.clock_observation_update(
+            clock_update = clock_tracker(device).update(
                 {
-                    "previous": getattr(device, "clock_observations", None),
+                    "previous": None,
                     "packet": list(data),
                     "conmon_status": None,
                     "observed_at": self._observation_timestamp(observed_wall_time),
@@ -250,6 +250,8 @@ class DanteHeartbeatService(DanteMulticastService):
         if known_device is not None and known_device is not device:
             device.receiver_flow_connection_health = getattr(known_device, "receiver_flow_connection_health", None)
             device.clock_observations = getattr(known_device, "clock_observations", None)
+            device._clock_tracker = getattr(known_device, "_clock_tracker", None)
+            known_device._clock_tracker = None
             known_device.receiver_flow_connection_health = None
             identity_changed = True
         self._heartbeat_devices[device_extended_unique_identifier] = device
@@ -307,9 +309,9 @@ class DanteHeartbeatService(DanteMulticastService):
             receiver = self._connection_health.history_snapshot(identity)
 
         clock = getattr(device, "clock_observations", None)
-        updated = core.clock_observation_update(
+        updated = clock_tracker(device).update(
             {
-                "previous": clock,
+                "previous": None,
                 "packet": None,
                 "conmon_status": None,
                 "observed_at": self._observation_timestamp(self._wall_clock()),
@@ -329,7 +331,7 @@ class DanteHeartbeatService(DanteMulticastService):
             "device": device.server_name,
             "device_identity": identity,
             "receiver": receiver,
-            "clock": clock,
+            "clock": clock_tracker(device).snapshot(include_history=True) if clock is not None else None,
             "clock_state": getattr(device, "clock_status", None),
             "clock_state_observed_at": getattr(device, "clock_observed_at", None),
             "retention_limit": 300,
@@ -405,9 +407,9 @@ class DanteHeartbeatService(DanteMulticastService):
         for device_extended_unique_identifier, device in self._heartbeat_devices.items():
             clock = getattr(device, "clock_observations", None)
             if clock is not None:
-                updated = core.clock_observation_update(
+                updated = clock_tracker(device).update(
                     {
-                        "previous": clock,
+                        "previous": None,
                         "packet": None,
                         "conmon_status": None,
                         "observed_at": self._observation_timestamp(now),

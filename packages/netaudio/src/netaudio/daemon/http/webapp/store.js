@@ -12,6 +12,8 @@ const PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS = 8000;
 
 export const connectionState = signal("connecting");
 export const devices = signal(readInventoryCache());
+export const externalFlows = signal({});
+export const contextExternalFlows = computed(() => ["all", "local"].includes(selectedContext.value) ? externalFlows.value : {});
 export const managedState = signal(null);
 export const managedDomains = signal([]);
 export const connectionProfiles = signal(null);
@@ -141,6 +143,8 @@ function markPending(payload) {
     since: Date.now(),
     tx_channel: payload.tx_channel,
     tx_device: payload.tx_device,
+    external_source_key: payload.external_source_key,
+    external_slot: payload.external_slot,
   };
   pendingSubscriptions.value = { ...pendingSubscriptions.value, [key]: entry };
   setTimeout(() => {
@@ -153,6 +157,11 @@ function markPending(payload) {
   }, PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS);
 }
 
+export function markExternalPending(receiver, channel, sourceKey, slot, clear) {
+  markPending({rx_device: receiver, rx_channel: channel, action: clear ? "remove" : "add",
+    external_source_key: sourceKey, external_slot: slot});
+}
+
 export function clearPendingForDevice(device) {
   const current = pendingSubscriptions.value;
   const names = new Set([device.name, device.server_name].filter(Boolean));
@@ -162,7 +171,12 @@ export function clearPendingForDevice(device) {
     const [receiverName, number] = key.split("\u0000");
     const channel = device.channels?.receivers?.[number];
     const subscription = channel && (device.subscriptions || []).find((entry) => entry.rx_channel_number === Number(number));
-    const confirmed = channel && (entry.action === "remove"
+    const externalIdentities = (device.receiver_flows || []).flatMap(flow => flow.effective_subscription_identities || []);
+    const externalMatch = externalIdentities.some(identity => identity.receiver_channel === Number(number)
+      && `${identity.source_ipv4}/${identity.session_id}` === entry.external_source_key && identity.flow_slot === entry.external_slot);
+    const confirmed = entry.external_source_key
+      ? device.receiver_flow_completeness === "complete" && (entry.action === "remove" ? !externalMatch : externalMatch)
+      : channel && (entry.action === "remove"
       ? !subscription?.tx_device
       : subscription?.tx_device === entry.tx_device && subscription?.tx_channel === entry.tx_channel);
     if (names.has(receiverName) && confirmed) {
@@ -178,6 +192,14 @@ export function clearPendingForDevice(device) {
 
 function applyEvent(payload) {
   const kind = payload.event;
+  if (kind === "external_flow_changed") {
+    const key = `${payload.identity.source_ipv4}/${payload.identity.session_id}`;
+    const next = {...externalFlows.value};
+    if (["deleted", "expired"].includes(payload.change)) delete next[key];
+    else if (payload.flow) next[key] = payload.flow;
+    externalFlows.value = next;
+    return;
+  }
   if (kind === "settings_updated") {
     backendSettings.value = payload.settings;
     return;
@@ -195,6 +217,7 @@ function applyEvent(payload) {
         connectionProfiles.value = payload.managed.connections;
       }
       devices.value = payload.devices || {};
+      externalFlows.value = payload.external_flows || {};
       shureDevices.value = payload.shure_devices || {};
       inventoryReady.value = true;
     });

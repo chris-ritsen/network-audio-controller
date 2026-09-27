@@ -106,7 +106,7 @@ export function canonicalFlowRequest({
       [authoring.identity_field]: Number(flowId),
     },
     protocol: {
-      protocol_id: authoring.protocol_id,
+      protocol_id: null,
       protocol_version: null,
       cohort: null,
       required_capabilities: [],
@@ -306,6 +306,14 @@ export function TransmitFlows({ device }) {
   const [plan, setPlan] = useState(null);
   const [result, setResult] = useState(null);
   const authoring = device.transmit_flow_authoring;
+  const authoringFacts = JSON.stringify([requestName, authoring, device.aes67_current,
+    device.aes67_configuration_supported, device.is_locked, device.sample_rate, device.encoding]);
+  useEffect(() => {
+    setPlan(null);
+    setResult(null);
+    setFlowId("");
+    setMediaMode("native_dante");
+  }, [authoringFacts]);
   const refresh = async () => {
     try {
       setInventory(await api.getTransmitFlows(requestName));
@@ -433,7 +441,9 @@ export function TransmitFlows({ device }) {
                     setPlan(null);
                   }}
                 >
-                  ${authoring.media_modes.map((mode) => html`<option value=${mode}>${mode === "native_dante" ? "Native Dante" : "RTP/AES67"}</option>`)}
+                  ${authoring.media_modes.map((mode) => html`<option value=${mode}
+                    disabled=${mode === "rtp_aes67" && (device.aes67_configuration_supported !== true || device.aes67_current !== true)}
+                    >${mode === "native_dante" ? "Native Dante" : "RTP/AES67"}</option>`)}
                 </select></label
               >`
             : null
