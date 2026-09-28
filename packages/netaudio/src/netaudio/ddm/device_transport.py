@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from netaudio import core
+from netaudio.common.app_config import settings as app_settings
 from netaudio.common.managed_api import ManagedAPIConfiguration
 from netaudio.ddm.client import ManagedAPIClient
 from netaudio.ddm.controller import (
@@ -15,6 +17,7 @@ from netaudio.ddm.controller import (
     query_managed_settings_with_api_key,
     reboot_managed_device_with_api_key,
 )
+from netaudio.network_path import NetworkPathError, NetworkPathManager, path_manager
 
 
 class ManagedDeviceControlError(RuntimeError):
@@ -50,6 +53,7 @@ class ManagedDeviceTransport:
         configuration: ManagedAPIConfiguration,
         *,
         client: ManagedAPIClient | None = None,
+        network_paths: NetworkPathManager = path_manager,
     ):
         error = configuration.configuration_error
         if error:
@@ -61,6 +65,7 @@ class ManagedDeviceTransport:
         if not server:
             raise ManagedDeviceControlError("DDM Controller server could not be determined from the server profile URL")
         self.configuration = configuration
+        self.network_paths = network_paths
         self.server = server
         self.client = client or ManagedAPIClient(
             configuration.url or "",
@@ -123,12 +128,34 @@ class ManagedDeviceTransport:
         # EUI-64 identity. Service discovery still has to announce this target.
         return identity
 
-    @staticmethod
-    def _host_mac() -> bytes:
-        host_mac = core.host_mac()
+    def _host_mac(self) -> bytes:
+        try:
+            addresses = socket.getaddrinfo(self.server, None, socket.AF_INET, socket.SOCK_STREAM)
+        except OSError as exception:
+            raise ManagedDeviceControlError(
+                f"could not resolve the DDM server {self.server}: {exception}"
+            ) from exception
+        if not addresses:
+            raise ManagedDeviceControlError(f"the DDM server {self.server} has no IPv4 address")
+        try:
+            path = self.network_paths.resolve(addresses[0][4][0], app_settings.interface)
+        except NetworkPathError as exception:
+            raise ManagedDeviceControlError(
+                f"no network path to the DDM server {self.server}: {exception}"
+            ) from exception
+        host_mac = core.host_mac_for_ipv4(path.source_address)
         if host_mac is None:
-            raise ManagedDeviceControlError("could not determine the host MAC address required for DDM control")
+            raise ManagedDeviceControlError(
+                f"could not determine the MAC address of {path.interface.name} ({path.source_address}), "
+                "which reaches the DDM server"
+            )
         return host_mac
+
+    async def _default_host_mac(self) -> tuple[bytes | None, ManagedDeviceControlError | None]:
+        try:
+            return await asyncio.to_thread(self._host_mac), None
+        except ManagedDeviceControlError as exception:
+            return None, exception
 
     async def execute(self, device, specification: Mapping[str, Any]) -> bytes | None:
         device_id = await self._control_device_id(device)
@@ -139,34 +166,34 @@ class ManagedDeviceTransport:
                 raise ManagedDeviceControlError("The device does not report managed reboot support")
             if fresh.connection is None or fresh.connection.state != "READY":
                 raise ManagedDeviceControlError("The device is not ready for a managed reboot")
+            host_mac = await asyncio.to_thread(self._host_mac)
             await asyncio.to_thread(
                 reboot_managed_device_with_api_key,
                 self.server,
                 self._credential(),
                 device_id,
-                self._host_mac(),
+                host_mac,
                 expected_domain_id=self._domain_id(device),
             )
             return None
         if command == "identify":
+            host_mac = await asyncio.to_thread(self._host_mac)
             await asyncio.to_thread(
                 identify_managed_device_with_api_key,
                 self.server,
                 self._credential(),
                 device_id,
-                self._host_mac(),
+                host_mac,
                 expected_domain_id=self._domain_id(device),
             )
             return None
 
+        host_mac, host_mac_error = await self._default_host_mac()
         try:
-            plan = core.build_managed_command(
-                dict(specification), host_mac=core.host_mac(), message_id=core.next_message_id()
-            )
+            plan = core.build_managed_command(dict(specification), host_mac=host_mac, message_id=core.next_message_id())
         except core.NetaudioCoreError as exception:
-            raise ManagedDeviceControlError(
-                f"{command} is not available through DDM control: {exception}"
-            ) from exception
+            detail = f"{exception}; {host_mac_error}" if host_mac_error is not None else str(exception)
+            raise ManagedDeviceControlError(f"{command} is not available through DDM control: {detail}") from exception
 
         packet = bytes(plan["packet"])
 

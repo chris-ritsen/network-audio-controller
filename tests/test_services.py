@@ -279,11 +279,11 @@ class TestDanteCMCService:
 
     @pytest.mark.asyncio
     async def test_default_registration_uses_the_client_path_mac_without_eager_global_lookup(self, monkeypatch):
-        from netaudio.dante.services import cmc
+        from netaudio import core
 
         transport = _recording_transport()
         lookup = MagicMock(side_effect=AssertionError("global host MAC lookup must stay lazy"))
-        monkeypatch.setattr(cmc, "_get_host_mac", lookup)
+        monkeypatch.setattr(core, "host_mac", lookup)
         service = DanteCMCService(transport)
 
         await service.register_device("192.168.1.61")

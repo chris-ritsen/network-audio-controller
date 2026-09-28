@@ -2,101 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import socket
-import struct
-import sys
 
 from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante.core_transport import CoreTransport
-from netaudio.dante.const import MULTICAST_GROUP_CONTROL_MONITORING
 
 logger = logging.getLogger("netaudio")
-
-SIOCGIFADDR = 0x8915
-SIOCGIFHWADDR = 0x8927
-
-
-def _get_mac_for_interface(interface_name: str) -> bytes | None:
-    if sys.platform != "linux":
-        return None
-
-    import fcntl
-
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        mac_info = fcntl.ioctl(s.fileno(), SIOCGIFHWADDR, struct.pack("256s", interface_name.encode()))
-        s.close()
-        return mac_info[18:24]
-    except OSError:
-        return None
-
-
-def _get_host_mac(interface_name: str | None = None) -> bytes:
-    if interface_name:
-        mac = _get_mac_for_interface(interface_name)
-        if mac:
-            return mac
-
-    from netaudio import core
-
-    mac = core.host_mac()
-    if mac:
-        return mac
-
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.connect((MULTICAST_GROUP_CONTROL_MONITORING, 1))
-        local_ip = sock.getsockname()[0]
-        sock.close()
-
-        if sys.platform == "linux":
-            import fcntl
-
-            for _, name in socket.if_nameindex():
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    addr_info = fcntl.ioctl(s.fileno(), SIOCGIFADDR, struct.pack("256s", name.encode()))
-                    ip = socket.inet_ntoa(addr_info[20:24])
-                    if ip == local_ip:
-                        mac_info = fcntl.ioctl(s.fileno(), SIOCGIFHWADDR, struct.pack("256s", name.encode()))
-                        s.close()
-                        return mac_info[18:24]
-                    s.close()
-                except OSError:
-                    continue
-
-        if sys.platform == "darwin":
-            import subprocess
-
-            for interface in ["en0", "en1", "en2", "en3", "en4"]:
-                try:
-                    result = subprocess.run(
-                        ["ifconfig", interface],
-                        capture_output=True,
-                        text=True,
-                        timeout=2,
-                    )
-                    if result.returncode != 0:
-                        continue
-                    has_ip = False
-                    mac_addr = None
-                    for line in result.stdout.splitlines():
-                        line = line.strip()
-                        if line.startswith("inet ") and local_ip in line:
-                            has_ip = True
-                        if line.startswith("ether "):
-                            mac_addr = line.split()[1]
-                    if has_ip and mac_addr:
-                        return bytes.fromhex(mac_addr.replace(":", ""))
-                except (OSError, subprocess.TimeoutExpired, ValueError) as exception:
-                    logger.warning(f"Could not read interface {interface}: {exception}")
-                    continue
-    except (OSError, ValueError):
-        logger.exception("Failed to derive host MAC address from network interfaces")
-
-    import uuid
-
-    return uuid.getnode().to_bytes(6, "big")
 
 
 class DanteCMCService:

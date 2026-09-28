@@ -1,4 +1,6 @@
+import errno
 import json
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -9,6 +11,7 @@ from netaudio.common.managed_api import ManagedAPIConfiguration
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.ddm import device_transport
+from netaudio.network_path import IPv4Interface, NetworkPathManager
 
 
 API_KEY = "00000000-0000-4000-8000-000000000000"
@@ -52,6 +55,125 @@ def _device(*, enrolled=True, direct=True):
     device.identify_supported = True
     device.managed_operation_permissions = {"identify": True} if enrolled else None
     return device
+
+
+def _path_mac(address):
+    third, fourth = (int(part) for part in address.split(".")[2:])
+    return bytes([2, 0, 0, 0, third, fourth])
+
+
+def _path_transport(monkeypatch, interfaces, *, route_source=None, server_addresses=("10.20.0.2",)):
+    lookups = []
+
+    def host_mac_for_ipv4(address):
+        lookups.append(address)
+        return _path_mac(address)
+
+    class RouteSocket:
+        def __init__(self, *_args):
+            pass
+
+        def connect(self, _address):
+            if route_source is None:
+                raise OSError(errno.ENETUNREACH, "Network is unreachable")
+
+        def getsockname(self):
+            return (route_source, 0)
+
+        def close(self):
+            pass
+
+    def getaddrinfo(host, port, family, kind):
+        assert (host, family, kind) == ("ddm.example", socket.AF_INET, socket.SOCK_STREAM)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 0)) for address in server_addresses]
+
+    monkeypatch.setattr(device_transport.core, "host_mac_for_ipv4", host_mac_for_ipv4)
+    monkeypatch.setattr(device_transport.core, "host_mac", MagicMock(side_effect=AssertionError("global host MAC")))
+    monkeypatch.setattr(device_transport.socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(device_transport.app_settings, "interface", None)
+    paths = NetworkPathManager(interface_provider=lambda: list(interfaces), socket_factory=RouteSocket)
+    transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient(), network_paths=paths)
+    return transport, lookups
+
+
+MANAGED_NETWORK = IPv4Interface(2, "en7", "10.20.0.5", 24)
+UNMANAGED_NETWORK = IPv4Interface(1, "en0", "192.168.1.10", 24)
+
+
+@pytest.mark.asyncio
+async def test_managed_host_mac_without_default_route(monkeypatch):
+    transport, lookups = _path_transport(monkeypatch, [UNMANAGED_NETWORK, MANAGED_NETWORK])
+    identify = MagicMock()
+    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
+
+    await transport.execute(_device(), {"command": "identify"})
+
+    assert lookups == ["10.20.0.5"]
+    assert identify.call_args.args[3] == _path_mac("10.20.0.5")
+
+
+@pytest.mark.asyncio
+async def test_managed_host_mac_follows_interface_changes(monkeypatch):
+    interfaces = [UNMANAGED_NETWORK, MANAGED_NETWORK]
+    transport, lookups = _path_transport(monkeypatch, interfaces)
+    identify = MagicMock()
+    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
+
+    await transport.execute(_device(), {"command": "identify"})
+    interfaces[:] = [IPv4Interface(1, "en8", "10.20.0.6", 24), UNMANAGED_NETWORK]
+    await transport.execute(_device(), {"command": "identify"})
+
+    assert lookups == ["10.20.0.5", "10.20.0.6"]
+    assert [call.args[3] for call in identify.call_args_list] == [_path_mac("10.20.0.5"), _path_mac("10.20.0.6")]
+
+
+@pytest.mark.asyncio
+async def test_managed_host_mac_honors_selected_interface(monkeypatch):
+    transport, lookups = _path_transport(monkeypatch, [UNMANAGED_NETWORK, MANAGED_NETWORK], route_source="10.20.0.5")
+    monkeypatch.setattr(device_transport.app_settings, "interface", "en0")
+    identify = MagicMock()
+    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
+
+    await transport.execute(_device(), {"command": "identify"})
+
+    assert lookups == ["192.168.1.10"]
+
+
+@pytest.mark.asyncio
+async def test_managed_host_mac_unavailable_fails_before_identify(monkeypatch):
+    transport, lookups = _path_transport(monkeypatch, [UNMANAGED_NETWORK])
+    identify = MagicMock()
+    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
+
+    with pytest.raises(device_transport.ManagedDeviceControlError, match="network path to the DDM server"):
+        await transport.execute(_device(), {"command": "identify"})
+
+    identify.assert_not_called()
+    assert lookups == []
+
+
+@pytest.mark.asyncio
+async def test_managed_arc_read_does_not_need_host_mac(monkeypatch):
+    transport, _ = _path_transport(monkeypatch, [UNMANAGED_NETWORK])
+    monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x1234)
+    query = MagicMock(return_value=bytes.fromhex("2809000a123433000001"))
+    monkeypatch.setattr(device_transport, "query_managed_arc_with_api_key", query)
+
+    await transport.execute(_device(), {"command": "query_receiver_port_ranges"})
+
+    query.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_managed_settings_reports_host_mac_path_error(monkeypatch):
+    transport, _ = _path_transport(monkeypatch, [UNMANAGED_NETWORK])
+    query = MagicMock()
+    monkeypatch.setattr(device_transport, "query_managed_settings_with_api_key", query)
+
+    with pytest.raises(device_transport.ManagedDeviceControlError, match="network path to the DDM server"):
+        await transport.execute(_device(), {"command": "probe_sample_rate"})
+
+    query.assert_not_called()
 
 
 def test_enrolment_metadata_selects_managed_control_even_when_direct_ip_exists():
@@ -254,8 +376,7 @@ async def test_private_managed_action_requires_the_device_records_domain(monkeyp
     captured = {}
     device = _device()
     device.ddm_domain_id = "11" * 16
-    transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
-    monkeypatch.setattr(device_transport.core, "host_mac", lambda: bytes.fromhex("001122334455"))
+    transport, _ = _path_transport(monkeypatch, [MANAGED_NETWORK])
 
     def identify(server, credential, device_id, host_mac, **options):
         captured.update(options)
@@ -288,9 +409,8 @@ async def test_managed_arc_normalizes_receiver_port_range_query_to_2809(monkeypa
 async def test_managed_settings_query_injects_host_mac_and_correlates_the_publication(monkeypatch):
     sent = []
     publication = bytes.fromhex("ffff001c00010000001dc1fffe50692e417564696e61746507380080")
-    transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
+    transport, _ = _path_transport(monkeypatch, [MANAGED_NETWORK])
 
-    monkeypatch.setattr(device_transport.core, "host_mac", lambda: bytes.fromhex("001122334455"))
     monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x4321)
 
     def query(server, credential, device_id, packet, expected_opcode, **options):
@@ -303,7 +423,7 @@ async def test_managed_settings_query_injects_host_mac_and_correlates_the_public
 
     assert result == publication
     assert sent[0][5] == device_transport.core.build_command(
-        {"command": "probe_sample_rate", "host_mac": "001122334455", "message_id": 0x4321}
+        {"command": "probe_sample_rate", "host_mac": _path_mac("10.20.0.5").hex(), "message_id": 0x4321}
     )
     assert sent[0][3] == 0x0080
 
@@ -667,7 +787,7 @@ async def test_enrollment_retains_correlated_primary_interface_when_ddm_omits_ma
 @pytest.mark.asyncio
 async def test_managed_wing_redundancy_uses_core_packet_and_interface_completion(monkeypatch):
     transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
-    monkeypatch.setattr(device_transport.core, "host_mac", lambda: bytes.fromhex("020000000062"))
+    monkeypatch.setattr(transport, "_host_mac", lambda: bytes.fromhex("020000000062"))
     monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x426C)
     query = MagicMock(return_value=b"verified publication")
     monkeypatch.setattr(device_transport, "query_managed_settings_with_api_key", query)
