@@ -148,7 +148,7 @@ test("pull-up choices have tuning labels and omit unknown values", async ({ page
   await serveWebapp(page, { devices: { [record.server_name]: record } });
   await page.goto(`http://netaudio.test/devices/${encodeURIComponent(record.server_name)}/device-config`);
   const row = page.locator(".field-row").filter({ has: page.getByText("Sample rate pull-up", { exact: true }) });
-  await expect(row.locator("option")).toHaveText(["None", "+4.1667%", "+0.1%", "−0.1%", "−4.0%"]);
+  await expect(row.locator("option")).toHaveText(["None", "+4.1667%", "+0.1%", "-0.1%", "-4.0%"]);
 });
 
 test("missing managed settings offer refresh without an invented latency", async ({ page }) => {

@@ -28,8 +28,8 @@ def test_audio_subscription_page_matches_controller_capture(exchange):
     assert core.parse_response("result_code", bytes.fromhex(exchange["response"]["hexadecimal"])) == 1
 
 
-@pytest.mark.parametrize("protocol,media_type", [(0x2809, 4), (0x2801, 3), (0xFFFF, 3)])
-def test_audio_subscription_page_rejects_unverified_protocol_media_combinations(protocol, media_type):
+@pytest.mark.parametrize("protocol,media_type", [(0x2801, 3), (0x2809, 0), (0x2809, 5), (0xFFFF, 3)])
+def test_subscription_page_rejects_unknown_protocol_or_media(protocol, media_type):
     with pytest.raises(core.NetaudioCoreError):
         core.build_command(
             {
@@ -40,6 +40,22 @@ def test_audio_subscription_page_rejects_unverified_protocol_media_combinations(
                 "records": [{"action": "clear", "rx_channel": 1}],
             }
         )
+
+
+@pytest.mark.parametrize("protocol", [0x2809, 0x280C, 0x280F])
+def test_video_subscription_page_records_media_type(protocol):
+    packet = core.build_command(
+        {
+            "command": "modern_arc_subscription_page",
+            "protocol_id": protocol,
+            "page_capacity": 1,
+            "media_type_code": 4,
+            "records": [{"action": "clear", "rx_channel": 1}],
+        }
+    )
+
+    assert packet[:2] == protocol.to_bytes(2, "big")
+    assert packet[16:28] == bytes.fromhex("080001010001000400000000")
 
 
 def test_audio_subscription_page_rejects_unverified_same_device_shorthand():

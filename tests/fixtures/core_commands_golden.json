@@ -319,7 +319,8 @@
       "host_mac": "001dc1502368",
       "message_id": 33,
       "control": {
-        "record_revision": 1850,
+        "control_profile": 1850,
+        "status_revision": 1850,
         "clock_capabilities": 0,
         "extension_flags": 0,
         "preferred_leader": true
@@ -333,7 +334,8 @@
       "host_mac": "001dc1502368",
       "message_id": 33,
       "control": {
-        "record_revision": 1850,
+        "control_profile": 1850,
+        "status_revision": 1850,
         "clock_capabilities": 0,
         "extension_flags": 0,
         "preferred_leader": false
@@ -346,7 +348,7 @@
       "command": "refresh_clock_status",
       "host_mac": "001dc1502368",
       "message_id": 33,
-      "record_revision": 1850
+      "control_profile": 1850
     },
     "hex": "ffff005c00210000001dc15023680000417564696e617465073a002100000064000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
   },

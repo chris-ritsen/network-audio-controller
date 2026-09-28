@@ -10,7 +10,7 @@ from netaudio.dante.const import RESULT_CODE_SUCCESS, SERVICE_ARC
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("version", [None, "2.8.16"])
+@pytest.mark.parametrize("version", [None, "2.8.256", "garbage"])
 async def test_preferred_transmitter_inventory_does_not_query_unknown_revisions(version):
     device = SimpleNamespace(
         services={"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": version}}},
@@ -85,7 +85,7 @@ async def test_rejected_modern_receiver_query_never_falls_back_to_legacy(monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("version", [None, "2.8.16", "garbage"])
+@pytest.mark.parametrize("version", [None, "2.8.256", "garbage"])
 async def test_flow_detection_does_not_probe_guessed_revisions(monkeypatch, version):
     device = SimpleNamespace(
         services={"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": version}}},

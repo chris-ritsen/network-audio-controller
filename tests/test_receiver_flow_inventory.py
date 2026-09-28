@@ -146,8 +146,9 @@ async def test_receiver_flow_inventory_uses_the_controller_query(monkeypatch):
 
     inventory = await flows.query_receiver_flow_inventory("192.0.2.10", 4440, protocol_id=0x2729)
 
-    expected = core.parse_response("receiver_flow_page", _packet(0x3200, 8172))
-    assert inventory == {**expected, "pages": [expected]}
+    packet = _packet(0x3200, 8172)
+    expected = core.parse_response("receiver_flow_page", packet)
+    assert inventory == {**expected, "complete": True, "pages": [expected], "raw_pages": [list(packet)]}
     assert command_specifications == [
         {
             "device_ip": "192.0.2.10",

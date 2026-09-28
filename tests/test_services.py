@@ -140,7 +140,7 @@ class TestApplicationSettingsCommands:
             "192.168.1.108",
             host_mac=b"\x10\x20\x30\x40\x50\x60",
             message_id=0x0021,
-            record_revision=0x073A,
+            control_profile=0x073A,
         )
 
         assert _executed(transport) == [
@@ -148,7 +148,7 @@ class TestApplicationSettingsCommands:
                 "192.168.1.108",
                 {
                     "command": "refresh_clock_status",
-                    "record_revision": 0x073A,
+                    "control_profile": 0x073A,
                     "host_mac": "102030405060",
                     "message_id": 0x0021,
                 },
@@ -163,7 +163,7 @@ class TestApplicationSettingsCommands:
 
         for _ in range(2):
             await application.send_refresh_clock_status(
-                "192.0.2.10", host_mac=b"\x10\x20\x30\x40\x50\x60", record_revision=0x073A
+                "192.0.2.10", host_mac=b"\x10\x20\x30\x40\x50\x60", control_profile=0x073A
             )
 
         packets = [core.build_command(specification) for _, specification in _executed(transport)]

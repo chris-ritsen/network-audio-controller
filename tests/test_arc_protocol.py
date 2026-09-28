@@ -94,21 +94,25 @@ def test_native_transmitter_inventory_plan_rejects_unsupported_revisions(adverti
         ("2.7.255", 0x27FF, False),
         ("2.8.1", 0x2801, False),
         ("2.8.9", 0x2809, True),
+        ("2.8.12", 0x280C, True),
         ("2.8.15", 0x280F, True),
+        ("2.8.16", 0x280F, True),
+        ("2.9.0", 0x280F, True),
+        ("15.15.255", 0x280F, True),
     ],
 )
 def test_core_resolves_advertised_arc_protocol(version, protocol_id, modern):
     assert core.arc_protocol(version) == {
         "protocol_id": protocol_id,
         "modern_channel_inventory": modern,
-        "subscription_page": protocol_id == 0x280F,
-        "subscription_batch_limit": 32 if protocol_id == 0x280F else 16,
+        "subscription_page": modern,
+        "subscription_batch_limit": 32 if modern else 16,
         "channel_name_probe_protocol_id": protocol_id if modern else 0x2809,
         "flow_query_protocol_ids": [protocol_id] if modern else [0x2729, 0x2801, 0x2809, 0x280F],
     }
 
 
-@pytest.mark.parametrize("version", ["", "2.8", "2.8.16", "2.8.256", "18.8.9", "2.8.-1", "2.8.9.0", " 2.8.9", "٢.٨.٩"])
+@pytest.mark.parametrize("version", ["", "2.8", "2.8.256", "18.8.9", "2.8.-1", "2.8.9.0", " 2.8.9", "٢.٨.٩"])
 def test_core_rejects_malformed_or_unestablished_revision(version):
     with pytest.raises(core.NetaudioCoreError, match="unsupported ARC protocol version"):
         core.arc_protocol(version)
@@ -119,7 +123,7 @@ def test_missing_revision_stays_unknown_and_managed_transport_is_explicit():
     assert core.arc_protocol(None, managed=True) == {
         "protocol_id": 0x2809,
         "modern_channel_inventory": True,
-        "subscription_page": False,
+        "subscription_page": True,
         "subscription_batch_limit": 32,
         "channel_name_probe_protocol_id": 0x2809,
         "flow_query_protocol_ids": [0x2809],

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections import deque
 from unittest.mock import AsyncMock
 
@@ -140,6 +141,7 @@ def _one_sample_stream(server_name: str):
             "event": "meter_values",
             "server_name": server_name,
             **_sample(tx={1: 0x7B}),
+            "wall_time": time.time(),
         }
         await asyncio.Event().wait()
 
@@ -185,7 +187,8 @@ async def test_passive_tui_uses_async_events_and_never_starts_or_stops_detailed_
     assert terminal.exited is True
     assert terminal.frames
     assert "PASSIVE" in terminal.frames[-1]
-    assert "7B" in terminal.frames[-1]
+    assert "-61.5" in terminal.frames[-1]
+    assert "STALE" not in terminal.frames[-1]
 
 
 @pytest.mark.asyncio
@@ -491,7 +494,7 @@ async def test_passive_tui_falls_back_to_cache_without_starting_or_stopping():
     assert start_calls == []
     assert stop_calls == []
     assert "cache fallback" in terminal.frames[-1]
-    assert "0x7B" in terminal.frames[-1]
+    assert "-61.5" in terminal.frames[-1]
 
 
 @pytest.mark.asyncio

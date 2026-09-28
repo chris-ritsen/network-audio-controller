@@ -197,7 +197,7 @@ def test_subscription_bulk_reports_partial_readback_per_channel():
 
 @pytest.mark.parametrize(
     "version,managed,batch_sizes",
-    [("2.7.255", False, [16, 16, 1]), ("2.8.15", False, [32, 1]), (None, True, [32, 1])],
+    [("2.7.255", False, [16, 16, 1]), ("2.8.15", False, [32, 1]), ("2.9.0", False, [32, 1]), (None, True, [32, 1])],
 )
 def test_bulk_subscription_uses_native_revision_limits_and_verifies_every_channel(version, managed, batch_sizes):
     def refresh_rx(device):
@@ -228,7 +228,7 @@ def test_bulk_subscription_uses_native_revision_limits_and_verifies_every_channe
 
 def test_bulk_subscription_unknown_revision_never_writes():
     devices, _, rx = _subscription_devices()
-    rx.services["arc"]["properties"]["arcp_vers"] = "2.9.0"
+    rx.services["arc"]["properties"]["arcp_vers"] = "2.8.256"
     application = FakeApplication(devices)
 
     result = _add_bulk(application)
@@ -336,7 +336,7 @@ def test_single_subscription_skips_verified_existing_source():
 @pytest.mark.parametrize("action", ["add", "remove"])
 def test_single_subscription_unknown_revision_never_writes(action):
     devices, _, rx = _subscription_devices()
-    rx.services["arc"]["properties"]["arcp_vers"] = "2.9.0"
+    rx.services["arc"]["properties"]["arcp_vers"] = "2.8.256"
     rx.subscriptions = [_subscription("Rx1", "Other", "TX")]
     application = FakeApplication(devices)
 

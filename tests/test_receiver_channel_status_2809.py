@@ -57,7 +57,7 @@ async def test_channel_name_probe_rejects_invalid_direction_before_io(channel_ty
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("channel_type", ["rx", "tx"])
-@pytest.mark.parametrize("version", [None, "2.8.16", "invalid"])
+@pytest.mark.parametrize("version", [None, "2.8.256", "invalid"])
 @pytest.mark.parametrize("cached", [None, 0x2809])
 async def test_channel_rename_does_not_guess_revision_even_with_a_cached_frontend(channel_type, version, cached):
     device = SimpleNamespace(

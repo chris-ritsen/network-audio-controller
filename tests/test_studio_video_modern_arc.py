@@ -383,7 +383,7 @@ async def test_subscription_writes_never_guess_an_unknown_revision(version, acti
     device.execute.assert_not_awaited()
 
 
-@pytest.mark.parametrize("protocol_id,capacity", [(0x27FF, 16), (0x2809, 16), (0x280F, 32)])
+@pytest.mark.parametrize("protocol_id,capacity", [(0x27FF, 16), (0x2809, 32), (0x280C, 32), (0x280F, 32)])
 @pytest.mark.parametrize("action", ["set", "clear"])
 def test_native_subscription_plan_selects_revision_and_bounds_every_command(protocol_id, capacity, action):
     records = [
@@ -401,7 +401,7 @@ def test_native_subscription_plan_selects_revision_and_bounds_every_command(prot
             "records": records,
         }
     )
-    field = "records" if protocol_id == 0x280F else "subscriptions" if action == "set" else "rx_channels"
+    field = "records" if capacity == 32 else "subscriptions" if action == "set" else "rx_channels"
 
     assert [len(command[field]) for command in commands] == ([32, 1] if capacity == 32 else [16, 16, 1])
     assert all(core.build_command(command) for command in commands)

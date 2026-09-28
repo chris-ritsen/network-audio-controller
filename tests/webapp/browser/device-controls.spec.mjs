@@ -200,6 +200,32 @@ function device() {
           value: 3,
         },
       },
+      presentation: {
+        editors: {
+          bluetooth_identification: {
+            bandwidth: null,
+            custom_name_limit: 32,
+            custom_name_source: 2,
+            details: {},
+            initial: { custom_name: "Saved name", name_source: 1 },
+            initial_fields: {
+              name_source: { key: "1", label: "Dante device name" },
+            },
+            reason: null,
+            variants: [
+              {
+                fields: { name_source: { key: "1", label: "Dante device name" } },
+                requested: { custom_name: "Saved name", name_source: 1 },
+              },
+              {
+                fields: { name_source: { key: "2", label: "Custom name" } },
+                requested: { custom_name: "Saved name", name_source: 2 },
+              },
+            ],
+          },
+        },
+        summary: {},
+      },
     },
   };
 }

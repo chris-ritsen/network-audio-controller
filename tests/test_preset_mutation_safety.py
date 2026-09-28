@@ -440,8 +440,9 @@ def test_preset_audio_modes_distinguish_fixed_from_unknown(monkeypatch, tmp_path
         ("2.7.255", False, [16, 16, 1]),
         ("2.8.15", False, [32, 1]),
         (None, True, [32, 1]),
+        ("2.8.16", False, [32, 1]),
+        ("2.8.256", False, None),
         (None, False, None),
-        ("2.8.16", False, None),
     ],
 )
 def test_preset_load_reconciles_receiver_subscriptions(monkeypatch, tmp_path, version, managed, batch_sizes):

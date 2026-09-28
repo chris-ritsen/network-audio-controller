@@ -39,7 +39,7 @@ def _without_transaction_id(payload: bytes) -> bytes:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("direction", ["rx", "tx"])
-@pytest.mark.parametrize("version", [None, "", "invalid", "2.8.16"])
+@pytest.mark.parametrize("version", [None, "", "2.8.256", "invalid"])
 async def test_device_inventory_never_falls_back_to_legacy_without_a_known_revision(direction, version):
     application = DanteApplication()
     device = DanteDevice("receiver.local.", app=application)
@@ -73,16 +73,18 @@ async def test_device_inventory_consumes_native_protocol_and_media_metadata(dire
 @pytest.mark.parametrize(
     ("version", "expected"),
     [
-        ("2.8.15", PROTOCOL_ARC_280F),
-        ("2.8.12", PROTOCOL_ARC_280C),
         ("2.8.9", PROTOCOL_ARC_2809),
+        ("2.8.12", PROTOCOL_ARC_280C),
+        ("2.8.15", PROTOCOL_ARC_280F),
+        ("2.8.16", PROTOCOL_ARC_280F),
+        ("2.9.0", PROTOCOL_ARC_280F),
     ],
 )
-def test_modern_arc_protocol_selection_uses_the_exact_advertised_version(version, expected):
+def test_modern_arc_protocol_selection_caps_at_280f(version, expected):
     assert modern_arc_protocol_identifier_for_device(_arc_device(version)) == expected
 
 
-@pytest.mark.parametrize("version", ["2.8.16", "invalid", ""])
+@pytest.mark.parametrize("version", ["", "2.8.256", "invalid"])
 def test_modern_arc_protocol_selection_rejects_unrecognized_versions(version):
     with pytest.raises(ArcProtocolError, match="unsupported ARC protocol version"):
         modern_arc_protocol_identifier_for_device(_arc_device(version))
