@@ -94,7 +94,7 @@ export function externalSubscriptionRequest(
   clear = false,
 ) {
   const flow = column.flow;
-  if (!flow.routable || ["recvonly", "inactive"].includes(flow.direction)) {
+  if (!flow.routable) {
     throw new Error(
       (flow.routability_errors || []).join("; ") ||
         "This announcement is not a routable audio sender.",
@@ -140,11 +140,7 @@ export function externalCellState(row, column, pending) {
       reason: "External receiver assignment reported; media health unverified",
     };
   }
-  if (
-    !flow.routable ||
-    ["recvonly", "inactive"].includes(flow.direction) ||
-    Date.parse(flow.expires_at) <= Date.now()
-  ) {
+  if (!flow.routable || Date.parse(flow.expires_at) <= Date.now()) {
     return {
       kind: "self-unavailable",
       reason:

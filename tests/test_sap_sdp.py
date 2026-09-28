@@ -62,9 +62,9 @@ def sap_packet(
     )
 
 
-def test_synthetic_sap_fixture_decodes_to_its_recorded_identity():
+@pytest.mark.parametrize("fixture_name", ["pipewire-shaped-announcement.bin", "synthetic-aes67-announcement.bin"])
+def test_sap_fixtures_decode_to_recorded_identity(fixture_name):
     provenance = json.loads((FIXTURE_DIRECTORY / "provenance.json").read_text())
-    fixture_name = "synthetic-aes67-announcement.bin"
     payload = (FIXTURE_DIRECTORY / fixture_name).read_bytes()
 
     assert hashlib.sha256(payload).hexdigest() == provenance["fixtures"][fixture_name]["sha256"]
@@ -75,6 +75,51 @@ def test_synthetic_sap_fixture_decodes_to_its_recorded_identity():
     assert parsed.message_hash == int(expected["message_hash"], 16)
     assert parsed.sdp["session_id"] == expected["session_id"]
     assert parsed.sdp["routable"]
+
+
+def test_pipewire_announcement_is_routable_recvonly_audio():
+    parsed = parse_sap_packet((FIXTURE_DIRECTORY / "pipewire-shaped-announcement.bin").read_bytes())
+    audio = parsed.sdp["routable_audio"]
+
+    assert parsed.sdp["routable"] is True
+    assert parsed.sdp["routability_errors"] == []
+    assert audio["direction"] == "recvonly"
+    assert audio["media_title"] == "2 channels: AUX1, AUX2"
+    assert audio["primary_destination_address"] == "239.69.150.243"
+    assert audio["destination_port"] == 5004
+    assert audio["encoding"] == "L24"
+    assert audio["sample_rate"] == 48000
+    assert audio["channel_count"] == 2
+    assert audio["packet_time_microseconds"] == 1000
+    assert audio["clock_offset"] == 0
+    assert audio["dante_origin"] is False
+
+
+DIRECTION_SDP = (
+    "v=0\no=user 1 1 IN IP4 192.0.2.1\ns=Direction\nc=IN IP4 239.69.1.10/32\nt=0 0\n{session}"
+    "m=audio 5004 RTP/AVP 96\na=rtpmap:96 L24/48000/2\n{media}"
+)
+
+
+@pytest.mark.parametrize(
+    "session,media,direction,routable",
+    [
+        ("", "", None, True),
+        ("", "a=inactive\n", "inactive", False),
+        ("", "a=recvonly\n", "recvonly", True),
+        ("", "a=sendrecv\n", "sendrecv", True),
+        ("a=inactive\n", "", "inactive", False),
+        ("a=inactive\n", "a=recvonly\n", "recvonly", True),
+        ("a=recvonly\n", "", "recvonly", True),
+        ("a=sendonly\n", "a=inactive\n", "inactive", False),
+    ],
+)
+def test_sdp_direction_eligibility(session, media, direction, routable):
+    parsed = parse_sdp(DIRECTION_SDP.format(session=session, media=media))
+
+    assert parsed["routable_audio"]["direction"] == direction
+    assert parsed["routable"] is routable
+    assert ("audio media direction is inactive" in parsed["routability_errors"]) is not routable
 
 
 def test_sdp_parses_structural_and_routable_audio_fields():

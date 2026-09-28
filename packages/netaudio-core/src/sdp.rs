@@ -573,6 +573,14 @@ pub fn parse(raw_sdp: &str) -> Result<SdpDocument, String> {
         routability_errors.push("SDP session name is empty".into());
     }
 
+    let inactive = routable_audio_result
+        .as_ref()
+        .is_some_and(|audio| audio.direction.as_deref() == Some("inactive"));
+
+    if inactive {
+        routability_errors.push("audio media direction is inactive".into());
+    }
+
     Ok(SdpDocument {
         version,
         origin_username: origin[0].into(),
@@ -589,7 +597,7 @@ pub fn parse(raw_sdp: &str) -> Result<SdpDocument, String> {
         session_attributes,
         media_descriptions,
         rtp_maps: rtp_maps_all,
-        routable: routable_audio_result.is_some(),
+        routable: routable_audio_result.is_some() && !inactive,
         routable_audio: routable_audio_result,
         routability_errors,
         unknown_lines,

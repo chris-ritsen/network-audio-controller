@@ -26,7 +26,9 @@ from tests.cli_test_support import invoke
 from tests.http_api_test_support import get, make_device, make_http_server, post
 
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures" / "external_subscription"
+PIPEWIRE_FIXTURE = Path(__file__).parent / "fixtures" / "sap_sdp" / "pipewire-shaped-announcement.bin"
 SAP_FIXTURE = Path(__file__).parent / "fixtures" / "sap_sdp" / "synthetic-aes67-announcement.bin"
+FIXTURE_ORIGINS = {PIPEWIRE_FIXTURE: "192.0.2.50", SAP_FIXTURE: "192.0.2.44"}
 
 LEGACY_SPEC = {
     "command": "subscribe_external_rtp",
@@ -214,12 +216,12 @@ def test_external_subscription_contract_rejects_unknown_fields(extra):
         core.build_command({**LEGACY_SPEC, **extra})
 
 
-def discovered_flow():
+def discovered_flow(fixture=SAP_FIXTURE):
     inventory = SapFlowInventory()
     change = inventory.ingest(
-        SAP_FIXTURE.read_bytes(),
+        fixture.read_bytes(),
         announcement_interface="eth0",
-        packet_source_ipv4="192.0.2.44",
+        packet_source_ipv4=FIXTURE_ORIGINS[fixture],
         received_monotonic=time.monotonic(),
         wall_time=1,
     )
@@ -273,6 +275,47 @@ def test_external_subscription_rejects_incompatible_receiver_facts(field, value)
             target, discovered_flow(), [1], [2], receiver_supports_multiple_interfaces=False
         )
     target.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("direction", [None, "recvonly", "sendonly", "sendrecv"])
+def test_external_subscription_accepts_sender_directions(direction):
+    target = device()
+    specification = external_receiver_subscription_specification(
+        target,
+        replace(discovered_flow(), direction=direction),
+        [1],
+        [2],
+        receiver_supports_multiple_interfaces=False,
+    )
+
+    assert specification["flow_slot_assignments"] == [2]
+    target.execute.assert_not_called()
+
+
+def test_external_subscription_rejects_inactive_announcement():
+    target = device()
+    with pytest.raises(FlowValidationError, match="inactive"):
+        external_receiver_subscription_specification(
+            target,
+            replace(discovered_flow(), direction="inactive"),
+            [1],
+            [2],
+            receiver_supports_multiple_interfaces=False,
+        )
+    target.execute.assert_not_called()
+
+
+def test_pipewire_announcement_plans_external_subscription():
+    flow = discovered_flow(PIPEWIRE_FIXTURE)
+    specification = external_receiver_subscription_specification(
+        device(), flow, [1, 2], [1, 2], receiver_supports_multiple_interfaces=False
+    )
+
+    assert flow.direction == "recvonly"
+    assert specification["session_id"] == 3967398212
+    assert specification["source_address"] == "192.0.2.50"
+    assert specification["primary_destination"] == {"address": "239.69.150.243", "port": 5004}
+    assert core.build_command(specification)[6:8] == bytes.fromhex("3201")
 
 
 def test_discovered_flow_maps_to_external_subscription_and_gates_secondary_destination():
@@ -551,12 +594,12 @@ def test_external_subscription_uses_channel_identity_not_inventory_key(numbers, 
     assert error.value.status == status
 
 
-def populated_inventory() -> SapFlowInventory:
+def populated_inventory(fixture=SAP_FIXTURE) -> SapFlowInventory:
     inventory = SapFlowInventory()
     inventory.ingest(
-        SAP_FIXTURE.read_bytes(),
+        fixture.read_bytes(),
         announcement_interface="eth0",
-        packet_source_ipv4="192.0.2.44",
+        packet_source_ipv4=FIXTURE_ORIGINS[fixture],
         received_monotonic=time.monotonic(),
         wall_time=1,
     )
@@ -582,11 +625,12 @@ def acknowledged_result() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_sap_http_slot_routing_through_native_core_has_one_write_and_readback(monkeypatch, tmp_path):
+@pytest.mark.parametrize("fixture", [PIPEWIRE_FIXTURE, SAP_FIXTURE], ids=lambda path: path.stem)
+async def test_sap_http_slot_routing_through_native_core_has_one_write_and_readback(monkeypatch, tmp_path, fixture):
     target = device(rx_channels=[7])
     server = make_http_server({target.server_name: target})
     application = server.application
-    application.external_flows = populated_inventory()
+    application.external_flows = populated_inventory(fixture)
     application.probe_lock_status = AsyncMock(return_value=SimpleNamespace(is_locked=False))
     application.probe_aes67_state = AsyncMock(return_value=(True, None))
     application.probe_sample_rate_status = AsyncMock(return_value={"current_value": 48000})
@@ -641,6 +685,9 @@ async def test_sap_http_slot_routing_through_native_core_has_one_write_and_readb
     assert len(writes) == 1
     assert writes[0]["command"]["receiver_channel_ids"] == [7]
     assert writes[0]["command"]["flow_slot_assignments"] == [2]
+    assert writes[0]["command"]["source_address"] == FIXTURE_ORIGINS[fixture]
+    assert str(writes[0]["command"]["session_id"]) == source["session_id"]
+    assert writes[0]["packet"][12:16] == "3201"
     (tmp_path / "sap-routing-evidence.json").write_text(
         json.dumps({"source": source, "request": request, "writes": writes, "result": result}, indent=2)
     )

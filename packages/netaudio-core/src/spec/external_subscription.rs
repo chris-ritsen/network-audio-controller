@@ -133,9 +133,9 @@ pub fn plan_external_subscription(
     }
     if !matches!(
         request.source_direction.as_deref(),
-        None | Some("sendonly" | "sendrecv")
+        None | Some("recvonly" | "sendonly" | "sendrecv")
     ) {
-        return Err(reject("announcement does not describe an active sender"));
+        return Err(reject("announcement direction is inactive or unsupported"));
     }
     if request.source_sample_rate.is_none()
         || request.source_sample_rate != request.receiver.sample_rate

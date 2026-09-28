@@ -108,3 +108,43 @@ test("external sessions remain separate matrix sources and map source slots to r
   assert.deepEqual(request.flow_slot_assignments, [2]);
   assert.equal(request.content_sha256, "9007199254740993");
 });
+
+function directionColumn(direction, routable, errors = []) {
+  return {
+    kind: "channel",
+    number: 1,
+    sourceKey: "192.0.2.50/3967398212",
+    flow: {
+      source_ipv4: "192.0.2.50",
+      session_id: "3967398212",
+      content_sha256: "digest",
+      direction,
+      routable,
+      routability_errors: errors,
+      expires_at: "2099-01-01T00:00:00Z",
+    },
+  };
+}
+
+test("recvonly sender is routable", () => {
+  const column = directionColumn("recvonly", true);
+  const row = { kind: "channel", number: 3, device: { receiver_flows: [] } };
+  assert.equal(externalCellState(row, column, null).kind, "empty");
+  const request = externalSubscriptionRequest(column, "rx.local.", 3);
+  assert.deepEqual(request.flow_slot_assignments, [1]);
+  assert.equal(request.session_id, "3967398212");
+});
+
+test("inactive uses core verdict", () => {
+  const column = directionColumn("inactive", false, [
+    "audio media direction is inactive",
+  ]);
+  const row = { kind: "channel", number: 3, device: { receiver_flows: [] } };
+  const state = externalCellState(row, column, null);
+  assert.equal(state.kind, "self-unavailable");
+  assert.equal(state.reason, "audio media direction is inactive");
+  assert.throws(
+    () => externalSubscriptionRequest(column, "rx.local.", 3),
+    /inactive/,
+  );
+});
