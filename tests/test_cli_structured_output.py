@@ -42,11 +42,23 @@ def test_lock_key_get_json(monkeypatch):
     assert _json(result) == {"device_lock_key": "0123456789abcdef0123456789abcdef"}
 
 
-def test_daemon_tls_json_reports_null_when_unconfigured(monkeypatch):
+def test_daemon_tls_json_reports_null_when_disabled(monkeypatch):
     monkeypatch.setattr("netaudio.daemon.http.tls.daemon_tls_settings", lambda: None)
     result = runner.invoke(app, ["-j", "daemon", "tls"])
     assert result.exit_code == 0
     assert _json(result) is None
+
+
+def test_daemon_remote_urls_use_tls_by_default(monkeypatch):
+    monkeypatch.setattr("netaudio.commands.server._port_in_use", lambda port: True)
+    monkeypatch.setattr("netaudio.daemon.http.api.advertisement_addresses", lambda: ["192.0.2.10"])
+    monkeypatch.setattr("netaudio.daemon.mcp_access.ensure_mcp_token", lambda: "offline-test-token")
+    result = runner.invoke(app, ["-j", "daemon", "web"])
+    payload = _json(result)
+    assert payload["urls"] == ["http://127.0.0.1:9000/"]
+    assert "https://192.0.2.10:9443/" in payload["https_urls"]
+    result = runner.invoke(app, ["-j", "daemon", "mcp-token"])
+    assert _json(result)["url"].startswith("https://")
 
 
 def test_virtual_status_json_when_not_running(monkeypatch):

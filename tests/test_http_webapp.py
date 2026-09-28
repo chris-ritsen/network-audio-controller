@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from netaudio.daemon.http.web import WEBAPP_ROOT, is_application_route, prefers_web_page, resolve_web_asset
@@ -68,6 +70,25 @@ class TestApplicationRoutes:
 
 
 class TestAssetServing:
+    @pytest.mark.asyncio
+    async def test_asset_connections_explicitly_close(self):
+        server = make_http_server()
+        async with await asyncio.start_server(server.handle_connection, "127.0.0.1", 0) as listener:
+            port = listener.sockets[0].getsockname()[1]
+            for path in ("/", "/app.js", "/vendor/preact.module.js"):
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                try:
+                    writer.write(f"GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode())
+                    await writer.drain()
+                    response = await asyncio.wait_for(reader.read(), 3)
+                    headers, _, body = response.partition(b"\r\n\r\n")
+                    assert b"200 OK" in headers
+                    assert b"Connection: close\r\n" in headers + b"\r\n"
+                    assert body
+                finally:
+                    writer.close()
+                    await writer.wait_closed()
+
     @pytest.mark.asyncio
     async def test_index_is_served_at_root(self):
         status, headers, body = await fetch(make_http_server(), "/")

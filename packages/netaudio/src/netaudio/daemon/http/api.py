@@ -283,8 +283,9 @@ class DaemonHTTPServer(
         if self.tcp_server is not None:
             return
         self._stop_lock = asyncio.Lock()
-        self.tcp_server = await asyncio.start_server(self.handle_connection, "0.0.0.0", self.port)
-        logger.info(f"Daemon HTTP API listening on port {self.port}")
+        http_host = "127.0.0.1" if self.tls is not None else "0.0.0.0"
+        self.tcp_server = await asyncio.start_server(self.handle_connection, http_host, self.port)
+        logger.info(f"Daemon HTTP API listening on {http_host}:{self.port}")
 
         try:
             if self.tls is not None:
@@ -734,11 +735,12 @@ class DaemonHTTPServer(
         properties["mcp_path"] = MCP_PATH
         if self.tls is not None:
             properties["tls_port"] = str(self.tls.port)
+        properties["scheme"] = "https" if self.tls is not None else "http"
         return ServiceInfo(
             DAEMON_SERVICE_TYPE,
             name or f"{_daemon_service_instance_label(hostname)}.{DAEMON_SERVICE_TYPE}",
             addresses=[socket.inet_aton(address) for address in addresses],
-            port=self.port,
+            port=self.tls.port if self.tls is not None else self.port,
             properties=properties,
             server=f"{server_hostname}.local.",
         )
@@ -785,6 +787,9 @@ class DaemonHTTPServer(
             logger.warning("Daemon HTTP API connection error", exc_info=True)
 
     async def _route(self, method, path, body, writer, reader, headers=None):
+        headers = dict(headers or {})
+        headers[":scheme"] = "https" if writer.get_extra_info("ssl_object") is not None else "http"
+
         if method == "GET" and urlsplit(path).path == "/events" and not prefers_web_page(headers):
             await self._handle_sse(writer, reader, parse_qs(urlsplit(path).query))
             return

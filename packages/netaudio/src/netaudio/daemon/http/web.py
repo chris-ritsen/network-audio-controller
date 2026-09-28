@@ -62,6 +62,7 @@ class DaemonWebHandlers:
             "HTTP/1.1 200 OK\r\n"
             f"Content-Type: {WEB_CONTENT_TYPES[asset_path.suffix]}\r\n"
             f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
             "Cache-Control: no-store\r\n"
             "X-Frame-Options: DENY\r\n"
             "Content-Security-Policy: frame-ancestors 'none'\r\n"

@@ -96,7 +96,7 @@ class DaemonOAuthHandlers:
         if configured:
             return configured
         headers = headers or {}
-        scheme = headers.get("x-forwarded-proto", "http").split(",")[0].strip() or "http"
+        scheme = headers.get("x-forwarded-proto", headers.get(":scheme", "http")).split(",")[0].strip() or "http"
         host = headers.get("x-forwarded-host") or headers.get("host") or f"localhost:{self.port}"
         return f"{scheme}://{host.split(',')[0].strip()}"
 

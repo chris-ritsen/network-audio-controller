@@ -488,12 +488,12 @@ def web(
     from netaudio.daemon.http.tls import TLSConfigurationError, certificate_fingerprint, daemon_tls_settings
 
     addresses = advertisement_addresses()
-    urls = [url, *(f"http://{address}:{effective_port}/" for address in addresses)]
     try:
         tls = daemon_tls_settings()
     except TLSConfigurationError as error:
         typer.echo(f"TLS is misconfigured: {error}", err=True)
-        tls = None
+        raise typer.Exit(code=1)
+    urls = [url] if tls is not None else [url, *(f"http://{address}:{effective_port}/" for address in addresses)]
     secure_urls = [] if tls is None else [f"https://{address}:{tls.port}/" for address in ("127.0.0.1", *addresses)]
     fingerprint = None if tls is None else certificate_fingerprint(tls.certificate)
     if structured_output_selected():
@@ -513,7 +513,6 @@ def web(
 @app.command()
 def tls():
     """Show the daemon's TLS configuration and certificate fingerprint."""
-    from netaudio.common.config_loader import default_config_path
     from netaudio.daemon.http.tls import TLSConfigurationError, certificate_fingerprint, daemon_tls_settings
 
     try:
@@ -525,9 +524,7 @@ def tls():
         if structured_output_selected():
             output_single(None)
         else:
-            typer.echo(
-                f"TLS is not configured. Add tls_certificate and tls_key under [daemon] in {default_config_path()}."
-            )
+            typer.echo("TLS is disabled by [daemon] no_ssl = true.")
         return
     fingerprint = certificate_fingerprint(settings_value.certificate)
     if structured_output_selected():
@@ -554,11 +551,19 @@ def mcp_token(
     ),
 ):
     """Show or rotate the bearer token that MCP clients use to reach this daemon."""
+    from netaudio.daemon.http.tls import TLSConfigurationError, daemon_tls_settings
     from netaudio.daemon.mcp_access import ensure_mcp_token, rotate_mcp_token
 
+    try:
+        settings_value = daemon_tls_settings()
+    except TLSConfigurationError as error:
+        typer.echo(f"TLS is misconfigured: {error}", err=True)
+        raise typer.Exit(code=1)
+
     token = rotate_mcp_token() if rotate else ensure_mcp_token()
-    effective_port = _effective_daemon_port(daemon_port)
-    url = f"http://{socket.gethostname().removesuffix('.local')}.local:{effective_port}/mcp"
+    effective_port = settings_value.port if settings_value is not None else _effective_daemon_port(daemon_port)
+    scheme = "https" if settings_value is not None else "http"
+    url = f"{scheme}://{socket.gethostname().removesuffix('.local')}.local:{effective_port}/mcp"
     if structured_output_selected():
         output_single({"token": token, "url": url, "rotated": rotate})
         return

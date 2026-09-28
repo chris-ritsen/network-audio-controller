@@ -152,6 +152,37 @@ or supply an explicit `.xml` path. Saving over an existing file requires
 
 ### Configuration and troubleshooting
 
+The daemon serves HTTPS on port 9443 by default, generating and reusing a
+self-signed certificate automatically. Run `netaudio daemon web` to see its
+addresses and `netaudio daemon tls` to inspect the certificate fingerprint.
+Browsers will warn until you trust the certificate; verify its fingerprint on
+the daemon's computer before accepting it. HTTP on port 9000 remains available
+only on loopback for the local CLI and browser.
+
+To supply your own certificate, add these settings to the configuration file
+shown by `netaudio config path`, then restart the daemon:
+
+```toml
+[daemon]
+tls_certificate = "/path/to/certificate.pem"
+tls_key = "/path/to/private-key.pem"
+tls_port = 9443
+```
+
+For an explicitly unencrypted LAN server, use this instead:
+
+```toml
+[daemon]
+no_ssl = true
+```
+
+This exposes HTTP on port 9000 without TLS; passwords and API keys sent over
+that connection are unencrypted. Do not combine `no_ssl` with TLS settings.
+Generated identities are stored privately in `tls/daemon.pem` beside the
+configuration file and are valid for one year. Keep that file private: it
+contains the server's key. Its certificate includes the hostname and IP
+addresses present when generated; prefer the hostname if addresses change.
+
 `netaudio config path` shows which configuration file is used. For a DDM
 network, `netaudio ddm login --default` guides you through connecting to a
 server and choosing a domain.
