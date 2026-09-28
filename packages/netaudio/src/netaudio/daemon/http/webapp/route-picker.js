@@ -163,7 +163,7 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
                   <span class="flex-1 min-w-0 break-words"><strong class="block">${entry.channelName}</strong><span class="block font-normal">${entry.deviceLabel}</span></span>
                   ${active ? html`<span class="badge badge-success badge-outline">Current</span>`
                     : !entry.online ? html`<span class="badge">Offline</span>`
-                    : !target.allowed ? html`<span class="badge">${target.state === "unsupported" ? "Self blocked" : "Self unavailable"}</span>`
+                    : !target.allowed ? html`<span class="badge">${target.state === "unsupported" ? "Not supported" : "Unavailable"}</span>`
                     : null}
                 </button>
               `;

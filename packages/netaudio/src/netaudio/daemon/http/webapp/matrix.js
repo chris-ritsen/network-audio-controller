@@ -358,7 +358,7 @@ export function ExpansionButtons({ label, onExpand, onCollapse, vertical = false
   </div>`;
 }
 
-export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: receivers, subscriptionIndex, flipped = false,
+export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: receivers, subscriptionIndex, flipped = false, locked = false,
   onExpandDevices, receiverFilter = "", transmitterFilter = "", onReceiverFilter, onTransmitterFilter, pending = {} }) {
   const rows = flipped ? transmitters : receivers;
   const columns = flipped ? receivers : transmitters;
@@ -485,6 +485,10 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
       }
       return;
     }
+    if (locked) {
+      return;
+    }
+
     if (!row.device.online || (column.sourceKind !== "external" && !column.device.online)) {
       setError("Both devices must be online to change this connection.");
       return;
@@ -544,7 +548,7 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     : rows[hover.rowIndex]?.kind !== "channel" || columns[hover.columnIndex]?.kind !== "channel" ? "pointer" : "crosshair";
   if (cellHover) {
     const state = cellState(rows[hover.rowIndex], columns[hover.columnIndex], subscriptionIndex, pending, flipped);
-    if (state.kind === "self-unsupported" || state.kind === "self-unavailable") cursor = "not-allowed";
+    if (locked || state.kind === "self-unsupported" || state.kind === "self-unavailable") cursor = "not-allowed";
   }
 
   return html`
@@ -729,7 +733,7 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
       const y = rowY(rowIndex);
       if (state.kind === "self-unsupported" || state.kind === "self-unavailable") {
         context.fillStyle = theme.panel;
-        context.fillRect(x, y, CELL, CELL);
+        context.fillRect(Math.floor(x) + 2, Math.floor(y) + 2, CELL - 4, CELL - 4);
         continue;
       }
       if (state.kind === "empty") {

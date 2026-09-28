@@ -58,7 +58,7 @@ test("details, tables, notices and errors remain selectable with UI selection di
   await expect(page.getByText("Video format", { exact: true })).toHaveCount(0);
 });
 
-test("mobile views use one selector and a reachable source picker", async ({ page }) => {
+test("mobile views use one selector and a reachable source picker", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await serveWebapp(page);
   await page.goto("http://netaudio.test/network-status");
@@ -71,7 +71,11 @@ test("mobile views use one selector and a reachable source picker", async ({ pag
   await page.locator(".mobile-card-toggle").first().click();
   const field = page.locator('td[data-label="Primary address"]').first();
   await field.hover();
+  await selector.focus();
+  await selector.dispatchEvent("pointerdown", { pointerType: "touch" });
   await selector.selectOption("/routing");
+  await expect(selector).not.toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath("mobile-selection.png") });
   await page.getByRole("region", { name: "Route receiver channels" }).getByRole("button").first().click();
   const picker = page.getByRole("dialog", { name: "Choose source" });
   await expect(picker).toBeVisible();
@@ -83,6 +87,9 @@ test("mobile views use one selector and a reachable source picker", async ({ pag
   await page.locator(".source-picker-results").evaluate((node) => { node.scrollTop = node.scrollHeight; });
   await expect(page.locator(".source-picker-entry").last()).toBeInViewport();
   await picker.getByRole("button", { name: "Done", exact: true }).click();
+  await selector.focus();
+  await selector.dispatchEvent("keydown", { key: "ArrowDown" });
+  await expect(selector).toBeFocused();
   await selector.selectOption("/subscriptions");
   for (const slot of await page.locator(".subscription-transport").all()) await expect(slot).toBeHidden();
   await page.setViewportSize({ width: 1600, height: 1000 });
@@ -129,10 +136,10 @@ test("source picker and matrix reflect same-device source capability", async ({ 
   });
   await viewport.hover({ position: cell(1, 1) });
   await expect(viewport).toHaveCSS("cursor", "not-allowed");
-  await expect(page.getByRole("tooltip")).toContainText("does not support self-subscriptions");
+  await expect(page.getByRole("tooltip")).toContainText("cannot connect to an output on the same device");
   await viewport.hover({ position: cell(2, 1) });
   await expect(viewport).toHaveCSS("cursor", "crosshair");
-  await expect(page.getByRole("tooltip")).not.toContainText("does not support self-subscriptions");
+  await expect(page.getByRole("tooltip")).not.toContainText("cannot connect to an output on the same device");
 });
 
 test("collapsed intersections expand channels without routing and names do not show tooltips", async ({ page }) => {
@@ -171,7 +178,7 @@ test("shared filter panel follows every tab and filters device inventories persi
   }
   await panel.getByRole("button", { name: "Clear all", exact: true }).click();
   await page.goto("http://netaudio.test/devices");
-  expect(await page.locator("#content tbody tr").count()).toBeGreaterThan(1);
+  await expect.poll(() => page.locator("#content tbody tr").count()).toBeGreaterThan(1);
 });
 
 test("text selection setting overrides all UI selection rules and survives reload", async ({ page }) => {

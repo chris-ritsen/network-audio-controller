@@ -20,7 +20,28 @@
     </script>
   </head>
   <body>
+    <section id="startup" class="content" role="status" hidden>
+      <h1>Unable to load NetAudio</h1>
+      <p id="startup-detail"></p>
+      <button type="button" class="btn" onclick="window.location.reload()">Reload</button>
+    </section>
+    <noscript>Enable JavaScript to open NetAudio.</noscript>
     <div id="root"></div>
-    <script type="module" src="/app.js"></script>
+    <script>
+      const startup = document.getElementById("startup");
+      const detail = document.getElementById("startup-detail");
+      const timeout = setTimeout(() => {
+        detail.textContent = "Check your connection and reload.";
+        startup.hidden = false;
+      }, 10000);
+      import("/app.js").then(() => {
+        clearTimeout(timeout);
+        startup.remove();
+      }).catch((error) => {
+        clearTimeout(timeout);
+        detail.textContent = error.message || "Check your connection and reload.";
+        startup.hidden = false;
+      });
+    </script>
   </body>
 </html>

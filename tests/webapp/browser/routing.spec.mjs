@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { serveWebapp } from "./fixture.mjs";
 
 const root = new URL(
   "../../../packages/netaudio/src/netaudio/daemon/http/webapp/",
@@ -40,6 +41,53 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ status: 404, body: "Not found" });
     }
   });
+});
+
+test("grid lock blocks adds and clears, survives reload, and leaves navigation usable", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => localStorage.setItem("netaudio.matrix.flipped", "false"));
+  await serveWebapp(page, { devices: {
+    rx: { name: "Receiver", server_name: "rx", online: true, channels: {
+      receivers: { 1: { name: "One" }, 2: { name: "Two" } }, transmitters: {},
+    }, subscriptions: [{ rx_channel_number: 1, rx_channel: "One", tx_device: "Source", tx_channel: "Program", status: { severity: "ok" } }] },
+    tx: { name: "Source", server_name: "tx", online: true, channels: {
+      receivers: {}, transmitters: { 1: { name: "Program" } },
+    }, subscriptions: [] },
+  } });
+  const writes = [];
+  page.on("request", (request) => { if (request.method() !== "GET") writes.push(new URL(request.url()).pathname); });
+  await page.goto("http://netaudio.test/routing");
+  const lock = page.getByRole("button", { name: "Lock grid", exact: true });
+  await lock.click();
+  await expect(lock).toHaveAttribute("aria-pressed", "true");
+  await page.reload();
+  await expect(lock).toHaveAttribute("aria-pressed", "true");
+  const viewport = page.locator(".matrix-viewport");
+  await expect(viewport).toHaveCSS("overscroll-behavior-x", "contain");
+  const clickChannel = async (index) => {
+    const point = await viewport.evaluate((node, index) => ({
+      x: Number(node.dataset.gutterWidth) + Number(node.dataset.cellSize) * 1.5,
+      y: Number(node.dataset.headerHeight) + Number(node.dataset.cellSize) * (index + 0.5),
+    }), index);
+    await viewport.click({ position: point });
+  };
+  await clickChannel(1);
+  await clickChannel(2);
+  await expect(viewport).toHaveCSS("cursor", "not-allowed");
+  await expect(page.locator("#routing-matrix-tooltip")).toBeVisible();
+  await page.getByRole("searchbox", { name: "Transmitters", exact: true }).fill("Source");
+  await page.getByRole("button", { name: "Collapse all receiver devices and groups", exact: true }).click();
+  await page.getByRole("button", { name: "Expand all receiver devices and groups", exact: true }).click();
+  expect(writes).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("locked-grid.png") });
+  await lock.click();
+  await expect(lock).toHaveAttribute("aria-pressed", "false");
+  await clickChannel(1);
+  await expect.poll(() => writes.length).toBe(1);
+  await clickChannel(2);
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes).toEqual(["/unsubscribe", "/subscribe"]);
+  await testInfo.attach("grid-lock-requests.json", { body: JSON.stringify({ locked: [], unlocked: writes }), contentType: "application/json" });
 });
 
 test("phone views use the available width without horizontal scrolling", async ({ page }) => {
@@ -148,6 +196,7 @@ for (const width of [1200, 390]) {
 test("breadcrumbs share the wordmark text baseline", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://netaudio.test/devices/avio-bt-1/receive");
+  await expect(page.locator(".breadcrumb a").first()).toBeVisible();
   const baselines = await page.locator(".brand-name, .breadcrumb a").evaluateAll((nodes) => nodes.map((node) => {
     const marker = document.createElement("span");
     marker.style.display = "inline-block";
@@ -383,16 +432,17 @@ test("saved devices survive connection loss but an empty snapshot replaces them"
   const before = await page.locator("#content table").boundingBox();
   await page.route("**/events", (route) => route.abort());
   await page.reload();
-  await expect(page.getByText("Showing saved devices.", { exact: false })).toHaveCount(0);
   await expect(page.locator("#content table").getByRole("link", { name: "Windows-PC", exact: true })).toBeVisible();
+  await expect(page.getByText("Showing saved devices.", { exact: false })).toHaveCount(0);
   const after = await page.locator("#content table").boundingBox();
   expect(after.y).toBe(before.y);
   expect(after.height).toBe(before.height);
   await page.route("**/events", (route) => route.fulfill({ contentType: "text/event-stream", body: 'data: {"event":"snapshot","devices":{}}\n\n' }));
   await page.reload();
+  await expect.poll(() => page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("netaudio.inventory.v1")).devices).length)).toBe(0);
+  await expect(page.locator(".topbar")).toBeVisible();
   await expect(page.locator("#content").getByRole("link", { name: "Windows-PC", exact: true })).toHaveCount(0);
   await expect(page.getByText("Showing saved devices.", { exact: false })).toHaveCount(0);
-  expect(await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("netaudio.inventory.v1")).devices).length)).toBe(0);
 });
 
 test("device Metering tab starts and releases its own session", async ({ page }) => {

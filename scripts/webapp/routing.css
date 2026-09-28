@@ -347,6 +347,7 @@
     inset: 0;
     z-index: 1;
     overflow: auto;
+    overscroll-behavior-x: contain;
   }
 
   .matrix-canvas {

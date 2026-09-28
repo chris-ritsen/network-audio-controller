@@ -54,7 +54,7 @@ test("source picker disables only same-device sources for a blocked receiver cha
   );
 
   assert.match(markup, /disabled[^>]*source-picker-entry self-unsupported/);
-  assert.match(markup, /Self blocked/);
+  assert.match(markup, /Not supported/);
   assert.match(markup, /Remote output/);
   assert.equal(
     selfConnectionTargetState(target, target.channels.receivers[1], remote)
@@ -73,7 +73,7 @@ test("source picker disables only same-device sources for a blocked receiver cha
   );
   assert.doesNotMatch(
     supported,
-    /self-unsupported|self-unavailable|Self blocked/,
+    /self-unsupported|self-unavailable|Not supported/,
   );
   assert.doesNotMatch(supported, /disabled/);
 });

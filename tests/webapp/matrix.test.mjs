@@ -181,7 +181,7 @@ test("same-device crosspoints follow each receiver channel capability", () => {
   assert.deepEqual(matrix.cellState(transmitter, receiver("Unsupported"), subscriptionIndex, {}, true),
     matrix.cellState(receiver("Unsupported"), transmitter, subscriptionIndex, {}));
   assert.match(matrix.describeHover({ rowIndex: rows.indexOf(receiver("Unsupported")), columnIndex: columns.indexOf(transmitter) },
-    rows, columns, subscriptionIndex, {}, false), /does not support self-subscriptions/);
+    rows, columns, subscriptionIndex, {}, false), /cannot connect to an output on the same device/);
 });
 
 test("channel cell reports subscription severity", () => {

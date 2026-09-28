@@ -138,10 +138,20 @@ function Sidebar() {
   `;
 }
 
-function NetworkNavigation({ filtersOpen }) {
+function NetworkNavigation({ filtersOpen, compact }) {
+  const panel = compact ? "top-panel" : "sidebar";
+  const pointerSelection = useRef(false);
   return html`<nav class="network-navigation" aria-label="Network views">
     <select class="select mobile-view-selector" aria-label="View" value=${NAVIGATION.find((view) => view.id === location.value.view)?.path || "/devices"}
-      onChange=${(event) => navigate(event.target.value)}>
+      onPointerDown=${() => { pointerSelection.current = true; }}
+      onKeyDown=${() => { pointerSelection.current = false; }}
+      onChange=${(event) => {
+        navigate(event.currentTarget.value);
+        if (pointerSelection.current) {
+          event.currentTarget.blur();
+          pointerSelection.current = false;
+        }
+      }}>
       ${NAVIGATION.map((view) => html`<option value=${view.path}>${view.label}</option>`)}
     </select>
     <button type="button" class="header-icon-button filter-panel-toggle"
@@ -149,7 +159,7 @@ function NetworkNavigation({ filtersOpen }) {
       title=${filtersOpen ? "Hide filters" : "Show filters"}
       aria-expanded=${filtersOpen} aria-controls="inventory-filters"
       onClick=${() => saveRoutingFilters({ ...inventoryFilters.value, panelOpen: !filtersOpen })}>
-      <${Icon} name=${filtersOpen ? "sidebar-close" : "sidebar-open"} />
+      <${Icon} name=${`${panel}-${filtersOpen ? "close" : "open"}`} />
     </button>
     ${NAVIGATION.filter((view) => view.group === "Network").map((view) => html`<a href=${view.path}
       aria-current=${location.value.view === view.id ? "page" : null}>${view.label}</a>`)}
@@ -179,7 +189,7 @@ function App() {
   const filtersOpen = inventoryFilters.value.panelOpen ?? !compact;
   return html`
     <${TopBar} />
-    <${NetworkNavigation} filtersOpen=${filtersOpen} />
+    <${NetworkNavigation} filtersOpen=${filtersOpen} compact=${compact} />
     <${Sidebar} />
     <${Content} filtersOpen=${filtersOpen} />
     <${CommandPalette} />

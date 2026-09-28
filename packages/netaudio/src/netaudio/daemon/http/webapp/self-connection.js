@@ -61,7 +61,7 @@ export function selfConnectionTargetState(
   if (receiverChannel?.can_subscribe_self === false) {
     return {
       allowed: false,
-      reason: "This receiver channel does not support self-subscriptions.",
+      reason: "This input cannot connect to an output on the same device.",
       selfConnection: true,
       state: "unsupported",
     };
@@ -69,7 +69,7 @@ export function selfConnectionTargetState(
   return {
     allowed: false,
     reason:
-      "Self-subscription capability is unavailable for this receiver channel.",
+      "Support for connecting this input to an output on the same device is unknown.",
     selfConnection: true,
     state: "unavailable",
   };

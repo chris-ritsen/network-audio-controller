@@ -20,6 +20,10 @@ function RoutingView() {
   const transmitterFilter = filters.transmitterSearch || "";
   const updateFilters = saveRoutingFilters;
   const optionsMenu = useDropdownDismissal();
+  const [gridLocked, setGridLocked] = useState(() => {
+    try { return window.localStorage.getItem("netaudio.matrix.locked") === "true"; }
+    catch { return false; }
+  });
   const [flipped, setFlipped] = useState(() => {
     try { return window.localStorage.getItem("netaudio.matrix.flipped") !== "false"; }
     catch { return true; }
@@ -70,6 +74,12 @@ function RoutingView() {
         <div class="toolbar">
           ${!compact ? html`<${Button} onClick=${() => updateFilters({ ...filters, listMode: !listMode })}>${listMode ? "Show grid" : "Channel list"}<//>` : null}
           ${!showList ? html`
+          <button class="btn btn-sm" type="button" aria-label="Lock grid" aria-pressed=${gridLocked}
+            title=${gridLocked ? "Unlock to change connections" : "Prevent connection changes while browsing the grid"}
+            onClick=${() => {
+              setGridLocked(!gridLocked);
+              try { window.localStorage.setItem("netaudio.matrix.locked", String(!gridLocked)); } catch {}
+            }}><${Icon} name=${gridLocked ? "lock" : "unlock"} /> ${gridLocked ? "Grid locked" : "Lock grid"}</button>
           <details class="routing-options" ref=${optionsMenu}><summary class="btn btn-sm">View options</summary><div class="routing-options-panel">
           <button class="btn btn-sm" type="button" aria-pressed=${flipped} onClick=${() => {
             setFlipped(!flipped);
@@ -100,6 +110,7 @@ function RoutingView() {
         : model.rows.length === 0 || model.columns.length === 0
         ? html`<${Notice}>No devices match the current filters.<//>`
         : html`<${RoutingMatrix}
+            locked=${gridLocked}
             pending=${pending}
             key=${flipped ? "transposed" : "normal"}
             flipped=${flipped}
