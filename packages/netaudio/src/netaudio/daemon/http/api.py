@@ -6,6 +6,7 @@ import ipaddress
 import json
 import logging
 import socket
+import ssl
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -38,7 +39,14 @@ from netaudio.daemon.http.oauth import DaemonOAuthHandlers
 from netaudio.daemon.http.presets import DaemonPresetHandlers
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
 from netaudio.daemon.http.sse_view import SseDeviceView
-from netaudio.daemon.http.tls import TLSConfigurationError, TLSSettings, build_ssl_context
+from netaudio.daemon.http.tls import (
+    TLSConfigurationError,
+    TLSSettings,
+    build_ssl_context,
+    ensure_generated_identity,
+    identity_coverage,
+    identity_is_current,
+)
 from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
 from netaudio.daemon.mcp_access import ensure_mcp_token
 from netaudio.daemon.mcp_oauth import OAuthStore
@@ -54,6 +62,7 @@ if TYPE_CHECKING:
 
 DAEMON_SERVICE_TYPE = "_netaudio-relay._tcp.local."
 BONJOUR_MONITOR_INTERVAL_SECONDS = 5
+TLS_RENEWAL_RETRY_SECONDS = 300
 BONJOUR_REFRESH_INTERVAL_SECONDS = 60
 BONJOUR_SLEEP_GAP_MULTIPLIER = 3
 SSE_CLIENT_QUEUE_SIZE = 128
@@ -205,6 +214,9 @@ class DaemonHTTPServer(
         self.tls = tls
         self.tcp_server = None
         self.tls_server = None
+        self._tls_context: ssl.SSLContext | None = None
+        self._tls_coverage = None
+        self._tls_renewal_retry_wall_time = 0.0
         self.zeroconf = None
         self.service_info = None
         self.sse_clients: dict[asyncio.StreamWriter, _SseClient] = {}
@@ -290,6 +302,8 @@ class DaemonHTTPServer(
         try:
             if self.tls is not None:
                 context = build_ssl_context(self.tls)
+                self._tls_context = context
+                self._tls_coverage = identity_coverage(self.tls.certificate) if self.tls.generated else None
                 self.tls_server = await asyncio.start_server(
                     self.handle_connection, "0.0.0.0", self.tls.port, ssl=context
                 )
@@ -609,6 +623,7 @@ class DaemonHTTPServer(
                 elapsed_wall_time = current_wall_time - self._last_bonjour_probe_wall_time
                 self._last_bonjour_probe_wall_time = current_wall_time
 
+                self._renew_tls_identity()
                 await self._reconcile_bonjour(
                     woke_from_sleep=(
                         elapsed_wall_time > BONJOUR_MONITOR_INTERVAL_SECONDS * BONJOUR_SLEEP_GAP_MULTIPLIER
@@ -618,6 +633,23 @@ class DaemonHTTPServer(
                 raise
             except (OSError, RuntimeError, ZeroconfError) as exception:
                 logger.warning(f"Daemon Bonjour monitor error: {exception}")
+
+    def _renew_tls_identity(self):
+        if self.tls is None or not self.tls.generated or self._tls_context is None:
+            return
+        if time.time() < self._tls_renewal_retry_wall_time or identity_is_current(self._tls_coverage):
+            return
+
+        try:
+            identity = ensure_generated_identity(self.tls.certificate)
+            self._tls_context.load_cert_chain(certfile=str(identity), keyfile=str(identity))
+        except (OSError, TLSConfigurationError, ssl.SSLError) as exception:
+            self._tls_renewal_retry_wall_time = time.time() + TLS_RENEWAL_RETRY_SECONDS
+            logger.warning(f"Daemon TLS certificate renewal failed: {exception}")
+            return
+
+        self._tls_coverage = identity_coverage(identity)
+        logger.info("Daemon TLS certificate renewed")
 
     async def _reconcile_bonjour(self, force=False, woke_from_sleep=False):
         current_addresses = self._get_advertisement_addresses()

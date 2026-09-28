@@ -13,11 +13,14 @@ from pathlib import Path
 
 import ifaddr
 from cryptography import x509
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 DEFAULT_TLS_PORT = 9443
+GENERATED_IDENTITY_LIFETIME = timedelta(days=365)
+GENERATED_IDENTITY_RENEWAL_WINDOW = timedelta(days=30)
 TLS_CERTIFICATE_KEY = "tls_certificate"
 TLS_KEY_KEY = "tls_key"
 TLS_PORT_KEY = "tls_port"
@@ -32,6 +35,15 @@ class TLSSettings:
     certificate: Path
     key: Path
     port: int
+    generated: bool = False
+
+
+@dataclass(frozen=True)
+class IdentityCoverage:
+    addresses: frozenset[ipaddress.IPv4Address | ipaddress.IPv6Address]
+    names: frozenset[str]
+    not_after: datetime
+    not_before: datetime
 
 
 def _resolve_path(value: object, base_directory: Path | None, name: str) -> Path:
@@ -74,8 +86,8 @@ def tls_settings_from_config(daemon_config: Mapping, base_directory: Path | None
 
             base_directory = default_config_path().parent
 
-        identity = _self_signed_identity(base_directory)
-        settings = TLSSettings(certificate=identity, key=identity, port=resolved_port)
+        identity = ensure_generated_identity(base_directory / "tls" / "daemon.pem")
+        settings = TLSSettings(certificate=identity, key=identity, port=resolved_port, generated=True)
         build_ssl_context(settings)
         return settings
 
@@ -86,27 +98,72 @@ def tls_settings_from_config(daemon_config: Mapping, base_directory: Path | None
     )
 
 
-def _self_signed_identity(base_directory: Path) -> Path:
-    """Publish one private PEM atomically so concurrent starts cannot mix keys and certificates."""
-    directory = base_directory / "tls"
-    identity = directory / "daemon.pem"
-    if identity.exists():
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _host_names() -> frozenset[str]:
+    hostname = socket.gethostname().rstrip(".")
+    names = set()
+    for name in ("localhost", hostname, f"{hostname.removesuffix('.local')}.local"):
+        try:
+            names.add(name.encode("idna").decode("ascii"))
+        except UnicodeError:
+            continue
+    return frozenset(names)
+
+
+def _host_addresses() -> frozenset[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    addresses = {ipaddress.ip_address("127.0.0.1"), ipaddress.ip_address("::1")}
+    for adapter in ifaddr.get_adapters():
+        for address in adapter.ips:
+            value = address.ip[0] if isinstance(address.ip, tuple) else address.ip
+            addresses.add(ipaddress.ip_address(value.split("%", 1)[0]))
+    return frozenset(addresses)
+
+
+def identity_coverage(identity: Path) -> IdentityCoverage | None:
+    try:
+        pem = identity.read_bytes()
+        certificate = x509.load_pem_x509_certificate(pem)
+        key = serialization.load_pem_private_key(pem, password=None)
+        alternative_names = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except (OSError, TypeError, ValueError, UnsupportedAlgorithm, x509.ExtensionNotFound):
+        return None
+
+    public_format = (serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    if key.public_key().public_bytes(*public_format) != certificate.public_key().public_bytes(*public_format):
+        return None
+
+    return IdentityCoverage(
+        addresses=frozenset(alternative_names.get_values_for_type(x509.IPAddress)),
+        names=frozenset(alternative_names.get_values_for_type(x509.DNSName)),
+        not_after=certificate.not_valid_after_utc,
+        not_before=certificate.not_valid_before_utc,
+    )
+
+
+def identity_is_current(coverage: IdentityCoverage | None) -> bool:
+    if coverage is None:
+        return False
+    now = _now()
+    if not coverage.not_before <= now < coverage.not_after - GENERATED_IDENTITY_RENEWAL_WINDOW:
+        return False
+    required_addresses = {address for address in _host_addresses() if address.version == 4}
+    return _host_names() <= coverage.names and required_addresses <= coverage.addresses
+
+
+def ensure_generated_identity(identity: Path) -> Path:
+    if identity_is_current(identity_coverage(identity)):
         return identity
 
     temporary = None
     try:
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        identity.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         key = ec.generate_private_key(ec.SECP256R1())
-        hostname = socket.gethostname().rstrip(".")
-        names = {"localhost", hostname, f"{hostname.removesuffix('.local')}.local"}
-        addresses = {ipaddress.ip_address("127.0.0.1"), ipaddress.ip_address("::1")}
-        for adapter in ifaddr.get_adapters():
-            for address in adapter.ips:
-                value = address.ip[0] if isinstance(address.ip, tuple) else address.ip
-                addresses.add(ipaddress.ip_address(value.split("%", 1)[0]))
-
+        addresses = _host_addresses()
         subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "NetAudio")])
-        now = datetime.now(timezone.utc)
+        now = _now()
         certificate = (
             x509.CertificateBuilder()
             .subject_name(subject)
@@ -114,11 +171,10 @@ def _self_signed_identity(base_directory: Path) -> Path:
             .public_key(key.public_key())
             .serial_number(x509.random_serial_number())
             .not_valid_before(now - timedelta(minutes=5))
-            # Keep the leaf below Apple's TLS certificate lifetime limit.
-            .not_valid_after(now + timedelta(days=365))
+            .not_valid_after(now + GENERATED_IDENTITY_LIFETIME)
             .add_extension(
                 x509.SubjectAlternativeName(
-                    [x509.DNSName(name.encode("idna").decode("ascii")) for name in sorted(names)]
+                    [x509.DNSName(name) for name in sorted(_host_names())]
                     + [x509.IPAddress(address) for address in sorted(addresses, key=str)]
                 ),
                 critical=False,
@@ -130,16 +186,14 @@ def _self_signed_identity(base_directory: Path) -> Path:
         pem = certificate.public_bytes(serialization.Encoding.PEM) + key.private_bytes(
             serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
         )
-        descriptor, temporary = tempfile.mkstemp(prefix=".identity-", dir=directory)
+        descriptor, temporary = tempfile.mkstemp(prefix=".identity-", dir=identity.parent)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(pem)
             stream.flush()
             os.fsync(stream.fileno())
 
-        try:
-            os.link(temporary, identity)
-        except FileExistsError:
-            pass
+        os.replace(temporary, identity)
+        temporary = None
     except (OSError, ValueError) as error:
         raise TLSConfigurationError(f"Cannot create the daemon TLS identity at {identity}: {error}") from error
     finally:
