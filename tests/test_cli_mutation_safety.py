@@ -637,7 +637,8 @@ def test_flow_delete_requires_confirmation_before_discovery(monkeypatch):
 
 
 def test_flow_delete_refuses_non_multicast_flow(monkeypatch):
-    application, devices, _ = _flow_context()
+    application, devices, target = _flow_context()
+    target.services = {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.7.41"}}}
     delete_calls = 0
 
     async def query(*_args, **_kwargs):

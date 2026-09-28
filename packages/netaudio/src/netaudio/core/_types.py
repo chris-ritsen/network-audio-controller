@@ -394,6 +394,7 @@ class FlowCandidate(_extensions.TypedDict):
 
 
 class FlowCommandPlan(_extensions.TypedDict):
+    authoring_family: _typing.Union[str, None]
     command: _typing.Union[dict[str, JsonValue], None]
     reasons: list[str]
     serializer_cohort: _typing.Union[str, None]
@@ -449,6 +450,7 @@ class ObservedTransmitFlowSpecification(_extensions.TypedDict):
 
 
 class FlowDeletePreflight(_extensions.TypedDict):
+    command: _typing.Union[dict[str, JsonValue], None]
     reason: _typing.Union[str, None]
     specification: _typing.Union[ObservedTransmitFlowSpecification, None]
     state: FlowPreflightOutcome

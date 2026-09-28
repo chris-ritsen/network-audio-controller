@@ -155,6 +155,20 @@ mod fixed_authoring_tests {
 }
 
 pub const MAX_LEGACY_FLOW_ID: u16 = 32;
+pub const SEGMENTED_DELETE_MEDIA_TYPE_AUDIO: u16 = 3;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "family", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TxFlowDeleteSelection {
+    Fixed {
+        global_flow_id: u16,
+    },
+    Segmented {
+        media_local_flow_id: u16,
+        media_type: u16,
+    },
+}
 
 #[derive(Debug, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -305,14 +319,6 @@ pub fn build_fixed_multicast_flow(
 fn flow_create_opcode(flow_protocol_id: u16) -> Result<u16, NetaudioError> {
     match flow_protocol_id {
         PROTOCOL_DANTE_FLOW | PROTOCOL_DANTE_FLOW_2801 => Ok(OPCODE_CREATE_TX_FLOW),
-        _ => Err(NetaudioError::InvalidFlowProtocol),
-    }
-}
-
-fn flow_delete_opcode(flow_protocol_id: u16) -> Result<u16, NetaudioError> {
-    match flow_protocol_id {
-        PROTOCOL_DANTE_FLOW | PROTOCOL_DANTE_FLOW_2801 => Ok(OPCODE_DELETE_TX_FLOW),
-        PROTOCOL_ARC_2809 => Ok(OPCODE_DELETE_TX_FLOW_2809),
         _ => Err(NetaudioError::InvalidFlowProtocol),
     }
 }
@@ -674,33 +680,46 @@ pub fn build_create_tx_flow(
 
 pub fn build_delete_tx_flow(
     flow_protocol_id: u16,
-    flow_slot: u16,
+    selection: TxFlowDeleteSelection,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    let delete_opcode = flow_delete_opcode(flow_protocol_id)?;
-    if !(1..=MAX_LEGACY_FLOW_ID).contains(&flow_slot) {
-        return Err(NetaudioError::InvalidFlowSlot);
+    if !matches!(flow_protocol_id, PROTOCOL_DANTE_FLOW | PROTOCOL_ARC_2809) {
+        return Err(NetaudioError::InvalidFlowProtocol);
     }
-    if flow_protocol_id == PROTOCOL_ARC_2809 {
-        if flow_slot != 2 {
-            return Err(NetaudioError::InvalidFlowSlot);
+    match selection {
+        TxFlowDeleteSelection::Fixed { global_flow_id } => {
+            if !(1..=MAX_LEGACY_FLOW_ID).contains(&global_flow_id) {
+                return Err(NetaudioError::InvalidFlowSlot);
+            }
+            let mut body = [0u8; 6];
+            body[1] = 1;
+            body[4..6].copy_from_slice(&global_flow_id.to_be_bytes());
+            arc_packet_with_reserved_word(
+                flow_protocol_id,
+                OPCODE_DELETE_TX_FLOW,
+                &body,
+                transaction_id,
+            )
         }
-        let mut body = [0u8; 24];
-        body[6..8].copy_from_slice(&1u16.to_be_bytes());
-        body[8..10].copy_from_slice(&3u16.to_be_bytes());
-        body[12..14].copy_from_slice(&flow_slot.to_be_bytes());
-        return arc_packet_with_reserved_word(
-            flow_protocol_id,
-            delete_opcode,
-            &body,
-            transaction_id,
-        );
+        TxFlowDeleteSelection::Segmented {
+            media_local_flow_id,
+            media_type,
+        } => {
+            if media_local_flow_id == 0 || media_type != SEGMENTED_DELETE_MEDIA_TYPE_AUDIO {
+                return Err(NetaudioError::InvalidFlowSlot);
+            }
+            let mut body = [0u8; 24];
+            body[6..8].copy_from_slice(&1u16.to_be_bytes());
+            body[8..10].copy_from_slice(&media_type.to_be_bytes());
+            body[12..14].copy_from_slice(&media_local_flow_id.to_be_bytes());
+            arc_packet_with_reserved_word(
+                flow_protocol_id,
+                OPCODE_DELETE_TX_FLOW_2809,
+                &body,
+                transaction_id,
+            )
+        }
     }
-    let mut body = Vec::new();
-    body.extend_from_slice(&0x0001u16.to_be_bytes());
-    body.extend_from_slice(&0u16.to_be_bytes());
-    body.extend_from_slice(&flow_slot.to_be_bytes());
-    arc_packet_with_reserved_word(flow_protocol_id, delete_opcode, &body, transaction_id)
 }
 
 #[cfg(test)]

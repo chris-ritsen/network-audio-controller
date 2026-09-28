@@ -739,12 +739,28 @@ fn flow_builders_reject_unknown_protocols() {
             Err(NetaudioError::InvalidFlowProtocol),
             "{protocol:#06x}"
         );
-        assert_eq!(
-            build_delete_tx_flow(protocol, 1, 0),
-            Err(NetaudioError::InvalidFlowProtocol),
-            "{protocol:#06x}"
-        );
+        for selection in [
+            TxFlowDeleteSelection::Fixed { global_flow_id: 1 },
+            TxFlowDeleteSelection::Segmented {
+                media_type: 3,
+                media_local_flow_id: 1,
+            },
+        ] {
+            assert_eq!(
+                build_delete_tx_flow(protocol, selection, 0),
+                Err(NetaudioError::InvalidFlowProtocol),
+                "{protocol:#06x}"
+            );
+        }
     }
+    assert_eq!(
+        build_delete_tx_flow(
+            PROTOCOL_DANTE_FLOW_2801,
+            TxFlowDeleteSelection::Fixed { global_flow_id: 1 },
+            0
+        ),
+        Err(NetaudioError::InvalidFlowProtocol)
+    );
     assert_eq!(
         build_create_tx_flow(PROTOCOL_ARC_2809, 2, &[1], 0),
         Err(NetaudioError::InvalidFlowProtocol)
@@ -803,18 +819,95 @@ fn create_tx_flow_rejects_invalid_channels_and_packet_overflow() {
 }
 
 #[test]
-fn delete_tx_flow_2809_matches_shipping_controller_slot_two_request() {
+fn segmented_delete_matches_shipping_controller_request() {
     assert_eq!(
-        build_delete_tx_flow(PROTOCOL_ARC_2809, 2, 0x1602).unwrap(),
+        build_delete_tx_flow(
+            PROTOCOL_ARC_2809,
+            TxFlowDeleteSelection::Segmented {
+                media_type: 3,
+                media_local_flow_id: 2
+            },
+            0x1602
+        )
+        .unwrap(),
         [
             0x28, 0x09, 0x00, 0x22, 0x16, 0x02, 0x26, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]
     );
+}
+
+#[test]
+fn fixed_delete_matches_specification_vector() {
     assert_eq!(
-        build_delete_tx_flow(PROTOCOL_ARC_2809, 1, 0x1602),
-        Err(NetaudioError::InvalidFlowSlot)
+        build_delete_tx_flow(
+            PROTOCOL_ARC_2809,
+            TxFlowDeleteSelection::Fixed { global_flow_id: 1 },
+            1
+        )
+        .unwrap(),
+        decode_hexadecimal("28090010000122020000000100000001")
+    );
+}
+
+#[test]
+fn delete_family_is_independent_of_envelope() {
+    for protocol in [PROTOCOL_DANTE_FLOW, PROTOCOL_ARC_2809] {
+        let fixed = build_delete_tx_flow(
+            protocol,
+            TxFlowDeleteSelection::Fixed { global_flow_id: 7 },
+            0,
+        )
+        .unwrap();
+        let segmented = build_delete_tx_flow(
+            protocol,
+            TxFlowDeleteSelection::Segmented {
+                media_type: 3,
+                media_local_flow_id: 9,
+            },
+            0,
+        )
+        .unwrap();
+        assert_eq!(&fixed[0..2], &protocol.to_be_bytes());
+        assert_eq!(&segmented[0..2], &protocol.to_be_bytes());
+        assert_eq!(&fixed[6..8], &OPCODE_DELETE_TX_FLOW.to_be_bytes());
+        assert_eq!(&segmented[6..8], &OPCODE_DELETE_TX_FLOW_2809.to_be_bytes());
+        assert_eq!(&fixed[14..16], &7u16.to_be_bytes());
+        assert_eq!(&segmented[22..24], &9u16.to_be_bytes());
+        assert_eq!(&segmented[18..20], &3u16.to_be_bytes());
+    }
+}
+
+#[test]
+fn delete_rejects_unrepresentable_selections() {
+    for selection in [
+        TxFlowDeleteSelection::Segmented {
+            media_type: 3,
+            media_local_flow_id: 0,
+        },
+        TxFlowDeleteSelection::Segmented {
+            media_type: 1,
+            media_local_flow_id: 2,
+        },
+    ] {
+        assert_eq!(
+            build_delete_tx_flow(PROTOCOL_ARC_2809, selection, 0),
+            Err(NetaudioError::InvalidFlowSlot),
+            "{selection:?}"
+        );
+    }
+    assert_eq!(
+        build_delete_tx_flow(
+            PROTOCOL_ARC_2809,
+            TxFlowDeleteSelection::Segmented {
+                media_type: 3,
+                media_local_flow_id: u16::MAX
+            },
+            0
+        )
+        .map(|packet| packet[22..24].to_vec()),
+        Ok(u16::MAX.to_be_bytes().to_vec())
     );
 }
 
@@ -827,7 +920,13 @@ fn flow_mutations_reject_slots_outside_device_range() {
             "{slot}"
         );
         assert_eq!(
-            build_delete_tx_flow(PROTOCOL_DANTE_FLOW, slot, 0),
+            build_delete_tx_flow(
+                PROTOCOL_DANTE_FLOW,
+                TxFlowDeleteSelection::Fixed {
+                    global_flow_id: slot
+                },
+                0
+            ),
             Err(NetaudioError::InvalidFlowSlot),
             "{slot}"
         );
@@ -835,7 +934,14 @@ fn flow_mutations_reject_slots_outside_device_range() {
 
     for slot in 1..=32 {
         let create = build_create_tx_flow(PROTOCOL_DANTE_FLOW_2801, slot, &[1], 0).unwrap();
-        let delete = build_delete_tx_flow(PROTOCOL_DANTE_FLOW, slot, 0).unwrap();
+        let delete = build_delete_tx_flow(
+            PROTOCOL_DANTE_FLOW,
+            TxFlowDeleteSelection::Fixed {
+                global_flow_id: slot,
+            },
+            0,
+        )
+        .unwrap();
         assert_eq!(&create[16..18], &slot.to_be_bytes());
         assert_eq!(&delete[14..16], &slot.to_be_bytes());
     }
@@ -901,7 +1007,12 @@ fn metering_start_for_a32_uses_the_controller_layout() {
 
 #[test]
 fn delete_tx_flow_2729_encodes_flow_slot_after_a_unit_count() {
-    let packet = build_delete_tx_flow(0x2729, 3, 0).unwrap();
+    let packet = build_delete_tx_flow(
+        0x2729,
+        TxFlowDeleteSelection::Fixed { global_flow_id: 3 },
+        0,
+    )
+    .unwrap();
     assert_eq!(
         packet,
         [

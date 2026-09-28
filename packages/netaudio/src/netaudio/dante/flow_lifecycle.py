@@ -96,6 +96,7 @@ def plan_create_transmit_flow(device, specification: _requests.TransmitFlowSpeci
         serializer_cohort=native["serializer_cohort"],
         supported=supported,
         reasons=tuple(dict.fromkeys(reasons)),
+        authoring_family=native["authoring_family"],
         specification=specification,
         flow_id=specification.get("identity", {}).get("global_flow_id"),
         command_specification=native["command"] if supported else None,
@@ -133,8 +134,8 @@ def plan_delete_transmit_flow(device, flow_id: int) -> FlowOperationPlan:
         serializer_cohort=native["serializer_cohort"],
         supported=supported,
         reasons=tuple(dict.fromkeys(reasons)),
+        authoring_family=native["authoring_family"],
         flow_id=flow_id,
-        command_specification=native["command"] if supported else None,
     )
 
 
@@ -741,13 +742,17 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
         )
     assert plan.protocol_id is not None
     protocol_id = plan.protocol_id
-    command_specification = plan.command_specification
-    assert command_specification is not None
+    planned_family = plan.authoring_family
 
     observations: list[dict[str, Any]] = []
     async with device.topology_mutation_lock:
         fresh_authoring = await _fresh_authoring_protocol(device)
-        if fresh_authoring is None or fresh_authoring[1] != protocol_id:
+        fresh_family = (
+            core.flow_authoring_capabilities(fresh_authoring[0])["transmit_flow_authoring"]["family"]
+            if fresh_authoring is not None
+            else None
+        )
+        if fresh_authoring is None or fresh_authoring[1] != protocol_id or fresh_family != planned_family:
             return _operation_result(
                 operation="delete",
                 state=FlowLifecycleState.PENDING,
@@ -760,7 +765,12 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
                 message=(
                     "fresh transmit-flow authoring capability was unavailable; no request was sent"
                     if fresh_authoring is None
-                    else "fresh transmit-flow authoring capability selected a different protocol; no request was sent"
+                    else (
+                        "fresh transmit-flow authoring capability selected a different protocol; no request was sent"
+                        if fresh_authoring[1] != protocol_id
+                        else "fresh transmit-flow authoring capability selected a different deletion family; "
+                        "no request was sent"
+                    )
                 ),
                 observations=[
                     _observation(
@@ -769,15 +779,24 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
                         inventory=None,
                         outcome="unavailable" if fresh_authoring is None else "contradiction",
                         details={
-                            "planned_protocol_id": protocol_id,
+                            "fresh_authoring_family": fresh_family,
                             "fresh_capability_word": fresh_authoring[0] if fresh_authoring else None,
                             "fresh_protocol_id": fresh_authoring[1] if fresh_authoring else None,
+                            "planned_authoring_family": planned_family,
+                            "planned_protocol_id": protocol_id,
                         },
                     )
                 ],
             )
         before = await _read_inventory(device, protocol_id)
-        preflight = core.flow_delete_preflight({"inventory": before, "flow_id": flow_id, "protocol_id": protocol_id})
+        preflight = core.flow_delete_preflight(
+            {
+                "capability_word": fresh_authoring[0],
+                "flow_id": flow_id,
+                "inventory": before,
+                "protocol_id": protocol_id,
+            }
+        )
         observations.append(
             _observation(
                 phase="preflight",
@@ -804,7 +823,9 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
             )
 
         requested = preflight["specification"]
+        command_specification = preflight["command"]
         assert requested is not None
+        assert command_specification is not None
         assert before is not None
 
         response = await _send_once(device, command_specification)

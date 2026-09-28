@@ -184,10 +184,11 @@ impl FlowDeviceFacts {
 #[derive(Debug, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FlowCommandPlan {
+    pub authoring_family: Option<&'static str>,
+    pub command: Option<serde_json::Map<String, Value>>,
     pub reasons: Vec<String>,
     pub serializer_cohort: Option<&'static str>,
     pub wire_authored_fields: Vec<&'static str>,
-    pub command: Option<serde_json::Map<String, Value>>,
 }
 
 impl FlowCommandPlan {
@@ -279,6 +280,7 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
         .as_ref()
         .and_then(Value::as_u64)
         .map(|word| word & 0x1000 != 0);
+    plan.authoring_family = family.map(|segmented| if segmented { "segmented" } else { "fixed" });
     let command = match (family, input.protocol_id) {
         (
             Some(false),
@@ -412,37 +414,42 @@ pub struct FlowDeleteRequest {
     pub device: FlowDeviceFacts,
 }
 
+pub fn delete_authoring_family(capability_word: u64) -> &'static str {
+    if capability_word & 0x1000 != 0 {
+        "segmented"
+    } else {
+        "fixed"
+    }
+}
+
 pub fn plan_delete(request: &FlowDeleteRequest) -> FlowCommandPlan {
     let mut plan = FlowCommandPlan {
         reasons: request.device.reasons(true),
         ..Default::default()
     };
-    if request.protocol_id == Some(crate::protocol::PROTOCOL_ARC_2809)
-        && request
-            .device
-            .capability_word
-            .as_ref()
-            .and_then(Value::as_u64)
-            .is_some_and(|word| word & 0x1000 == 0)
-    {
-        plan.reject("fixed-format deletion with this ARC envelope has not been established");
-    }
-    plan.serializer_cohort = match request.protocol_id {
-        Some(crate::commands::PROTOCOL_DANTE_FLOW) => Some("legacy_2729_explicit_slot_delete"),
-        Some(crate::protocol::PROTOCOL_ARC_2809) => Some("modern_2809_global_flow_2_delete"),
+    plan.authoring_family = request
+        .device
+        .capability_word
+        .as_ref()
+        .and_then(Value::as_u64)
+        .map(delete_authoring_family);
+    match request.protocol_id {
+        Some(crate::commands::PROTOCOL_DANTE_FLOW | crate::protocol::PROTOCOL_ARC_2809) => {}
         Some(crate::commands::PROTOCOL_DANTE_FLOW_2801) => {
             plan.reject("this revision has no digest-bound delete request/acknowledgement fixture");
-            None
         }
-        _ => {
-            plan.reject("flow protocol is unknown or unsupported for deletion");
-            None
-        }
-    };
-    plan.validate_command(
-        json!({"command": "delete_tx_flow", "flow_protocol_id": request.protocol_id,
-        "flow_slot": request.flow_id}),
-    );
+        _ => plan.reject("flow protocol is unknown or unsupported for deletion"),
+    }
+    if !(1..=crate::commands::MAX_LEGACY_FLOW_ID).contains(&request.flow_id) {
+        plan.reject("flow identifier is outside the transmit-flow inventory range");
+    }
+    if plan.reasons.is_empty() {
+        plan.serializer_cohort = match plan.authoring_family {
+            Some("segmented") => Some("segmented_media_local_audio_delete"),
+            Some(_) => Some("fixed_global_flow_delete"),
+            None => None,
+        };
+    }
 
     plan
 }

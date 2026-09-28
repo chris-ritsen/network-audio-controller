@@ -480,11 +480,22 @@ class TestSpecErrors:
         spec = {
             "command": command,
             "flow_protocol_id": 0x2729,
-            "flow_slot": slot,
         }
         if command == "create_tx_flow":
-            spec["channels"] = [1]
+            spec.update(flow_slot=slot, channels=[1])
+        else:
+            spec["selection"] = {"family": "fixed", "global_flow_id": slot}
         assert self._status(spec) == 29
+
+    @pytest.mark.parametrize(
+        "selection",
+        [
+            {"family": "segmented", "media_local_flow_id": 0, "media_type": 3},
+            {"family": "segmented", "media_local_flow_id": 2, "media_type": 1},
+        ],
+    )
+    def test_invalid_segmented_delete_selection(self, selection):
+        assert self._status({"command": "delete_tx_flow", "flow_protocol_id": 0x2809, "selection": selection}) == 29
 
     @pytest.mark.parametrize("protocol", [0, 0x2728, 0x2800, 0x2808, 0xFFFF])
     @pytest.mark.parametrize("command", ["query_tx_flows", "create_tx_flow", "delete_tx_flow"])
@@ -496,5 +507,5 @@ class TestSpecErrors:
         if command == "create_tx_flow":
             spec.update(flow_slot=1, channels=[1])
         elif command == "delete_tx_flow":
-            spec["flow_slot"] = 1
+            spec["selection"] = {"family": "fixed", "global_flow_id": 1}
         assert self._status(spec) == 30

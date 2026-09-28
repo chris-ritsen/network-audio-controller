@@ -1126,10 +1126,21 @@ fn flow_parser_rejects_duplicate_records_and_truncated_channel_lists() {
     let mut missing_pointer = flow_query_response();
     missing_pointer[14..16].copy_from_slice(&0u16.to_be_bytes());
     assert_eq!(parse_tx_flows(&missing_pointer), None);
+}
 
-    let mut oversized_encoding = flow_query_response();
-    oversized_encoding[52..56].copy_from_slice(&65_536u32.to_be_bytes());
-    assert_eq!(parse_tx_flows(&oversized_encoding), None);
+#[test]
+fn fixed_flow_record_keeps_format_metadata_raw() {
+    let mut response = flow_query_response();
+    response[52..54].copy_from_slice(&[0x01, 0x02]);
+    let flows = parse_tx_flows(&response).unwrap();
+    assert_eq!(flows[0].raw_format_metadata, [0x01, 0x02]);
+    assert_eq!(flows[0].encoding, 24);
+    assert_eq!(flows[1].raw_format_metadata, [0, 0]);
+
+    response[54..56].copy_from_slice(&0u16.to_be_bytes());
+    let flows = parse_tx_flows(&response).unwrap();
+    assert_eq!(flows[0].encoding, 0);
+    assert_eq!(flows[0].raw_format_metadata, [0x01, 0x02]);
 }
 
 fn studio_video_packet(name: &str) -> Vec<u8> {

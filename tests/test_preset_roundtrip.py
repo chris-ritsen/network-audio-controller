@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from netaudio import core
+from netaudio.dante.const import SERVICE_ARC
 from netaudio.dante.network_configuration import NetworkConfigurationUnverified
 
 from netaudio.presets.loading import (
@@ -385,9 +386,11 @@ def _planning_device():
         is_locked=False,
         requires_managed_control=False,
         flow_protocol_id=0x2729,
+        services={"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.7.41"}}},
         transmit_flow_authoring_capability_word=0,
         transmit_flow_authoring=core.flow_authoring_capabilities(0)["transmit_flow_authoring"],
         receiver_flow_inventory_family="legacy",
+        routing_capacity_transmit_channel_count=32,
         transmitter_flows=[],
         tx_channels=channels,
         rx_channels=channels,

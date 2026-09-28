@@ -198,37 +198,106 @@ pub struct FlowCreatePreflight {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct FlowDeletePreflightRequest {
-    inventory: Value,
+    capability_word: Option<u16>,
     flow_id: NonZeroU16,
+    inventory: Value,
     protocol_id: u16,
 }
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FlowDeletePreflight {
-    state: FlowPreflightOutcome,
+    command: Option<serde_json::Map<String, Value>>,
     reason: Option<String>,
     specification: Option<ObservedTransmitFlowSpecification>,
+    state: FlowPreflightOutcome,
+}
+
+fn record_media_identity(record: &serde_json::Map<String, Value>) -> Option<(u64, u64)> {
+    Some((
+        record.get("media_type_code")?.as_u64()?,
+        record.get("media_local_flow_id")?.as_u64()?,
+    ))
+}
+
+fn delete_selection(
+    capability_word: u16,
+    flow_id: u16,
+    record: &serde_json::Map<String, Value>,
+    flows: &[serde_json::Map<String, Value>],
+) -> Result<crate::commands::TxFlowDeleteSelection, (FlowPreflightOutcome, String)> {
+    if crate::flow_plan::delete_authoring_family(u64::from(capability_word)) == "fixed" {
+        return Ok(crate::commands::TxFlowDeleteSelection::Fixed {
+            global_flow_id: flow_id,
+        });
+    }
+    let Some((media_type, media_local_flow_id)) = record_media_identity(record) else {
+        return Err((
+            FlowPreflightOutcome::Rejected,
+            format!("fresh inventory does not identify flow {flow_id}'s media-local identity"),
+        ));
+    };
+    if media_type != u64::from(crate::commands::SEGMENTED_DELETE_MEDIA_TYPE_AUDIO) {
+        return Err((
+            FlowPreflightOutcome::Rejected,
+            format!("flow {flow_id} is not an audio flow"),
+        ));
+    }
+    let media_local_flow_id = u16::try_from(media_local_flow_id)
+        .ok()
+        .filter(|value| *value != 0)
+        .ok_or_else(|| {
+            (
+                FlowPreflightOutcome::Rejected,
+                format!("flow {flow_id} has an invalid media-local identity"),
+            )
+        })?;
+    let matches = flows
+        .iter()
+        .filter(|candidate| {
+            record_media_identity(candidate) == Some((media_type, u64::from(media_local_flow_id)))
+        })
+        .count();
+    if matches != 1 {
+        return Err((
+            FlowPreflightOutcome::Unavailable,
+            format!(
+                "fresh inventory does not map media-local flow {media_local_flow_id} to one flow"
+            ),
+        ));
+    }
+    Ok(crate::commands::TxFlowDeleteSelection::Segmented {
+        media_local_flow_id,
+        media_type: crate::commands::SEGMENTED_DELETE_MEDIA_TYPE_AUDIO,
+    })
 }
 
 pub fn delete_preflight(request: FlowDeletePreflightRequest) -> FlowDeletePreflight {
-    let inventory = serde_json::from_value::<FlowInventoryEvidence>(request.inventory).ok();
-    let Some(inventory) = inventory.filter(FlowInventoryEvidence::unambiguous) else {
-        return FlowDeletePreflight {
-            state: FlowPreflightOutcome::Unavailable,
-            reason: Some("fresh preflight inventory was unavailable".into()),
-            specification: None,
-        };
-    };
-    let rejected = |reason| FlowDeletePreflight {
-        state: FlowPreflightOutcome::Rejected,
+    let refused = |state, reason| FlowDeletePreflight {
+        command: None,
         reason: Some(reason),
         specification: None,
+        state,
     };
+    let Some(capability_word) = request.capability_word else {
+        return refused(
+            FlowPreflightOutcome::Unavailable,
+            "fresh transmit-flow authoring capability was unavailable".into(),
+        );
+    };
+    let inventory = serde_json::from_value::<FlowInventoryEvidence>(request.inventory).ok();
+    let Some(inventory) = inventory.filter(FlowInventoryEvidence::unambiguous) else {
+        return refused(
+            FlowPreflightOutcome::Unavailable,
+            "fresh preflight inventory was unavailable".into(),
+        );
+    };
+    let rejected = |reason| refused(FlowPreflightOutcome::Rejected, reason);
     let Some(record) = inventory
         .flows
-        .into_iter()
+        .iter()
         .find(|record| record_identity(record) == Some(request.flow_id.get()))
+        .cloned()
     else {
         return rejected(format!("flow {} is not active", request.flow_id));
     };
@@ -237,14 +306,32 @@ pub fn delete_preflight(request: FlowDeletePreflightRequest) -> FlowDeletePrefli
         return rejected("only multicast transmit-flow deletion is supported".into());
     }
 
+    let selection = match delete_selection(
+        capability_word,
+        request.flow_id.get(),
+        &record,
+        &inventory.flows,
+    ) {
+        Ok(selection) => selection,
+        Err((state, reason)) => return refused(state, reason),
+    };
+    let command = json!({"command": "delete_tx_flow",
+        "flow_protocol_id": request.protocol_id, "selection": selection});
+    let mut validation = command.clone();
+    validation["message_id"] = json!(1);
+    if let Err(error) = crate::spec::build_command_from_json(&validation.to_string()) {
+        return rejected(error.to_string());
+    }
+
     match transmit_flow_specification(&FlowReadbackRequest {
         protocol_id: request.protocol_id,
         record: Value::Object(record),
     }) {
         Ok(specification) => FlowDeletePreflight {
-            state: FlowPreflightOutcome::Ready,
+            command: command.as_object().cloned(),
             reason: None,
             specification: Some(specification),
+            state: FlowPreflightOutcome::Ready,
         },
         Err(reason) => rejected(reason),
     }

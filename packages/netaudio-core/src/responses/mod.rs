@@ -261,22 +261,23 @@ pub struct MeteringFrame {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TxFlow {
-    pub inventory_layout: &'static str,
-    pub flow_number: u16,
-    pub flow_type: String,
-    pub sample_rate: u32,
-    pub encoding: u16,
-    pub frames_per_packet: Option<u16>,
-    pub configuration_flags: u16,
-    pub media_class: Option<u16>,
-    pub media_mode: Option<String>,
-    pub flow_name: Option<String>,
-    pub primary_destination: Option<serde_json::Value>,
-    pub secondary_destination: Option<serde_json::Value>,
-    pub destinations: Vec<serde_json::Value>,
-    pub raw_extension: Vec<u8>,
     pub channel_count: u16,
     pub channels: Vec<u16>,
+    pub configuration_flags: u16,
+    pub destinations: Vec<serde_json::Value>,
+    pub encoding: u16,
+    pub flow_name: Option<String>,
+    pub flow_number: u16,
+    pub flow_type: String,
+    pub frames_per_packet: Option<u16>,
+    pub inventory_layout: &'static str,
+    pub media_class: Option<u16>,
+    pub media_mode: Option<String>,
+    pub primary_destination: Option<serde_json::Value>,
+    pub raw_extension: Vec<u8>,
+    pub raw_format_metadata: [u8; 2],
+    pub sample_rate: u32,
+    pub secondary_destination: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

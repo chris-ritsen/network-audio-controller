@@ -70,32 +70,33 @@ def test_channel_count_preserves_u16_counts():
 
 
 @pytest.mark.parametrize(
-    "word,protocol,inventory",
+    "word,family",
     [
-        (0, 0x2729, "legacy"),
-        (0x0030, 0x2729, "legacy"),
-        (0x1000, 0x2809, "modern"),
-        (0x1030, 0x2809, "modern"),
+        (0, "fixed"),
+        (0x0030, "fixed"),
+        (0x1000, "segmented"),
+        (0x1030, "segmented"),
     ],
 )
-def test_authoring_capabilities_are_consistent_from_wire_to_device(word, protocol, inventory):
+def test_authoring_capabilities_are_consistent_from_wire_to_device(word, family):
     from netaudio.dante.device import DanteDevice
 
     response = _channel_count_response()
     response[10:12] = word.to_bytes(2, "big")
     parsed = core.parse_response("channel_count", bytes(response))
+    segmented = family == "segmented"
     expected = {
         "transmit_flow_authoring": {
-            "protocol_id": protocol,
-            "identity_field": "media_local_flow_id" if inventory == "modern" else "global_flow_id",
-            "identifier_max": 65535 if inventory == "modern" else 32,
-            "media_modes": ["native_dante", "rtp_aes67"] if inventory == "modern" else ["native_dante"],
-            "supports_flow_options": inventory == "modern",
+            "family": family,
+            "identifier_max": 65535 if segmented else 32,
+            "identity_field": "media_local_flow_id" if segmented else "global_flow_id",
+            "media_modes": ["native_dante", "rtp_aes67"],
+            "opcode": 0x2601 if segmented else 0x2201,
+            "supports_flow_options": True,
         },
-        "receiver_flow_inventory_family": inventory,
     }
     assert core.flow_authoring_capabilities(word) == expected
-    assert parsed["uses_modern_transmit_flow_authoring"] is (protocol == 0x2809)
+    assert parsed["uses_modern_transmit_flow_authoring"] is segmented
     device = DanteDevice("receiver.local.")
     controls = device.controls_data_from_core(
         {

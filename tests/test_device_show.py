@@ -560,8 +560,8 @@ def test_explicitly_fetched_empty_channel_inventory_clears_stale_channels():
 
     assert device.tx_count == device.rx_count == 0
     assert device.transmit_flow_authoring_capability_word == 0
-    assert device.transmit_flow_authoring["protocol_id"] == 0x2729
-    assert device.receiver_flow_inventory_family == "legacy"
+    assert device.transmit_flow_authoring["family"] == "fixed"
+    assert device.receiver_flow_inventory_family is None
     assert device.tx_channels == {}
     assert device.rx_channels == {}
     assert device.subscriptions == []

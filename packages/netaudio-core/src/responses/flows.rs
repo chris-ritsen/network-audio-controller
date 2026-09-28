@@ -861,6 +861,7 @@ fn parse_flow_record(
     let flow_number = read_u16(body, offset)?;
     let configuration_flags = read_u16(body, offset + 2)?;
     let sample_rate = read_u32(body, offset + FLOW_RECORD_SAMPLE_RATE)?;
+    let raw_format_metadata = [*body.get(offset + 8)?, *body.get(offset + 9)?];
     let encoding = read_u16(body, offset + 10)?;
     let destination_count = read_u16(body, offset + 12)?;
     let channel_count = read_u16(body, offset + FLOW_RECORD_CHANNEL_COUNT)?;
@@ -931,22 +932,23 @@ fn parse_flow_record(
     };
 
     Some(TxFlow {
-        inventory_layout: "fixed",
-        flow_number,
-        flow_type,
-        sample_rate,
-        encoding,
-        frames_per_packet,
-        configuration_flags,
-        media_class,
-        media_mode,
-        flow_name,
-        primary_destination: destinations.first().cloned(),
-        secondary_destination: destinations.get(1).cloned(),
-        destinations,
-        raw_extension,
         channel_count,
         channels,
+        configuration_flags,
+        encoding,
+        flow_name,
+        flow_number,
+        flow_type,
+        frames_per_packet,
+        inventory_layout: "fixed",
+        media_class,
+        media_mode,
+        primary_destination: destinations.first().cloned(),
+        raw_extension,
+        raw_format_metadata,
+        sample_rate,
+        secondary_destination: destinations.get(1).cloned(),
+        destinations,
     })
 }
 

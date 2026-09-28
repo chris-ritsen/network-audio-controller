@@ -136,11 +136,17 @@ async def test_receiver_inventory_never_substitutes_a_legacy_revision(monkeypatc
 
 def synthetic_page(numbers, *, capacity=32, more=False, protocol=0x2729):
     """Synthetic unicast records for pagination invariants, not captured evidence."""
-    records = [struct.pack(">HHIIHH", number, 0x0011, 48000, 24, 1, 1) for number in numbers]
-    offset = 12 + capacity * 2
-    pointers = [offset + index * 16 for index in range(len(records))]
-    pointers.extend([0] * (capacity - len(records)))
-    body = bytes([capacity, len(records)]) + struct.pack(f">{capacity}H", *pointers) + b"".join(records)
+    start = 12 + capacity * 2
+    pointers = []
+    records = b""
+    for number in numbers:
+        record = start + len(records)
+        socket = record + 24
+        records += struct.pack(">HHIBBHHHHHH", number, 0x0011, 48000, 0, 0, 24, 1, 1, socket, 1, 0) + bytes(2)
+        records += bytes([8, 2]) + struct.pack(">H", 5004) + bytes([192, 0, 2, 1])
+        pointers.append(record)
+    pointers.extend([0] * (capacity - len(numbers)))
+    body = bytes([capacity, len(numbers)]) + struct.pack(f">{capacity}H", *pointers) + records
 
     return struct.pack(">5H", protocol, 10 + len(body), 1, 0x2200, 0x8112 if more else 1) + body
 

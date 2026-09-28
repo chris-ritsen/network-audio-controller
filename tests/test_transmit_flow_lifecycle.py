@@ -115,7 +115,7 @@ def test_native_builders_reject_channel_overflow_and_invalid_slot_mappings():
             )
 
 
-def device(protocol_id=0x2729, *, managed=False, locked=False):
+def device(protocol_id=0x2729, *, managed=False, locked=False, capability_word=None):
     async def probe_sample_rate_status(_device, timeout=2.0):
         assert timeout == 2.0
         return {"current_value": 48_000}
@@ -140,8 +140,8 @@ def device(protocol_id=0x2729, *, managed=False, locked=False):
         async def __aexit__(self, *_args):
             return False
 
-    modern_authoring = protocol_id == 0x2809
-    capability_word = 0x1000 if modern_authoring else 0
+    if capability_word is None:
+        capability_word = 0x1000 if protocol_id == 0x2809 else 0
 
     async def execute(specification):
         if specification["command"] == "query_receiver_flows":
@@ -175,7 +175,7 @@ def device(protocol_id=0x2729, *, managed=False, locked=False):
         flow_protocol_id=protocol_id,
         transmit_flow_authoring_capability_word=capability_word,
         transmit_flow_authoring=core.flow_authoring_capabilities(capability_word)["transmit_flow_authoring"],
-        receiver_flow_inventory_family="modern" if modern_authoring else "legacy",
+        receiver_flow_inventory_family="modern" if protocol_id == 0x2809 else "legacy",
         requires_managed_control=managed,
         is_locked=locked,
         tx_channels={1: object(), 2: object()},
@@ -444,19 +444,153 @@ def test_native_flow_plan_never_accepts_a_command_the_serializer_rejects(channel
     assert plan["command"] is None
 
 
+def active_flow(global_flow_id, media_local_flow_id=None, media_type_code=3):
+    record = {
+        "flow_type": "multicast",
+        "channels": [1, 2],
+        "sample_rate": 48_000,
+        "encoding": 24,
+    }
+    if media_local_flow_id is None:
+        record["flow_number"] = global_flow_id
+    else:
+        record.update(
+            global_flow_id=global_flow_id,
+            media_type_code=media_type_code,
+            media_local_flow_id=media_local_flow_id,
+        )
+    return record
+
+
+def delete_preflight(flows, flow_id, protocol_id, capability_word):
+    return core.flow_delete_preflight(
+        {
+            "inventory": {"flows": flows},
+            "flow_id": flow_id,
+            "protocol_id": protocol_id,
+            "capability_word": capability_word,
+        }
+    )
+
+
 @pytest.mark.parametrize("protocol_id", [0x2729, 0x2809])
-def test_native_delete_plan_produces_capture_backed_command(protocol_id):
+def test_native_delete_preflight_produces_capture_backed_command(protocol_id):
     modern = protocol_id == 0x2809
+    target = device(protocol_id)
     plan = core.plan_transmit_flow_delete(
-        {"protocol_id": protocol_id, "flow_id": 2, "device": flow_lifecycle._flow_device_facts(device(protocol_id))}
+        {"protocol_id": protocol_id, "flow_id": 2, "device": flow_lifecycle._flow_device_facts(target)}
+    )
+    preflight = delete_preflight(
+        [active_flow(2, 2 if modern else None)], 2, protocol_id, target.transmit_flow_authoring_capability_word
     )
     expected = fixture("modern-2809-delete-request.bin" if modern else "legacy-2729-delete-request.bin")
-    command = {**plan["command"], "message_id": int.from_bytes(expected[4:6], "big")}
+    command = {**preflight["command"], "message_id": int.from_bytes(expected[4:6], "big")}
     assert not plan["reasons"]
+    assert plan["authoring_family"] == ("segmented" if modern else "fixed")
+    assert preflight["state"] == "ready"
     assert core.build_command(command) == expected
 
 
-@pytest.mark.parametrize("protocol_id,flow_id", [(0x2809, 3), (0x2801, 2), (0x2729, 33), (None, 2)])
+@pytest.mark.parametrize("protocol_id", [0x2729, 0x2809])
+@pytest.mark.parametrize("capability_word,opcode", [(0, "2202"), (0x1000, "2602")])
+def test_delete_family_follows_capability_word(protocol_id, capability_word, opcode):
+    target = device(protocol_id, capability_word=capability_word)
+    plan = flow_lifecycle.plan_delete_transmit_flow(target, 5)
+    preflight = delete_preflight([active_flow(5, 9)], 5, protocol_id, capability_word)
+    packet = core.build_command(preflight["command"])
+
+    assert plan.supported, plan.reasons
+    assert packet[0:2] == protocol_id.to_bytes(2, "big")
+    assert packet[6:8] == bytes.fromhex(opcode)
+    if capability_word:
+        assert packet[18:20] == (3).to_bytes(2, "big")
+        assert packet[22:24] == (9).to_bytes(2, "big")
+    else:
+        assert packet[14:16] == (5).to_bytes(2, "big")
+
+
+def test_fixed_delete_matches_specification_vector():
+    preflight = delete_preflight([active_flow(1)], 1, 0x2809, 0)
+    command = {**preflight["command"], "message_id": 1}
+    assert core.build_command(command) == bytes.fromhex("28090010000122020000000100000001")
+
+
+@pytest.mark.parametrize(
+    "flows,capability_word,state",
+    [
+        ([active_flow(5)], 0x1000, "rejected"),
+        ([active_flow(5, 9, media_type_code=1)], 0x1000, "rejected"),
+        ([active_flow(5, 9), active_flow(6, 9)], 0x1000, "unavailable"),
+        ([active_flow(5, 9)], None, "unavailable"),
+        ([active_flow(33, 9)], 0, "rejected"),
+    ],
+)
+def test_delete_preflight_requires_resolvable_selection(flows, capability_word, state):
+    preflight = delete_preflight(
+        flows, flows[0].get("global_flow_id", flows[0].get("flow_number")), 0x2809, capability_word
+    )
+    assert preflight["state"] == state
+    assert preflight["command"] is None
+
+
+def test_fixed_family_create_delete_symmetry():
+    target = device(0x2809, capability_word=0)
+    create = flow_lifecycle.plan_create_transmit_flow(
+        target, specification(identity=dict(global_flow_id=3), protocol=dict(protocol_id=0x2809))
+    )
+    delete = flow_lifecycle.plan_delete_transmit_flow(target, 3)
+    preflight = delete_preflight([active_flow(3)], 3, 0x2809, 0)
+    created = core.build_command(create.command_specification)
+    deleted = core.build_command(preflight["command"])
+
+    assert create.supported, create.reasons
+    assert delete.supported, delete.reasons
+    assert created[0:2] == deleted[0:2] == bytes.fromhex("2809")
+    assert created[6:8] == bytes.fromhex("2201")
+    assert deleted[6:8] == bytes.fromhex("2202")
+    assert created[16:18] == deleted[14:16] == (3).to_bytes(2, "big")
+
+
+@pytest.mark.asyncio
+async def test_segmented_delete_sends_media_local_identity(monkeypatch):
+    inventories = iter(({"flows": [active_flow(5, 9)]}, {"flows": []}))
+    sent = []
+
+    async def read_inventory(*_args):
+        return next(inventories)
+
+    async def send_once(_device, command):
+        sent.append(core.build_command(command))
+        return bytes.fromhex("2809000a000126020001")
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+    result = await flow_lifecycle.delete_transmit_flow(device(0x2809), 5)
+
+    assert result.state is FlowLifecycleState.DELETED
+    assert result.requested["identity"]["global_flow_id"] == 5
+    assert len(sent) == 1
+    assert sent[0][6:8] == bytes.fromhex("2602")
+    assert sent[0][22:24] == (9).to_bytes(2, "big")
+
+
+@pytest.mark.asyncio
+async def test_delete_refuses_changed_authoring_family(monkeypatch):
+    target = device(0x2809)
+    target.transmit_flow_authoring_capability_word = 0
+
+    async def send_once(*_args):
+        pytest.fail("a changed authoring family must not send a delete")
+
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+    result = await flow_lifecycle.delete_transmit_flow(target, 2)
+
+    assert result.state is FlowLifecycleState.PENDING
+    assert result.request_acknowledgement is None
+    assert "family" in result.message
+
+
+@pytest.mark.parametrize("protocol_id,flow_id", [(0x2801, 2), (0x2729, 33), (None, 2)])
 def test_native_delete_plan_rejects_unestablished_or_unrepresentable_request(protocol_id, flow_id):
     plan = core.plan_transmit_flow_delete(
         {
@@ -1008,7 +1142,9 @@ async def test_delete_preflight_uses_native_evidence_and_never_sends_an_unsafe_r
 
     monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
     monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
-    native = core.flow_delete_preflight({"inventory": inventory, "flow_id": 2, "protocol_id": 0x2729})
+    native = core.flow_delete_preflight(
+        {"inventory": inventory, "flow_id": 2, "protocol_id": 0x2729, "capability_word": 0}
+    )
     result = await flow_lifecycle.delete_transmit_flow(device(), 2)
 
     assert native["state"] == ("unavailable" if expected_state is FlowLifecycleState.PENDING else "rejected")
@@ -1506,3 +1642,36 @@ def test_partial_inventory_cannot_supply_effective_flow_or_preset_comparison_sta
     partial = core.parse_response("modern_arc_receiver_flow_status_page", packet("receiver_flow_partial.bin"))
     with pytest.raises(flow_lifecycle.flows.FlowValidationError, match="complete flow inventory is unavailable"):
         flow_lifecycle.canonical_inventory(partial, 0x2809)
+
+
+def test_zero_encoding_is_not_readback_evidence():
+    record = active_flow(2)
+    record["encoding"] = 0
+    with pytest.raises(core.NetaudioCoreError):
+        core.transmit_flow_specification(record, protocol_id=0x2729)
+    preflight = delete_preflight([record], 2, 0x2729, 0)
+    assert preflight["state"] == "rejected"
+    assert preflight["command"] is None
+
+
+@pytest.mark.asyncio
+async def test_rejected_segmented_delete_sends_once(monkeypatch):
+    reads = []
+    sent = []
+
+    async def read_inventory(*_args):
+        reads.append(True)
+        return {"flows": [active_flow(5, 9)]}
+
+    async def send_once(_device, command):
+        sent.append(command)
+        return bytes.fromhex("2809000a000126020007")
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+    result = await flow_lifecycle.delete_transmit_flow(device(0x2809), 5)
+
+    assert result.state is FlowLifecycleState.REJECTED
+    assert result.effective_state_confirmation is None
+    assert len(sent) == 1
+    assert len(reads) == 1

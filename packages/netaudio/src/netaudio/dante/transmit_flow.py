@@ -36,6 +36,7 @@ class FlowOperationPlan:
     serializer_cohort: str | None
     supported: bool
     reasons: tuple[str, ...]
+    authoring_family: str | None = None
     specification: _requests.TransmitFlowSpecification | None = None
     flow_id: int | None = None
     command_specification: dict[str, Any] | None = None
@@ -44,6 +45,7 @@ class FlowOperationPlan:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "authoring_family": self.authoring_family,
             "operation": self.operation,
             "state": self.state.value,
             "transport": self.transport,

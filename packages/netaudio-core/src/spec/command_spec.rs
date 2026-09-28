@@ -187,9 +187,9 @@ pub(super) enum CommandSpec {
     },
     DeleteTxFlow {
         flow_protocol_id: u16,
-        flow_slot: u16,
         #[serde(default)]
         message_id: u16,
+        selection: commands::TxFlowDeleteSelection,
     },
     DeviceInfo {
         #[serde(default)]
@@ -915,9 +915,9 @@ pub(super) fn build_command(
         CommandSpec::DanteModel { mac } => commands::build_dante_model(parse_mac_required(&mac)?)?,
         CommandSpec::DeleteTxFlow {
             flow_protocol_id,
-            flow_slot,
             message_id,
-        } => commands::build_delete_tx_flow(flow_protocol_id, flow_slot, message_id)?,
+            selection,
+        } => commands::build_delete_tx_flow(flow_protocol_id, selection, message_id)?,
         CommandSpec::DeviceInfo {
             message_id,
             protocol_id,

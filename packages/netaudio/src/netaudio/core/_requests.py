@@ -570,6 +570,7 @@ class FlowCreateRequest(_extensions.TypedDict):
 
 
 class FlowDeletePreflightRequest(_extensions.TypedDict):
+    capability_word: _extensions.NotRequired[_typing.Union[int, None]]
     flow_id: int
     inventory: JsonValue
     protocol_id: int

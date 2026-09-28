@@ -57,10 +57,12 @@ def test_native_readback_refuses_unknown_protocol():
         core.transmit_flow_specification(record(), protocol_id=0x2810)
 
 
-@pytest.mark.parametrize("protocol,known", [(0x2729, True), (0x2809, False)])
-def test_native_readback_reports_which_semantic_fields_are_established(protocol, known):
-    result = core.transmit_flow_specification(record(), protocol_id=protocol)
-    assert ("media_mode" in result["observed_fields"]) is known
+@pytest.mark.parametrize("protocol", [0x2729, 0x2809])
+@pytest.mark.parametrize("media_mode", [None, "native_dante", "rtp_aes67"])
+def test_native_readback_reports_which_semantic_fields_are_established(protocol, media_mode):
+    observed = record() if media_mode is None else {**record(), "media_mode": media_mode}
+    result = core.transmit_flow_specification(observed, protocol_id=protocol)
+    assert ("media_mode" in result["observed_fields"]) is (media_mode is not None)
     assert "channel_slots" in result["observed_fields"]
     assert "primary_destination" in result["observed_fields"]
     assert "secondary_destination" not in result["observed_fields"]

@@ -51,14 +51,14 @@ def controls_input(channel_audio_metadata):
 
 
 @pytest.mark.parametrize(
-    "capability_word,protocol,identity_field,identifier_max,media_modes",
+    "capability_word,family,opcode,identity_field,identifier_max",
     [
-        (0, 0x2729, "global_flow_id", 32, ["native_dante"]),
-        (0x1000, 0x2809, "media_local_flow_id", 65535, ["native_dante", "rtp_aes67"]),
+        (0, "fixed", 0x2201, "global_flow_id", 32),
+        (0x1000, "segmented", 0x2601, "media_local_flow_id", 65535),
     ],
 )
 def test_native_authoring_profile_survives_device_serialization(
-    capability_word, protocol, identity_field, identifier_max, media_modes
+    capability_word, family, opcode, identity_field, identifier_max
 ):
     device = DanteDevice()
     data = controls_input(None)
@@ -67,11 +67,12 @@ def test_native_authoring_profile_survives_device_serialization(
 
     serialized = DanteDeviceSerializer.to_json(device)
     assert serialized["transmit_flow_authoring"] == {
-        "protocol_id": protocol,
-        "identity_field": identity_field,
+        "family": family,
         "identifier_max": identifier_max,
-        "media_modes": media_modes,
-        "supports_flow_options": capability_word == 0x1000,
+        "identity_field": identity_field,
+        "media_modes": ["native_dante", "rtp_aes67"],
+        "opcode": opcode,
+        "supports_flow_options": True,
     }
 
     data["counts"]["transmit_flow_authoring_capability_word"] = None
