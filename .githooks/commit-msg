@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+import re
+import sys
+
+WIDTH = 72
+SCISSORS = "# ------------------------ >8 ------------------------"
+LIST_MARKER = re.compile(r"^(\s*)((?:[-*+]|\d+[.)])\s+)?")
+
+
+def body_lines(message):
+    lines = message.split("\n")
+    for number, line in enumerate(lines[1:], start=2):
+        if line == SCISSORS:
+            return
+        if line.startswith("#"):
+            continue
+        yield number, line
+
+
+def could_wrap(line):
+    if len(line) <= WIDTH:
+        return False
+    text = line[LIST_MARKER.match(line).end():]
+    return any(character.isspace() for character in text.strip())
+
+
+def main():
+    with open(sys.argv[1], encoding="utf-8") as message_file:
+        message = message_file.read()
+    unwrapped = [(number, line) for number, line in body_lines(message) if could_wrap(line)]
+    if not unwrapped:
+        return 0
+    print(f"Commit message body lines must wrap at {WIDTH} columns.", file=sys.stderr)
+    print("A longer line may hold only one unbreakable word, such as a URL.", file=sys.stderr)
+    for number, line in unwrapped:
+        print(f"  line {number} ({len(line)} columns): {line}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
