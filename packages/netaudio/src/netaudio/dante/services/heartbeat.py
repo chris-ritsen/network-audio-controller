@@ -319,7 +319,9 @@ class DanteHeartbeatService(DanteMulticastService):
     def connection_health_history(self, device_extended_unique_identifier: str) -> dict | None:
         return self._connection_health.history_snapshot(device_extended_unique_identifier)
 
-    def diagnostics_snapshot(self, device, *, receiver_history=True, reset=False, warning_enabled=None):
+    def diagnostics_snapshot(
+        self, device, *, include_clock=True, receiver_history=True, reset=False, warning_enabled=None
+    ):
         now = self._monotonic_clock()
         identity = next((key for key, value in self._heartbeat_devices.items() if value is device), None)
         receiver = None
@@ -351,16 +353,18 @@ class DanteHeartbeatService(DanteMulticastService):
             if warning_enabled is not None:
                 self._notify_device_updated(device)
 
-        return {
+        snapshot = {
             "device": device.server_name,
             "device_identity": identity,
             "receiver": receiver,
-            "clock": clock_tracker(device).snapshot(include_history=True) if clock is not None else None,
             "clock_state": getattr(device, "clock_status", None),
             "clock_state_observed_at": getattr(device, "clock_observed_at", None),
             "retention_limit": 300,
             "timestamp_provenance": "local_receive_time",
         }
+        if include_clock:
+            snapshot["clock"] = clock_tracker(device).snapshot(include_history=True) if clock is not None else None
+        return snapshot
 
     def _schedule_connection_health_expiry(
         self,

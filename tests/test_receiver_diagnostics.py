@@ -264,9 +264,10 @@ async def test_diagnostics_can_omit_receiver_history():
     server = make_http_server({device.server_name: device})
     server.diagnostics = service
     writer = FakeWriter()
-    await server._route("GET", "/diagnostics/" + device.server_name + "?receiver_history=0", b"", writer, None)
+    await server._route("GET", "/diagnostics/" + device.server_name + "?receiver_history=0&clock=0", b"", writer, None)
     code, summary = writer.response()
     assert code == 200
+    assert "clock" not in summary
     latency = summary["receiver"]["paths"][0]["latency"]
     assert "history" not in latency
     assert latency["histogram"]["counts"]

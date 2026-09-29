@@ -916,6 +916,7 @@ class DaemonHTTPServer(
                 await self._handle_diagnostics(
                     writer,
                     unquote(route[len("/diagnostics/") :]),
+                    include_clock=query.get("clock", [""])[-1] != "0",
                     receiver_history=query.get("receiver_history", [""])[-1] != "0",
                 )
             elif route == "/issues":

@@ -43,7 +43,9 @@ FORGET_SELECTIONS = frozenset({"emulated", "offline"})
 
 
 class DaemonDeviceHandlers:
-    async def _handle_diagnostics(self, writer, name, *, receiver_history=True, reset=False, warning_enabled=None):
+    async def _handle_diagnostics(
+        self, writer, name, *, include_clock=True, receiver_history=True, reset=False, warning_enabled=None
+    ):
         device = self._find_device(name)
         if device is None:
             await self._send_json(writer, {"error": "Device not found"}, 404)
@@ -54,7 +56,11 @@ class DaemonDeviceHandlers:
         await self._send_json(
             writer,
             self.diagnostics.diagnostics_snapshot(
-                device, receiver_history=receiver_history, reset=reset, warning_enabled=warning_enabled
+                device,
+                include_clock=include_clock,
+                receiver_history=receiver_history,
+                reset=reset,
+                warning_enabled=warning_enabled,
             ),
         )
 

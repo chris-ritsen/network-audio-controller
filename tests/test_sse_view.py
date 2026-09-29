@@ -82,6 +82,31 @@ def test_repeated_snapshot_becomes_patches_removals_and_managed_status():
     ]
 
 
+def test_receiver_latency_change_sends_a_notice_without_data():
+    view = patch_view()
+    health = {"paths": [{"telemetry_index": 0, "latency": {"current": {"raw": 17}}}]}
+    view.events_for(
+        {
+            "event": "device_updated",
+            "server_name": "lx-dante.local.",
+            "device": device(receiver_flow_connection_health=health),
+        }
+    )
+    changed = {"paths": [{"telemetry_index": 0, "latency": {"current": {"raw": 18}}}]}
+
+    events = view.events_for(
+        {
+            "event": "device_updated",
+            "server_name": "lx-dante.local.",
+            "device": device(receiver_flow_connection_health=changed),
+        }
+    )
+
+    assert events == [
+        {"event": "telemetry_updated", "server_name": "lx-dante.local.", "fields": ["receiver_flow_connection_health"]}
+    ]
+
+
 def test_telemetry_only_update_sends_nothing():
     view = patch_view()
 
