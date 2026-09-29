@@ -913,7 +913,11 @@ class DaemonHTTPServer(
             elif route == "/event-journal":
                 await self._handle_get_event_journal(writer, query)
             elif route.startswith("/diagnostics/"):
-                await self._handle_diagnostics(writer, unquote(route[len("/diagnostics/") :]))
+                await self._handle_diagnostics(
+                    writer,
+                    unquote(route[len("/diagnostics/") :]),
+                    receiver_history=query.get("receiver_history", [""])[-1] != "0",
+                )
             elif route == "/issues":
                 await self._handle_get_issues(writer, query)
             else:

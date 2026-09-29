@@ -77,6 +77,17 @@ def parse_connection_health_records(data: bytes) -> _requests.HeartbeatConnectio
         return None
 
 
+def receiver_without_history(receiver: dict) -> dict:
+    paths = []
+    for path in receiver.get("paths", []):
+        trimmed = dict(path)
+        for series in ("late_packets", "latency"):
+            if isinstance(trimmed.get(series), dict):
+                trimmed[series] = {key: value for key, value in trimmed[series].items() if key != "history"}
+        paths.append(trimmed)
+    return {**receiver, "paths": paths}
+
+
 class DanteHeartbeatService(DanteMulticastService):
     def __init__(
         self,
@@ -297,7 +308,7 @@ class DanteHeartbeatService(DanteMulticastService):
     def connection_health_history(self, device_extended_unique_identifier: str) -> dict | None:
         return self._connection_health.history_snapshot(device_extended_unique_identifier)
 
-    def diagnostics_snapshot(self, device, *, reset=False, warning_enabled=None):
+    def diagnostics_snapshot(self, device, *, receiver_history=True, reset=False, warning_enabled=None):
         now = self._monotonic_clock()
         identity = next((key for key, value in self._heartbeat_devices.items() if value is device), None)
         receiver = None
@@ -307,6 +318,8 @@ class DanteHeartbeatService(DanteMulticastService):
             else:
                 self._connection_health.expire_device(identity, now)
             receiver = self._connection_health.history_snapshot(identity)
+            if receiver is not None and not receiver_history:
+                receiver = receiver_without_history(receiver)
 
         clock = getattr(device, "clock_observations", None)
         updated = clock_tracker(device).update(

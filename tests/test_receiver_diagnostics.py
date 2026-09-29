@@ -247,6 +247,33 @@ async def test_diagnostics_export_and_local_reset_send_no_commands_or_journal_re
     server.publish_device_updated.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_diagnostics_can_omit_receiver_history():
+    from unittest.mock import AsyncMock, MagicMock
+    from tests.http_api_test_support import make_http_server, FakeWriter, make_device
+    from netaudio.dante.services.heartbeat import DanteHeartbeatService
+
+    device = make_device()
+    device.execute = AsyncMock()
+    device.update_last_seen = MagicMock()
+    device.receiver_telemetry_capacity = TOPOLOGY["capacity"]
+    device.receiver_flow_completeness = "complete"
+    device.receiver_flows = TOPOLOGY["flows"]
+    service = DanteHeartbeatService(device_by_ip=lambda _: device, monotonic_clock=lambda: 100.0)
+    service._on_packet(heartbeat_packet(latency_sequence=1), ("192.0.2.1", 1030))
+    server = make_http_server({device.server_name: device})
+    server.diagnostics = service
+    writer = FakeWriter()
+    await server._route("GET", "/diagnostics/" + device.server_name + "?receiver_history=0", b"", writer, None)
+    code, summary = writer.response()
+    assert code == 200
+    latency = summary["receiver"]["paths"][0]["latency"]
+    assert "history" not in latency
+    assert latency["histogram"]["counts"]
+    assert latency["statistics"]["count"] == 1
+    assert "history" not in summary["receiver"]["paths"][0]["late_packets"]
+
+
 def test_browser_renders_native_path_and_histogram_values(tmp_path):
     import json
     import subprocess
