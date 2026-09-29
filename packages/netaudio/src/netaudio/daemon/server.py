@@ -178,6 +178,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._pending_offline_tasks: dict[str, asyncio.Task] = {}
         self._unreachable_devices_reported: set[str] = set()
         self._background_tasks: set[asyncio.Task] = set()
+        self._receiver_flow_requests: set[str] = set()
         self._offline_failures: dict[str, int] = {}
         self._offline_candidate_since: dict[str, float] = {}
         self._last_status_field_refresh_monotonic = time.monotonic()
@@ -456,6 +457,19 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             )
         )
 
+    def _request_receiver_flows(self, device) -> None:
+        server_name = device.server_name
+        if server_name in self._receiver_flow_requests:
+            return
+        task = self._spawn_background(
+            self.application.state.ensure_receiver_flow_inventory(device),
+            name=f"receiver-flows-{server_name}",
+        )
+        if task is None:
+            return
+        self._receiver_flow_requests.add(server_name)
+        task.add_done_callback(lambda _: self._receiver_flow_requests.discard(server_name))
+
     def _register_event_listeners(self):
         if self._event_listeners_registered:
             return
@@ -588,6 +602,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             interface_name=app_settings.interface,
             on_signal_presence=self.metering.record_signal_presence,
             on_device_updated=self._emit_heartbeat_device_updated,
+            on_receiver_flows_needed=self._request_receiver_flows,
         )
         await self.heartbeat.start()
         self.http_api.diagnostics = self.heartbeat

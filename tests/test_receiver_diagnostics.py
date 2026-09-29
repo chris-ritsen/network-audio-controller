@@ -274,6 +274,31 @@ async def test_diagnostics_can_omit_receiver_history():
     assert "history" not in summary["receiver"]["paths"][0]["late_packets"]
 
 
+def test_latency_telemetry_requests_missing_flow_inventory():
+    from unittest.mock import MagicMock
+    from tests.http_api_test_support import make_device
+    from netaudio.dante.services.heartbeat import DanteHeartbeatService
+
+    device = make_device()
+    device.update_last_seen = MagicMock()
+    device.receiver_telemetry_capacity = TOPOLOGY["capacity"]
+    device.receiver_flow_completeness = "unknown"
+    device.receiver_flows = []
+    requested = []
+    service = DanteHeartbeatService(
+        device_by_ip=lambda _: device, monotonic_clock=lambda: 100.0, on_receiver_flows_needed=requested.append
+    )
+    service._on_packet(heartbeat_packet(latency_sequence=1), ("192.0.2.1", 1030))
+    assert requested == [device]
+    device.receiver_flow_completeness = "complete"
+    device.receiver_flows = TOPOLOGY["flows"]
+    service._on_packet(heartbeat_packet(latency_sequence=2), ("192.0.2.1", 1030))
+    assert requested == [device]
+    path = service.diagnostics_snapshot(device)["receiver"]["paths"][0]
+    assert path["attribution_status"] == "resolved"
+    assert path["evidence"]["source"] == "sender-a"
+
+
 def test_browser_renders_native_path_and_histogram_values(tmp_path):
     import json
     import subprocess

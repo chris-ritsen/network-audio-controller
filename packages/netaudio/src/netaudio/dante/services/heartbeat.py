@@ -77,6 +77,15 @@ def parse_connection_health_records(data: bytes) -> _requests.HeartbeatConnectio
         return None
 
 
+def receiver_topology(device) -> dict:
+    return {
+        "capacity": getattr(device, "receiver_telemetry_capacity", None),
+        "complete": getattr(device, "receiver_flow_completeness", None) == "complete",
+        "flows": getattr(device, "receiver_flows", None) or [],
+        "inventory_family": getattr(device, "receiver_flow_inventory_family", None),
+    }
+
+
 def receiver_without_history(receiver: dict) -> dict:
     paths = []
     for path in receiver.get("paths", []):
@@ -97,6 +106,7 @@ class DanteHeartbeatService(DanteMulticastService):
         interface_name=None,
         on_signal_presence=None,
         on_device_updated=None,
+        on_receiver_flows_needed=None,
         monotonic_clock=None,
         wall_clock=None,
         connection_health_freshness_seconds=CONNECTION_HEALTH_FRESHNESS_SECONDS,
@@ -111,6 +121,7 @@ class DanteHeartbeatService(DanteMulticastService):
         self._mark_offline = mark_offline
         self._on_signal_presence = on_signal_presence
         self._on_device_updated = on_device_updated
+        self._on_receiver_flows_needed = on_receiver_flows_needed
         self._monotonic_clock = monotonic_clock or time.monotonic
         self._wall_clock = wall_clock or time.time
         self._previous_interface_traffic_sequences: dict[str, int] = {}
@@ -184,16 +195,16 @@ class DanteHeartbeatService(DanteMulticastService):
 
             connection_health_records = parse_connection_health_records(data)
             if connection_health_records:
+                if (
+                    self._on_receiver_flows_needed is not None
+                    and getattr(device, "receiver_flow_completeness", None) != "complete"
+                ):
+                    self._on_receiver_flows_needed(device)
                 state = self._connection_health.update(
                     connection_health_records,
                     self._observation_timestamp(observed_wall_time),
                     observed_monotonic,
-                    topology={
-                        "inventory_family": getattr(device, "receiver_flow_inventory_family", None),
-                        "capacity": getattr(device, "receiver_telemetry_capacity", None),
-                        "complete": getattr(device, "receiver_flow_completeness", None) == "complete",
-                        "flows": getattr(device, "receiver_flows", None) or [],
-                    },
+                    topology=receiver_topology(device),
                 )
                 if state is not None:
                     device.receiver_flow_connection_health = state

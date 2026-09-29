@@ -431,28 +431,47 @@ class DanteStateService:
             except (RuntimeError, OSError) as exception:
                 logger.warning(f"Error re-fetching receiver channels for {server_name}: {exception}")
                 return
-            try:
-                flow_inventory = None
-                if self._readback_allowed(device, "receiver flows"):
-                    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
-                    if flow_inventory is None:
-                        self._readback_failed(device, "receiver flows")
-                        logger.warning(f"Receiver flow inventory unavailable for {server_name}")
-                if flow_inventory is not None:
-                    flow_records = flow_inventory.get("flows")
-                    if isinstance(flow_records, list):
-                        device.apply_receiver_flow_status_page(flow_inventory)
-                        if device.receiver_flow_completeness == "complete":
-                            self._readback_succeeded(device, "receiver flows")
-                        else:
-                            self._readback_failed(device, "receiver flows")
+            await self._refresh_receiver_flow_inventory(device)
+        self._emit_device_updated(device)
+
+    async def ensure_receiver_flow_inventory(self, device) -> None:
+        if (
+            device.receiver_flow_completeness == "complete"
+            or not device.online
+            or not self._has_control_path(device)
+            or not self._readback_allowed(device, "receiver flows")
+        ):
+            return
+        async with self._lock_for(device.server_name):
+            if device.receiver_flow_completeness == "complete":
+                return
+            logger.info(f"Fetching receiver flows for {device.server_name} (latency telemetry arrived)")
+            await self._refresh_receiver_flow_inventory(device)
+        self._emit_device_updated(device)
+
+    async def _refresh_receiver_flow_inventory(self, device) -> None:
+        server_name = device.server_name
+        try:
+            flow_inventory = None
+            if self._readback_allowed(device, "receiver flows"):
+                flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
+                if flow_inventory is None:
+                    self._readback_failed(device, "receiver flows")
+                    logger.warning(f"Receiver flow inventory unavailable for {server_name}")
+            if flow_inventory is not None:
+                flow_records = flow_inventory.get("flows")
+                if isinstance(flow_records, list):
+                    device.apply_receiver_flow_status_page(flow_inventory)
+                    if device.receiver_flow_completeness == "complete":
+                        self._readback_succeeded(device, "receiver flows")
                     else:
                         self._readback_failed(device, "receiver flows")
-                        logger.warning(f"Malformed receiver flow inventory for {server_name}")
-            except (RuntimeError, OSError) as exception:
-                self._readback_failed(device, "receiver flows")
-                logger.warning(f"Error re-fetching receiver flow inventory for {server_name}: {exception}")
-        self._emit_device_updated(device)
+                else:
+                    self._readback_failed(device, "receiver flows")
+                    logger.warning(f"Malformed receiver flow inventory for {server_name}")
+        except (RuntimeError, OSError) as exception:
+            self._readback_failed(device, "receiver flows")
+            logger.warning(f"Error re-fetching receiver flow inventory for {server_name}: {exception}")
 
     async def _on_clocking_status(self, event: DanteEvent) -> None:
         device = self._online_device(event.server_name)
