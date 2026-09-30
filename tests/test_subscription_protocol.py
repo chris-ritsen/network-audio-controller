@@ -51,7 +51,7 @@ class TestSubscriptionCorrelation:
         assert resp_row["correlated_packet_id"] == req_id
         store.close()
 
-    def test_multicast_temporally_correlated_to_request(self, load_sub_fixture, tmp_path):
+    def test_nearby_unmapped_status_is_not_correlated_to_a_request(self, load_sub_fixture, tmp_path):
         from netaudio.dante.packet_store import PacketStore
 
         store = PacketStore(db_path=str(tmp_path / "test.sqlite"))
@@ -81,5 +81,6 @@ class TestSubscriptionCorrelation:
         )
 
         mc_row = store.get_packet(mc_id)
-        assert mc_row["correlated_packet_id"] is not None
+        assert mc_row["correlated_packet_id"] is None
+        assert store.get_status_request_candidates(mc_id) == []
         store.close()
