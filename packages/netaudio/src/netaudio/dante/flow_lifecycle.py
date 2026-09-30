@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 from typing import Any
 
 from netaudio import core
 from netaudio.core import _requests, _types
 from netaudio.dante import flows
+from netaudio.dante.const import PROTOCOL_ARC_2809
 from netaudio.dante.performance_configuration import observed_performance_configuration
 from netaudio.dante.flow_preconditions import refresh_flow_state
 from netaudio.dante.arc_protocol import (
@@ -19,6 +21,7 @@ from netaudio.dante.transmit_flow import (
     FlowOperationResult,
 )
 
+logger = logging.getLogger("netaudio")
 
 VERIFICATION_TIMEOUT_SECONDS = 5.0
 VERIFICATION_POLL_INTERVAL_SECONDS = 0.25
@@ -225,19 +228,27 @@ async def _read_inventory(device, protocol_id: int) -> dict | None:
 async def _fresh_authoring_protocol(device) -> tuple[int, int] | None:
     protocol_id = _protocol_id(device)
     if protocol_id is None:
+        logger.warning(f"{device.name}: no advertised ARC protocol for a fresh flow-authoring read")
         return None
+    query = {"command": "channel_count"}
+    if protocol_id == PROTOCOL_ARC_2809:
+        query["protocol_id"] = protocol_id
     try:
-        response = await device.execute({"command": "channel_count", "protocol_id": protocol_id})
-    except (OSError, RuntimeError, TimeoutError, core.NetaudioCoreError):
+        response = await device.execute(query)
+    except (OSError, RuntimeError, TimeoutError, core.NetaudioCoreError) as exception:
+        logger.warning(f"{device.name}: fresh flow-authoring read failed: {exception!r}")
         return None
     if not response:
+        logger.warning(f"{device.name}: fresh flow-authoring read returned no response")
         return None
     try:
         channel_count = core.parse_response("channel_count", response)
-    except core.NetaudioCoreError:
+    except core.NetaudioCoreError as exception:
+        logger.warning(f"{device.name}: fresh flow-authoring response did not parse: {exception}")
         return None
     capability_word = channel_count.get("transmit_flow_authoring_capability_word")
     if isinstance(capability_word, bool) or not isinstance(capability_word, int):
+        logger.warning(f"{device.name}: fresh channel-count response has no flow-authoring capability word")
         return None
     capabilities = core.flow_authoring_capabilities(capability_word)
     device.transmit_flow_authoring_capability_word = capability_word
