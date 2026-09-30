@@ -415,15 +415,8 @@ pub fn parse_rx_page(response: &[u8], starting_channel: u16) -> Option<Vec<RxCha
             minimum_pointer,
         )?);
         let tx_device_name = optional_pointed_string(response, tx_device_pointer, minimum_pointer)?;
-        let tx_channel_name = if tx_channel_pointer != 0 {
-            Some(pointed_string(
-                response,
-                tx_channel_pointer,
-                minimum_pointer,
-            )?)
-        } else {
-            rx_channel_name.clone()
-        };
+        let tx_channel_name =
+            optional_pointed_string(response, tx_channel_pointer, minimum_pointer)?;
 
         let receiver_flags = u16_at(record, RX_RECORD_FLAGS);
         let subscription_status_code = u16_at(record, RX_RECORD_SUBSCRIPTION_STATUS);
@@ -868,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn rx_parser_unsubscribed_falls_back_to_rx_name() {
+    fn rx_parser_unsubscribed_has_no_source() {
         let mut response = vec![0u8; RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE + RX_RECORD_SIZE];
         let strings_base = response.len() as u16;
         response.extend_from_slice(b"unused-1\x00");
@@ -887,7 +880,8 @@ mod tests {
         let channels = parse_rx_page(&response, 1).unwrap();
         assert_eq!(channels[0].receiver_flags, 0x0006);
         assert!(!channels[0].can_subscribe_self);
-        assert_eq!(channels[0].tx_channel_name.as_deref(), Some("unused-1"));
+        assert_eq!(channels[0].rx_channel_name.as_deref(), Some("unused-1"));
+        assert_eq!(channels[0].tx_channel_name, None);
         assert_eq!(channels[0].tx_device_name, None);
     }
 
