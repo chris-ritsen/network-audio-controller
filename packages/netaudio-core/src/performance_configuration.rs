@@ -188,7 +188,7 @@ pub struct PerformanceFacts {
 #[derive(Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PerformanceCapabilities {
-    platform_software_version: Option<[u16; 3]>,
+    platform_software_version: Option<Vec<u16>>,
     supported_property_ids: Option<Vec<u16>>,
     operations: BTreeMap<&'static str, PerformanceAvailability>,
 }
@@ -350,21 +350,23 @@ impl Operation {
     }
 }
 
-fn software_version(value: &str) -> Option<[u16; 3]> {
-    let mut parts = value.split('.');
-    let mut version = [0; 3];
+fn software_version(value: &str) -> Option<Vec<u16>> {
+    let components = value
+        .split('.')
+        .map(|part| {
+            if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
 
-    for component in &mut version {
-        let part = parts.next()?;
+            part.parse().ok()
+        })
+        .collect::<Option<Vec<u16>>>()?;
 
-        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
-        }
+    matches!(components.len(), 3 | 4).then_some(components)
+}
 
-        *component = part.parse().ok()?;
-    }
-
-    parts.next().is_none().then_some(version)
+fn compatibility_version(components: &[u16]) -> [u16; 3] {
+    [components[0], components[1], components[2]]
 }
 
 pub fn capabilities(facts: PerformanceFacts) -> Result<PerformanceCapabilities, NetaudioError> {
@@ -372,6 +374,7 @@ pub fn capabilities(facts: PerformanceFacts) -> Result<PerformanceCapabilities, 
         .platform_software_version
         .as_deref()
         .and_then(software_version);
+    let compatibility = version.as_deref().map(compatibility_version);
     let supported_property_ids = facts.property_ids.map(|values| known_property_ids(&values));
     let supported = supported_property_ids.as_deref().unwrap_or_default();
     let mut transport_reasons = Vec::new();
@@ -401,11 +404,11 @@ pub fn capabilities(facts: PerformanceFacts) -> Result<PerformanceCapabilities, 
         if supported_property_ids.is_none() {
             reasons.push("property_directory_unknown");
         } else if operation
-            .properties(supported, version.unwrap_or([3, 0, 0]))
+            .properties(supported, compatibility.unwrap_or([3, 0, 0]))
             .is_err()
         {
             if operation.needs_version()
-                && version.is_some_and(|version| version < [3, 0, 0])
+                && compatibility.is_some_and(|version| version < [3, 0, 0])
                 && !supported.contains(&PROPERTY_PRE_3_COMPATIBILITY)
             {
                 reasons.push("compatibility_property_not_advertised");

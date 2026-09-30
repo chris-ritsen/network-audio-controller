@@ -59,7 +59,7 @@ def _platform_software_version(device) -> tuple[int, int, int]:
     version = _performance_capabilities(device)["platform_software_version"]
 
     if version is None:
-        raise RuntimeError("platform software version is unavailable or is not an x.y.z version")
+        raise RuntimeError("platform software version is unavailable or is not an x.y.z or x.y.z.b version")
 
     return version[0], version[1], version[2]
 

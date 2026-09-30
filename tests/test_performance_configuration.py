@@ -394,7 +394,7 @@ def test_latency_overflow_and_software_version_are_rejected_before_writes():
     with pytest.raises(core.NetaudioCoreError):
         set_transmit_flow_performance(device, 0xFFFFFFFF // 1_000 + 1, 1).send(None)
 
-    device.platform_software_version = "3.0.0.1"
+    device.platform_software_version = "3.0.x"
     with pytest.raises(RuntimeError, match="x.y.z"):
         set_receive_flow_performance(device, 1, 1).send(None)
 
