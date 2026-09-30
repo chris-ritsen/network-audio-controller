@@ -1076,7 +1076,10 @@ class DaemonDeviceHandlers:
             await self._send_json(
                 writer,
                 {
-                    "error": "encoding change was not applied",
+                    "error": (
+                        f"encoding change was not confirmed within {self.audio_capability_verification_timeout:g} "
+                        f"seconds; the device last reported {result['current_value']}-bit"
+                    ),
                     "observed": result["current_value"],
                     "supported": status["available_values"],
                 },
