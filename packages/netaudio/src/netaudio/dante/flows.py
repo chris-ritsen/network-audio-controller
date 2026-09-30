@@ -419,13 +419,23 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
     application = device.application
     inventory_family = getattr(device, "receiver_flow_inventory_family", None)
 
+    if inventory_family == "unsupported":
+        return None
+
     if inventory_family is None:
         protocol_id = flow_inventory_protocol_identifier_for_device(device)
         if protocol_id is None:
             return None
 
-        with core.ReceiverFlowInventory(protocol_id) as inventory:
-            command = inventory.state()["next_command"]
+        try:
+            with core.ReceiverFlowInventory(protocol_id) as inventory:
+                command = inventory.state()["next_command"]
+        except core.NetaudioCoreError as exception:
+            if "unsupported flow inventory protocol" not in str(exception):
+                raise
+            device.receiver_flow_inventory_family = "unsupported"
+            logger.info(f"{device.name}: receiver flow inventory is not supported for protocol {protocol_id:#06x}")
+            return None
 
         if command is None:
             return None

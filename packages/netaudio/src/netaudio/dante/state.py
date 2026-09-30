@@ -437,6 +437,7 @@ class DanteStateService:
     async def ensure_receiver_flow_inventory(self, device) -> None:
         if (
             device.receiver_flow_completeness == "complete"
+            or getattr(device, "receiver_flow_inventory_family", None) == "unsupported"
             or not device.online
             or not self._has_control_path(device)
             or not self._readback_allowed(device, "receiver flows")
@@ -455,7 +456,7 @@ class DanteStateService:
             flow_inventory = None
             if self._readback_allowed(device, "receiver flows"):
                 flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
-                if flow_inventory is None:
+                if flow_inventory is None and getattr(device, "receiver_flow_inventory_family", None) != "unsupported":
                     self._readback_failed(device, "receiver flows")
                     logger.warning(f"Receiver flow inventory unavailable for {server_name}")
             if flow_inventory is not None:
