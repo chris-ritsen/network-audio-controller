@@ -6,6 +6,10 @@ use crate::commands::{GAIN_INPUT_DIRECTION, GAIN_LEVELS, GAIN_OUTPUT_DIRECTION};
 #[serde(deny_unknown_fields)]
 pub struct AnalogAccess {
     pub managed: bool,
+    #[serde(default)]
+    pub managed_context_available: bool,
+    #[serde(default)]
+    pub managed_write_permitted: Option<bool>,
     pub address_available: bool,
     pub online: Option<bool>,
     pub supported: Option<bool>,
@@ -16,13 +20,29 @@ pub struct AnalogAccess {
 impl AnalogAccess {
     pub fn denial(&self) -> Option<&'static str> {
         if self.managed {
-            Some("Managed analog-control transport is unavailable.")
+            self.managed_denial()
         } else if !self.address_available || self.online == Some(false) {
             Some("Device is unavailable.")
         } else if self.supported != Some(true) {
             Some("Codec-control support is unavailable.")
         } else if self.write && self.locked != Some(false) {
             Some("Device is locked or its lock state is unknown.")
+        } else {
+            None
+        }
+    }
+
+    fn managed_denial(&self) -> Option<&'static str> {
+        if !self.managed_context_available {
+            Some("Managed device context is unavailable.")
+        } else if self.online == Some(false) {
+            Some("Device is unavailable.")
+        } else if self.supported == Some(false) {
+            Some("Codec-control support is unavailable.")
+        } else if self.write && self.managed_write_permitted != Some(true) {
+            Some("Managed codec-control write permission is unavailable.")
+        } else if self.write && self.locked == Some(true) {
+            Some("Device is locked.")
         } else {
             None
         }

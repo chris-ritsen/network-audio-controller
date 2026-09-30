@@ -93,7 +93,7 @@ def test_native_analog_plan_does_not_guess_missing_or_restricted_capabilities():
     [
         ({}, False, None),
         ({}, True, None),
-        ({"managed": True}, False, "Managed analog-control transport is unavailable."),
+        ({"managed": True}, False, "Managed device context is unavailable."),
         ({"address_available": False}, False, "Device is unavailable."),
         ({"online": False}, True, "Device is unavailable."),
         ({"supported": None}, False, "Codec-control support is unavailable."),

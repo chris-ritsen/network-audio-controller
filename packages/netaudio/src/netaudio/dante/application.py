@@ -1567,7 +1567,7 @@ class DanteApplication:
         from netaudio.dante.analog_control import permission
         from netaudio.dante.panel_state import panel_snapshot
 
-        if device.generic_codec_control_supported is True and permission(device, write=False) is None:
+        if permission(device, write=False) is None:
             status = await self.probe_codec_status(device, timeout=timeout)
             self._apply_codec_status(device, status)
         result = await self.panels.inspect(device, timeout=timeout) if panel_family(device) else panel_snapshot(device)
@@ -1577,6 +1577,8 @@ class DanteApplication:
             "direction": device.gain_device_type,
             "choices": device.gain_level_choices,
             "observed_at_unix": device.codec_observed_at,
+            "read_unavailable_reason": permission(device, write=False),
+            "write_unavailable_reason": permission(device, write=True),
         }
         return result
 

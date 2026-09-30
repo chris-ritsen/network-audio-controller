@@ -8,10 +8,23 @@ from copy import deepcopy
 from netaudio import core
 
 
+def _managed_context_available(device) -> bool:
+    return all(
+        getattr(device, name, None) is not None for name in ("ddm_device_id", "ddm_server_profile", "ddm_context")
+    )
+
+
+def _managed_write_permitted(device) -> bool | None:
+    permissions = getattr(device, "managed_operation_permissions", None)
+    return permissions.get("codec_control") if isinstance(permissions, dict) else None
+
+
 def permission(device, *, write):
     return core.analog_access(
         {
             "managed": bool(device.requires_managed_control),
+            "managed_context_available": _managed_context_available(device),
+            "managed_write_permitted": _managed_write_permitted(device),
             "address_available": bool(device.ipv4),
             "online": getattr(device, "online", None),
             "supported": device.generic_codec_control_supported,
@@ -79,6 +92,12 @@ async def apply_analog(application, device, channel, level, direction=None, time
 
         if reason:
             return {**result, "reason": reason}
+
+        if device.requires_managed_control:
+            try:
+                application.managed_transport(device)
+            except RuntimeError as exception:
+                return {**result, "reason": f"Managed device context changed: {exception}"}
 
         await application.send_set_gain_level(device, channel, level, plan["direction"])
         result["request_sent"] = True

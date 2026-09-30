@@ -10,6 +10,8 @@ class AnalogAccess(_extensions.TypedDict):
     address_available: bool
     locked: _extensions.NotRequired[_typing.Union[bool, None]]
     managed: bool
+    managed_context_available: _extensions.NotRequired[bool]
+    managed_write_permitted: _extensions.NotRequired[_typing.Union[bool, None]]
     online: _extensions.NotRequired[_typing.Union[bool, None]]
     supported: _extensions.NotRequired[_typing.Union[bool, None]]
     write: bool
