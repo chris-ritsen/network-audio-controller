@@ -18,7 +18,8 @@ def device(family="bluetooth"):
     app, d = application_with_device("controls.local.", "192.0.2.5")
     d.platform_versions_record = {
         "platform_model_identifier": "DIOBT" if family == "bluetooth" else "DanteAV",
-        "plugin_identifiers": ["DIOBT" if family == "bluetooth" else "DanteAV"],
+        "platform_model_identifier_hexadecimal": "44494f4254000000" if family == "bluetooth" else "44616e7465415600",
+        "plugin_identifiers": ["417564696E617465-0003" if family == "bluetooth" else "DanteAV"],
     }
     d.virtual_panel_supported = True
     d.video_transmission_supported = family == "dante_av"

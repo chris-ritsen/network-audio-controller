@@ -3,7 +3,7 @@ mod models;
 pub mod planning;
 pub mod presentation;
 mod profile;
-pub use profile::{profile, PanelFamily, PanelProfile, PanelProfileRequest};
+pub use profile::{profile, PanelFamily, PanelProfile, PanelProfileRequest, PanelSelection};
 mod protobuf;
 use crate::bytes::{read_u16, read_u32};
 use crate::protocol::{validate_conmon_envelope, ConmonHeader, NetaudioError};

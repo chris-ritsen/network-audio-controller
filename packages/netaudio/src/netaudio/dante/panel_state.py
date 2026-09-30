@@ -20,6 +20,7 @@ def panel_facts(device) -> _requests.PanelProfileRequest:
     versions = getattr(device, "platform_versions_record", None) or {}
     return {
         "plugins": versions.get("plugin_identifiers") or [],
+        "platform_model_identifier_hexadecimal": versions.get("platform_model_identifier_hexadecimal"),
         "managed": bool(getattr(device, "requires_managed_control", False)),
         "address_available": bool(getattr(device, "ipv4", None)),
         "online": getattr(device, "online", None),
@@ -98,6 +99,9 @@ def panel_snapshot(device):
     profile = panel_profile(device)
     state = deepcopy(getattr(device, "device_controls", {}))
     state["family"] = profile["family"]
+    state["selection"] = profile["selection"]
+    state["unrecognized_panels"] = profile["unrecognized_panels"]
+    state["read_unavailable_reason"] = profile["read_unavailable_reason"]
     for observation in state.get("observations", {}).values():
         observation["fresh"] = fresh(device, observation)
     state["readable"] = profile["read_unavailable_reason"] is None

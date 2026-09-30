@@ -804,7 +804,8 @@ class PanelProfileRequest(_extensions.TypedDict):
     locked: _extensions.NotRequired[_typing.Union[bool, None]]
     managed: bool
     online: _extensions.NotRequired[_typing.Union[bool, None]]
-    plugins: list[str]
+    platform_model_identifier_hexadecimal: _extensions.NotRequired[_typing.Union[str, None]]
+    plugins: list[_typing.Union[str, None]]
     read_allowed: bool
     video_transmission_supported: bool
     virtual_panel_supported: bool

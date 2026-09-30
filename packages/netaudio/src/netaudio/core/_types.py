@@ -940,10 +940,15 @@ class PanelQuery(_extensions.TypedDict):
     request: PanelRequest
 
 
+PanelSelection = _typing.Literal["advertised", "platform_default"]
+
+
 class PanelProfile(_extensions.TypedDict):
     family: _typing.Union[PanelFamily, None]
     queries: list[PanelQuery]
     read_unavailable_reason: _typing.Union[str, None]
+    selection: _typing.Union[PanelSelection, None]
+    unrecognized_panels: list[_typing.Union[str, None]]
     write_unavailable_reason: _typing.Union[str, None]
 
 
