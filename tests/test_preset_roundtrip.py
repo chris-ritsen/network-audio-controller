@@ -390,7 +390,7 @@ def _planning_device():
         transmit_flow_authoring_capability_word=0,
         transmit_flow_authoring=core.flow_authoring_capabilities(0)["transmit_flow_authoring"],
         receiver_flow_inventory_family="legacy",
-        routing_capacity_transmit_channel_count=32,
+        maximum_transmit_flow_channel_slots=32,
         transmitter_flows=[],
         tx_channels=channels,
         rx_channels=channels,

@@ -147,7 +147,7 @@ def device(protocol_id=0x2729, *, managed=False, locked=False, capability_word=N
         if specification["command"] == "query_receiver_flows":
             return bytes.fromhex("2729000e00003200000101000000")
         assert specification["command"] == "channel_count"
-        response = bytearray(16)
+        response = bytearray(22)
         response[0:2] = protocol_id.to_bytes(2, "big")
         response[2:4] = len(response).to_bytes(2, "big")
         response[6:8] = (0x1000).to_bytes(2, "big")
@@ -155,6 +155,8 @@ def device(protocol_id=0x2729, *, managed=False, locked=False, capability_word=N
         response[10:12] = capability_word.to_bytes(2, "big")
         response[12:14] = (2).to_bytes(2, "big")
         response[14:16] = (2).to_bytes(2, "big")
+        response[18:20] = (32).to_bytes(2, "big")
+        response[20:22] = (32).to_bytes(2, "big")
         return bytes(response)
 
     return SimpleNamespace(
@@ -166,7 +168,7 @@ def device(protocol_id=0x2729, *, managed=False, locked=False, capability_word=N
                 },
             }
         },
-        routing_capacity_transmit_channel_count=32,
+        maximum_transmit_flow_channel_slots=32,
         aes67_current=True,
         aes67_configuration_supported=True,
         switch_redundancy_supported=True,
@@ -681,7 +683,7 @@ def test_planner_rejects_unsupported_fields_and_unproven_cohorts():
 def test_planner_rejects_channel_slots_beyond_advertised_audio_transmit_capacity():
     target = device(protocol_id=0x2809)
     target.tx_channels[3] = object()
-    target.routing_capacity_transmit_channel_count = 2
+    target.maximum_transmit_flow_channel_slots = 2
     requested = specification(
         channel_slots=(
             dict(slot=1, transmitter_channel=1),
@@ -695,7 +697,7 @@ def test_planner_rejects_channel_slots_beyond_advertised_audio_transmit_capacity
     plan = flow_lifecycle.plan_create_transmit_flow(target, requested)
 
     assert not plan.supported
-    assert "advertised audio transmit capacity of 2" in "; ".join(plan.reasons)
+    assert "maximum of 2 channel slots per transmit flow" in "; ".join(plan.reasons)
 
 
 @pytest.mark.asyncio

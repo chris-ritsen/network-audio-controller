@@ -554,11 +554,11 @@ class FlowDeviceFacts(_extensions.TypedDict):
     advertised_protocol: _extensions.NotRequired[_typing.Union[int, None]]
     capabilities: dict[str, JsonValue]
     capability_word: _extensions.NotRequired[JsonValue]
-    channel_capacity: _extensions.NotRequired[JsonValue]
     channels: _extensions.NotRequired[_typing.Union[list[int], None]]
     encoding: _extensions.NotRequired[_typing.Union[int, None]]
     locked: _extensions.NotRequired[_typing.Union[bool, None]]
     managed: bool
+    maximum_flow_channel_slots: _extensions.NotRequired[JsonValue]
     protocol_version: _extensions.NotRequired[_typing.Union[str, None]]
     sample_rate: _extensions.NotRequired[_typing.Union[int, None]]
 

@@ -101,6 +101,10 @@ pub struct ChannelCount {
     pub uses_modern_transmit_flow_authoring: bool,
     pub tx_count: u16,
     pub rx_count: u16,
+    pub maximum_transmit_flow_channel_slots: Option<u16>,
+    pub maximum_receive_flow_channel_slots: Option<u16>,
+    pub maximum_transmit_flows: Option<u16>,
+    pub maximum_receive_flows: Option<u16>,
     pub locked: Option<bool>,
 }
 
@@ -288,6 +292,10 @@ pub fn parse_channel_count(response: &[u8]) -> Option<ChannelCount> {
             == "segmented",
         tx_count: read_u16(response, CHANNEL_COUNT_TX_OFFSET)?,
         rx_count: read_u16(response, CHANNEL_COUNT_RX_OFFSET)?,
+        maximum_transmit_flow_channel_slots: read_u16(response, 0x12),
+        maximum_receive_flow_channel_slots: read_u16(response, 0x14),
+        maximum_transmit_flows: field(0x2600, 0x16),
+        maximum_receive_flows: field(0x2600, 0x18),
         locked: None,
     })
 }

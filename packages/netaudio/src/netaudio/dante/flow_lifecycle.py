@@ -8,6 +8,7 @@ from typing import Any
 from netaudio import core
 from netaudio.core import _requests, _types
 from netaudio.dante import flows
+from netaudio.dante.channel_capability import apply_channel_capability
 from netaudio.dante.const import PROTOCOL_ARC_2809
 from netaudio.dante.performance_configuration import observed_performance_configuration
 from netaudio.dante.flow_preconditions import refresh_flow_state
@@ -65,7 +66,7 @@ def _flow_device_facts(device, required_capabilities=()) -> _requests.FlowDevice
         "sample_rate": getattr(device, "sample_rate", None),
         "encoding": getattr(device, "encoding", None),
         "channels": [int(number) for number in channels] if isinstance(channels, dict) else None,
-        "channel_capacity": getattr(device, "routing_capacity_transmit_channel_count", None),
+        "maximum_flow_channel_slots": getattr(device, "maximum_transmit_flow_channel_slots", None),
         "capabilities": {
             **{name: getattr(device, name, None) for name in required_capabilities},
             "aes67_configuration_supported": getattr(device, "aes67_configuration_supported", None),
@@ -252,6 +253,7 @@ async def _fresh_authoring_protocol(device) -> tuple[int, int] | None:
         return None
     capabilities = core.flow_authoring_capabilities(capability_word)
     device.transmit_flow_authoring_capability_word = capability_word
+    apply_channel_capability(device, channel_count)
 
     for name, value in capabilities.items():
         setattr(device, name, value)
@@ -462,6 +464,7 @@ async def create_transmit_flow(device, specification: _requests.TransmitFlowSpec
 
     observations: list[dict[str, Any]] = []
     planned_capability = getattr(device, "transmit_flow_authoring_capability_word", None)
+    planned_slot_capacity = getattr(device, "maximum_transmit_flow_channel_slots", None)
     async with device.topology_mutation_lock:
         reason = await refresh_flow_state(device, rtp=specification.get("media_mode") == "rtp_aes67")
         if reason is not None:
@@ -486,7 +489,12 @@ async def create_transmit_flow(device, specification: _requests.TransmitFlowSpec
                 ],
             )
         fresh_authoring = await _fresh_authoring_protocol(device)
-        if fresh_authoring is None or fresh_authoring != (planned_capability, protocol_id):
+        fresh_slot_capacity = getattr(device, "maximum_transmit_flow_channel_slots", None)
+        if (
+            fresh_authoring is None
+            or fresh_authoring != (planned_capability, protocol_id)
+            or fresh_slot_capacity != planned_slot_capacity
+        ):
             return _operation_result(
                 operation="create",
                 state=FlowLifecycleState.PENDING,
@@ -500,6 +508,9 @@ async def create_transmit_flow(device, specification: _requests.TransmitFlowSpec
                     "fresh transmit-flow authoring capability was unavailable; no request was sent"
                     if fresh_authoring is None
                     else "fresh transmit-flow authoring capability selected a different protocol; no request was sent"
+                    if fresh_authoring != (planned_capability, protocol_id)
+                    else "the device's fresh maximum channel slots per transmit flow differs from the plan; "
+                    "no request was sent"
                 ),
                 observations=[
                     _observation(
@@ -511,6 +522,8 @@ async def create_transmit_flow(device, specification: _requests.TransmitFlowSpec
                             "planned_protocol_id": protocol_id,
                             "fresh_capability_word": fresh_authoring[0] if fresh_authoring else None,
                             "fresh_protocol_id": fresh_authoring[1] if fresh_authoring else None,
+                            "planned_maximum_flow_channel_slots": planned_slot_capacity,
+                            "fresh_maximum_flow_channel_slots": fresh_slot_capacity,
                         },
                     )
                 ],

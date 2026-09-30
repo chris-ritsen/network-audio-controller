@@ -8,6 +8,7 @@ from copy import deepcopy
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.arc_protocol import ArcProtocolError, arc_protocol_for_device
 from netaudio.dante.channel import DanteChannel, channels_by_number
+from netaudio.dante.channel_capability import CHANNEL_CAPABILITY_FIELDS, channel_capability_fields
 from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
 from netaudio.dante.core_transport import (
     DEFAULT_REQUEST_ATTEMPTS,
@@ -134,6 +135,11 @@ class DanteDevice:
         self.flow_protocol_id: int | None = None
         self.transmit_flow_authoring_capability_word: int | None = None
         self.transmit_flow_authoring: dict | None = None
+        self.maximum_transmit_flow_channel_slots: int | None = None
+        self.maximum_receive_flow_channel_slots: int | None = None
+        self.maximum_transmit_flows: int | None = None
+        self.maximum_receive_flows: int | None = None
+        self.channel_capability_observed_at: str | None = None
         self.receiver_flow_inventory_family: str | None = None
         self.media_types: list[str] | None = None
         self.receiver_channel_name_protocol_identifier: int | None = None
@@ -762,6 +768,7 @@ class DanteDevice:
         locked = counts["locked"]
         transmit_flow_authoring_capability_word = counts["transmit_flow_authoring_capability_word"]
         controls["receiver_telemetry_capacity"] = counts["receiver_telemetry_capacity"]
+        controls.update(channel_capability_fields(counts))
         controls["tx_count"] = tx_count
         controls["rx_count"] = rx_count
         controls["transmit_flow_authoring_capability_word"] = transmit_flow_authoring_capability_word
@@ -851,6 +858,9 @@ class DanteDevice:
             self.receiver_telemetry_capacity = data["receiver_telemetry_capacity"]
         if "transmit_flow_authoring_capability_word" in data:
             self.transmit_flow_authoring_capability_word = data["transmit_flow_authoring_capability_word"]
+        for name in CHANNEL_CAPABILITY_FIELDS:
+            if name in data:
+                setattr(self, name, data[name])
         if "transmit_flow_authoring" in data:
             self.transmit_flow_authoring = data["transmit_flow_authoring"]
         if "receiver_flow_inventory_family" in data:

@@ -48,7 +48,7 @@ def server():
     device.encoding = 24
     device.settings_properties = [{"property_id": 0x210}, {"property_id": 0x8204}]
     device.performance_settings = {0x210: 48, 0x8204: 1000000}
-    device.routing_capacity_transmit_channel_count = 32
+    device.maximum_transmit_flow_channel_slots = 32
     device.services = {"arc": {"type": "_netaudio-arc._udp.local.", "properties": {"arcp_vers": "2.7.41"}}}
     return make_http_server({"dev1": device})
 

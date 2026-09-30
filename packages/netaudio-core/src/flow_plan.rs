@@ -26,7 +26,8 @@ pub struct FlowDeviceFacts {
     pub sample_rate: Option<u32>,
     pub encoding: Option<u16>,
     pub channels: Option<Vec<u16>>,
-    pub channel_capacity: Option<Value>,
+    #[serde(alias = "channel_capacity")]
+    pub maximum_flow_channel_slots: Option<Value>,
     pub capabilities: std::collections::BTreeMap<String, Value>,
 }
 
@@ -137,12 +138,16 @@ impl FlowDeviceFacts {
                 }
             }
         }
-        if let Some(capacity) = self.channel_capacity.as_ref().and_then(Value::as_u64) {
+        if let Some(capacity) = self
+            .maximum_flow_channel_slots
+            .as_ref()
+            .and_then(Value::as_u64)
+        {
             if request.channel_slots.len() as u64 > capacity {
-                reasons.push(format!("requested channel-slot count exceeds the advertised audio transmit capacity of {capacity}"));
+                reasons.push(format!("requested {} channel slots exceed the device's maximum of {capacity} channel slots per transmit flow", request.channel_slots.len()));
             }
         } else {
-            reasons.push("audio transmit channel capacity is unknown".into());
+            reasons.push("the device's maximum channel slots per transmit flow is unknown".into());
         }
         if self.sample_rate.is_none() || self.encoding.is_none() {
             reasons.push("current audio format is unknown".into());
