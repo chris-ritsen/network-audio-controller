@@ -155,6 +155,7 @@ async def test_receiver_flow_inventory_uses_the_controller_query(monkeypatch):
             "arc_port": 4440,
             "command_specification": {
                 "command": "query_receiver_flows",
+                "protocol_id": 0x2729,
                 "starting_flow": 1,
             },
             "timeout_ms": 1000,

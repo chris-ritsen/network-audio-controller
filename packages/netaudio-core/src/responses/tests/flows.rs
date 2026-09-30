@@ -153,7 +153,7 @@ fn receiver_flow_parser_decodes_shipping_controller_response() {
     assert_eq!(first.encoding, 24);
     assert_eq!(first.interface_count, 1);
     assert_eq!(first.flow_channel_slot_count, 2);
-    assert_eq!(first.receiver_bitmap_word_count, 8);
+    assert_eq!(first.receiver_bitmap_word_count, Some(8));
     assert_eq!(first.interface_endpoints.len(), 1);
     assert_eq!(first.interface_endpoints[0].descriptor_length_bytes, 8);
     assert_eq!(
@@ -176,10 +176,10 @@ fn receiver_flow_parser_decodes_shipping_controller_response() {
         first.receiver_channel_numbers_by_flow_channel,
         vec![vec![21], vec![22]]
     );
-    assert_eq!(first.subscription_status_code, 9);
-    assert_eq!(first.interface_state_bitmap, 1);
-    assert_eq!(first.status_flags, 0x0800);
-    assert_eq!(first.status_unknown, 0);
+    assert_eq!(first.subscription_status_code, Some(9));
+    assert_eq!(first.interface_state_bitmap, Some(1));
+    assert_eq!(first.status_flags, Some(0x0800));
+    assert_eq!(first.status_unknown, Some(0));
     assert_eq!(first.latency_nanoseconds, 1_000_000);
     assert_eq!(first.transport, 0);
     assert_eq!(first.external_identity_pointer, 0);
@@ -201,8 +201,8 @@ fn receiver_flow_parser_decodes_shipping_controller_response() {
         multicast.interface_endpoints[0].ipv4_address.as_deref(),
         Some("239.255.255.56")
     );
-    assert_eq!(multicast.subscription_status_code, 10);
-    assert_eq!(multicast.interface_state_bitmap, 0);
+    assert_eq!(multicast.subscription_status_code, Some(10));
+    assert_eq!(multicast.interface_state_bitmap, Some(0));
     assert_eq!(
         multicast.receiver_bitmaps_hexadecimal,
         vec![
@@ -233,7 +233,7 @@ fn receiver_flow_parser_uses_variable_bitmaps_and_semantic_pointer_order() {
     assert_eq!(flow.flow_number, 3);
     assert_eq!(flow.interface_count, 2);
     assert_eq!(flow.flow_channel_slot_count, 2);
-    assert_eq!(flow.receiver_bitmap_word_count, 2);
+    assert_eq!(flow.receiver_bitmap_word_count, Some(2));
     assert_eq!(flow.receiver_bitmaps_hexadecimal, ["00010001", "00040000"]);
     assert_eq!(
         flow.receiver_channel_numbers_by_flow_channel,
@@ -250,10 +250,10 @@ fn receiver_flow_parser_uses_variable_bitmaps_and_semantic_pointer_order() {
         flow.interface_endpoints[1].ipv4_address.as_deref(),
         Some("239.69.1.11")
     );
-    assert_eq!(flow.subscription_status_code, 9);
-    assert_eq!(flow.interface_state_bitmap, 3);
-    assert_eq!(flow.status_flags, 0x1234);
-    assert_eq!(flow.status_unknown, 0xABCD);
+    assert_eq!(flow.subscription_status_code, Some(9));
+    assert_eq!(flow.interface_state_bitmap, Some(3));
+    assert_eq!(flow.status_flags, Some(0x1234));
+    assert_eq!(flow.status_unknown, Some(0xABCD));
     assert_eq!(flow.latency_nanoseconds, 1_000_000);
     assert_eq!(flow.transport, 3);
     let identity = flow.external_identity.as_ref().unwrap();
@@ -263,7 +263,7 @@ fn receiver_flow_parser_uses_variable_bitmaps_and_semantic_pointer_order() {
     assert_eq!(identity.presence_mask, 0x000B);
     assert_eq!(identity.source_ipv4.as_deref(), Some("192.0.2.44"));
     assert_eq!(identity.session_id, Some(0x0102_0304_0506_0708));
-    assert_eq!(identity.unknown_optional_field_raw, 0x1122_3344_5566_7788);
+    assert_eq!(identity.unknown_optional_field_raw, None);
     assert_eq!(identity.clock_offset, Some(17));
     assert_eq!(flow.effective_subscription_identities.len(), 3);
     assert_eq!(
@@ -287,7 +287,10 @@ fn receiver_flow_parser_rejects_unsupported_form_and_bad_external_identity() {
 
     let mut short_identity = response;
     short_identity[86] = 0x0D;
-    assert_eq!(parse_receiver_flow_page(&short_identity), None);
+    let page = parse_receiver_flow_page(&short_identity).unwrap();
+    let identity = page.flows[0].external_identity.as_ref().unwrap();
+    assert_eq!(identity.clock_offset, None);
+    assert_eq!(identity.inconsistent_presence_mask, 0x0008);
 }
 
 #[test]
@@ -298,6 +301,7 @@ fn receiver_flow_parser_accepts_authentic_empty_virtual_a32_response() {
     assert_eq!(
         parse_receiver_flow_page(&response),
         Some(ReceiverFlowPage {
+            protocol_id: PROTOCOL_DANTE_FLOW,
             result_code: RESULT_CODE_SUCCESS,
             page_disposition: ModernArcPageDisposition::Complete,
             maximum_flow_slots: 16,
@@ -435,7 +439,7 @@ fn transmit_channel_capabilities_parse_controller_and_authentic_firmware_respons
 #[test]
 fn receiver_flow_parser_rejects_invalid_record_pointers() {
     let original = captured_receiver_flow_response();
-    for invalid_pointer in [0u16, 43, u16::MAX] {
+    for invalid_pointer in [43u16, u16::MAX] {
         let mut response = original.clone();
         response[12..14].copy_from_slice(&invalid_pointer.to_be_bytes());
         assert_eq!(parse_receiver_flow_page(&response), None);

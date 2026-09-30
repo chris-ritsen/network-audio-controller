@@ -561,9 +561,13 @@ pub fn build_set_receiver_channel_name_for_protocol(
 }
 
 pub fn build_query_receiver_flows(
+    protocol_id: u16,
     starting_flow: u16,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
+    if !crate::responses::FIXED_RECEIVER_FLOW_PROTOCOL_IDS.contains(&protocol_id) {
+        return Err(NetaudioError::InvalidFlowProtocol);
+    }
     if starting_flow == 0 {
         return Err(NetaudioError::InvalidFlowSlot);
     }
@@ -571,7 +575,7 @@ pub fn build_query_receiver_flows(
     body[1] = 0x01;
     body[2..4].copy_from_slice(&starting_flow.to_be_bytes());
     arc_packet_with_reserved_word(
-        PROTOCOL_DANTE_FLOW,
+        protocol_id,
         OPCODE_QUERY_RECEIVER_FLOWS,
         &body,
         transaction_id,

@@ -1,5 +1,5 @@
 use crate::channel_inventory::ChannelInventory;
-use crate::flow_inventory::{FlowDirection, FlowInventory};
+use crate::flow_inventory::{FlowDirection, FlowInventory, ReceiverFlowFamily};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -62,6 +62,16 @@ impl Inventory {
             }
             "rx_flows" => FlowInventory::new(FlowDirection::Receiver, protocol_id, maximum_pages)
                 .map(Self::Flows),
+            "fixed_rx_flows" => {
+                FlowInventory::new_receiver(ReceiverFlowFamily::Fixed, protocol_id, maximum_pages)
+                    .map(Self::Flows)
+            }
+            "segmented_rx_flows" => FlowInventory::new_receiver(
+                ReceiverFlowFamily::Segmented,
+                protocol_id,
+                maximum_pages,
+            )
+            .map(Self::Flows),
             _ => Err("invalid inventory kind"),
         }
     }

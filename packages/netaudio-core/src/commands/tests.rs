@@ -642,7 +642,7 @@ fn receiver_channel_name_2809_builder_matches_shipping_controller_requests() {
 
 #[test]
 fn query_receiver_flows_matches_shipping_controller_request() {
-    let packet = build_query_receiver_flows(1, 0x033A).unwrap();
+    let packet = build_query_receiver_flows(PROTOCOL_DANTE_FLOW, 1, 0x033A).unwrap();
     assert_eq!(
         packet,
         [
@@ -651,7 +651,7 @@ fn query_receiver_flows_matches_shipping_controller_request() {
         ]
     );
     assert_eq!(
-        build_query_receiver_flows(0, 0x033A),
+        build_query_receiver_flows(PROTOCOL_DANTE_FLOW, 0, 0x033A),
         Err(NetaudioError::InvalidFlowSlot)
     );
 }

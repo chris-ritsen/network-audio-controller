@@ -384,6 +384,7 @@ class FlowAuthoringProfile(_extensions.TypedDict):
 
 
 class FlowAuthoringCapabilities(_extensions.TypedDict):
+    receiver_flow_query_family: str
     transmit_flow_authoring: FlowAuthoringProfile
 
 

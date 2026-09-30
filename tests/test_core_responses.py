@@ -65,6 +65,10 @@ def test_channel_count_preserves_u16_counts():
         "uses_modern_transmit_flow_authoring": False,
         "tx_count": 260,
         "rx_count": 520,
+        "maximum_transmit_flow_channel_slots": None,
+        "maximum_receive_flow_channel_slots": None,
+        "maximum_transmit_flows": None,
+        "maximum_receive_flows": None,
         "locked": None,
     }
 
@@ -94,6 +98,7 @@ def test_authoring_capabilities_are_consistent_from_wire_to_device(word, family)
             "opcode": 0x2601 if segmented else 0x2201,
             "supports_flow_options": True,
         },
+        "receiver_flow_query_family": family,
     }
     assert core.flow_authoring_capabilities(word) == expected
     assert parsed["uses_modern_transmit_flow_authoring"] is segmented

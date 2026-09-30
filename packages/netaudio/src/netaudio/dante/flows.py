@@ -18,6 +18,7 @@ from netaudio.dante.arc_protocol import (
     flow_inventory_protocol_identifier_for_device,
 )
 from netaudio.dante.channel import channel_by_number
+from netaudio.dante.channel_capability import apply_channel_capability
 from netaudio.dante.flow_preconditions import refresh_flow_state
 
 logger = logging.getLogger("netaudio")
@@ -415,39 +416,55 @@ def effective_external_subscription_index(inventory: dict) -> dict[int, list[dic
     return index
 
 
-async def query_preferred_receiver_flow_inventory(device) -> dict | None:
-    application = device.application
-    inventory_family = getattr(device, "receiver_flow_inventory_family", None)
-
-    if inventory_family == "unsupported":
+def receiver_flow_query_family(device) -> str | None:
+    capability_word = getattr(device, "transmit_flow_authoring_capability_word", None)
+    if not isinstance(capability_word, bool) and isinstance(capability_word, int):
+        return core.flow_authoring_capabilities(capability_word)["receiver_flow_query_family"]
+    if not getattr(device, "requires_managed_control", False):
         return None
-
-    if inventory_family is None:
+    try:
         protocol_id = flow_inventory_protocol_identifier_for_device(device)
         if protocol_id is None:
             return None
+        core.ReceiverFlowInventory(protocol_id, family="segmented").close()
+    except (ArcProtocolError, core.NetaudioCoreError):
+        return None
+    return "segmented"
 
-        try:
-            with core.ReceiverFlowInventory(protocol_id) as inventory:
-                command = inventory.state()["next_command"]
-        except core.NetaudioCoreError as exception:
-            if "unsupported flow inventory protocol" not in str(exception):
-                raise
-            device.receiver_flow_inventory_family = "unsupported"
-            logger.info(f"{device.name}: receiver flow inventory is not supported for protocol {protocol_id:#06x}")
-            return None
 
-        if command is None:
-            return None
+def receiver_flow_inventory_family(device) -> str | None:
+    cached = getattr(device, "receiver_flow_inventory_family", None)
+    if cached in ("legacy", "modern"):
+        return cached
+    return {"fixed": "legacy", "segmented": "modern"}.get(receiver_flow_query_family(device))
 
-        command_name = command["command"]
-        if not isinstance(command_name, str):
-            return None
 
-        inventory_family = {
-            "query_modern_arc_receiver_flow_status": "modern",
-            "query_receiver_flows": "legacy",
-        }.get(command_name)
+async def _read_channel_capability(device) -> None:
+    execute = getattr(device, "execute", None)
+    if not callable(execute) or getattr(device, "requires_managed_control", False):
+        return
+    try:
+        response = await execute({"command": "channel_count"})
+        counts = core.parse_response("channel_count", response) if response else None
+    except (OSError, RuntimeError, TimeoutError, core.NetaudioCoreError) as exception:
+        logger.debug(f"{getattr(device, 'name', device)}: channel capability read failed: {exception!r}")
+        return
+    if not isinstance(counts, dict):
+        return
+    capability_word = counts["transmit_flow_authoring_capability_word"]
+    device.transmit_flow_authoring_capability_word = capability_word
+    for name, value in core.flow_authoring_capabilities(capability_word).items():
+        setattr(device, name, value)
+    apply_channel_capability(device, counts)
+
+
+async def query_preferred_receiver_flow_inventory(device) -> dict | None:
+    application = device.application
+    inventory_family = receiver_flow_inventory_family(device)
+
+    if inventory_family is None:
+        await _read_channel_capability(device)
+        inventory_family = receiver_flow_inventory_family(device)
 
     if inventory_family == "modern":
         modern_query = getattr(application, "query_modern_arc_receiver_flow_status", None)
@@ -487,6 +504,7 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
         device._arc_port(),
         protocol_id=flow_inventory_protocol_identifier_for_device(device),
         device=device,
+        family="fixed",
     )
 
     if inventory is None:
@@ -498,13 +516,13 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
 
 
 async def query_receiver_flow_inventory(
-    device_ip: str, arc_port: int, *, protocol_id: int | None, device=None
+    device_ip: str, arc_port: int, *, protocol_id: int | None, device=None, family: str | None = None
 ) -> dict | None:
     if protocol_id is None:
         return None
 
     try:
-        with core.ReceiverFlowInventory(protocol_id) as inventory:
+        with core.ReceiverFlowInventory(protocol_id, family=family) as inventory:
             state = inventory.state()
 
             while state["next_command"] is not None:

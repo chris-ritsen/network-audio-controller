@@ -475,24 +475,29 @@ fn optional_string_at_pointer(data: &[u8], pointer: u16) -> Option<Option<String
     Some(Some(string_at_pointer(data, pointer)?))
 }
 
+pub const FIXED_RECEIVER_FLOW_PROTOCOL_IDS: [u16; 5] = [
+    PROTOCOL_DANTE_FLOW,
+    crate::commands::PROTOCOL_DANTE_FLOW_2801,
+    PROTOCOL_ARC_2809,
+    crate::protocol::PROTOCOL_ARC_280C,
+    crate::protocol::PROTOCOL_ARC_280F,
+];
+
 pub fn parse_receiver_flow_page(response: &[u8]) -> Option<ReceiverFlowPage> {
     let envelope = validate_response_envelope(
         response,
-        &[(PROTOCOL_DANTE_FLOW, OPCODE_QUERY_RECEIVER_FLOWS)],
+        &FIXED_RECEIVER_FLOW_PROTOCOL_IDS.map(|protocol| (protocol, OPCODE_QUERY_RECEIVER_FLOWS)),
         &[RESULT_CODE_SUCCESS, crate::protocol::RESULT_CODE_MORE_PAGES],
     )?;
     let body = envelope.body;
-    let maximum_records = usize::from(*body.first()?);
-    let active_count = usize::from(*body.get(1)?);
-    if !(1..=32).contains(&maximum_records) || active_count > maximum_records {
-        return None;
-    }
-    let pointer_table_size = maximum_records.checked_mul(2)?;
-    let records_start = 2usize.checked_add(pointer_table_size)?;
+    let allocation = *body.first()?;
+    let reported_count = *body.get(1)?;
+    let records_start =
+        2usize.checked_add(usize::from(allocation.max(reported_count)).checked_mul(2)?)?;
     body.get(..records_start)?;
 
-    let mut record_offsets = Vec::with_capacity(active_count);
-    for index in 0..maximum_records {
+    let mut record_offsets = Vec::with_capacity(usize::from(reported_count));
+    for index in 0..usize::from(reported_count) {
         let record_pointer = read_u16(body, 2 + index * 2)?;
         if record_pointer == 0 {
             continue;
@@ -506,21 +511,22 @@ pub fn parse_receiver_flow_page(response: &[u8]) -> Option<ReceiverFlowPage> {
         }
         record_offsets.push(record_offset);
     }
-    if record_offsets.len() != active_count {
-        return None;
-    }
 
-    let mut flows = Vec::with_capacity(active_count);
-    let mut flow_numbers = HashSet::with_capacity(active_count);
+    let mut flows = Vec::with_capacity(record_offsets.len());
+    let mut flow_numbers = HashSet::with_capacity(record_offsets.len());
     for record_offset in record_offsets.iter().copied() {
-        let record_end = record_offsets
-            .iter()
-            .copied()
-            .filter(|candidate| *candidate > record_offset)
-            .min()
-            .unwrap_or(body.len());
-        let flow = parse_receiver_flow_record(body, record_offset, record_end)?;
-        if !(1..=32).contains(&flow.flow_number) || !flow_numbers.insert(flow.flow_number) {
+        let flow = if read_u16(body, record_offset.checked_add(2)?)? & 0x4000 != 0 {
+            parse_receiver_flow_record_48(body, record_offset)?
+        } else {
+            let record_end = record_offsets
+                .iter()
+                .copied()
+                .filter(|candidate| *candidate > record_offset)
+                .min()
+                .unwrap_or(body.len());
+            parse_receiver_flow_record(body, record_offset, record_end)?
+        };
+        if flow.flow_number == 0 || !flow_numbers.insert(flow.flow_number) {
             return None;
         }
         flows.push(flow);
@@ -528,16 +534,272 @@ pub fn parse_receiver_flow_page(response: &[u8]) -> Option<ReceiverFlowPage> {
     flows.sort_unstable_by_key(|flow| flow.flow_number);
 
     Some(ReceiverFlowPage {
+        protocol_id: envelope.protocol_id,
         result_code: envelope.result_code,
         page_disposition: if envelope.result_code == RESULT_CODE_SUCCESS {
             ModernArcPageDisposition::Complete
         } else {
             ModernArcPageDisposition::MorePages
         },
-        maximum_flow_slots: u8::try_from(maximum_records).ok()?,
-        reported_flow_count: u8::try_from(active_count).ok()?,
+        maximum_flow_slots: allocation,
+        reported_flow_count: reported_count,
         flows,
     })
+}
+
+const RECEIVER_FLOW_48_HEADER_SIZE: usize = 48;
+const RECEIVER_FLOW_CHANNEL_MAP_SLICE_LIMIT: usize = 256;
+
+fn body_offset(pointer: u16) -> Option<usize> {
+    usize::from(pointer).checked_sub(RESPONSE_HEADER_SIZE)
+}
+
+fn parse_receiver_flow_record_48(body: &[u8], record_offset: usize) -> Option<ReceiverFlow> {
+    let header =
+        body.get(record_offset..record_offset.checked_add(RECEIVER_FLOW_48_HEADER_SIZE)?)?;
+    let flow_number = read_u16(header, 0)?;
+    let flags = read_u16(header, 2)?;
+    let interface_count = read_u16(header, 12)?;
+    let flow_channel_slot_count = read_u16(header, 36)?;
+    let transport = read_u16(header, 28)?;
+    let external_identity_pointer = read_u16(header, 30)?;
+
+    let mut interface_endpoints = Vec::new();
+    let mut unrecognized_endpoint_descriptors_hexadecimal = Vec::new();
+    let mut endpoint_decoding_complete = interface_count <= 2;
+    for field in [18, 20] {
+        let pointer = read_u16(header, field)?;
+        if pointer == 0 {
+            continue;
+        }
+        let offset = body_offset(pointer)?;
+        let length = *body.get(offset)?;
+        let descriptor = body.get(offset..offset.checked_add(usize::from(length))?)?;
+        if length < 2 {
+            return None;
+        }
+        let kind = descriptor[1];
+        match (length, kind) {
+            (8 | 4, 2) => interface_endpoints.push(ReceiverFlowInterfaceEndpoint {
+                pointer,
+                descriptor_length_bytes: length,
+                kind,
+                udp_port: read_u16(descriptor, 2)?,
+                ipv4_address: if length == 8 {
+                    Some(ipv4_at(descriptor, 4)?)
+                } else {
+                    None
+                },
+                raw_descriptor_hexadecimal: bytes_to_hex(descriptor),
+            }),
+            _ => {
+                endpoint_decoding_complete = false;
+                unrecognized_endpoint_descriptors_hexadecimal.push(bytes_to_hex(descriptor));
+            }
+        }
+    }
+
+    let mut channel_map_slices = Vec::new();
+    let mut flow_slots_by_receiver_channel = std::collections::BTreeMap::<u16, u16>::new();
+    let mut visited = HashSet::new();
+    let mut pointer = read_u16(header, 38)?;
+    while pointer != 0 {
+        if !visited.insert(pointer) || visited.len() > RECEIVER_FLOW_CHANNEL_MAP_SLICE_LIMIT {
+            return None;
+        }
+        let offset = body_offset(pointer)?;
+        body.get(offset..offset.checked_add(8)?)?;
+        let starting_receiver_channel = read_u16(body, offset)?;
+        let byte_count = read_u16(body, offset + 2)?;
+        let next_pointer = read_u16(body, offset + 4)?;
+        if starting_receiver_channel == 0 && byte_count == 0 {
+            break;
+        }
+        if byte_count % 2 != 0 {
+            return None;
+        }
+        let mapping =
+            body.get(offset + 6..(offset + 6).checked_add(usize::from(byte_count))?)?;
+        if byte_count != 0 && starting_receiver_channel == 0 {
+            return None;
+        }
+        for (index, flow_slot) in mapping.iter().copied().enumerate() {
+            if flow_slot == 0 {
+                continue;
+            }
+            let receiver_channel =
+                starting_receiver_channel.checked_add(u16::try_from(index).ok()?)?;
+            if u16::from(flow_slot) > flow_channel_slot_count {
+                return None;
+            }
+            match flow_slots_by_receiver_channel.insert(receiver_channel, u16::from(flow_slot)) {
+                Some(previous) if previous != u16::from(flow_slot) => return None,
+                _ => {}
+            }
+        }
+        channel_map_slices.push(ReceiverFlowChannelMapSlice {
+            pointer,
+            starting_receiver_channel,
+            byte_count,
+            next_pointer,
+            mapping_hexadecimal: bytes_to_hex(mapping),
+        });
+        pointer = next_pointer;
+    }
+    let mut receiver_channel_numbers_by_flow_channel =
+        vec![Vec::new(); usize::from(flow_channel_slot_count)];
+    for (receiver_channel, flow_slot) in &flow_slots_by_receiver_channel {
+        receiver_channel_numbers_by_flow_channel[usize::from(*flow_slot) - 1]
+            .push(*receiver_channel);
+    }
+
+    let external_identity = if transport == 3 && external_identity_pointer != 0 {
+        Some(parse_external_rtp_identity(
+            body,
+            external_identity_pointer,
+        )?)
+    } else {
+        None
+    };
+
+    Some(ReceiverFlow {
+        record_layout: "fixed_48_byte",
+        flow_number,
+        flags,
+        flow_type: receiver_flow_type(&interface_endpoints),
+        sample_rate: read_u32(header, 4)?,
+        format_metadata_hexadecimal: Some(bytes_to_hex(header.get(8..10)?)),
+        encoding: u32::from(read_u16(header, 10)?),
+        interface_count,
+        flow_channel_slot_count,
+        receiver_bitmap_word_count: None,
+        effective_subscription_identities: effective_subscription_identities(
+            external_identity.as_ref(),
+            &receiver_channel_numbers_by_flow_channel,
+            &interface_endpoints,
+        )?,
+        interface_endpoints,
+        unrecognized_endpoint_descriptors_hexadecimal,
+        endpoint_decoding_complete,
+        receiver_bitmaps_hexadecimal: Vec::new(),
+        channel_map_slices,
+        receiver_channel_numbers_by_flow_channel,
+        subscription_status_code: None,
+        interface_state_bitmap: None,
+        status_flags: None,
+        status_unknown: None,
+        flow_status_word: Some(read_u16(header, 44)?),
+        interface_bitmap: Some(read_u16(header, 46)?),
+        latency_nanoseconds: read_u32(header, 32)?,
+        transport,
+        external_identity_pointer,
+        external_identity,
+        status_descriptor_hexadecimal: None,
+        raw_record_hexadecimal: bytes_to_hex(header),
+    })
+}
+
+fn parse_external_rtp_identity(body: &[u8], pointer: u16) -> Option<ExternalRtpFlowIdentity> {
+    let offset = body_offset(pointer)?;
+    let length_words = *body.get(offset)?;
+    if length_words < 2 {
+        return None;
+    }
+    let descriptor = body.get(offset..offset.checked_add(usize::from(length_words) * 2)?)?;
+    let presence_mask = read_u16(descriptor, 2)?;
+    let mut inconsistent_presence_mask = 0;
+    let mut present = |bit: u16, minimum_words: u8| {
+        if presence_mask & bit == 0 {
+            return false;
+        }
+        if length_words < minimum_words {
+            inconsistent_presence_mask |= bit;
+            return false;
+        }
+        true
+    };
+    let source_ipv4 = present(0x0001, 4);
+    let session_id = present(0x0002, 8);
+    let unknown_optional_field = present(0x0004, 12);
+    let clock_offset = present(0x0008, 14);
+    let optional_code = present(0x0010, 15);
+    Some(ExternalRtpFlowIdentity {
+        pointer,
+        length_words,
+        reserved: descriptor[1],
+        presence_mask,
+        source_ipv4: if source_ipv4 {
+            Some(ipv4_at(descriptor, 4)?)
+        } else {
+            None
+        },
+        session_id: if session_id {
+            Some(read_u64(descriptor, 8)?)
+        } else {
+            None
+        },
+        unknown_optional_field_raw: if unknown_optional_field {
+            Some(read_u64(descriptor, 16)?)
+        } else {
+            None
+        },
+        clock_offset: if clock_offset {
+            Some(read_u32(descriptor, 24)?)
+        } else {
+            None
+        },
+        optional_code: if optional_code {
+            Some(*descriptor.get(28)?)
+        } else {
+            None
+        },
+        inconsistent_presence_mask,
+        raw_descriptor_hexadecimal: bytes_to_hex(descriptor),
+    })
+}
+
+fn receiver_flow_type(interface_endpoints: &[ReceiverFlowInterfaceEndpoint]) -> Option<String> {
+    interface_endpoints
+        .iter()
+        .find_map(|endpoint| endpoint.ipv4_address.as_deref())
+        .and_then(|address| address.split('.').next())
+        .and_then(|octet| octet.parse::<u8>().ok())
+        .map(|first_octet| {
+            if (224..=239).contains(&first_octet) {
+                "multicast".to_owned()
+            } else {
+                "unicast".to_owned()
+            }
+        })
+}
+
+fn effective_subscription_identities(
+    external_identity: Option<&ExternalRtpFlowIdentity>,
+    receiver_channel_numbers_by_flow_channel: &[Vec<u16>],
+    interface_endpoints: &[ReceiverFlowInterfaceEndpoint],
+) -> Option<Vec<ReceiverFlowSubscriptionIdentity>> {
+    let mut identities = Vec::new();
+    if let Some(identity) = external_identity {
+        if let (Some(source), Some(session_id)) =
+            (identity.source_ipv4.as_ref(), identity.session_id)
+        {
+            for (slot_index, receiver_channels) in
+                receiver_channel_numbers_by_flow_channel.iter().enumerate()
+            {
+                let flow_slot = u16::try_from(slot_index).ok()?.checked_add(1)?;
+                for receiver_channel_number in receiver_channels {
+                    identities.push(ReceiverFlowSubscriptionIdentity {
+                        receiver_channel: *receiver_channel_number,
+                        flow_slot,
+                        source_ipv4: source.clone(),
+                        session_id,
+                        interface_endpoints: interface_endpoints.to_vec(),
+                    });
+                }
+            }
+        }
+    }
+    Some(identities)
 }
 
 pub fn parse_receiver_port_ranges(response: &[u8]) -> Option<ReceiverPortRanges> {
@@ -706,46 +968,17 @@ fn parse_receiver_flow_record(
     let transport = read_u16(status_descriptor, 12)?;
     let external_identity_pointer = read_u16(status_descriptor, 14)?;
     let external_identity = if transport == 3 {
-        let identity_offset =
-            usize::from(external_identity_pointer).checked_sub(RESPONSE_HEADER_SIZE)?;
+        let identity_offset = body_offset(external_identity_pointer)?;
         if identity_offset < record_data_start || identity_offset >= record_end {
             return None;
         }
-        let length_words = *body.get(identity_offset)?;
-        let identity_length = usize::from(length_words).checked_mul(2)?;
-        if identity_length != 28 {
-            return None;
-        }
-        let identity_end = identity_offset.checked_add(identity_length)?;
-        let descriptor = body.get(identity_offset..identity_end)?;
+        let identity = parse_external_rtp_identity(body, external_identity_pointer)?;
+        let identity_end = identity_offset.checked_add(usize::from(identity.length_words) * 2)?;
         if identity_end > record_end {
             return None;
         }
         occupied_ranges.push((identity_offset, identity_end));
-        let presence_mask = read_u16(descriptor, 2)?;
-        Some(ExternalRtpFlowIdentity {
-            pointer: external_identity_pointer,
-            length_words,
-            reserved: *descriptor.get(1)?,
-            presence_mask,
-            source_ipv4: if presence_mask & 0x0001 != 0 {
-                Some(ipv4_at(descriptor, 4)?)
-            } else {
-                None
-            },
-            session_id: if presence_mask & 0x0002 != 0 {
-                Some(read_u64(descriptor, 8)?)
-            } else {
-                None
-            },
-            unknown_optional_field_raw: read_u64(descriptor, 16)?,
-            clock_offset: if presence_mask & 0x0008 != 0 {
-                Some(read_u32(descriptor, 24)?)
-            } else {
-                None
-            },
-            raw_descriptor_hexadecimal: bytes_to_hex(descriptor),
-        })
+        Some(identity)
     } else {
         None
     };
@@ -761,62 +994,39 @@ fn parse_receiver_flow_record(
         return None;
     }
 
-    let flow_type = interface_endpoints
-        .iter()
-        .find_map(|endpoint| endpoint.ipv4_address.as_deref())
-        .and_then(|address| address.split('.').next())
-        .and_then(|octet| octet.parse::<u8>().ok())
-        .map(|first_octet| {
-            if (224..=239).contains(&first_octet) {
-                "multicast".to_owned()
-            } else {
-                "unicast".to_owned()
-            }
-        });
-    let mut effective_subscription_identities = Vec::new();
-    if let Some(identity) = &external_identity {
-        if let (Some(source), Some(session_id)) =
-            (identity.source_ipv4.as_ref(), identity.session_id)
-        {
-            for (slot_index, receiver_channels) in
-                receiver_channel_numbers_by_flow_channel.iter().enumerate()
-            {
-                let flow_slot = u16::try_from(slot_index).ok()?.checked_add(1)?;
-                for receiver_channel_number in receiver_channels {
-                    effective_subscription_identities.push(ReceiverFlowSubscriptionIdentity {
-                        receiver_channel: *receiver_channel_number,
-                        flow_slot,
-                        source_ipv4: source.clone(),
-                        session_id,
-                        interface_endpoints: interface_endpoints.clone(),
-                    });
-                }
-            }
-        }
-    }
-
     Some(ReceiverFlow {
+        record_layout: "fixed_20_byte",
         flow_number: read_u16(body, record_offset)?,
         flags,
-        flow_type,
+        flow_type: receiver_flow_type(&interface_endpoints),
         sample_rate: read_u32(body, record_offset.checked_add(4)?)?,
+        format_metadata_hexadecimal: None,
         encoding: read_u32(body, record_offset.checked_add(8)?)?,
         interface_count,
         flow_channel_slot_count,
-        receiver_bitmap_word_count,
+        receiver_bitmap_word_count: Some(receiver_bitmap_word_count),
+        effective_subscription_identities: effective_subscription_identities(
+            external_identity.as_ref(),
+            &receiver_channel_numbers_by_flow_channel,
+            &interface_endpoints,
+        )?,
         interface_endpoints,
+        unrecognized_endpoint_descriptors_hexadecimal: Vec::new(),
+        endpoint_decoding_complete: true,
         receiver_bitmaps_hexadecimal,
+        channel_map_slices: Vec::new(),
         receiver_channel_numbers_by_flow_channel,
-        subscription_status_code: read_u16(status_descriptor, 0)?,
-        interface_state_bitmap: read_u16(status_descriptor, 2)?,
-        status_flags: read_u16(status_descriptor, 4)?,
-        status_unknown: read_u16(status_descriptor, 6)?,
+        subscription_status_code: Some(read_u16(status_descriptor, 0)?),
+        interface_state_bitmap: Some(read_u16(status_descriptor, 2)?),
+        status_flags: Some(read_u16(status_descriptor, 4)?),
+        status_unknown: Some(read_u16(status_descriptor, 6)?),
+        flow_status_word: None,
+        interface_bitmap: None,
         latency_nanoseconds: read_u32(status_descriptor, 8)?,
         transport,
         external_identity_pointer,
         external_identity,
-        effective_subscription_identities,
-        status_descriptor_hexadecimal: bytes_to_hex(status_descriptor),
+        status_descriptor_hexadecimal: Some(bytes_to_hex(status_descriptor)),
         raw_record_hexadecimal: bytes_to_hex(body.get(record_offset..record_end)?),
     })
 }

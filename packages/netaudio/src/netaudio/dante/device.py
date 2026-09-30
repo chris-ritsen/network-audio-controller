@@ -136,6 +136,7 @@ class DanteDevice:
         self.flow_protocol_id: int | None = None
         self.transmit_flow_authoring_capability_word: int | None = None
         self.transmit_flow_authoring: dict | None = None
+        self.receiver_flow_query_family: str | None = None
         self.maximum_transmit_flow_channel_slots: int | None = None
         self.maximum_receive_flow_channel_slots: int | None = None
         self.maximum_transmit_flows: int | None = None
@@ -779,6 +780,7 @@ class DanteDevice:
             controls.update(core.flow_authoring_capabilities(transmit_flow_authoring_capability_word))
         else:
             controls["transmit_flow_authoring"] = None
+            controls["receiver_flow_query_family"] = None
         if locked is not None:
             controls["is_locked"] = locked
         if data.get("aes67") is not None:
@@ -864,6 +866,8 @@ class DanteDevice:
                 setattr(self, name, data[name])
         if "transmit_flow_authoring" in data:
             self.transmit_flow_authoring = data["transmit_flow_authoring"]
+        if "receiver_flow_query_family" in data:
+            self.receiver_flow_query_family = data["receiver_flow_query_family"]
         if "receiver_flow_inventory_family" in data:
             self.receiver_flow_inventory_family = data["receiver_flow_inventory_family"]
         if "is_locked" in data:

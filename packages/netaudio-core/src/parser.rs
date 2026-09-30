@@ -55,6 +55,7 @@ const PCM_ENCODINGS: [(u16, u16); 3] = [
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FlowAuthoringCapabilities {
     pub transmit_flow_authoring: FlowAuthoringProfile,
+    pub receiver_flow_query_family: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -79,6 +80,7 @@ pub fn flow_authoring_capabilities(capability_word: u16) -> FlowAuthoringCapabil
                 media_modes: vec!["native_dante", "rtp_aes67"],
                 supports_flow_options: true,
             },
+            receiver_flow_query_family: "segmented",
         }
     } else {
         FlowAuthoringCapabilities {
@@ -90,6 +92,7 @@ pub fn flow_authoring_capabilities(capability_word: u16) -> FlowAuthoringCapabil
                 media_modes: vec!["native_dante", "rtp_aes67"],
                 supports_flow_options: true,
             },
+            receiver_flow_query_family: "fixed",
         }
     }
 }

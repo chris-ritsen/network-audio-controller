@@ -212,7 +212,7 @@ async def test_receiver_inventory_family_follows_channel_count_capability_select
     assert (await flows.query_preferred_receiver_flow_inventory(legacy))["page_disposition"] == "complete"
     modern_inventory = await flows.query_preferred_receiver_flow_inventory(modern)
 
-    assert legacy_commands == [{"command": "query_receiver_flows", "starting_flow": 1}]
+    assert legacy_commands == [{"command": "query_receiver_flows", "protocol_id": 0x2729, "starting_flow": 1}]
     assert modern_query.await_count == 1
     assert modern_inventory == modern_page
 

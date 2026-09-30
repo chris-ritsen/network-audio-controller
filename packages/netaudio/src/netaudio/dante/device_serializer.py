@@ -151,6 +151,7 @@ DEVICE_SCALAR_FIELDS = (
     "receiver_flow_partial_inventory",
     "receiver_flows",
     "receiver_flow_inventory_family",
+    "receiver_flow_query_family",
     "requested_sample_rate_pullup_raw_value",
     "routing_capacity_receive_channel_count",
     "routing_capacity_transmit_channel_count",

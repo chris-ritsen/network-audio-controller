@@ -221,7 +221,12 @@ async def run_receiver_flow_list(application, devices) -> None:
         "Latency",
     ]
 
-    empty_message = f"No receiver flows configured (0/{flow_inventory['maximum_flow_slots']} slots used)."
+    maximum_receive_flows = getattr(device, "maximum_receive_flows", None)
+    empty_message = (
+        f"No receiver flows configured (0 of at most {maximum_receive_flows})."
+        if isinstance(maximum_receive_flows, int)
+        else "No receiver flows configured."
+    )
 
     rows = []
     for receiver_flow in receiver_flows:
@@ -234,8 +239,11 @@ async def run_receiver_flow_list(application, devices) -> None:
         else:
             receiver_channel_mapping = "unknown"
         subscription_status_code = receiver_flow.get("subscription_status_code")
+        flow_status_word = receiver_flow.get("flow_status_word")
         if subscription_status_code is not None:
             status_display = str(subscription_status(subscription_status_code)["label"])
+        elif isinstance(flow_status_word, int):
+            status_display = f"status word 0x{flow_status_word:04x}"
         else:
             status_display = "unknown"
         flow_type = receiver_flow["flow_type"]

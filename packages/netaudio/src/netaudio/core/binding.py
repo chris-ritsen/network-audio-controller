@@ -1014,8 +1014,10 @@ class ChannelInventory(_Inventory):
 
 
 class ReceiverFlowInventory(_Inventory):
-    def __init__(self, protocol_id: int, maximum_pages: int = 256):
-        super().__init__("rx_flows", protocol_id, maximum_pages)
+    def __init__(self, protocol_id: int, maximum_pages: int = 256, *, family: str | None = None):
+        if family not in (None, "fixed", "segmented"):
+            raise ValueError("receiver flow family must be fixed or segmented")
+        super().__init__(f"{family}_rx_flows" if family else "rx_flows", protocol_id, maximum_pages)
 
 
 class TransmitFlowInventory(_Inventory):

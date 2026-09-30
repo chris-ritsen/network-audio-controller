@@ -348,6 +348,8 @@ pub(super) enum CommandSpec {
     QueryReceiverFlows {
         #[serde(default)]
         message_id: u16,
+        #[serde(default = "default_flow_protocol")]
+        protocol_id: u16,
         #[serde(default = "default_flow_start")]
         starting_flow: u16,
     },
@@ -1047,8 +1049,9 @@ pub(super) fn build_command(
         } => commands::build_query_receiver_flow_status(protocol_id, starting_flow, message_id)?,
         CommandSpec::QueryReceiverFlows {
             starting_flow,
+            protocol_id,
             message_id,
-        } => commands::build_query_receiver_flows(starting_flow, message_id)?,
+        } => commands::build_query_receiver_flows(protocol_id, starting_flow, message_id)?,
         CommandSpec::QueryReceiverPortRanges {
             message_id,
             protocol_id,

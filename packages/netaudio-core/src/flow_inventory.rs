@@ -9,6 +9,7 @@ use crate::protocol::{
 };
 use crate::responses::{
     parse_modern_arc_receiver_flow_status_page, parse_receiver_flow_page,
+    FIXED_RECEIVER_FLOW_PROTOCOL_IDS,
     parse_transmitter_flow_status_page, parse_tx_flow_page,
 };
 
@@ -16,6 +17,12 @@ use crate::responses::{
 pub enum FlowDirection {
     Receiver,
     Transmitter,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ReceiverFlowFamily {
+    Fixed,
+    Segmented,
 }
 
 struct FlowPage {
@@ -27,7 +34,9 @@ struct FlowPage {
 
 pub struct FlowInventory {
     direction: FlowDirection,
+    receiver_family: ReceiverFlowFamily,
     protocol_id: u16,
+    observed_protocol_id: Option<u16>,
     maximum_pages: usize,
     pages: usize,
     starting_flow: u16,
@@ -53,13 +62,47 @@ impl FlowInventory {
             return Err("unsupported flow inventory protocol");
         }
 
+        let receiver_family = if is_modern_arc_protocol(protocol_id) {
+            ReceiverFlowFamily::Segmented
+        } else {
+            ReceiverFlowFamily::Fixed
+        };
+
+        Self::with_receiver_family(direction, receiver_family, protocol_id, maximum_pages)
+    }
+
+    pub fn new_receiver(
+        family: ReceiverFlowFamily,
+        protocol_id: u16,
+        maximum_pages: usize,
+    ) -> Result<Self, &'static str> {
+        let supported = match family {
+            ReceiverFlowFamily::Fixed => FIXED_RECEIVER_FLOW_PROTOCOL_IDS.contains(&protocol_id),
+            ReceiverFlowFamily::Segmented => is_modern_arc_protocol(protocol_id),
+        };
+
+        if !supported {
+            return Err("unsupported flow inventory protocol");
+        }
+
+        Self::with_receiver_family(FlowDirection::Receiver, family, protocol_id, maximum_pages)
+    }
+
+    fn with_receiver_family(
+        direction: FlowDirection,
+        receiver_family: ReceiverFlowFamily,
+        protocol_id: u16,
+        maximum_pages: usize,
+    ) -> Result<Self, &'static str> {
         if maximum_pages == 0 || maximum_pages > 256 {
             return Err("flow inventory page limit must be between 1 and 256");
         }
 
         Ok(Self {
             direction,
+            receiver_family,
             protocol_id,
+            observed_protocol_id: None,
             maximum_pages,
             pages: 0,
             starting_flow: 1,
@@ -84,7 +127,16 @@ impl FlowInventory {
 
         let envelope = response_envelope(response).ok_or("malformed flow page envelope")?;
 
-        if envelope.protocol_id != self.protocol_id {
+        if self.fixed_receiver() {
+            if !FIXED_RECEIVER_FLOW_PROTOCOL_IDS.contains(&envelope.protocol_id)
+                || envelope.protocol_id > self.protocol_id
+                || self
+                    .observed_protocol_id
+                    .is_some_and(|protocol_id| protocol_id != envelope.protocol_id)
+            {
+                return Err("flow page protocol changed during pagination");
+            }
+        } else if envelope.protocol_id != self.protocol_id {
             return Err("flow page protocol changed during pagination");
         }
 
@@ -124,9 +176,11 @@ impl FlowInventory {
 
         let mut numbers = HashSet::with_capacity(page.identifiers.len());
 
+        let bounded_by_capacity = self.direction == FlowDirection::Transmitter;
+
         for number in &page.identifiers {
             if *number == 0
-                || *number > u16::from(page.capacity)
+                || (bounded_by_capacity && *number > u16::from(page.capacity))
                 || (self.direction == FlowDirection::Receiver && *number < self.starting_flow)
                 || self.identifiers.contains(number)
                 || !numbers.insert(*number)
@@ -145,7 +199,9 @@ impl FlowInventory {
                     .checked_add(1)
                     .ok_or("flow identifier overflow")?;
 
-                if next <= self.starting_flow || next > u16::from(page.capacity) {
+                if next <= self.starting_flow
+                    || (bounded_by_capacity && next > u16::from(page.capacity))
+                {
                     return Err("flow page made no progress");
                 }
 
@@ -157,6 +213,7 @@ impl FlowInventory {
         // Commit only after validating the entire response and continuation.
         self.capacity = Some(page.capacity);
         self.observed_opcode = Some(envelope.opcode);
+        self.observed_protocol_id = Some(envelope.protocol_id);
         self.identifiers.extend(numbers);
         self.records.extend(page.records);
         self.pages += 1;
@@ -199,7 +256,7 @@ impl FlowInventory {
             });
         }
 
-        if is_modern_arc_protocol(self.protocol_id) {
+        if self.receiver_family == ReceiverFlowFamily::Segmented {
             let page = parse_modern_arc_receiver_flow_status_page(response)
                 .ok_or("malformed receiver flow status page")?;
 
@@ -221,6 +278,11 @@ impl FlowInventory {
         })
     }
 
+    fn fixed_receiver(&self) -> bool {
+        self.direction == FlowDirection::Receiver
+            && self.receiver_family == ReceiverFlowFamily::Fixed
+    }
+
     pub fn state(&self) -> InventoryState {
         if let Some(inventory) = &self.complete {
             return InventoryState::complete(inventory.clone());
@@ -228,10 +290,10 @@ impl FlowInventory {
 
         let (name, protocol_field) = match self.direction {
             FlowDirection::Transmitter => ("query_tx_flows", Some("flow_protocol_id")),
-            FlowDirection::Receiver if is_modern_arc_protocol(self.protocol_id) => {
+            FlowDirection::Receiver if self.receiver_family == ReceiverFlowFamily::Segmented => {
                 ("query_modern_arc_receiver_flow_status", Some("protocol_id"))
             }
-            FlowDirection::Receiver => ("query_receiver_flows", None),
+            FlowDirection::Receiver => ("query_receiver_flows", Some("protocol_id")),
         };
         let mut command = serde_json::Map::from_iter([
             ("command".into(), json!(name)),

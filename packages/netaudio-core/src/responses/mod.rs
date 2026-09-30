@@ -468,28 +468,44 @@ pub struct ModernArcReceiverFlowStatusPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReceiverFlow {
+    pub record_layout: &'static str,
     pub flow_number: u16,
     pub flags: u16,
     pub flow_type: Option<String>,
     pub sample_rate: u32,
+    pub format_metadata_hexadecimal: Option<String>,
     pub encoding: u32,
     pub interface_count: u16,
     pub flow_channel_slot_count: u16,
-    pub receiver_bitmap_word_count: u16,
+    pub receiver_bitmap_word_count: Option<u16>,
     pub interface_endpoints: Vec<ReceiverFlowInterfaceEndpoint>,
+    pub unrecognized_endpoint_descriptors_hexadecimal: Vec<String>,
+    pub endpoint_decoding_complete: bool,
     pub receiver_bitmaps_hexadecimal: Vec<String>,
+    pub channel_map_slices: Vec<ReceiverFlowChannelMapSlice>,
     pub receiver_channel_numbers_by_flow_channel: Vec<Vec<u16>>,
-    pub subscription_status_code: u16,
-    pub interface_state_bitmap: u16,
-    pub status_flags: u16,
-    pub status_unknown: u16,
+    pub subscription_status_code: Option<u16>,
+    pub interface_state_bitmap: Option<u16>,
+    pub status_flags: Option<u16>,
+    pub status_unknown: Option<u16>,
+    pub flow_status_word: Option<u16>,
+    pub interface_bitmap: Option<u16>,
     pub latency_nanoseconds: u32,
     pub transport: u16,
     pub external_identity_pointer: u16,
     pub external_identity: Option<ExternalRtpFlowIdentity>,
     pub effective_subscription_identities: Vec<ReceiverFlowSubscriptionIdentity>,
-    pub status_descriptor_hexadecimal: String,
+    pub status_descriptor_hexadecimal: Option<String>,
     pub raw_record_hexadecimal: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReceiverFlowChannelMapSlice {
+    pub pointer: u16,
+    pub starting_receiver_channel: u16,
+    pub byte_count: u16,
+    pub next_pointer: u16,
+    pub mapping_hexadecimal: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -510,8 +526,10 @@ pub struct ExternalRtpFlowIdentity {
     pub presence_mask: u16,
     pub source_ipv4: Option<String>,
     pub session_id: Option<u64>,
-    pub unknown_optional_field_raw: u64,
+    pub unknown_optional_field_raw: Option<u64>,
     pub clock_offset: Option<u32>,
+    pub optional_code: Option<u8>,
+    pub inconsistent_presence_mask: u16,
     pub raw_descriptor_hexadecimal: String,
 }
 
@@ -526,6 +544,7 @@ pub struct ReceiverFlowSubscriptionIdentity {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReceiverFlowPage {
+    pub protocol_id: u16,
     pub result_code: u16,
     pub page_disposition: ModernArcPageDisposition,
     pub maximum_flow_slots: u8,
