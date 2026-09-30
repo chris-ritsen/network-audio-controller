@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 from netaudio.core.binding import NetaudioCoreError
+from netaudio.dante.operation_availability import operation_availability
 from netaudio.presets.loading import (
     MatchedPresetDevice,
     PresetLoadReport,
@@ -154,28 +155,44 @@ class DaemonPresetHandlers:
         if not name or name != expected_name:
             raise ValueError(f"{expected_name}: fresh device identity did not match. Review the preset again.")
 
-    async def _preset_audio_snapshot(self, device):
-        sample_rate_status = await self.application.probe_sample_rate_status(device)
-        encoding_status = await self.application.probe_encoding_status(device)
+    async def _preset_audio_snapshot(self, device) -> list[dict]:
+        omitted = []
+        statuses = {}
+        probes = {
+            "sample_rate": self.application.probe_sample_rate_status,
+            "encoding": self.application.probe_encoding_status,
+        }
+        for setting, probe in probes.items():
+            if operation_availability(device, setting).supported is False:
+                omitted.append(
+                    {
+                        "device": device.name,
+                        "setting": setting,
+                        "reason": "The device's advertised capabilities do not include this setting.",
+                    }
+                )
+                continue
+            statuses[setting] = await probe(device)
         settings = await self.application.get_device_settings(device)
-        sample_rate = sample_rate_status["current_value"]
-        encoding = encoding_status["current_value"]
         if (
-            not sample_rate
-            or not encoding
+            any(not status["current_value"] for status in statuses.values())
             or not isinstance(settings, dict)
             or settings.get("configured_latency_ns") is None
         ):
             raise ValueError(f"{device.name}: audio settings could not be read completely.")
         device.configured_latency = settings["configured_latency_ns"] / 1_000_000
-        device.sample_rate = sample_rate
-        device.requested_sample_rate = sample_rate_status["requested_value"]
-        device.sample_rate_update_mode = sample_rate_status["update_mode"]
-        device.supported_sample_rates = sample_rate_status["available_values"]
-        device.encoding = encoding
-        device.requested_encoding = encoding_status["requested_value"]
-        device.encoding_update_mode = encoding_status["update_mode"]
-        device.supported_encodings = encoding_status["available_values"]
+        if "sample_rate" in statuses:
+            sample_rate_status = statuses["sample_rate"]
+            device.sample_rate = sample_rate_status["current_value"]
+            device.requested_sample_rate = sample_rate_status["requested_value"]
+            device.sample_rate_update_mode = sample_rate_status["update_mode"]
+            device.supported_sample_rates = sample_rate_status["available_values"]
+        if "encoding" in statuses:
+            encoding_status = statuses["encoding"]
+            device.encoding = encoding_status["current_value"]
+            device.requested_encoding = encoding_status["requested_value"]
+            device.encoding_update_mode = encoding_status["update_mode"]
+            device.supported_encodings = encoding_status["available_values"]
         device.preferred_leader = await self.application.probe_preferred_leader_state(device)
         if device.preferred_leader is None:
             raise ValueError(f"{device.name}: preferred-leader state could not be read.")
@@ -185,6 +202,7 @@ class DaemonPresetHandlers:
             await self.application.probe_gain_adapter(device)
         if device.clock_monitoring_supported is True:
             await self.application.probe_clocking_status(device)
+        return omitted
 
     async def _handle_save_preset(self, writer, params):
         try:
@@ -213,6 +231,8 @@ class DaemonPresetHandlers:
             return
         try:
 
+            omitted = []
+
             async def read_selected():
                 for device in selected.values():
                     await self._preset_identity(device, device.name)
@@ -233,7 +253,7 @@ class DaemonPresetHandlers:
                         if panel_family(device):
                             await self.application.inspect_device_controls(device)
                     if "audio" in sections:
-                        await self._preset_audio_snapshot(device)
+                        omitted.extend(await self._preset_audio_snapshot(device))
                     if "network" in sections:
                         interfaces = await self.application.probe_interface_status(device)
                         if not interfaces:
@@ -247,7 +267,10 @@ class DaemonPresetHandlers:
 
                         if advertised_redundancy_support(device) is True:
                             await self.application.probe_dante_redundancy(device)
-                content = format_devices_xml(selected, preset_name=name, sections=sections)
+                omitted_settings = {}
+                for omission in omitted:
+                    omitted_settings.setdefault(omission["device"], set()).add(omission["setting"])
+                content = format_devices_xml(selected, preset_name=name, sections=sections, omitted=omitted_settings)
                 if len(content.encode("utf-8")) > MAX_PRESET_BYTES:
                     raise ValueError("This preset exceeds 4 MiB. Save fewer devices together.")
                 return content
@@ -266,6 +289,7 @@ class DaemonPresetHandlers:
                 "xml": content,
                 "device_count": len(selected),
                 "saved_at": datetime.now(timezone.utc).isoformat(),
+                "omitted": omitted,
             },
         )
 

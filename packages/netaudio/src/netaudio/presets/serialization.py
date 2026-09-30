@@ -96,7 +96,9 @@ def _canonical_transmit_flows(device: DanteDevice) -> list[dict[str, Any]]:
     return result
 
 
-def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict[str, Any]:
+def device_preset_config(
+    device: DanteDevice, sections: Collection[str], omitted: Collection[str] = ()
+) -> dict[str, Any]:
     """Build the canonical preset configuration from one freshly populated device."""
     sections = set(sections)
     version_identity = {
@@ -132,7 +134,7 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
     if "audio" in sections:
         for field_name in ("preferred_leader", "sample_rate", "encoding"):
             value = getattr(device, field_name, None)
-            if value is not None:
+            if value is not None and field_name not in omitted:
                 config[field_name] = value
         latency = device.configured_latency
         if latency is None and device.active_latency is None:
@@ -392,13 +394,17 @@ def format_preset_configs(
 
 
 def format_devices_xml(
-    devices: dict[str, DanteDevice], preset_name: str = "netaudio", *, sections: Collection[str] | None = None
+    devices: dict[str, DanteDevice],
+    preset_name: str = "netaudio",
+    *,
+    sections: Collection[str] | None = None,
+    omitted: Mapping[str, Collection[str]] | None = None,
 ) -> str:
     selected_sections = _validated_sections(sections)
     configs = ParsedPresetDevices()
     device_by_name = {}
     for server_name, device in sorted(devices.items(), key=lambda item: item[1].name or item[0]):
-        config = device_preset_config(device, selected_sections)
+        config = device_preset_config(device, selected_sections, (omitted or {}).get(device.name, ()))
         name = config["name"]
         if name in configs:
             raise ValueError(f"duplicate preset device name: {name!r}")
