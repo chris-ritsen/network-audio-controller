@@ -17,7 +17,7 @@ from netaudio.common.ddm_config_store import (
     set_default_ddm_context,
 )
 from netaudio.common.managed_api import DDM_NAME_PATTERN, resolve_ddm_configuration
-from netaudio.ddm.client import ManagedAPIClient, ManagedAPIError, authenticate_with_password
+from netaudio.ddm.client import AuthenticationError, ManagedAPIClient, ManagedAPIError, authenticate_with_password
 
 
 class DaemonConnectionHandlers:
@@ -176,10 +176,11 @@ class DaemonConnectionHandlers:
         except ValueError as error:
             await self._send_json(writer, {"error": str(error)}, 400)
             return
-        except ManagedAPIError:
-            await self._send_json(
-                writer, {"error": "DDM authentication failed or the server could not be reached"}, 502
-            )
+        except AuthenticationError as error:
+            await self._send_json(writer, {"error": str(error)}, 401)
+            return
+        except ManagedAPIError as error:
+            await self._send_json(writer, {"error": f"DDM login failed: {error}"}, 502)
             return
         except OSError:
             await self._send_json(writer, {"error": "DDM credentials could not be saved on the backend"}, 500)

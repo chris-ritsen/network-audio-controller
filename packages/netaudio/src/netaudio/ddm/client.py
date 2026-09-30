@@ -288,7 +288,10 @@ def authenticate_with_password(
     response = _send_request(transport or _default_transport, request, response_limit)
     result = _decode_result(response)
     if result.data is None or result.errors:
-        raise AuthenticationError("DDM rejected username/password login")
+        reasons = "; ".join(error.message for error in result.errors or () if error.message)
+        raise AuthenticationError(
+            f"DDM rejected username/password login: {reasons}" if reasons else "DDM rejected username/password login"
+        )
     payload = result.data.get(PASSWORD_LOGIN_OPERATION_NAME)
     if not isinstance(payload, Mapping):
         raise ResponseShapeError("Managed API login result must be an object")
