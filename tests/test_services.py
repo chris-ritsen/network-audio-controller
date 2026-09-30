@@ -484,7 +484,8 @@ class TestDanteNotificationService:
         events = receive_packets(application, [ROUTING_CAPACITY_READY_PACKET], ("192.168.1.108", 8702))
 
         assert device.routing_ready is True
-        assert device.routing_ready_state_code == 0x0101
+        assert device.routing_ready_code == 1
+        assert device.routing_link_status == 1
         assert device.routing_capacity_transmit_channel_count == 128
         assert device.routing_capacity_receive_channel_count == 128
         assert device.tx_count == device.tx_count_raw == 128
@@ -497,7 +498,8 @@ class TestDanteNotificationService:
     def test_routing_capacity_transition_preserves_active_counts(self):
         application, device = application_with_device("a32.local.", "10.0.2.15", name="A32")
         device.routing_ready = True
-        device.routing_ready_state_code = 0x0101
+        device.routing_ready_code = 1
+        device.routing_link_status = 1
         device.routing_capacity_transmit_channel_count = 64
         device.routing_capacity_receive_channel_count = 64
         device.tx_count = device.tx_count_raw = 64
@@ -506,7 +508,8 @@ class TestDanteNotificationService:
         events = receive_packets(application, [ROUTING_CAPACITY_TRANSITION_PACKET], ("10.0.2.15", 8702))
 
         assert device.routing_ready is False
-        assert device.routing_ready_state_code == 0x0001
+        assert device.routing_ready_code == 0
+        assert device.routing_link_status == 1
         assert device.routing_capacity_transmit_channel_count == 0
         assert device.routing_capacity_receive_channel_count == 0
         assert device.tx_count == device.tx_count_raw == 64

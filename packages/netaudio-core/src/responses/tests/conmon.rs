@@ -32,12 +32,14 @@ fn routing_capacity_status_parses_settled_and_transitional_authentic_packets() {
     assert_eq!(
         parse_routing_capacity_status(&settled),
         Some(RoutingCapacityStatus {
+            record_revision: 0x0724,
             unmapped_prefix_word: 0,
-            state_code: 0x0101,
-            routing_ready: Some(true),
-            unmapped_word: 0,
-            transmit_channel_count: 128,
-            receive_channel_count: 128,
+            routing_ready_code: 1,
+            routing_ready: true,
+            link_status: Some(1),
+            unmapped_word: Some(0),
+            transmit_channel_count: Some(128),
+            receive_channel_count: Some(128),
         })
     );
 
@@ -47,12 +49,14 @@ fn routing_capacity_status_parses_settled_and_transitional_authentic_packets() {
     assert_eq!(
         parse_routing_capacity_status(&transitional),
         Some(RoutingCapacityStatus {
+            record_revision: 0x0724,
             unmapped_prefix_word: 0,
-            state_code: 0x0001,
-            routing_ready: Some(false),
-            unmapped_word: 0,
-            transmit_channel_count: 0,
-            receive_channel_count: 0,
+            routing_ready_code: 0,
+            routing_ready: false,
+            link_status: Some(1),
+            unmapped_word: Some(0),
+            transmit_channel_count: Some(0),
+            receive_channel_count: Some(0),
         })
     );
 }
@@ -65,25 +69,27 @@ fn routing_capacity_status_preserves_unknown_state_and_rejects_invalid_packets()
     assert_eq!(
         parse_routing_capacity_status(&unknown),
         Some(RoutingCapacityStatus {
+            record_revision: 0x0724,
             unmapped_prefix_word: 0x12345678,
-            state_code: 0x9abc,
-            routing_ready: None,
-            unmapped_word: 0x55aa,
-            transmit_channel_count: 32,
-            receive_channel_count: 16,
+            routing_ready_code: 0x9a,
+            routing_ready: true,
+            link_status: Some(0xbc),
+            unmapped_word: Some(0x55aa),
+            transmit_channel_count: Some(32),
+            receive_channel_count: Some(16),
         })
     );
 
     unknown[26..28].copy_from_slice(&CONMON_OPCODE_SAMPLE_RATE_STATUS.to_be_bytes());
     assert_eq!(parse_routing_capacity_status(&unknown), None);
 
-    let mut wrong_length = decode_hexadecimal(
+    let mut truncated = decode_hexadecimal(
         "ffff002812870000001dc10812580000417564696e61746507240100000000000101000000800080",
     );
-    wrong_length.push(0);
-    let wrong_packet_length = wrong_length.len() as u16;
-    wrong_length[2..4].copy_from_slice(&wrong_packet_length.to_be_bytes());
-    assert_eq!(parse_routing_capacity_status(&wrong_length), None);
+    truncated.truncate(0x20);
+    let truncated_packet_length = truncated.len() as u16;
+    truncated[2..4].copy_from_slice(&truncated_packet_length.to_be_bytes());
+    assert_eq!(parse_routing_capacity_status(&truncated), None);
 }
 
 fn captured_ad4d_switch_configuration_status() -> Vec<u8> {

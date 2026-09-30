@@ -69,7 +69,8 @@ class DanteDevice:
         self.routing_capacity_receive_channel_count: int | None = None
         self.routing_capacity_transmit_channel_count: int | None = None
         self.routing_ready: bool | None = None
-        self.routing_ready_state_code: int | None = None
+        self.routing_ready_code: int | None = None
+        self.routing_link_status: int | None = None
         self.sample_rate = None
         self.requested_sample_rate: int | None = None
         self.sample_rate_update_mode: int | None = None

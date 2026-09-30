@@ -185,12 +185,12 @@ def apply_device_status(device, kind: str, status) -> bool:
         return changed or source_changed
     if kind == STATUS_KIND_ROUTING_CAPACITY:
         fields = dict(status)
-        if status["routing_ready"] is True and device.tx_count is None:
-            fields["tx_count"] = status["routing_capacity_transmit_channel_count"]
-            fields["tx_count_raw"] = status["routing_capacity_transmit_channel_count"]
-        if status["routing_ready"] is True and device.rx_count is None:
-            fields["rx_count"] = status["routing_capacity_receive_channel_count"]
-            fields["rx_count_raw"] = status["routing_capacity_receive_channel_count"]
+        transmit_count = status["routing_capacity_transmit_channel_count"]
+        receive_count = status["routing_capacity_receive_channel_count"]
+        if status["routing_ready"] is True and device.tx_count is None and transmit_count is not None:
+            fields["tx_count"] = fields["tx_count_raw"] = transmit_count
+        if status["routing_ready"] is True and device.rx_count is None and receive_count is not None:
+            fields["rx_count"] = fields["rx_count_raw"] = receive_count
         return _assign_changed(device, fields)
     if kind == STATUS_KIND_INTERFACE_STATISTICS:
         return _assign_changed(device, {"interface_statistics": status.to_dict()})

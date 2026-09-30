@@ -289,7 +289,8 @@ def _parse_routing_capacity_status(data: bytes, source_ip: str, device) -> Parse
         "routing_capacity_receive_channel_count": parsed["receive_channel_count"],
         "routing_capacity_transmit_channel_count": parsed["transmit_channel_count"],
         "routing_ready": parsed["routing_ready"],
-        "routing_ready_state_code": parsed["state_code"],
+        "routing_ready_code": parsed["routing_ready_code"],
+        "routing_link_status": parsed["link_status"],
     }
     return ParsedStatus(STATUS_KIND_ROUTING_CAPACITY, status, parsed)
 

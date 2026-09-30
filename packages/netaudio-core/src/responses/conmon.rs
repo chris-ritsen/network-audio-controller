@@ -73,12 +73,14 @@ pub struct ClearConfigurationStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RoutingCapacityStatus {
+    pub record_revision: u16,
     pub unmapped_prefix_word: u32,
-    pub state_code: u16,
-    pub routing_ready: Option<bool>,
-    pub unmapped_word: u16,
-    pub transmit_channel_count: u16,
-    pub receive_channel_count: u16,
+    pub routing_ready_code: u8,
+    pub routing_ready: bool,
+    pub link_status: Option<u8>,
+    pub unmapped_word: Option<u16>,
+    pub transmit_channel_count: Option<u16>,
+    pub receive_channel_count: Option<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -213,28 +215,27 @@ pub fn parse_clear_configuration_status(data: &[u8]) -> Option<ClearConfiguratio
 
 pub fn parse_routing_capacity_status(data: &[u8]) -> Option<RoutingCapacityStatus> {
     validate_conmon_envelope(data, CONMON_OPCODE_ROUTING_CAPACITY_STATUS)?;
-    if data.len() != CONMON_ROUTING_CAPACITY_PACKET_SIZE {
-        return None;
-    }
-    let state_code = read_u16(data, CONMON_ROUTING_CAPACITY_STATE_CODE_OFFSET)?;
-    let routing_ready = match state_code {
-        0x0101 => Some(true),
-        0x0001 => Some(false),
-        _ => None,
+    let revision = read_u16(data, CONMON_ROUTING_CAPACITY_RECORD_OFFSET)?;
+    let routing_ready_code = *data.get(CONMON_ROUTING_CAPACITY_READY_OFFSET)?;
+    let count = |offset| {
+        (revision >= 0x0609)
+            .then(|| read_u16(data, offset))
+            .flatten()
     };
     Some(RoutingCapacityStatus {
+        record_revision: revision,
         unmapped_prefix_word: read_u32(data, CONMON_ROUTING_CAPACITY_UNMAPPED_PREFIX_WORD_OFFSET)?,
-        state_code,
-        routing_ready,
-        unmapped_word: read_u16(data, CONMON_ROUTING_CAPACITY_UNMAPPED_WORD_OFFSET)?,
-        transmit_channel_count: read_u16(
-            data,
-            CONMON_ROUTING_CAPACITY_TRANSMIT_CHANNEL_COUNT_OFFSET,
-        )?,
-        receive_channel_count: read_u16(
-            data,
-            CONMON_ROUTING_CAPACITY_RECEIVE_CHANNEL_COUNT_OFFSET,
-        )?,
+        routing_ready_code,
+        routing_ready: routing_ready_code != 0,
+        link_status: if revision >= 0x0714 {
+            data.get(CONMON_ROUTING_CAPACITY_LINK_STATUS_OFFSET)
+                .copied()
+        } else {
+            None
+        },
+        unmapped_word: read_u16(data, CONMON_ROUTING_CAPACITY_UNMAPPED_WORD_OFFSET),
+        transmit_channel_count: count(CONMON_ROUTING_CAPACITY_TRANSMIT_CHANNEL_COUNT_OFFSET),
+        receive_channel_count: count(CONMON_ROUTING_CAPACITY_RECEIVE_CHANNEL_COUNT_OFFSET),
     })
 }
 

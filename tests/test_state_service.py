@@ -113,7 +113,8 @@ class TestApplyDeviceStatus:
             "routing_capacity_receive_channel_count": 16,
             "routing_capacity_transmit_channel_count": 16,
             "routing_ready": True,
-            "routing_ready_state_code": 0x0101,
+            "routing_ready_code": 1,
+            "routing_link_status": 1,
         }
 
         assert apply_device_status(device, "routing_capacity", status) is True
@@ -544,13 +545,15 @@ ROUTING_READY_STATUS = {
     "routing_capacity_receive_channel_count": 128,
     "routing_capacity_transmit_channel_count": 128,
     "routing_ready": True,
-    "routing_ready_state_code": 0x0101,
+    "routing_ready_code": 1,
+    "routing_link_status": 1,
 }
 ROUTING_TRANSITION_STATUS = {
     "routing_capacity_receive_channel_count": 0,
     "routing_capacity_transmit_channel_count": 0,
     "routing_ready": False,
-    "routing_ready_state_code": 0x0001,
+    "routing_ready_code": 0,
+    "routing_link_status": 1,
 }
 
 
