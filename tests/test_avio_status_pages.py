@@ -89,7 +89,7 @@ def test_transmitter_channel_status_page_sets_controller_and_factory_names():
     )
 
     assert channel.name == "bluetooth:left"
-    assert channel.friendly_name == "Left"
+    assert channel.friendly_name == "bluetooth:left"
     assert channel.factory_name == "Left"
     assert DanteDeviceSerializer.channel_to_json(channel)["factory_name"] == "Left"
 

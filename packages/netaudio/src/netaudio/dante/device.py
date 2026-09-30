@@ -514,11 +514,11 @@ class DanteDevice:
 
             if channel_name:
                 channel.name = channel_name
+                channel.friendly_name = channel_name
 
             factory_name = record.get("friendly_channel_name")
 
             if factory_name:
-                channel.friendly_name = factory_name
                 channel.factory_name = factory_name
 
             self._apply_modern_arc_channel_metadata(channel, record)
@@ -579,11 +579,11 @@ class DanteDevice:
 
             if local_channel_name:
                 channel.name = local_channel_name
+                channel.friendly_name = local_channel_name
 
             factory_name = record.get("friendly_channel_name")
 
             if factory_name:
-                channel.friendly_name = factory_name
                 channel.factory_name = factory_name
 
             self._apply_modern_arc_channel_metadata(channel, record)
