@@ -129,11 +129,23 @@ class ClockControlAvailability(_extensions.TypedDict):
     subdomain: bool
 
 
-class ClockInterfaceVector(_extensions.TypedDict):
-    first_record: int
+class ClockExtensionDescriptor(_extensions.TypedDict):
+    base_vector_metadata: int
+    base_vector_offset: int
+    extent: int
+    global_block_length: _typing.Union[int, None]
+    global_block_offset: _typing.Union[int, None]
+    unresolved_metadata: int
+
+
+class ClockGlobalBlock(_extensions.TypedDict):
+    extended_port_count: int
+    extended_port_offset: int
+    extended_port_stride: int
+    identity_validity: int
+    length: int
     offset: int
-    stride: int
-    unknown_header_words: list[int]
+    raw_block: list[int]
 
 
 class Observation(_extensions.TypedDict):
@@ -1034,13 +1046,16 @@ class PtpClockStatus(_extensions.TypedDict):
     extended_ports: list[ExtendedClockPort]
     extended_ptpv2_domain: _typing.Union[int, None]
     extended_validity: _typing.Union[int, None]
+    extended_value_validity_word: _typing.Union[int, None]
+    extended_value_word: _typing.Union[int, None]
+    extension_descriptor: _typing.Union[ClockExtensionDescriptor, None]
     extension_flags: _typing.Union[int, None]
     extension_offset: _typing.Union[int, None]
     extension_unknown_byte: _typing.Union[int, None]
     extension_unknown_word: _typing.Union[int, None]
     follower_only: _typing.Union[bool, None]
+    global_block: _typing.Union[ClockGlobalBlock, None]
     global_unicast_delay_requests: _typing.Union[bool, None]
-    interface_vector: _typing.Union[ClockInterfaceVector, None]
     maximum_drift_parts_per_billion: _typing.Union[int, None]
     multicast_dscp: _typing.Union[int, None]
     mute_flags: _typing.Union[int, None]
@@ -1055,7 +1070,10 @@ class PtpClockStatus(_extensions.TypedDict):
     ptpv1_grandmaster_uuid: _typing.Union[list[int], None]
     ptpv1_master_uuid: _typing.Union[list[int], None]
     ptpv2_clock_class: _typing.Union[int, None]
+    ptpv2_device_identity: _typing.Union[str, None]
     ptpv2_domain: _typing.Union[int, None]
+    ptpv2_grandmaster_identity: _typing.Union[str, None]
+    ptpv2_master_identity: _typing.Union[str, None]
     ptpv2_priority1: _typing.Union[int, None]
     ptpv2_priority2: _typing.Union[int, None]
     raw_record: list[int]

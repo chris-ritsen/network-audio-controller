@@ -52,18 +52,19 @@ async def test_incomplete_receiver_query_keeps_last_complete_inventory_and_diagn
 
 
 def extended_clock_packet(*, validity=0x7F, offset=92, stride=64, count=2):
-    record = bytearray(220)
+    record = bytearray(284)
     record[:4] = bytes.fromhex("073a0020")
     record[46:48] = (48).to_bytes(2, "big")
     record[58:60] = bytes.fromhex("0804")
-    record[86:92] = stride.to_bytes(2, "big") + offset.to_bytes(2, "big") + count.to_bytes(2, "big")
-    record[92:96] = bytes.fromhex("007e0001")
-    record[96:105] = bytes.fromhex("40010100fd01f98002")
+    record[86:92] = (12).to_bytes(2, "big") + offset.to_bytes(2, "big") + (64).to_bytes(2, "big")
+    record[92:100] = count.to_bytes(2, "big") + bytes(2) + (156).to_bytes(2, "big") + stride.to_bytes(2, "big")
     record[124:128] = bytes.fromhex("deadbeef")
     record[128:132] = validity.to_bytes(4, "big")
     record[140:146] = bytes([2, 1, 7, 248, 128, 129])
     record[152] = 46
-    record[158:160] = (2).to_bytes(2, "big")
+    record[156:160] = bytes.fromhex("007e0001")
+    record[160:169] = bytes.fromhex("40010100fd01f98002")
+    record[222:224] = (2).to_bytes(2, "big")
     header = bytearray(CLOCK_STATUS_PACKET[:24])
     header[2:4] = (24 + len(record)).to_bytes(2, "big")
     return bytes(header + record)
@@ -91,9 +92,11 @@ def test_extended_clock_readback_preserves_raw_and_nullable_values():
 def paired_clock_packet(port_ids=(17, 3), *, interface_valid=True):
     packet = bytearray(extended_clock_packet())
     record = bytearray(packet[24:])
-    record[80:84] = bytes.fromhex("00dc0001")
-    record[92:96] = (0x7F if interface_valid else 0x7E).to_bytes(2, "big") + bytes.fromhex("002a")
-    record.extend(len(port_ids).to_bytes(2, "big") + bytes.fromhex("000000e40010"))
+    record[80:84] = len(record).to_bytes(2, "big") + bytes.fromhex("0001")
+    record[156:160] = (0x7F if interface_valid else 0x7E).to_bytes(2, "big") + bytes.fromhex("002a")
+    record.extend(
+        len(port_ids).to_bytes(2, "big") + bytes(2) + (len(record) + 8).to_bytes(2, "big") + bytes.fromhex("0010")
+    )
 
     for port_id in port_ids:
         record.extend(bytes(2) + port_id.to_bytes(2, "big") + bytes(12))
@@ -119,7 +122,7 @@ def test_clock_port_identity_survives_parse_plan_encode_and_readback(interface_v
     assert packet[24 + 68 : 24 + 74] == bytes.fromhex("000300113f00")
     assert not core.clock_configuration_matches(status, request)
     updated = bytearray(paired_clock_packet(interface_valid=interface_valid))
-    updated[24 + 96] = 63
+    updated[24 + 160] = 63
     readback = core.parse_response("ptp_clock_status", bytes(updated))
     assert core.clock_configuration_matches(readback, request)
 
@@ -145,12 +148,10 @@ def test_missing_clock_base_vector_keeps_port_unavailable():
     "geometry",
     [
         {"offset": 48},
-        {"offset": 219},
-        {"stride": 11},
+        {"offset": 221},
+        {"stride": 3},
         {"stride": 65535},
         {"count": 65535},
-        {"offset": 0},
-        {"count": 0},
     ],
 )
 def test_clock_descriptor_rejects_overlap_truncation_and_inconsistent_geometry(geometry):

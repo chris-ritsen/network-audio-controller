@@ -31,7 +31,6 @@ fn packet(rev: u16, extension: usize) -> Vec<u8> {
     let v3 = extension + 128;
     word(r, extension + 32, v as u16);
     word(r, extension + 34, 1);
-    word(r, extension + 38, 12);
     word(r, extension + 40, v3 as u16);
     word(r, extension + 42, 1);
     word(r, v, 4);
@@ -159,8 +158,6 @@ fn malformed_regions_and_lengths_fail_closed() {
         (112, 0xffff),
         (116, 0xffff),
         (118, 15),
-        (64 + 38, 3),
-        (64 + 40, 128),
         (46, 0xffff),
     ] {
         let mut bad = bytes.clone();
