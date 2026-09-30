@@ -77,6 +77,15 @@ class PacketStoreQueries:
 
         return pairs
 
+    def get_status_request_candidates(self, packet_id):
+        rows = self._conn.execute(
+            """SELECT * FROM packet_status_request_candidates
+               WHERE status_packet_id = ? OR request_packet_id = ?
+               ORDER BY status_packet_id, delay_ns""",
+            (packet_id, packet_id),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_packets_by_opcode(self, opcode):
         rows = self._conn.execute(
             "SELECT * FROM packets WHERE opcode = ? ORDER BY timestamp_ns",
@@ -350,5 +359,13 @@ class PacketStoreQueries:
 
         row = self._conn.execute("SELECT COUNT(*) as count FROM packets WHERE correlated_packet_id IS NULL").fetchone()
         stats["uncorrelated"] = row["count"]
+
+        row = self._conn.execute(
+            "SELECT COUNT(*) as count FROM packets WHERE correlation_kind = 'transaction'"
+        ).fetchone()
+        stats["correlated_by_transaction"] = row["count"]
+
+        row = self._conn.execute("SELECT COUNT(*) as count FROM packet_status_request_candidates").fetchone()
+        stats["status_request_candidates"] = row["count"]
 
         return stats

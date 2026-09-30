@@ -26,6 +26,13 @@ def _default_db_path():
 DEFAULT_DB_PATH = _default_db_path()
 
 TEMPORAL_CORRELATION_WINDOW = 0.1
+STATUS_REQUEST_OPCODES = {
+    0x0080: frozenset({0x0081}),
+    0x0082: frozenset({0x0083}),
+    0x0084: frozenset({0x0085}),
+    0x100B: frozenset({0x100A}),
+    0x100E: frozenset({0x100D}),
+}
 
 
 @dataclass(frozen=True)
@@ -178,6 +185,16 @@ class PacketStore(PacketStoreQueries):
             CREATE INDEX IF NOT EXISTS idx_capture_artifacts_session
                 ON capture_artifacts(session_id, timestamp_ns, id);
 
+            CREATE TABLE IF NOT EXISTS packet_status_request_candidates (
+                status_packet_id INTEGER NOT NULL REFERENCES packets(id),
+                request_packet_id INTEGER NOT NULL REFERENCES packets(id),
+                rule TEXT NOT NULL,
+                delay_ns INTEGER NOT NULL,
+                PRIMARY KEY (status_packet_id, request_packet_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_packet_status_request_candidates_request
+                ON packet_status_request_candidates(request_packet_id);
+
             CREATE TABLE IF NOT EXISTS packet_sessions (
                 packet_id INTEGER NOT NULL REFERENCES packets(id),
                 session_id INTEGER NOT NULL REFERENCES capture_sessions(id),
@@ -198,6 +215,8 @@ class PacketStore(PacketStoreQueries):
             self._conn.execute("ALTER TABLE packets ADD COLUMN source_host TEXT")
         if "interface" not in columns:
             self._conn.execute("ALTER TABLE packets ADD COLUMN interface TEXT")
+        if "correlation_kind" not in columns:
+            self._conn.execute("ALTER TABLE packets ADD COLUMN correlation_kind TEXT")
         marker_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(capture_markers)").fetchall()}
         if "summary" not in marker_columns:
             self._conn.execute("ALTER TABLE capture_markers ADD COLUMN summary TEXT")
@@ -669,61 +688,77 @@ class PacketStore(PacketStoreQueries):
                 raise
 
         if header and header["transaction_id"] is not None:
-            self._correlate_by_transaction_id(packet_id, header, device_ip, direction)
+            self._correlate_by_transaction_id(packet_id, header, record)
 
-        if source_type == "multicast" and device_ip:
-            self._correlate_by_temporal_proximity(packet_id, device_ip, timestamp_ns)
+        if source_type == "multicast" and device_ip and header:
+            self._record_status_request_candidates(packet_id, header["opcode"], device_ip, session_id, timestamp_ns)
 
         return packet_id
 
-    def _correlate_by_transaction_id(self, packet_id, header, device_ip, direction):
-        if not device_ip or not direction:
+    def _correlate_by_transaction_id(self, packet_id, header, record: PacketRecord):
+        if not record.device_ip or record.direction not in ("request", "response"):
             return
 
-        opposite = "response" if direction == "request" else "request"
+        if record.direction == "request":
+            peer_direction, peer_port_column, device_port = "response", "src_port", record.dst_port
+        else:
+            peer_direction, peer_port_column, device_port = "request", "dst_port", record.src_port
 
         row = self._conn.execute(
-            """SELECT id FROM packets
+            f"""SELECT id FROM packets
                WHERE transaction_id = ? AND device_ip = ? AND direction = ?
+                 AND opcode = ? AND protocol_name IS ? AND session_id IS ?
+                 AND ({peer_port_column} IS NULL OR ? IS NULL OR {peer_port_column} = ?)
                  AND correlated_packet_id IS NULL AND id != ?
                ORDER BY timestamp_ns DESC LIMIT 1""",
-            (header["transaction_id"], device_ip, opposite, packet_id),
+            (
+                header["transaction_id"],
+                record.device_ip,
+                peer_direction,
+                header["opcode"],
+                header["protocol_name"],
+                record.session_id,
+                device_port,
+                device_port,
+                packet_id,
+            ),
         ).fetchone()
 
         if row:
             match_id = row["id"]
             self._conn.execute(
-                "UPDATE packets SET correlated_packet_id = ? WHERE id = ?",
+                "UPDATE packets SET correlated_packet_id = ?, correlation_kind = 'transaction' WHERE id = ?",
                 (match_id, packet_id),
             )
             self._conn.execute(
-                "UPDATE packets SET correlated_packet_id = ? WHERE id = ?",
+                "UPDATE packets SET correlated_packet_id = ?, correlation_kind = 'transaction' WHERE id = ?",
                 (packet_id, match_id),
             )
             self._conn.commit()
 
-    def _correlate_by_temporal_proximity(self, packet_id, device_ip, timestamp_ns):
+    def _record_status_request_candidates(self, packet_id, opcode, device_ip, session_id, timestamp_ns):
+        request_opcodes = STATUS_REQUEST_OPCODES.get(opcode)
+        if not request_opcodes:
+            return
+
         window_ns = int(TEMPORAL_CORRELATION_WINDOW * 1e9)
-        min_ts = timestamp_ns - window_ns
+        placeholders = ", ".join("?" for _ in request_opcodes)
+        rows = self._conn.execute(
+            f"""SELECT id, timestamp_ns FROM packets
+               WHERE device_ip = ? AND direction = 'request' AND session_id IS ?
+                 AND opcode IN ({placeholders})
+                 AND timestamp_ns >= ? AND timestamp_ns <= ? AND id != ?""",
+            (device_ip, session_id, *sorted(request_opcodes), timestamp_ns - window_ns, timestamp_ns, packet_id),
+        ).fetchall()
 
-        row = self._conn.execute(
-            """SELECT id FROM packets
-               WHERE device_ip = ? AND direction = 'request'
-                 AND timestamp_ns >= ? AND timestamp_ns <= ?
-                 AND correlated_packet_id IS NULL AND id != ?
-               ORDER BY timestamp_ns DESC LIMIT 1""",
-            (device_ip, min_ts, timestamp_ns, packet_id),
-        ).fetchone()
-
-        if row:
-            match_id = row["id"]
-            self._conn.execute(
-                "UPDATE packets SET correlated_packet_id = ? WHERE id = ?",
-                (match_id, packet_id),
-            )
-            self._conn.execute(
-                "UPDATE packets SET correlated_packet_id = ? WHERE id = ?",
-                (packet_id, match_id),
+        if rows:
+            self._conn.executemany(
+                """INSERT OR IGNORE INTO packet_status_request_candidates
+                   (status_packet_id, request_packet_id, rule, delay_ns) VALUES (?, ?, ?, ?)""",
+                [
+                    (packet_id, row["id"], "temporal_same_status_family", timestamp_ns - row["timestamp_ns"])
+                    for row in rows
+                ],
             )
             self._conn.commit()
 

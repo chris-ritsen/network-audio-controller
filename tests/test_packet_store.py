@@ -244,8 +244,7 @@ class TestCorrelation:
         packets = store.get_packets()
         assert all(p["correlated_packet_id"] is None for p in packets)
 
-    def test_temporal_correlation(self, store):
-        """Multicast packet from device within 100ms of request to that device."""
+    def test_nearby_unrelated_status_is_not_correlated(self, store):
         req = _make_packet(transaction_id=0x0055)
         now = 1_000_000_000
 
@@ -273,7 +272,8 @@ class TestCorrelation:
 
         packets = store.get_packets()
         mc = next(p for p in packets if p["id"] == mc_id)
-        assert mc["correlated_packet_id"] == req_id
+        assert mc["correlated_packet_id"] is None
+        assert next(p for p in packets if p["id"] == req_id)["correlated_packet_id"] is None
 
     def test_get_correlated_pairs(self, store):
         req = _make_packet(transaction_id=0x0077, opcode=0x3010)
