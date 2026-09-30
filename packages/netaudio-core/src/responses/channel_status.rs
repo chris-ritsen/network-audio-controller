@@ -117,7 +117,7 @@ fn modern_arc_page_counts(body: &[u8]) -> Option<(u8, u8)> {
     }
     let page_capacity = *body.get(6)?;
     let reported_record_count = *body.get(7)?;
-    if page_capacity == 0 || reported_record_count > page_capacity {
+    if (page_capacity == 0 && reported_record_count != 0) || reported_record_count > page_capacity {
         return None;
     }
     Some((page_capacity, reported_record_count))

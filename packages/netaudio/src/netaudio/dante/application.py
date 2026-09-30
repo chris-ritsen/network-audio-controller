@@ -682,7 +682,14 @@ class DanteApplication:
 
             while state["next_command"] is not None:
                 response = await device.execute(state["next_command"])
-                inventory.accept(response)
+                try:
+                    inventory.accept(response)
+                except core.NetaudioCoreError as exception:
+                    logger.warning(
+                        f"{getattr(device, 'name', None)}: {channel_type} channel page rejected ({exception}): "
+                        f"{bytes(response or b'').hex()}"
+                    )
+                    raise
                 state = inventory.state()
 
         cache_attribute = (
