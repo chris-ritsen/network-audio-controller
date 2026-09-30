@@ -198,6 +198,7 @@ class TestAES67Waiter:
 
         [event] = dispatcher._pending_events
         assert event.type is EventType.DEVICE_STATUS_RECEIVED
+        assert isinstance(event.data.pop("received_order"), int)
         assert event.data == {
             "kind": "aes67",
             "notification_id": 0x1007,

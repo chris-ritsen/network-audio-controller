@@ -30,6 +30,7 @@ from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.latency import unavailable_latency_controls
 from netaudio.dante.operation_availability import probe_supported
 from netaudio.dante.services.notification_packet_handlers import (
+    superseded_status,
     STATUS_KIND_AES67,
     STATUS_KIND_CLEAR_CONFIGURATION,
     STATUS_KIND_CLOCK,
@@ -295,6 +296,9 @@ class DanteStateService:
         kind = event.data["kind"]
         status = event.data["status"]
         source_ip = event.data["source_ip"]
+        if superseded_status(source_ip, kind, event.data.get("received_order")):
+            logger.debug(f"Skipped a queued {kind} status from {source_ip}; a newer one has been received")
+            return
         device = self.application._device_by_control_key(source_ip)
         if device is None:
             self._pending_status.setdefault(source_ip, []).append((kind, status))

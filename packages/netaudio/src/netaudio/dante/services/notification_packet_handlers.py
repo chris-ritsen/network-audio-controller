@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import logging
 import time
 from dataclasses import dataclass
@@ -42,6 +43,15 @@ class ParsedStatus:
     kind: str
     status: object
     waiter_result: object
+
+
+_status_receive_order = itertools.count(1)
+_latest_status_orders: dict[tuple[str, str], int] = {}
+
+
+def superseded_status(source_ip: str, kind: str, received_order: int | None) -> bool:
+    latest = _latest_status_orders.get((source_ip, kind))
+    return received_order is not None and latest is not None and received_order < latest
 
 
 def _core_parse(kind: str, data: bytes, source_ip: str, description: str):
@@ -468,6 +478,8 @@ class NotificationPacketHandlers:
             observation = self._interface_statistics_error_baselines.apply(parsed.status)
             parsed = ParsedStatus(parsed.kind, observation, observation)
 
+        received_order = next(_status_receive_order)
+        _latest_status_orders[(source_ip, parsed.kind)] = received_order
         if parsed.kind == "panel_status":
             parsed.status["correlated"] = any(
                 waiter.accept is not None and waiter.accept(parsed.status)
@@ -488,6 +500,7 @@ class NotificationPacketHandlers:
                     "kind": parsed.kind,
                     "notification_id": opcode,
                     "raw": data,
+                    "received_order": received_order,
                     "source_ip": source_ip,
                     "status": parsed.status,
                 },
