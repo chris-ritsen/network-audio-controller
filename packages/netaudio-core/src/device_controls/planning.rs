@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use super::{
     category_panel, profile, CodecFormatStatus, PanelProfileRequest, PanelRequest, SerialSettings,
-    VideoFormatStatus,
+    VideoFormatStatus, BLUETOOTH_NAME_LIMIT,
 };
 
 #[derive(Deserialize)]
@@ -114,6 +114,22 @@ impl PanelPlanRequest {
             }
         };
         let request: PanelRequest = decode(&specification)?;
+        if let PanelRequest::BluetoothIdentification {
+            name_source,
+            custom_name,
+        } = &request
+        {
+            if !matches!(name_source, 1 | 2) {
+                return Err(unsupported(
+                    "Bluetooth name source must be 1 (Dante device name) or 2 (custom name).",
+                ));
+            }
+            if custom_name.chars().count() > BLUETOOTH_NAME_LIMIT {
+                return Err(unsupported(format!(
+                    "Bluetooth custom names are limited to {BLUETOOTH_NAME_LIMIT} characters."
+                )));
+            }
+        }
         // Encoder validation applies even to no-ops; an unknown setting is not confirmed by equality.
         request.encode().map_err(unsupported)?;
         let mut extra = Vec::new();
@@ -128,7 +144,11 @@ impl PanelPlanRequest {
                     ));
                 }
 
-                json!({"name_source": name_source, "custom_name": custom_name})
+                if *name_source == 1 {
+                    json!({"name_source": name_source})
+                } else {
+                    json!({"name_source": name_source, "custom_name": custom_name})
+                }
             }
             PanelRequest::BluetoothDiscovery { discoverable } => {
                 if !matches!(current.as_u64(), Some(1 | 2)) {
