@@ -2354,7 +2354,7 @@ class DanteApplication:
             DEVICE_NAME_NOTIFICATION_IDS,
         )
 
-    async def set_encoding(self, device, encoding: int, timeout: float = 2.0) -> dict | None:
+    async def set_encoding(self, device, encoding: int, timeout: float = 20.0) -> dict | None:
         core.build_command({"command": "set_encoding", "encoding": encoding})
         require_writable(device, "encoding", encoding)
 
