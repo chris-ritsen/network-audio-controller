@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    profile, CodecFormatStatus, PanelFamily, PanelProfileRequest, PanelRequest, SerialSettings,
+    category_panel, profile, CodecFormatStatus, PanelProfileRequest, PanelRequest, SerialSettings,
     VideoFormatStatus,
 };
 
@@ -259,17 +259,21 @@ pub fn plan(input: PanelPlanRequest) -> PanelPlan {
         expected: None,
     };
     let result = (|| {
-        let family = match input.category.as_str() {
-            "bluetooth_identification" | "bluetooth_discovery" | "bluetooth_pairing" => {
-                PanelFamily::Bluetooth
-            }
-            "video_format" | "codec_format" | "serial" | "bandwidth" | "hdcp" => {
-                PanelFamily::DanteAv
-            }
-            _ => return Err(unsupported("This setting has no supported writer.")),
-        };
+        if !matches!(
+            input.category.as_str(),
+            "bluetooth_identification"
+                | "bluetooth_discovery"
+                | "bluetooth_pairing"
+                | "video_format"
+                | "codec_format"
+                | "serial"
+                | "bandwidth"
+                | "hdcp"
+        ) {
+            return Err(unsupported("This setting has no supported writer."));
+        }
 
-        if profile.family != Some(family) {
+        if !category_panel(&input.category).is_some_and(|panel| profile.panels.contains(&panel)) {
             return Err(unsupported(
                 "This setting does not belong to the device's panel.",
             ));

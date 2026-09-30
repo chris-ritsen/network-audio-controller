@@ -19,7 +19,9 @@ def device(family="bluetooth"):
     d.platform_versions_record = {
         "platform_model_identifier": "DIOBT" if family == "bluetooth" else "DanteAV",
         "platform_model_identifier_hexadecimal": "44494f4254000000" if family == "bluetooth" else "44616e7465415600",
-        "plugin_identifiers": ["417564696E617465-0003" if family == "bluetooth" else "DanteAV"],
+        "plugin_identifiers": ["417564696E617465-0003"]
+        if family == "bluetooth"
+        else ["417564696E617465-0001", "417564696E617465-0002"],
     }
     d.virtual_panel_supported = True
     d.video_transmission_supported = family == "dante_av"
@@ -126,7 +128,7 @@ def test_retained_bluetooth_fixtures_decode_typed_envelope(load_fixture, fixture
 def test_advertised_panel_identity_precedes_model_and_never_uses_payload_guess():
     _, d = device()
     assert panel_family(d) == "bluetooth"
-    d.platform_versions_record["plugin_identifiers"] = ["DanteAV"]
+    d.platform_versions_record["plugin_identifiers"] = ["417564696E617465-0001", "417564696E617465-0002"]
     assert panel_family(d) == "dante_av"
     d.platform_versions_record["plugin_identifiers"] = ["unknown"]
     assert panel_family(d) is None
@@ -493,7 +495,7 @@ def test_model_name_does_not_establish_panel_capability():
     assert panel_family(d) is None
     observation(d, "bluetooth_discovery", 2)
     assert plan_panel(d, "bluetooth_discovery", True)["action"] == "unsupported"
-    d.platform_versions_record["plugin_identifiers"] = ["DanteAV"]
+    d.platform_versions_record["plugin_identifiers"] = ["417564696E617465-0001", "417564696E617465-0002"]
     assert panel_family(d) == "dante_av"
     d.platform_versions_record["plugin_identifiers"] = ["unsupported"]
     assert panel_family(d) is None

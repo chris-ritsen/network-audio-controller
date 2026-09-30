@@ -99,6 +99,8 @@ def panel_snapshot(device):
     profile = panel_profile(device)
     state = deepcopy(getattr(device, "device_controls", {}))
     state["family"] = profile["family"]
+    state["panels"] = profile["panels"]
+    state["categories"] = profile["categories"]
     state["selection"] = profile["selection"]
     state["unrecognized_panels"] = profile["unrecognized_panels"]
     state["read_unavailable_reason"] = profile["read_unavailable_reason"]

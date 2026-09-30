@@ -12,6 +12,63 @@ pub enum PanelFamily {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
+pub enum Panel {
+    Video,
+    Serial,
+    Bluetooth,
+}
+
+impl Panel {
+    fn family(self) -> PanelFamily {
+        match self {
+            Self::Bluetooth => PanelFamily::Bluetooth,
+            Self::Video | Self::Serial => PanelFamily::DanteAv,
+        }
+    }
+
+    fn categories(self) -> &'static [&'static str] {
+        match self {
+            Self::Bluetooth => &[
+                "bluetooth_connection",
+                "bluetooth_identification",
+                "bluetooth_discovery",
+                "bluetooth_pairing",
+            ],
+            Self::Video => &[
+                "video_format",
+                "codec_format",
+                "video_channel",
+                "bandwidth",
+                "hdcp",
+                "visca",
+            ],
+            Self::Serial => &["serial"],
+        }
+    }
+}
+
+pub fn category_panel(category: &str) -> Option<Panel> {
+    [Panel::Bluetooth, Panel::Video, Panel::Serial]
+        .into_iter()
+        .find(|panel| panel.categories().contains(&category))
+}
+
+fn query_selector(category: &str) -> Option<u32> {
+    Some(match category {
+        "bluetooth_connection" | "video_format" => 1,
+        "bluetooth_identification" | "codec_format" => 2,
+        "bluetooth_discovery" | "video_channel" => 3,
+        "bluetooth_pairing" | "serial" => 4,
+        "bandwidth" => 5,
+        "hdcp" => 6,
+        "visca" => 7,
+        _ => return None,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
 pub enum PanelSelection {
     Advertised,
     PlatformDefault,
@@ -29,6 +86,8 @@ pub struct PanelQuery {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PanelProfile {
     pub family: Option<PanelFamily>,
+    pub panels: Vec<Panel>,
+    pub categories: Vec<&'static str>,
     pub selection: Option<PanelSelection>,
     pub unrecognized_panels: Vec<Option<String>>,
     pub queries: Vec<PanelQuery>,
@@ -52,85 +111,91 @@ pub struct PanelProfileRequest {
     pub video_transmission_supported: bool,
 }
 
+const VIDEO_PANEL_IDENTIFIER: &str = "417564696E617465-0001";
+const SERIAL_PANEL_IDENTIFIER: &str = "417564696E617465-0002";
 const BLUETOOTH_PANEL_IDENTIFIER: &str = "417564696E617465-0003";
 const BLUETOOTH_PLATFORM_MODEL_IDENTIFIER: &str = "44494f4254000000";
+const DANTE_AV_PLATFORM_MODEL_IDENTIFIER: &str = "44616e7465415600";
 
-fn advertised_family(identifier: &str) -> Option<PanelFamily> {
+fn advertised_panel(identifier: &str) -> Option<Panel> {
     match identifier {
-        BLUETOOTH_PANEL_IDENTIFIER => Some(PanelFamily::Bluetooth),
-        "DanteAV" => Some(PanelFamily::DanteAv),
+        VIDEO_PANEL_IDENTIFIER => Some(Panel::Video),
+        SERIAL_PANEL_IDENTIFIER => Some(Panel::Serial),
+        BLUETOOTH_PANEL_IDENTIFIER => Some(Panel::Bluetooth),
         _ => None,
     }
 }
 
-fn is_bluetooth_platform(facts: &PanelProfileRequest) -> bool {
-    facts
-        .platform_model_identifier_hexadecimal
-        .as_deref()
-        .is_some_and(|model| model.eq_ignore_ascii_case(BLUETOOTH_PLATFORM_MODEL_IDENTIFIER))
+fn platform_default_panels(facts: &PanelProfileRequest) -> &'static [Panel] {
+    let model = facts.platform_model_identifier_hexadecimal.as_deref();
+    if model.is_some_and(|model| model.eq_ignore_ascii_case(BLUETOOTH_PLATFORM_MODEL_IDENTIFIER)) {
+        &[Panel::Bluetooth]
+    } else if model
+        .is_some_and(|model| model.eq_ignore_ascii_case(DANTE_AV_PLATFORM_MODEL_IDENTIFIER))
+    {
+        &[Panel::Video, Panel::Serial]
+    } else {
+        &[]
+    }
 }
 
 pub fn profile(facts: &PanelProfileRequest) -> PanelProfile {
-    let mut advertised_families = Vec::new();
+    let mut advertised_panels = Vec::new();
     let mut unrecognized_panels = Vec::new();
 
     for entry in &facts.plugins {
-        match entry.as_deref().and_then(advertised_family) {
-            Some(family) if !advertised_families.contains(&family) => {
-                advertised_families.push(family)
-            }
+        match entry.as_deref().and_then(advertised_panel) {
+            Some(panel) if !advertised_panels.contains(&panel) => advertised_panels.push(panel),
             Some(_) => {}
             None => unrecognized_panels.push(entry.clone()),
         }
     }
 
-    let (family, selection) = if !facts.plugins.is_empty() {
-        match advertised_families.as_slice() {
-            [family] => (Some(*family), Some(PanelSelection::Advertised)),
-            _ => (None, None),
+    let mut families = Vec::new();
+    for panel in &advertised_panels {
+        if !families.contains(&panel.family()) {
+            families.push(panel.family());
         }
-    } else if is_bluetooth_platform(facts) && facts.virtual_panel_supported {
+    }
+
+    let (panels, selection) = if !facts.plugins.is_empty() {
+        match families.as_slice() {
+            [_] => (advertised_panels, Some(PanelSelection::Advertised)),
+            _ => (Vec::new(), None),
+        }
+    } else if facts.virtual_panel_supported && !platform_default_panels(facts).is_empty() {
         (
-            Some(PanelFamily::Bluetooth),
+            platform_default_panels(facts).to_vec(),
             Some(PanelSelection::PlatformDefault),
         )
     } else {
-        (None, None)
+        (Vec::new(), None)
     };
-    let categories: &[&str] = match family {
-        Some(PanelFamily::Bluetooth) => &[
-            "bluetooth_connection",
-            "bluetooth_identification",
-            "bluetooth_discovery",
-            "bluetooth_pairing",
-        ],
-        Some(PanelFamily::DanteAv) => &[
-            "video_format",
-            "codec_format",
-            "video_channel",
-            "serial",
-            "bandwidth",
-            "hdcp",
-            "visca",
-        ],
-        None => &[],
-    };
-    let queries = categories
+    let family = panels.first().map(|panel| panel.family());
+    let categories: Vec<&'static str> = [Panel::Bluetooth, Panel::Video, Panel::Serial]
+        .into_iter()
+        .filter(|panel| panels.contains(panel))
+        .flat_map(|panel| panel.categories().iter().copied())
+        .collect();
+    let mut queries: Vec<PanelQuery> = categories
         .iter()
-        .zip(1u32..)
-        .map(|(category, selector)| PanelQuery {
-            category,
-            prerequisites: match *category {
-                "video_format" => vec!["video_format", "visca"],
-                "bandwidth" => vec!["bandwidth", "video_format"],
-                _ => vec![category],
-            },
-            request: match family {
-                Some(PanelFamily::Bluetooth) => PanelRequest::BluetoothQuery { selector },
-                _ => PanelRequest::VideoQuery { selector },
-            },
+        .filter_map(|category| {
+            let selector = query_selector(category)?;
+            Some(PanelQuery {
+                category,
+                prerequisites: match *category {
+                    "video_format" => vec!["video_format", "visca"],
+                    "bandwidth" => vec!["bandwidth", "video_format"],
+                    _ => vec![category],
+                },
+                request: match family {
+                    Some(PanelFamily::Bluetooth) => PanelRequest::BluetoothQuery { selector },
+                    _ => PanelRequest::VideoQuery { selector },
+                },
+            })
         })
         .collect();
+    queries.sort_by_key(|query| query_selector(query.category));
 
     let read_unavailable_reason = if facts.managed {
         Some("Managed panel transport is not established.")
@@ -138,11 +203,11 @@ pub fn profile(facts: &PanelProfileRequest) -> PanelProfile {
         Some("Device address is unavailable.")
     } else if facts.online == Some(false) {
         Some("Device is offline.")
-    } else if family.is_none() && advertised_families.len() > 1 {
+    } else if family.is_none() && families.len() > 1 {
         Some("Device advertises control panels from more than one panel family.")
     } else if family.is_none() && !facts.plugins.is_empty() {
         Some("Device advertises only unrecognized control panels.")
-    } else if family.is_none() && is_bluetooth_platform(facts) {
+    } else if family.is_none() && !platform_default_panels(facts).is_empty() {
         Some("Device has not advertised panel support.")
     } else if family.is_none() && facts.platform_model_identifier_hexadecimal.is_none() {
         Some("Device platform identity has not been read.")
@@ -167,6 +232,8 @@ pub fn profile(facts: &PanelProfileRequest) -> PanelProfile {
 
     PanelProfile {
         family,
+        panels,
+        categories,
         selection,
         unrecognized_panels,
         queries,

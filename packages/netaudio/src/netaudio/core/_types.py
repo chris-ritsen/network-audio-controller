@@ -798,6 +798,9 @@ class PacketPerformance(_extensions.TypedDict):
     latency_microseconds: int
 
 
+Panel = _typing.Literal["video", "serial", "bluetooth"]
+
+
 class PanelBandwidth(_extensions.TypedDict):
     disable: JsonValue
     enable: JsonValue
@@ -957,7 +960,9 @@ PanelSelection = _typing.Literal["advertised", "platform_default"]
 
 
 class PanelProfile(_extensions.TypedDict):
+    categories: list[str]
     family: _typing.Union[PanelFamily, None]
+    panels: list[Panel]
     queries: list[PanelQuery]
     read_unavailable_reason: _typing.Union[str, None]
     selection: _typing.Union[PanelSelection, None]
