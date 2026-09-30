@@ -50,7 +50,7 @@ pub fn profile(facts: &PanelProfileRequest) -> PanelProfile {
         }
 
         match first.as_str() {
-            "DIOBT" => Some(PanelFamily::Bluetooth),
+            "DIOBT" | "417564696E617465-0003" => Some(PanelFamily::Bluetooth),
             "DanteAV" => Some(PanelFamily::DanteAv),
             _ => None,
         }
@@ -96,6 +96,8 @@ pub fn profile(facts: &PanelProfileRequest) -> PanelProfile {
         Some("Device address is unavailable.")
     } else if facts.online == Some(false) {
         Some("Device is offline.")
+    } else if family.is_none() && facts.plugins.is_empty() {
+        Some("Device advertises no control panel.")
     } else if family.is_none() {
         Some("Device panel identity is unknown or ambiguous.")
     } else if !facts.virtual_panel_supported {
