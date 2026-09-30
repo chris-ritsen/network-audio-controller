@@ -225,7 +225,8 @@ class DaemonPresetHandlers:
                             if count is not None and len(channels) != count:
                                 raise ValueError(f"{device.name}: incomplete {direction.upper()} channel inventory.")
                         if device.flow_protocol_id is not None or device.transmitter_flows is not None:
-                            await self.application.inspect_transmit_flows(device)
+                            inventory = await self.application.inspect_transmit_flows(device)
+                            device.flow_protocol_id = inventory.get("flow_protocol_id", device.flow_protocol_id)
                     if "device_controls" in sections:
                         from netaudio.dante.panel_state import panel_family
 
