@@ -1,0 +1,17 @@
+.git
+.github
+.githooks
+.venv
+**/__pycache__
+**/*.pyc
+node_modules
+test-results
+playwright-report
+dist
+research
+tests
+aur
+packages/netaudio-core/target
+packages/netaudio/src/netaudio/core/libnetaudio_core.*
+packages/netaudio/src/netaudio/core/netaudio_core.dll
+packages/netaudio/src/netaudio/_build_info.json
