@@ -128,6 +128,22 @@ def _assign_changed(device, fields: dict) -> bool:
     return changed
 
 
+def _without_observation_time(value):
+    if isinstance(value, dict) and "observed_at_unix" in value:
+        return {key: item for key, item in value.items() if key != "observed_at_unix"}
+    return value
+
+
+def _assign_observed(device, fields: dict) -> bool:
+    changed = False
+    for field_name, value in fields.items():
+        current = getattr(device, field_name)
+        if current != value:
+            setattr(device, field_name, value)
+            changed = changed or _without_observation_time(current) != _without_observation_time(value)
+    return changed
+
+
 def apply_audio_capability(device, status: dict, *, kind: str) -> bool:
     return apply_device_status(device, kind, audio_capability_fields(status, kind=kind))
 
@@ -171,7 +187,7 @@ def apply_device_status(device, kind: str, status) -> bool:
             for name, value in status.items()
             if name in ALWAYS_OVERWRITTEN_MODEL_FIELDS or not getattr(device, name, None)
         }
-        changed = _assign_changed(device, fields)
+        changed = _assign_observed(device, fields)
         source = "conmon_platform_record" if kind == STATUS_KIND_DANTE_MODEL else "conmon_manufacturer_record"
         field_sources = dict(getattr(device, "field_sources", None) or {})
         source_changed = False

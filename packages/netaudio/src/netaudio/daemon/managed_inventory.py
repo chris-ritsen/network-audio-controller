@@ -322,7 +322,15 @@ def _overlay_channel_metadata(direct_channels: dict, managed_channels: dict) -> 
 
 
 def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
-    merged = copy.deepcopy(direct_record)
+    merged = dict(direct_record)
+    channels = direct_record.get("channels")
+    if isinstance(channels, dict):
+        merged["channels"] = {
+            direction: {number: dict(channel) for number, channel in entries.items()}
+            if isinstance(entries, dict)
+            else entries
+            for direction, entries in channels.items()
+        }
     for field in list(merged):
         if field.startswith("ddm_"):
             merged.pop(field)
@@ -372,7 +380,7 @@ def merge_device_inventory(
     for key, record in direct.items():
         if key in matched_direct:
             continue
-        annotated = copy.deepcopy(record)
+        annotated = record
         if record.get("management_state") == "managed":
             annotated.update(online=False, availability_state="unknown", control_transports=["ddm"])
             merged[key] = annotated
