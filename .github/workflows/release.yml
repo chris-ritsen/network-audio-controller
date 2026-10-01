@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
       - run: uv lock --check
-      - run: uv run --isolated --python 3.9 --no-project python -m compileall -q packages/netaudio/src/netaudio
+      - run: uv run --isolated --python 3.10 --no-project python -m compileall -q packages/netaudio/src/netaudio
       - run: uv run ruff check .
       - run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -132,14 +132,14 @@ jobs:
           fi
           python scripts/verify_wheel_artifact.py "${wheel[0]}" \
             --platform "${{ matrix.platform }}" --architecture "${{ matrix.architecture }}"
-          for python_version in 3.9 3.10 3.11 3.12 3.13; do
+          for python_version in 3.10 3.11 3.12 3.13 3.14; do
             uv run --isolated --no-project --python "$python_version" \
               python scripts/smoke_wheel_install.py "${wheel[0]}"
           done
       - shell: bash
         run: |
           wheel=(dist/*.whl)
-          uv run --isolated --no-project --python 3.9 --with "${wheel[0]}" \
+          uv run --isolated --no-project --python 3.10 --with "${wheel[0]}" \
             python -c "from netaudio import core; core.require(); assert len(core.build_command({'command': 'reboot', 'host_mac': '001122334455'})) > 0"
       - uses: actions/upload-artifact@v7
         with:
@@ -198,9 +198,9 @@ jobs:
             echo "expected exactly one wheel built from the source distribution, found ${#wheel[@]}" >&2
             exit 1
           fi
-          uv run --isolated --no-project --python 3.9 --with "${wheel[0]}" \
+          uv run --isolated --no-project --python 3.10 --with "${wheel[0]}" \
             python scripts/smoke_wheel.py
-          uv run --isolated --no-project --python 3.9 --with "${wheel[0]}" \
+          uv run --isolated --no-project --python 3.10 --with "${wheel[0]}" \
             python -c "from netaudio import core; core.require(); assert len(core.build_command({'command': 'reboot', 'host_mac': '001122334455'})) > 0"
       - uses: actions/upload-artifact@v7
         with:

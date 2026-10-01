@@ -188,7 +188,7 @@ Dante network for discovery, heartbeats and metering.
 
 ### From source
 
-A source checkout requires Python 3.9 or newer, `uv`, and a Rust toolchain:
+A source checkout requires Python 3.10 or newer, `uv`, and a Rust toolchain:
 
 ```bash
 uv sync

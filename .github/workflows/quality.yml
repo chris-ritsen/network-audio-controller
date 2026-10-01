@@ -58,7 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.scope == 'compatibility') && '["3.9", "3.10", "3.11", "3.12", "3.13"]' || '["3.13"]') }}
+        python-version: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.scope == 'compatibility') && '["3.10", "3.11", "3.12", "3.13", "3.14"]' || '["3.13"]') }}
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -105,8 +105,8 @@ jobs:
         with:
           tool: cbindgen@0.29.4
       - uses: astral-sh/setup-uv@v7
-      - run: uv sync --python 3.9 --all-groups
-      - run: uv run --python 3.9 python scripts/check_project.py --scope native --report "${{ runner.temp }}/checks/report.json"
+      - run: uv sync --python 3.10 --all-groups
+      - run: uv run --python 3.10 python scripts/check_project.py --scope native --report "${{ runner.temp }}/checks/report.json"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -184,7 +184,7 @@ jobs:
           fi
           python scripts/verify_wheel_artifact.py "${wheel[0]}" \
             --platform "${{ matrix.platform }}" --architecture "${{ matrix.architecture }}"
-          for python_version in 3.9 3.10 3.11 3.12 3.13; do
+          for python_version in 3.10 3.11 3.12 3.13 3.14; do
             uv run --isolated --no-project --python "$python_version" \
               python scripts/smoke_wheel_install.py "${wheel[0]}"
           done

@@ -6,7 +6,7 @@ pkgdesc="CLI for managing network audio devices (git version)"
 arch=('x86_64' 'aarch64')
 url='https://github.com/chris-ritsen/network-audio-controller'
 license=(Unlicense)
-depends=('python' 'python-zeroconf' 'python-ifaddr' 'python-sqlitedict' 'python-typer' 'python-rich' 'python-segno' 'python-pyyaml' 'python-dbus-fast')
+depends=('python' 'python-zeroconf' 'python-ifaddr' 'python-typer' 'python-rich' 'python-segno' 'python-pyyaml' 'python-dbus-fast')
 optdepends=('python-redis: publish device state to Redis and store captured packets'
             'wireshark-cli: live network capture')
 makedepends=('git' 'rust' 'python-build' 'python-installer' 'python-wheel' 'python-hatchling' 'python-packaging')
