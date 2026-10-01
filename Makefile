@@ -7,7 +7,7 @@ RUST_TEST ?=
 LINT_FILES ?=
 BOUNDED := python3 scripts/run_bounded_tests.py
 
-.PHONY: help test-python-full test-webapp-full test-full test-rust test-browser lint
+.PHONY: help test-python-full test-webapp-full test-full test-rust test-browser lint audit audit-fix
 help:
 	@echo "test TEST_CASES='tests/test_name.py::test_name'  Focused Python checks; no build or dependency sync"
 	@echo "test-webapp WEB_TESTS='tests/webapp/name.test.mjs'  Focused JavaScript checks"
@@ -17,6 +17,8 @@ help:
 	@echo "test-full / quality                           Explicit broad checks; not routine"
 	@echo "check-local                                   Shared local/CI checks with a report; five-minute limit"
 	@echo "core / install / deploy                        Explicit build and deployment commands"
+	@echo "audit                                         Known vulnerabilities in uv.lock and the core's Cargo.lock"
+	@echo "audit-fix                                     Upgrade the vulnerable packages in their lockfiles, then audit"
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
@@ -88,6 +90,12 @@ lint:
 
 quality:
 	$(PYTHON) scripts/check_project.py --scope native --offline
+
+audit:
+	$(PYTHON) scripts/audit_dependencies.py
+
+audit-fix:
+	$(PYTHON) scripts/audit_dependencies.py --fix
 
 wheel-smoke:
 	@tmp=$$(mktemp -d) || exit 1; \

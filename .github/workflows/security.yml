@@ -1,0 +1,110 @@
+name: security
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: security
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  base-image:
+    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE: docker.io/s00pcan/netaudio
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: s00pcan
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Rebuild the release image on a newer base image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --json tagName --jq .tagName)"
+          version="${tag#v}"
+          release="${RUNNER_TEMP}/release"
+          git worktree add --detach "$release" "$tag"
+          if [ ! -f "$release/scripts/container_base.py" ]; then
+            echo "$tag predates base image tracking; nothing to rebuild." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          current="$(python3 scripts/container_base.py --dockerfile "$release/containers/Dockerfile" current)"
+          published="$(python3 scripts/container_base.py published "${IMAGE}:${version}")"
+          if [ "$current" = "$published" ]; then
+            echo "${IMAGE}:${version} is on the current base image ${current}." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh release download "$tag" --pattern 'netaudio-*-manylinux_*.whl' --dir "$release/dist"
+          docker buildx build --file "$release/containers/Dockerfile" \
+            --build-arg WHEELS=prebuilt --build-arg EXTRAS=redis \
+            --build-arg BASE_DIGEST="$current" \
+            --build-arg VERSION="$version" --build-arg REVISION="$(git rev-parse "${tag}^{commit}")" \
+            --platform linux/amd64,linux/arm64 \
+            --tag "${IMAGE}:${version}" --tag "${IMAGE}:latest" \
+            --push "$release"
+          echo "Rebuilt ${IMAGE}:${version} and latest on base ${current} (was ${published:-unknown})." >> "$GITHUB_STEP_SUMMARY"
+      - name: Rebuild the edge image on a newer base image
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(python3 scripts/container_base.py current)"
+          published="$(python3 scripts/container_base.py published "${IMAGE}:edge")"
+          if [ "$current" = "$published" ]; then
+            echo "${IMAGE}:edge is on the current base image ${current}." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          docker buildx build --file containers/Dockerfile \
+            --build-arg EXTRAS=redis --build-arg BASE_DIGEST="$current" \
+            --build-arg VERSION=edge --build-arg REVISION="$GITHUB_SHA" \
+            --platform linux/amd64,linux/arm64 \
+            --tag "${IMAGE}:edge" \
+            --push .
+          echo "Rebuilt ${IMAGE}:edge on base ${current} (was ${published:-unknown})." >> "$GITHUB_STEP_SUMMARY"
+
+  dependencies:
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - name: Audit the locked dependencies of master and the latest release
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=0
+          tag="$(gh release view --json tagName --jq .tagName)"
+          release="${RUNNER_TEMP}/release"
+          git worktree add --detach "$release" "$tag"
+          for checkout in "$GITHUB_WORKSPACE" "$release"; do
+            name="master"
+            [ "$checkout" = "$release" ] && name="$tag"
+            if [ ! -f "$checkout/scripts/audit_dependencies.py" ]; then
+              echo "### $name"$'\n\n'"Predates the dependency audit." >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            report="$(cd "$checkout" && uv run --no-project --python 3.13 python scripts/audit_dependencies.py)"
+            result=$?
+            echo "$report"
+            printf '### %s\n\n```\n%s\n```\n\n' "$name" "$report" >> "$GITHUB_STEP_SUMMARY"
+            [ "$result" -ne 0 ] && status=1
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "Fix on the dev machine with make audit-fix, run make check-local, and release a patch." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"

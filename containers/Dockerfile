@@ -2,12 +2,13 @@
 
 ARG PYTHON_VERSION=3.13
 ARG DEBIAN_RELEASE=trixie
+ARG BASE_DIGEST=""
 ARG WHEELS=compiled
 
 FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:0.12 AS uv
 
 
-FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE} AS toolchain
+FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE}${BASE_DIGEST:+@${BASE_DIGEST}} AS toolchain
 
 ARG BUILDARCH
 RUN case "$BUILDARCH" in \
@@ -57,7 +58,7 @@ COPY dist/ /dist/
 FROM ${WHEELS} AS wheels
 
 
-FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE} AS installed
+FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE}${BASE_DIGEST:+@${BASE_DIGEST}} AS installed
 
 COPY --from=uv /uv /usr/local/bin/uv
 
@@ -83,7 +84,7 @@ RUN --mount=type=bind,from=wheels,source=/dist,target=/dist \
     && python3 -c 'import pathlib, sys; expected = int(sys.argv[1]); headers = {path: path.open("rb").read(20) for path in pathlib.Path("/installed").rglob("*") if path.is_file() and not path.is_symlink()}; foreign = [str(path) for path, header in headers.items() if header[:4] == b"\x7fELF" and int.from_bytes(header[18:20], "little") != expected]; sys.exit("built for another architecture: " + ", ".join(foreign) if foreign else 0)' "$elf"
 
 
-FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE} AS accounts
+FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE}${BASE_DIGEST:+@${BASE_DIGEST}} AS accounts
 
 RUN groupadd --system --gid 10001 netaudio \
     && useradd --system --uid 10001 --gid 10001 --home-dir /var/lib/netaudio --no-create-home netaudio \
@@ -92,7 +93,7 @@ RUN groupadd --system --gid 10001 netaudio \
     && cp -p /etc/passwd /etc/group /etc/shadow /etc/gshadow /accounts/etc/
 
 
-FROM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE} AS runtime
+FROM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE}${BASE_DIGEST:+@${BASE_DIGEST}} AS runtime
 
 COPY --from=accounts /accounts/ /
 COPY --from=installed /installed/ /
@@ -115,9 +116,14 @@ VOLUME ["/var/lib/netaudio"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-c", "import urllib.request; from netaudio.common.app_config import configured_daemon_port; urllib.request.urlopen(f'http://127.0.0.1:{configured_daemon_port()}/server-info', timeout=4)"]
 
+ARG PYTHON_VERSION
+ARG DEBIAN_RELEASE
+ARG BASE_DIGEST
 ARG VERSION=""
 ARG REVISION=""
 LABEL org.opencontainers.image.title="netaudio" \
+      org.opencontainers.image.base.name="docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE}" \
+      org.opencontainers.image.base.digest="${BASE_DIGEST}" \
       org.opencontainers.image.description="Dante network audio daemon, web interface and MCP server" \
       org.opencontainers.image.source="https://github.com/chris-ritsen/network-audio-controller" \
       org.opencontainers.image.licenses="Unlicense" \

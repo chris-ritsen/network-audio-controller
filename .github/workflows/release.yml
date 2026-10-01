@@ -169,6 +169,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           docker buildx build --file containers/Dockerfile \
             --build-arg WHEELS=prebuilt --build-arg EXTRAS=redis \
+            --build-arg BASE_DIGEST="$(python3 scripts/container_base.py current)" \
             --build-arg VERSION="$version" --build-arg REVISION="$GITHUB_SHA" \
             --platform linux/amd64,linux/arm64 \
             --tag "${IMAGE}:${version}" --tag "${IMAGE}:latest" \
