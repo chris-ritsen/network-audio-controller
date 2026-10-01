@@ -1,0 +1,18 @@
+[Exec]
+Boot=no
+ProcessTwo=yes
+Parameters=/usr/local/bin/netaudio daemon run
+User=netaudio
+WorkingDirectory=/var/lib/netaudio
+Environment=HOME=/var/lib/netaudio
+Environment=NETAUDIO_CONFIG=/var/lib/netaudio/config.toml
+Environment=PYTHONUNBUFFERED=1
+PrivateUsers=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Files]
+Bind=/var/lib/netaudio
+
+[Network]
+Private=no
+VirtualEthernet=no

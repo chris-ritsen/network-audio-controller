@@ -1,0 +1,9 @@
+services:
+  netaudio:
+    image: ${NETAUDIO_IMAGE:-netaudio:local}
+    build:
+      context: ..
+      dockerfile: containers/Dockerfile
+      network: host
+      args:
+        EXTRAS: ${NETAUDIO_EXTRAS:-}
