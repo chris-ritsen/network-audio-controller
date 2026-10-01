@@ -107,23 +107,50 @@ image yourself with
 `docker compose -f containers/compose.yaml -f containers/compose.build.yaml up -d --build`.
 
 With systemd-nspawn (systemd 260 or newer), the same image runs without
-Docker:
+Docker. Save these settings as `/etc/systemd/nspawn/netaudio.nspawn`; they are
+also in `containers/netaudio.nspawn`:
+
+```ini
+[Exec]
+Boot=no
+KillSignal=TERM
+Parameters=/usr/local/bin/netaudio daemon run
+User=netaudio
+WorkingDirectory=/var/lib/netaudio
+Environment=HOME=/var/lib/netaudio
+Environment=NETAUDIO_CONFIG=/var/lib/netaudio/config.toml
+Environment=PYTHONUNBUFFERED=1
+Environment=NOTIFY_SOCKET=
+PrivateUsers=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Files]
+Bind=/var/lib/netaudio
+
+[Network]
+Private=no
+VirtualEthernet=no
+```
+
+Then pull the image and start it now and at boot:
 
 ```bash
 sudo importctl pull-oci --class=machine docker.io/s00pcan/netaudio:latest netaudio
-sudo install -D -m 0644 containers/netaudio.nspawn /etc/systemd/nspawn/netaudio.nspawn
 sudo install -d -o 10001 -g 10001 -m 0750 /var/lib/netaudio
 sudo machinectl enable --now netaudio
 journalctl -u systemd-nspawn@netaudio -f
 ```
 
-State lives in `/var/lib/netaudio` on the host, including `config.toml`.
-To run CLI commands inside the container:
+Settings and state live in `/var/lib/netaudio` on the host, including
+`config.toml`; add `Environment=` lines for the options below. To run CLI
+commands inside the container, save this as `/usr/local/bin/netaudio` and use
+`sudo netaudio device list`:
 
-```bash
-sudo nsenter --target "$(machinectl show netaudio --property=Leader --value)" --all \
-  --setuid 10001 --setgid 10001 env HOME=/var/lib/netaudio \
-  NETAUDIO_CONFIG=/var/lib/netaudio/config.toml netaudio device list
+```sh
+#!/bin/sh
+exec nsenter --target "$(machinectl show netaudio --property=Leader --value)" --all \
+  --setuid 10001 --setgid 10001 \
+  env HOME=/var/lib/netaudio NETAUDIO_CONFIG=/var/lib/netaudio/config.toml netaudio "$@"
 ```
 
 Container options, as environment variables:

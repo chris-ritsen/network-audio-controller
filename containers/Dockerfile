@@ -35,7 +35,7 @@ COPY dist/ /dist/
 FROM ${WHEELS} AS wheels
 
 
-FROM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE}
+FROM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE} AS runtime
 
 ARG EXTRAS=""
 RUN --mount=type=bind,from=wheels,source=/dist,target=/dist \
@@ -46,7 +46,14 @@ RUN groupadd --system --gid 10001 netaudio \
     && useradd --system --uid 10001 --gid 10001 --home-dir /var/lib/netaudio --no-create-home netaudio \
     && install -d -o netaudio -g netaudio -m 0750 /var/lib/netaudio
 
-ENV HOME=/var/lib/netaudio \
+
+FROM scratch
+
+COPY --from=runtime / /
+
+ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=C.UTF-8 \
+    HOME=/var/lib/netaudio \
     NETAUDIO_CONFIG=/var/lib/netaudio/config.toml \
     PYTHONUNBUFFERED=1
 
