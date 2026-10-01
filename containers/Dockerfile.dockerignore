@@ -1,5 +1,6 @@
 **
 !pyproject.toml
+!uv.lock
 !README.md
 !LICENSE
 !hatch_build_core.py

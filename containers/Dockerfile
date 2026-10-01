@@ -61,6 +61,11 @@ FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE} A
 
 COPY --from=uv /uv /usr/local/bin/uv
 
+WORKDIR /lock
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-emit-project --no-dev --all-extras --no-hashes --format requirements-txt \
+        --output-file /lock/constraints.txt
+
 ARG TARGETARCH
 ARG EXTRAS=""
 RUN --mount=type=bind,from=wheels,source=/dist,target=/dist \
@@ -73,7 +78,7 @@ RUN --mount=type=bind,from=wheels,source=/dist,target=/dist \
     && set -- /dist/netaudio-*_"$machine".whl \
     && if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then echo "expected one $machine netaudio wheel in /dist" >&2; exit 1; fi \
     && uv pip install --python /usr/local/bin/python3 --python-platform "$machine-manylinux_2_40" \
-        --prefix /installed/usr/local --compile-bytecode --link-mode copy \
+        --prefix /installed/usr/local --compile-bytecode --link-mode copy --constraints /lock/constraints.txt \
         "netaudio${EXTRAS:+[${EXTRAS}]} @ file://$1" \
     && python3 -c 'import pathlib, sys; expected = int(sys.argv[1]); headers = {path: path.open("rb").read(20) for path in pathlib.Path("/installed").rglob("*") if path.is_file() and not path.is_symlink()}; foreign = [str(path) for path, header in headers.items() if header[:4] == b"\x7fELF" and int.from_bytes(header[18:20], "little") != expected]; sys.exit("built for another architecture: " + ", ".join(foreign) if foreign else 0)' "$elf"
 
