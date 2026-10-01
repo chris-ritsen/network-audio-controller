@@ -271,6 +271,11 @@ port = 4780
 To serve plain HTTP on the network instead, set `no_ssl = true` under
 `[daemon]`.
 
+Versions before 0.3.15 served plain HTTP to the network on port 9000. Setting
+`port = 9000` and `no_ssl = true` keeps that address for existing bookmarks and
+clients. After upgrading, `netaudio daemon restart` replaces an older daemon
+that is still running on port 9000.
+
 The daemon can publish device state to Redis for other programs. Install
 `netaudio[redis]` and name the server; without a `[redis]` section the daemon
 does not use Redis:
@@ -280,6 +285,9 @@ does not use Redis:
 host = "localhost"
 port = 6379
 ```
+
+Versions before 0.3.15 published to a Redis server on localhost whenever one
+was running; this section keeps that behavior.
 
 `netaudio config path` shows which configuration file is used. For a DDM
 network, `netaudio ddm login --default` guides you through connecting to a
