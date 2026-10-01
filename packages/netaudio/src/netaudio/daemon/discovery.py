@@ -13,7 +13,7 @@ from netaudio.dante.device import DanteDevice
 from netaudio.dante.discovery import request_discovery
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.latency import nanoseconds_to_milliseconds
-from netaudio.network_path import preferred_device_address
+from netaudio.network_path import multicast_ipv4_addresses, preferred_device_address
 
 
 logger = logging.getLogger("netaudio")
@@ -54,7 +54,8 @@ class DanteDiscoveryMixin:
         interface_address = app_settings.interface_ip
         if app_settings.interface and not interface_address:
             raise RuntimeError("configured discovery interface has no IPv4 address")
-        self.zeroconf = AsyncZeroconf(interfaces=[interface_address]) if interface_address else AsyncZeroconf()
+        interfaces = [interface_address] if interface_address else multicast_ipv4_addresses()
+        self.zeroconf = AsyncZeroconf(interfaces=interfaces) if interfaces else AsyncZeroconf()
         self.browser = AsyncServiceBrowser(
             self.zeroconf.zeroconf,
             SERVICES,

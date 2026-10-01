@@ -44,11 +44,12 @@ def test_interface_address_is_resolved_fresh_and_never_falls_back(selected_inter
     assert settings.interface_ip is None
 
 
-def test_library_discovery_uses_only_the_selected_address(selected_interface):
+def test_library_discovery_uses_only_the_selected_address(monkeypatch, selected_interface):
     settings, _ = selected_interface
     instance = browser.DanteBrowser(0)
     assert instance.get_zeroconf_kwargs() == {"ip_version": IPVersion.V4Only, "interfaces": ["192.0.2.62"]}
     settings.interface = None
+    monkeypatch.setattr(browser, "multicast_ipv4_addresses", lambda: [])
     assert instance.get_zeroconf_kwargs() == {"ip_version": IPVersion.V4Only}
 
 

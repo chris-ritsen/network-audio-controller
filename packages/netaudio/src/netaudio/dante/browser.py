@@ -25,7 +25,7 @@ from netaudio.dante.const import MEDIA_SERVICE_TYPES, SERVICE_ARC, SERVICE_CMC, 
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.discovery import request_discovery
 from netaudio.dante.latency import nanoseconds_to_milliseconds
-from netaudio.network_path import preferred_device_address
+from netaudio.network_path import multicast_ipv4_addresses, preferred_device_address
 
 logger = logging.getLogger("netaudio")
 
@@ -224,6 +224,8 @@ class DanteBrowser:
                     "Using loopback interface %s for Zeroconf may not discover network devices",
                     interface_address,
                 )
+        elif addresses := multicast_ipv4_addresses():
+            kwargs["interfaces"] = addresses
 
         return kwargs
 

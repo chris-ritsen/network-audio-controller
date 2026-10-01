@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -15,6 +16,9 @@ import ifaddr
 
 DANTE_SECONDARY_NETWORK = ipaddress.IPv4Network("172.31.0.0/16")
 SERVICE_ORDER_REFRESH_SECONDS = 5.0
+INTERFACE_FLAG_REQUESTS = {"linux": (0x8913, 0x1000), "darwin": (0xC0206911, 0x8000)}
+INTERFACE_REQUEST_SIZE = 40
+INTERFACE_FLAGS_OFFSET = 16
 _service_order_cache: tuple[float, dict[str, int]] = (0.0, {})
 _service_order_lock = threading.Lock()
 
@@ -116,6 +120,34 @@ def active_ipv4_interfaces(
                 continue
             interfaces.add(IPv4Interface(priority, adapter.nice_name, str(address), network_prefix))
     return tuple(sorted(interfaces))
+
+
+def interface_supports_multicast(name: str) -> bool | None:
+    request = INTERFACE_FLAG_REQUESTS.get(sys.platform)
+    if request is None:
+        return None
+    import fcntl
+
+    request_code, multicast_flag = request
+    interface_request = name.encode()[:15].ljust(INTERFACE_REQUEST_SIZE, b"\0")
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            result = fcntl.ioctl(probe.fileno(), request_code, interface_request)
+        except OSError:
+            return None
+    (flags,) = struct.unpack_from("H", result, INTERFACE_FLAGS_OFFSET)
+    return bool(flags & multicast_flag)
+
+
+def multicast_ipv4_addresses(selected_interface: str | None = None) -> list[str]:
+    addresses = []
+    for interface in active_ipv4_interfaces(selected_interface, include_loopback=True):
+        loopback = ipaddress.IPv4Address(interface.address).is_loopback
+        if not loopback and interface_supports_multicast(interface.name) is False:
+            continue
+        if interface.address not in addresses:
+            addresses.append(interface.address)
+    return addresses
 
 
 def preferred_device_address(

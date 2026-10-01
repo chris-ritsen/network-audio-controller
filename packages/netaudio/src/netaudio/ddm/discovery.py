@@ -9,6 +9,7 @@ from typing import Any
 from zeroconf import IPVersion, ServiceStateChange
 
 from netaudio.common.app_config import settings as app_settings
+from netaudio.network_path import multicast_ipv4_addresses
 
 
 DDM_CONTROLLER_SERVICE = "_dante-ddm-c._tcp.local."
@@ -137,8 +138,8 @@ async def discover_ddm_servers(
 
     options: dict[str, object] = {"ip_version": IPVersion.V4Only}
     selected_interfaces = interfaces
-    if selected_interfaces is None and app_settings.interface_ip:
-        selected_interfaces = [app_settings.interface_ip]
+    if selected_interfaces is None:
+        selected_interfaces = [app_settings.interface_ip] if app_settings.interface_ip else multicast_ipv4_addresses()
     if selected_interfaces:
         options["interfaces"] = selected_interfaces
 

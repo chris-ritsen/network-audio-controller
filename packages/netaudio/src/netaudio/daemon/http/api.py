@@ -48,6 +48,7 @@ from netaudio.daemon.subscription_readback import SubscriptionReadback
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.metering import metering_scale
+from netaudio.network_path import interface_supports_multicast
 from netaudio.monitoring import (
     DerivationStatus,
     EventSeverity,
@@ -80,6 +81,8 @@ def advertisement_addresses(selected_interface: str | None = None) -> tuple[str,
     addresses = set()
     for adapter in ifaddr.get_adapters():
         if selected_interface and adapter.nice_name != selected_interface:
+            continue
+        if interface_supports_multicast(adapter.nice_name) is False:
             continue
         for adapter_ip in adapter.ips:
             address = adapter_ip.ip

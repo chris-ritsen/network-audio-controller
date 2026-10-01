@@ -65,6 +65,7 @@ async def test_daemon_and_library_reuse_their_active_discovery_transport():
 def test_daemon_discovery_honors_configured_interface(monkeypatch, address):
     settings = SimpleNamespace(interface="test-interface" if address else None, interface_ip=address)
     monkeypatch.setattr(daemon_discovery, "app_settings", settings)
+    monkeypatch.setattr(daemon_discovery, "multicast_ipv4_addresses", lambda: [])
     transport = Mock(return_value=SimpleNamespace(zeroconf=object()))
     browser = Mock()
     monkeypatch.setattr(daemon_discovery, "AsyncZeroconf", transport)
