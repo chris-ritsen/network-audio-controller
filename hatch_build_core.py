@@ -80,9 +80,7 @@ class CoreLibraryBuildHook(BuildHookInterface):
                     "netaudio-core library is not built and cargo is not installed; "
                     "install Rust (https://rustup.rs) or use a prebuilt wheel"
                 )
-            raise RuntimeError(
-                f"netaudio-core library not found in {self._release_dir(crate_dir)} after cargo build"
-            )
+            raise RuntimeError(f"netaudio-core library not found in {self._release_dir(crate_dir)} after cargo build")
         installed_library = install_built_library(self.root, library_path)
         build_data["force_include"][str(installed_library)] = f"netaudio/core/{installed_library.name}"
         build_data["force_include"][str(write_build_information(self.root))] = "netaudio/_build_info.json"

@@ -961,7 +961,9 @@ class DanteStateService:
             logger.debug(f"Conmon Dante model received for {server_name}")
             return
 
-        logger.warning(f"{server_name} did not answer the Dante model query after {len(CONMON_RETRY_TIMEOUTS)} attempts")
+        logger.warning(
+            f"{server_name} did not answer the Dante model query after {len(CONMON_RETRY_TIMEOUTS)} attempts"
+        )
         device = self.devices.get(server_name)
         if device is not None:
             await self._refresh_deferred_capabilities(device, "Dante model unavailable")
