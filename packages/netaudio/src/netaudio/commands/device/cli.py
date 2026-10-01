@@ -224,7 +224,7 @@ async def run_clear_configuration(application, devices, mode: ClearConfiguration
         preserve_internet_protocol_settings,
     )
     typer.echo(
-        f"Clear-configuration accepted: {device_name} (result {status['action_result_code']}, mode {mode.value})"
+        f"Clear-configuration acknowledged: {device_name} (executed mode {status['executed_mode']}, mode {mode.value})"
     )
 
 

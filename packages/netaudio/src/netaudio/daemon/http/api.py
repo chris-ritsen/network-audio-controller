@@ -18,18 +18,10 @@ from zeroconf import IPVersion, ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
-from netaudio.dante.metering import metering_scale
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.common.app_config import settings as app_settings
 from netaudio.common.managed_api import DDMConfiguration
-from netaudio.monitoring import (
-    DerivationStatus,
-    EventSeverity,
-    MonitoringEvent,
-    MonitoringEventJournal,
-    MonitoringEventKind,
-    MutationAuditRecorder,
-)
+from netaudio.daemon.api_contract import API_VERSION, api_contract
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.connections import DaemonConnectionHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
@@ -37,8 +29,9 @@ from netaudio.daemon.http.managed import DaemonManagedHandlers
 from netaudio.daemon.http.mcp import MCP_PATH, DaemonMcpHandlers
 from netaudio.daemon.http.oauth import DaemonOAuthHandlers
 from netaudio.daemon.http.presets import DaemonPresetHandlers
+from netaudio.daemon.http.request_scope import REQUEST_INVENTORY
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
-from netaudio.daemon.http.sse_view import SseDeviceView
+from netaudio.daemon.http.sse_view import TELEMETRY_FIELDS, SseDeviceView, substantive_record
 from netaudio.daemon.http.tls import (
     TLSConfigurationError,
     TLSSettings,
@@ -54,6 +47,15 @@ from netaudio.daemon.server_info import server_info
 from netaudio.daemon.subscription_readback import SubscriptionReadback
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
+from netaudio.dante.metering import metering_scale
+from netaudio.monitoring import (
+    DerivationStatus,
+    EventSeverity,
+    MonitoringEvent,
+    MonitoringEventJournal,
+    MonitoringEventKind,
+    MutationAuditRecorder,
+)
 
 logger = logging.getLogger("netaudio")
 
@@ -153,6 +155,17 @@ async def _bounded(awaitable, timeout: float):
     return task.result()
 
 
+UNENROLLED_DISCOVERY_GRACE_SECONDS = 10.0
+
+
+def _awaiting_direct_discovery(record: dict) -> bool:
+    return record.get("inventory_sources") == ["ddm"] and record.get("management_state") != "managed"
+
+
+def _without_telemetry(record: dict) -> dict:
+    return {key: value for key, value in record.items() if key not in TELEMETRY_FIELDS}
+
+
 class DaemonHTTPServer(
     DaemonPresetHandlers,
     DaemonSettingsHandlers,
@@ -201,6 +214,10 @@ class DaemonHTTPServer(
         else:
             configure_recorder(self.operation_recorder)
         self._dismissed_offline_inventory: set[str] = set()
+        self._published_inventory: dict[str, dict] = {}
+        self._published_managed = None
+        self.discovery_started_monotonic: float | None = None
+        self._discovery_republish: asyncio.TimerHandle | None = None
         self.state = state
         self.subscription_readback = SubscriptionReadback(self._emit_device_updated, application)
         self.metering = metering
@@ -263,6 +280,8 @@ class DaemonHTTPServer(
             "/set-clock-subdomain": self._handle_set_clock_subdomain,
             "/refresh-clock": self._handle_refresh_clock,
             "/reboot": self._handle_reboot,
+            "/clear-configuration": self._handle_clear_configuration,
+            "/factory-reset": self._handle_factory_reset,
             "/interface": self._handle_set_interface,
             "/redundancy": self._handle_set_redundancy,
             "/metering/start": self._handle_metering_start,
@@ -341,6 +360,7 @@ class DaemonHTTPServer(
                     *(self._close_sse_client(client, "daemon shutdown") for client in clients),
                     return_exceptions=True,
                 )
+            self.mcp_subscriptions.close_all()
 
             for attribute, label in (("tcp_server", "HTTP"), ("tls_server", "HTTPS")):
                 server = getattr(self, attribute)
@@ -360,6 +380,7 @@ class DaemonHTTPServer(
         dispatcher = self.application.dispatcher
         dispatcher.on(EventType.DEVICE_DISCOVERED, self._on_device_event)
         dispatcher.on(EventType.DEVICE_UPDATED, self._on_device_event)
+        dispatcher.on(EventType.DEVICE_TELEMETRY, self._on_device_telemetry)
         dispatcher.on(EventType.EXTERNAL_FLOW_CHANGED, self._on_external_flow_changed)
         dispatcher.on(EventType.DEVICE_REMOVED, self._on_device_removed)
         dispatcher.on(EventType.METER_VALUES, self._on_meter_values)
@@ -375,6 +396,7 @@ class DaemonHTTPServer(
         dispatcher = self.application.dispatcher
         dispatcher.off(EventType.DEVICE_DISCOVERED, self._on_device_event)
         dispatcher.off(EventType.DEVICE_UPDATED, self._on_device_event)
+        dispatcher.off(EventType.DEVICE_TELEMETRY, self._on_device_telemetry)
         dispatcher.off(EventType.EXTERNAL_FLOW_CHANGED, self._on_external_flow_changed)
         dispatcher.off(EventType.DEVICE_REMOVED, self._on_device_removed)
         dispatcher.off(EventType.METER_VALUES, self._on_meter_values)
@@ -401,6 +423,7 @@ class DaemonHTTPServer(
         if not device_json:
             return
 
+        self._published_inventory[event.server_name] = _without_telemetry(device_json)
         await self._broadcast_sse(
             {
                 "event": event.type.name.lower(),
@@ -409,7 +432,34 @@ class DaemonHTTPServer(
             }
         )
 
+    def _clients_want(self, attribute: str) -> bool:
+        return any(client.view is None or getattr(client.view, attribute) for client in self.sse_clients.values())
+
+    async def _on_device_telemetry(self, event: DanteEvent):
+        if not self.sse_clients or event.server_name in self._dismissed_offline_inventory:
+            return
+        if not self._clients_want("telemetry") and not self._clients_want("notices"):
+            return
+        device = self.application.devices.get(event.server_name)
+        if device is None:
+            return
+        fields = event.data.get("fields") or ()
+        if any(client.view is None or client.view.telemetry for client in self.sse_clients.values()):
+            telemetry = DanteDeviceSerializer.telemetry_to_json(device, fields)
+            fields = telemetry
+        else:
+            telemetry = {}
+        await self._broadcast_sse(
+            {
+                "event": "telemetry_updated",
+                "server_name": event.server_name,
+                "fields": sorted(fields),
+                "telemetry": telemetry,
+            }
+        )
+
     async def _on_device_removed(self, event: DanteEvent):
+        self._published_inventory.pop(event.server_name, None)
         await self._broadcast_sse(
             {
                 "event": "device_removed",
@@ -421,6 +471,8 @@ class DaemonHTTPServer(
         await self._broadcast_sse({"event": "external_flow_changed", **event.data})
 
     async def _on_meter_values(self, event: DanteEvent):
+        if self.sse_clients and not self._clients_want("meters"):
+            return
         await self._broadcast_sse(
             {
                 "event": "meter_values",
@@ -459,6 +511,8 @@ class DaemonHTTPServer(
         )
 
     async def _on_shure_meter(self, event: DanteEvent):
+        if self.sse_clients and not self._clients_want("meters"):
+            return
         await self._broadcast_sse(
             {
                 "event": "shure_meter_values",
@@ -476,10 +530,37 @@ class DaemonHTTPServer(
             return self._serialized_devices().get(server_name)
         return self.managed_inventory.serialize_devices({server_name: device}).get(server_name)
 
+    def _schedule_discovery_republish(self, delay: float) -> None:
+        if self._discovery_republish is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._discovery_republish = loop.call_later(
+            delay, lambda: loop.create_task(self.publish_inventory_changes(self._serialized_devices()))
+        )
+
     def _serialized_devices(self, context_name: str | None = None) -> dict[str, dict]:
+        scope = REQUEST_INVENTORY.get()
+        if scope is not None and scope.get("reuse") and context_name is None:
+            if "records" not in scope:
+                scope["records"] = self._serialize_inventory(None)
+            return scope["records"]
+        return self._serialize_inventory(context_name)
+
+    def _serialize_inventory(self, context_name: str | None) -> dict[str, dict]:
         if self.managed_inventory is not None and self.managed_inventory.enabled:
             records = self.managed_inventory.serialize_devices(self.managed_controls.direct_devices())
             records = self.managed_controls.reconcile(records)
+            remaining = (
+                UNENROLLED_DISCOVERY_GRACE_SECONDS - (time.monotonic() - self.discovery_started_monotonic)
+                if self.discovery_started_monotonic is not None
+                else 0.0
+            )
+            if remaining > 0:
+                records = {key: record for key, record in records.items() if not _awaiting_direct_discovery(record)}
+                self._schedule_discovery_republish(remaining)
         else:
             self.managed_controls.clear()
             records = {
@@ -505,35 +586,79 @@ class DaemonHTTPServer(
         metering_state = self.metering.get_cached_levels_by_server() if self.metering else {}
         return {
             "event": "snapshot",
+            "api_version": API_VERSION,
             "devices": self._serialized_devices(),
             "external_flows": self.application.external_flows.to_dict(),
             "shure_devices": shure_state,
             "metering": metering_state,
             "metering_scale": metering_scale(),
-            "managed": (
-                {
-                    "status": self.managed_inventory.status(),
-                    "domains": self.managed_inventory.domains(),
-                    "connections": self._connection_state(self.managed_inventory.configuration),
-                }
-                if self.managed_inventory is not None
-                and isinstance(getattr(self.managed_inventory, "configuration", None), DDMConfiguration)
-                else None
-            ),
+            "managed": self._managed_payload(),
+        }
+
+    def _managed_payload(self) -> dict | None:
+        if self.managed_inventory is None or not isinstance(
+            getattr(self.managed_inventory, "configuration", None), DDMConfiguration
+        ):
+            return None
+        return {
+            "status": self.managed_inventory.status(),
+            "domains": self.managed_inventory.domains(),
+            "connections": self._connection_state(self.managed_inventory.configuration),
         }
 
     async def publish_inventory_snapshot(self) -> None:
         if not self.sse_clients:
             return
-        await self._broadcast_sse(self._snapshot_payload())
+        payload = self._snapshot_payload()
+        self._published_inventory = {
+            server_name: _without_telemetry(record) for server_name, record in payload["devices"].items()
+        }
+        self._published_managed = payload["managed"]
+        await self._broadcast_sse(payload)
 
-    async def _broadcast_sse(self, data):
+    async def publish_inventory_changes(self, records: dict[str, dict]) -> None:
+        if not self.sse_clients:
+            return
+        if not self._published_inventory:
+            await self.publish_inventory_snapshot()
+            return
+        for server_name in sorted(self._published_inventory.keys() - records.keys()):
+            del self._published_inventory[server_name]
+            await self._broadcast_sse({"event": "device_removed", "server_name": server_name})
+        for server_name, record in records.items():
+            visible = _without_telemetry(record)
+            previous = self._published_inventory.get(server_name)
+            if previous == visible:
+                continue
+            self._published_inventory[server_name] = visible
+            await self._broadcast_sse(
+                {
+                    "event": "device_discovered" if previous is None else "device_updated",
+                    "server_name": server_name,
+                    "device": record,
+                },
+                full_record_clients=previous is None or substantive_record(previous) != substantive_record(visible),
+            )
+        managed = self._managed_payload()
+        if managed != self._published_managed:
+            self._published_managed = managed
+            await self._broadcast_sse({"event": "managed_status", "managed": managed})
+
+    async def _broadcast_sse(self, data, *, full_record_clients: bool = True):
         shared_payload = None
         for client in tuple(self.sse_clients.values()):
             if client.view is not None:
                 for event in client.view.events_for(data):
-                    if not self._enqueue_sse(client, event, _encode_sse(event)):
+                    if event is data:
+                        if shared_payload is None:
+                            shared_payload = _encode_sse(data)
+                        payload = shared_payload
+                    else:
+                        payload = _encode_sse(event)
+                    if not self._enqueue_sse(client, event, payload):
                         break
+                continue
+            if not full_record_clients:
                 continue
             if shared_payload is None:
                 shared_payload = _encode_sse(data)
@@ -562,19 +687,29 @@ class DaemonHTTPServer(
             return False
         return True
 
+    @staticmethod
+    def _sse_payload(client: _SseClient, payload: bytes | _MeterUpdate) -> bytes:
+        if isinstance(payload, _MeterUpdate):
+            if client.pending_meters.get(payload.key) is payload:
+                del client.pending_meters[payload.key]
+            return payload.payload
+        return payload
+
     async def _sse_sender(self, client: _SseClient):
         try:
             while True:
-                payload = await client.queue.get()
-                if isinstance(payload, _MeterUpdate):
-                    if client.pending_meters.get(payload.key) is payload:
-                        del client.pending_meters[payload.key]
-                    payload = payload.payload
-                client.writer.write(payload)
-                await _bounded(
-                    client.writer.drain(),
-                    SSE_DRAIN_TIMEOUT_SECONDS,
-                )
+                chunks = [self._sse_payload(client, await client.queue.get())]
+                while not client.queue.empty():
+                    chunks.append(self._sse_payload(client, client.queue.get_nowait()))
+                transport = getattr(client.writer, "transport", None)
+                if transport is not None and transport.is_closing():
+                    raise ConnectionResetError("SSE client transport is closing")
+                client.writer.write(b"".join(chunks))
+                if transport is None or transport.get_write_buffer_size():
+                    await _bounded(
+                        client.writer.drain(),
+                        SSE_DRAIN_TIMEOUT_SECONDS,
+                    )
         except asyncio.CancelledError:
             raise
         except (asyncio.TimeoutError, BrokenPipeError, ConnectionResetError, OSError) as exception:
@@ -828,13 +963,15 @@ class DaemonHTTPServer(
 
         try:
             if urlsplit(path).path == MCP_PATH:
-                await self._handle_mcp(method, body, writer, headers)
+                await self._handle_mcp(method, body, writer, headers, reader)
             elif self.is_oauth_path(urlsplit(path).path):
                 await self._handle_oauth(method, path, body, writer, headers)
             else:
                 await self._dispatch(method, path, body, writer, headers)
         except TimeoutError:
             await self._send_json(writer, {"error": "device did not respond"}, 504)
+        except (BrokenPipeError, ConnectionResetError) as exception:
+            logger.debug(f"Daemon HTTP API client left during {method} {path}: {exception}")
         except Exception as exception:
             logger.exception(f"Daemon HTTP API error handling {method} {path}")
             await self._send_json(writer, {"error": str(exception)}, 500)
@@ -843,7 +980,7 @@ class DaemonHTTPServer(
             writer.close()
             await writer.wait_closed()
         except (BrokenPipeError, ConnectionResetError, OSError) as exception:
-            logger.warning(f"Daemon HTTP API writer close ended with {exception}")
+            logger.debug(f"Daemon HTTP API writer close ended with {exception}")
 
     async def _dispatch(self, method, path, body, writer, headers=None):
         if (
@@ -874,6 +1011,8 @@ class DaemonHTTPServer(
             context_name = next(iter(query.get("context", ())), None)
             if route == "/server-info":
                 await self._send_json(writer, self.server_info)
+            elif route == "/api":
+                await self._send_json(writer, api_contract())
             elif route == "/settings":
                 await self._handle_get_settings(writer)
             elif route == "/ddm/connections":

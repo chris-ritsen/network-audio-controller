@@ -331,6 +331,7 @@ class IssueEngine:
         *,
         timestamp: str,
         emit_transitions: bool = True,
+        cross_device: bool = True,
     ) -> list[IssueTransition]:
         """Retain an owned JSON-safe snapshot that the caller will no longer mutate."""
         identity = current.get("device_identity") or _device_identity(current)
@@ -354,6 +355,8 @@ class IssueEngine:
             timestamp,
             emit_transitions,
         )
+        if not cross_device:
+            return transitions
 
         cross_candidates = self._detect_cross_device(timestamp)
         affected_cross_ids = {
@@ -1140,6 +1143,8 @@ class IssueEngine:
         ):
             requested_value = snapshot.get(requested)
             effective_value = snapshot.get(effective)
+            if requested in {"requested_sample_rate", "requested_encoding"} and requested_value == 0:
+                continue
             if requested_value is not None and effective_value is not None and requested_value != effective_value:
                 differences[effective] = {"requested": requested_value, "effective": effective_value}
         for interface in _interfaces(snapshot):

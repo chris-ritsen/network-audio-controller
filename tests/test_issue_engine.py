@@ -53,6 +53,18 @@ def failed_subscription() -> dict:
     return value
 
 
+def test_zero_requested_audio_value_is_not_reported_as_configuration_divergence():
+    value = snapshot()
+    value.update({"requested_sample_rate": 0, "sample_rate_hz": 48000, "requested_encoding": 0, "encoding": 24})
+    engine = IssueEngine()
+    engine.observe_snapshot(value, timestamp="2026-09-12T12:00:00Z")
+    assert IssueKind.CONFIGURATION_DIVERGENCE not in {issue.kind for issue in engine.list_issues(state="open")}
+
+    value["requested_sample_rate"] = 96000
+    engine.observe_snapshot(value, timestamp="2026-09-12T12:00:01Z")
+    assert IssueKind.CONFIGURATION_DIVERGENCE in {issue.kind for issue in engine.list_issues(state="open")}
+
+
 def test_issue_lifecycle_is_stable_and_missing_evidence_does_not_infer_resolution():
     engine = IssueEngine()
     value = failed_subscription()

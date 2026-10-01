@@ -45,6 +45,9 @@ class ParsedStatus:
     waiter_result: object
 
 
+_reported_parse_failures: set[tuple[str, str, str]] = set()
+
+
 _status_receive_order = itertools.count(1)
 _latest_status_orders: dict[tuple[str, str], int] = {}
 
@@ -58,7 +61,15 @@ def _core_parse(kind: str, data: bytes, source_ip: str, description: str):
     try:
         return core.parse_response(kind, data)
     except core.NetaudioCoreError as exception:
-        logger.warning(f"Invalid {description} from {source_ip}: {exception}")
+        failure = (kind, source_ip, str(exception))
+        if failure in _reported_parse_failures:
+            logger.debug(f"Invalid {description} from {source_ip}: {exception}")
+        else:
+            _reported_parse_failures.add(failure)
+            logger.warning(
+                f"Invalid {description} from {source_ip}: {exception} ({len(data)} bytes: {data.hex()}); "
+                "repeats are logged at debug level"
+            )
         return None
 
 
@@ -94,8 +105,8 @@ def _parse_clear_configuration_status(data: bytes, source_ip: str, device) -> Pa
         return None
     logger.debug(
         f"Conmon clear_configuration_status from {source_ip} ({len(data)}B): "
-        f"available_actions_mask=0x{parsed['available_actions_mask']:08X} "
-        f"action_result_code=0x{parsed['action_result_code']:08X}"
+        f"supported_modes_mask=0x{parsed['supported_modes_mask']:08X} "
+        f"executed_mode=0x{parsed['executed_mode']:08X}"
     )
     return ParsedStatus(STATUS_KIND_CLEAR_CONFIGURATION, parsed, parsed)
 

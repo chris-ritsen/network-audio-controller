@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +11,7 @@ from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import run_command
 from netaudio.commands.preset.loading import run_preset_dry_run, run_preset_load
+from netaudio.presets import storage as preset_storage
 from netaudio.presets.parsing import parse_preset
 
 app = typer.Typer(
@@ -25,12 +24,7 @@ PRESET_REFERENCE_HELP = "Preset name in the preset directory, or an explicit .xm
 
 
 def preset_directory() -> Path:
-    from netaudio.common.config_loader import default_config_path, get_config_value
-
-    configured, _ = get_config_value("preset_directory")
-    if configured:
-        return Path(str(configured)).expanduser()
-    return default_config_path().parent / "presets"
+    return preset_storage.preset_directory()
 
 
 def _is_explicit_preset_path(reference: str) -> bool:
@@ -48,20 +42,7 @@ def resolve_preset_path(reference: str, *, for_write: bool) -> Path:
 
 
 def _write_preset_atomic(path: Path, content: str, *, force: bool) -> None:
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("x", encoding="utf-8") as output:
-            output.write(content)
-            output.flush()
-            os.fsync(output.fileno())
-
-        if force:
-            os.replace(temporary, path)
-        else:
-            os.link(temporary, path)
-            temporary.unlink()
-    finally:
-        temporary.unlink(missing_ok=True)
+    preset_storage.write_preset_atomic(path, content, force=force)
 
 
 async def run_preset_save(application, devices, output_path: Path, preset_name: str | None, force: bool) -> None:

@@ -855,9 +855,9 @@ fn clear_configuration_status_parses_authentic_publications_and_preserves_unknow
         Some(ClearConfigurationStatus {
             record_protocol_identifier: 0x0724,
             unmapped_first_word: 0,
-            available_actions_mask: 3,
-            action_result_code: 1,
-            completed_action: Some("clear_all_configuration"),
+            supported_modes_mask: 3,
+            executed_mode: 1,
+            executed_action: Some("clear_all_configuration"),
         })
     );
 
@@ -865,25 +865,19 @@ fn clear_configuration_status_parses_authentic_publications_and_preserves_unknow
     unknown[CONMON_CLEAR_CONFIGURATION_FIRST_WORD_OFFSET
         ..CONMON_CLEAR_CONFIGURATION_FIRST_WORD_OFFSET + 4]
         .copy_from_slice(&0x11223344u32.to_be_bytes());
-    unknown[CONMON_CLEAR_CONFIGURATION_AVAILABLE_ACTIONS_MASK_OFFSET
-        ..CONMON_CLEAR_CONFIGURATION_AVAILABLE_ACTIONS_MASK_OFFSET + 4]
+    unknown[CONMON_CLEAR_CONFIGURATION_SUPPORTED_MODES_MASK_OFFSET
+        ..CONMON_CLEAR_CONFIGURATION_SUPPORTED_MODES_MASK_OFFSET + 4]
         .copy_from_slice(&0x80000003u32.to_be_bytes());
-    unknown[CONMON_CLEAR_CONFIGURATION_ACTION_RESULT_CODE_OFFSET
-        ..CONMON_CLEAR_CONFIGURATION_ACTION_RESULT_CODE_OFFSET + 4]
+    unknown[CONMON_CLEAR_CONFIGURATION_EXECUTED_MODE_OFFSET
+        ..CONMON_CLEAR_CONFIGURATION_EXECUTED_MODE_OFFSET + 4]
         .copy_from_slice(&u32::MAX.to_be_bytes());
     let parsed_unknown = parse_clear_configuration_status(&unknown).unwrap();
     assert_eq!(parsed_unknown.unmapped_first_word, 0x11223344);
-    assert_eq!(parsed_unknown.available_actions_mask, 0x80000003);
-    assert_eq!(parsed_unknown.action_result_code, u32::MAX);
-    assert_eq!(parsed_unknown.completed_action, None);
+    assert_eq!(parsed_unknown.supported_modes_mask, 0x80000003);
+    assert_eq!(parsed_unknown.executed_mode, u32::MAX);
+    assert_eq!(parsed_unknown.executed_action, None);
 
     assert_eq!(parse_clear_configuration_status(&mode_one[..39]), None);
-    let mut wrong_record_identifier = mode_one.clone();
-    wrong_record_identifier[25] = 0x3E;
-    assert_eq!(
-        parse_clear_configuration_status(&wrong_record_identifier),
-        None
-    );
     let mut wrong_opcode = mode_one;
     wrong_opcode[26..28].copy_from_slice(&0x0077u16.to_be_bytes());
     assert_eq!(parse_clear_configuration_status(&wrong_opcode), None);

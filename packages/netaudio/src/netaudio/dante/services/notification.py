@@ -247,7 +247,7 @@ async def mutate_and_wait_for_clear_configuration_status(
     waiter = notifications.register_waiter(
         "clear_configuration_status",
         device_ip_address,
-        accept=lambda status: status["completed_action"] == expected_action,
+        accept=lambda status: status["executed_action"] == expected_action,
     )
     try:
         await mutate()

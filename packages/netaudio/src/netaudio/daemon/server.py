@@ -57,6 +57,7 @@ logger = logging.getLogger("netaudio")
 ONLINE_REVALIDATE_IDLE_SECONDS = 45.0
 REVALIDATE_INTERVAL_SECONDS = 30.0
 STATUS_FIELD_REFRESH_INTERVAL_SECONDS = 300.0
+SHURE_METER_PUBLISH_INTERVAL_SECONDS = 0.25
 
 
 def _stale_device_minutes_from_config(daemon_config: dict) -> float:
@@ -148,6 +149,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self.browser: AsyncServiceBrowser | None = None
         self.running = False
         self._redis = None
+        self._redis_device_mappings: dict[str, dict[str, str]] = {}
+        self._pending_shure_meters: dict[str, Any] = {}
         self._stop_event = DeferredAsyncioEvent()
         self._start_lock = DeferredAsyncioLock()
         self._startup_task: asyncio.Task | None = None
@@ -240,6 +243,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                     f"Could not set Redis keyspace notification config, relying on server config: {exception}"
                 )
             self._redis = candidate
+            self._redis_device_mappings = {}
             logger.info("Connected to Redis")
         except REDIS_ERRORS as exception:
             logger.info(f"Redis not available, continuing without it: {exception}")
@@ -258,30 +262,34 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             return
 
         key = f"netaudio:daemon:device:{device.server_name}"
+        mapping = {
+            "server_name": device.server_name or "",
+            "name": device.name or "",
+            "ipv4": str(device.ipv4) if device.ipv4 else "",
+            "model_id": device.model_id or "",
+            "bluetooth_device": device.bluetooth_device or "",
+            "bluetooth_connected": (
+                "" if device.bluetooth_connected is None else "1" if device.bluetooth_connected else "0"
+            ),
+            "online": "1" if device.online else "0",
+        }
+        if self._redis_device_mappings.get(key) == mapping:
+            return
         try:
             await cast(
                 Awaitable[int],
                 self._redis.hset(
                     key,
-                    mapping={
-                        "server_name": device.server_name or "",
-                        "name": device.name or "",
-                        "ipv4": str(device.ipv4) if device.ipv4 else "",
-                        "model_id": device.model_id or "",
-                        "bluetooth_device": device.bluetooth_device or "",
-                        "bluetooth_connected": (
-                            "" if device.bluetooth_connected is None else "1" if device.bluetooth_connected else "0"
-                        ),
-                        "online": "1" if device.online else "0",
-                        "last_seen": str(device.last_seen) if device.last_seen else "",
-                    },
+                    mapping={**mapping, "last_seen": str(device.last_seen) if device.last_seen else ""},
                 ),
             )
         except REDIS_ERRORS as exception:
             logger.warning(f"Redis publish error for {device.server_name}: {exception}")
+            return
+        self._redis_device_mappings[key] = mapping
 
     async def _on_managed_inventory_changed(self) -> None:
-        self.http_api._serialized_devices()
+        records = self.http_api._serialized_devices()
         self.managed_signals.reconcile()
         now = time.monotonic()
         for device in list(self.devices.values()):
@@ -308,7 +316,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             if task is not None:
                 self._managed_control_tasks[key] = task
                 self._managed_control_refreshes[key] = (device, now)
-        await self.http_api.publish_inventory_snapshot()
+        await self.http_api.publish_inventory_changes(records)
         await self._publish_managed_inventory_to_redis()
 
     async def _publish_managed_inventory_to_redis(self) -> None:
@@ -330,6 +338,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             return
 
         key = f"netaudio:daemon:device:{server_name}"
+        self._redis_device_mappings.pop(key, None)
         try:
             await self._redis.delete(key)
         except REDIS_ERRORS as exception:
@@ -446,7 +455,20 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         await self._delete_shure_from_redis(event.device_name)
 
     async def _on_shure_meters(self, event: DanteEvent):
-        await self._publish_shure_meters_to_redis(event.device_name, event.data)
+        if not self._redis:
+            return
+        pending = event.device_name in self._pending_shure_meters
+        self._pending_shure_meters[event.device_name] = event.data
+        if not pending:
+            self._spawn_background(
+                self._flush_shure_meters(event.device_name), name=f"shure-meters:{event.device_name}"
+            )
+
+    async def _flush_shure_meters(self, mac) -> None:
+        await asyncio.sleep(SHURE_METER_PUBLISH_INTERVAL_SECONDS)
+        data = self._pending_shure_meters.pop(mac, None)
+        if data is not None:
+            await self._publish_shure_meters_to_redis(mac, data)
 
     def _emit_heartbeat_device_updated(self, device) -> None:
         self.application.dispatcher.emit_nowait(
@@ -475,6 +497,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             return
         self.application.dispatcher.on(EventType.DEVICE_DISCOVERED, self._on_device_discovered)
         self.application.dispatcher.on(EventType.DEVICE_UPDATED, self._on_device_updated)
+        self.application.dispatcher.on(EventType.DEVICE_TELEMETRY, self._on_device_telemetry)
         self.application.dispatcher.on(EventType.DEVICE_REMOVED, self._on_device_removed)
         self.application.dispatcher.on(EventType.SHURE_DEVICE_DISCOVERED, self._on_shure_discovered)
         self.application.dispatcher.on(EventType.SHURE_DEVICE_UPDATED, self._on_shure_updated)
@@ -513,6 +536,13 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             await self._publish_journal_events(self.event_journal.observe_device(device))
             await self._publish_device_to_redis(device)
             await self._republish_correlated_shure(device)
+
+    async def _on_device_telemetry(self, event: DanteEvent):
+        device = self.devices.get(event.server_name)
+        if device:
+            await self._publish_journal_events(
+                self.event_journal.observe_device_telemetry(device, event.data.get("fields") or ())
+            )
 
     async def _on_device_removed(self, event: DanteEvent):
         logger.info(f"Device removed (event): {event.server_name}")
@@ -572,6 +602,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             raise
 
     async def _start_once(self):
+        self.http_api.discovery_started_monotonic = time.monotonic()
 
         try:
             await self.http_api.start()
@@ -603,6 +634,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             on_signal_presence=self.metering.record_signal_presence,
             on_device_updated=self._emit_heartbeat_device_updated,
             on_receiver_flows_needed=self._request_receiver_flows,
+            on_device_telemetry=self.state._emit_device_telemetry,
         )
         await self.heartbeat.start()
         self.http_api.diagnostics = self.heartbeat

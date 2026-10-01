@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import socket
 import time
@@ -572,6 +573,36 @@ def mcp_token(
     typer.echo("Send it as the Authorization: Bearer header.")
     if rotate:
         typer.echo(f"{icon('warning')}The daemon reads the token at start; run 'netaudio daemon restart' to apply.")
+
+
+@app.command("mcp-call")
+def mcp_call(
+    tool: Optional[str] = typer.Argument(None, help="Tool or operation name; omit to list the tools clients see."),
+    arguments: str = typer.Option("{}", "--arguments", "-a", help="Tool arguments as a JSON object."),
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
+    ),
+):
+    """Call the running daemon's MCP server as a client would, printing exactly what the client receives."""
+    from netaudio.daemon.mcp_client import McpCallError, call_tool, list_tools
+
+    port = _effective_daemon_port(daemon_port)
+    try:
+        if tool is None:
+            for entry in list_tools(port):
+                typer.echo(f"{entry['name']}: {entry.get('description', '')}")
+            return
+        parsed = json.loads(arguments)
+        if not isinstance(parsed, dict):
+            raise ValueError("--arguments must be a JSON object")
+        result = call_tool(port, tool, parsed)
+    except (McpCallError, ValueError) as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1)
+    for content in result.get("content") or []:
+        typer.echo(content.get("text", json.dumps(content)))
+    if result.get("isError"):
+        raise typer.Exit(code=1)
 
 
 @app.command("mcp-login-secret")

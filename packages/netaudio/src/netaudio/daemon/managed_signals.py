@@ -59,6 +59,7 @@ class ManagedSignalReceiver:
                 asyncio.open_connection(api.server, endpoints["service_port"], ssl=api.ssl_context), 5
             )
             local_address = writer.get_extra_info("sockname")[0]
+            peer = writer.get_extra_info("peername")[:2]
             notification = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             notification.bind((local_address, 0))
             request: _requests.ManagedSessionRequest = {
@@ -84,7 +85,7 @@ class ManagedSignalReceiver:
                     if key in self._failed_targets:
                         logger.info("Managed signal updates recovered for %s", key)
                         self._failed_targets.discard(key)
-                    self.accept(key, publication, writer.get_extra_info("peername")[:2])
+                    self.accept(key, publication, peer)
 
                 request = {
                     "action": "receive",

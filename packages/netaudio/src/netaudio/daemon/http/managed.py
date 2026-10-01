@@ -107,7 +107,14 @@ class DaemonManagedHandlers:
             return
         enrolled = bool(matches[0].get("ddm_domain_id"))
         if enrolled != (action == "unenroll"):
-            await self._send_json(writer, {"error": "Device enrollment has changed; use its current state"}, 409)
+            name = matches[0].get("name") or device_id
+            domain = matches[0].get("ddm_domain_name") or matches[0].get("ddm_domain_id")
+            message = (
+                f"{name} is already enrolled in {domain}; unenroll it before enrolling it in another domain"
+                if enrolled
+                else f"{name} is not enrolled in a domain"
+            )
+            await self._send_json(writer, {"error": message, "enrolled": enrolled, "domain": domain}, 409)
             return
         operation = "DevicesEnroll" if action == "enroll" else "DevicesUnenroll"
         values = {"deviceIds": [device_id], "clearConfig": False}

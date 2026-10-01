@@ -66,9 +66,11 @@ class ReceiverFlowConnectionHealthTracker:
 
         return None
 
-    def history_snapshot(self, identity):
+    def history_snapshot(self, identity, include_history=True):
         tracker = self._trackers.get(identity)
-        return tracker.snapshot(include_history=True) if identity in self._devices and tracker is not None else None
+        if identity not in self._devices or tracker is None:
+            return None
+        return tracker.snapshot(include_history=include_history)
 
     def remove_device(self, identity):
         tracker = self._trackers.pop(identity, None)

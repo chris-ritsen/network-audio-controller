@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from weakref import WeakKeyDictionary
 
 from netaudio.common.app_config import settings as app_settings
@@ -119,6 +120,49 @@ FIELD_STATUS_KINDS = frozenset(
 )
 
 
+CLOCK_TELEMETRY_FIELDS = frozenset(
+    {
+        "clock_frequency_offset_parts_per_billion",
+        "clock_observations",
+        "clock_observed_at",
+        "clock_status",
+    }
+)
+CLOCK_STATUS_TELEMETRY_KEYS = frozenset({"clock_frequency_offset_parts_per_billion", "raw_record"})
+
+
+@dataclass(frozen=True)
+class TelemetryChange:
+    fields: frozenset[str]
+
+
+def _clock_state(device) -> tuple:
+    status = device.clock_status
+    if isinstance(status, dict):
+        status = {key: value for key, value in status.items() if key not in CLOCK_STATUS_TELEMETRY_KEYS}
+    return status, device.clock_observed_at is None
+
+
+def _assign_clock_status(device, fields: dict) -> bool | TelemetryChange:
+    previous_state = _clock_state(device)
+    changed = set()
+    for field_name, value in fields.items():
+        if getattr(device, field_name) != value:
+            setattr(device, field_name, value)
+            changed.add(field_name)
+    if not changed:
+        return False
+    if changed <= CLOCK_TELEMETRY_FIELDS and _clock_state(device) == previous_state:
+        return TelemetryChange(frozenset(changed))
+    return True
+
+
+def _newly_executed_clear_mode(previous, status) -> bool:
+    if not isinstance(status, dict) or status.get("executed_action") is None:
+        return False
+    return not isinstance(previous, dict) or previous.get("executed_mode") != status.get("executed_mode")
+
+
 def _assign_changed(device, fields: dict) -> bool:
     changed = False
     for field_name, value in fields.items():
@@ -170,7 +214,7 @@ def apply_device_status(device, kind: str, status) -> bool:
             )
             if observed is not None:
                 fields["clock_observations"] = observed
-        return _assign_changed(device, fields)
+        return _assign_clock_status(device, fields)
     if kind == "panel_status":
         from netaudio.dante.panel_state import observe_panel
 
@@ -227,7 +271,7 @@ class DanteStateService:
         self._status_applied = False
         self._notification_handlers = {
             NOTIFICATION_AES67_STATUS: self._on_aes67_status,
-            NOTIFICATION_CLEAR_CONFIG_STATUS: self._on_device_state_changed,
+            NOTIFICATION_CLEAR_CONFIG_STATUS: self._on_clear_configuration_notification,
             NOTIFICATION_CLOCKING_STATUS: self._on_clocking_status,
             NOTIFICATION_DEVICE_REBOOT: self._on_device_reboot,
             NOTIFICATION_ENCODING_STATUS: self._on_encoding_status,
@@ -288,6 +332,22 @@ class DanteStateService:
             )
         )
 
+    def _emit_device_telemetry(self, device, fields) -> None:
+        self.application.dispatcher.emit_nowait(
+            DanteEvent(
+                type=EventType.DEVICE_TELEMETRY,
+                device_name=device.name,
+                server_name=device.server_name,
+                data={"fields": sorted(fields)},
+            )
+        )
+
+    def _emit_status_change(self, device, change) -> None:
+        if isinstance(change, TelemetryChange):
+            self._emit_device_telemetry(device, change.fields)
+        else:
+            self._emit_device_updated(device)
+
     def _online_device(self, server_name: str):
         device = self.devices.get(server_name)
         if not device or not device.online:
@@ -322,6 +382,7 @@ class DanteStateService:
         if not device.online and kind not in (STATUS_KIND_DANTE_MODEL, STATUS_KIND_MAKE_MODEL):
             return
 
+        previous_clear_status = device.clear_configuration_status
         if kind == STATUS_KIND_SAMPLE_RATE:
             current_value_changed = (
                 device.sample_rate is not None and device.sample_rate != status[STATUS_KIND_SAMPLE_RATE]
@@ -334,17 +395,15 @@ class DanteStateService:
             changed = apply_device_status(device, kind, status)
 
         if changed:
-            self._emit_device_updated(device)
+            self._emit_status_change(device, changed)
 
         if not self._refetching:
             return
         if kind == STATUS_KIND_ROUTING_CAPACITY and changed and status["routing_ready"] is True:
             await self.fetch_device_controls(device.server_name)
-        elif kind == STATUS_KIND_CLEAR_CONFIGURATION:
-            await self.fetch_device_controls(device.server_name)
-            await asyncio.gather(
-                self._refresh_sample_rate_status(device, "configuration cleared"),
-                self._refresh_encoding_status(device, "configuration cleared"),
+        elif kind == STATUS_KIND_CLEAR_CONFIGURATION and _newly_executed_clear_mode(previous_clear_status, status):
+            await self.refresh_after_configuration_clear(
+                device, f"clear-configuration status reports executed mode {status['executed_mode']}"
             )
 
     async def _refetch_channels(self, event: DanteEvent, description: str, fetch) -> None:
@@ -504,16 +563,28 @@ class DanteStateService:
             self._emit_device_updated(device)
 
     async def _on_device_state_changed(self, event: DanteEvent) -> None:
-        device = self._online_device(event.server_name)
-        if not device:
+        if not self._online_device(event.server_name):
             return
         await self.fetch_device_controls(event.server_name)
-        if event.data.get("notification_id") == NOTIFICATION_CLEAR_CONFIG_STATUS and (
-            device.requires_managed_control or device.ipv4
-        ):
+
+    async def _on_clear_configuration_notification(self, event: DanteEvent) -> None:
+        device = self._online_device(event.server_name)
+        if not device or (not device.requires_managed_control and not device.ipv4):
+            return
+        try:
+            await self.application.probe_clear_configuration_status(device)
+        except (RuntimeError, OSError) as exception:
+            logger.warning(f"Clear-configuration status unavailable for {device.server_name}: {exception}")
+
+    async def refresh_after_configuration_clear(self, device, reason: str) -> None:
+        if not self._refetching:
+            return
+        logger.info(f"Re-reading configuration for {device.server_name} ({reason})")
+        await self.fetch_device_controls(device.server_name)
+        if device.requires_managed_control or device.ipv4:
             await asyncio.gather(
-                self._refresh_sample_rate_status(device, "configuration cleared"),
-                self._refresh_encoding_status(device, "configuration cleared"),
+                self._refresh_sample_rate_status(device, reason),
+                self._refresh_encoding_status(device, reason),
             )
 
     async def _on_controls_changed(self, event: DanteEvent) -> None:

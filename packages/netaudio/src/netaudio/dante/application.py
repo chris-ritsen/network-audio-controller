@@ -1009,9 +1009,12 @@ class DanteApplication:
         if status is None:
             raise CapabilityProbeTimeout(f"clear-configuration status timed out for {key}")
 
-        if status["completed_action"] != action:
+        if status["executed_action"] != action:
             raise RuntimeError(f"clear-configuration did not confirm the requested action for {key}")
 
+        device = target if hasattr(target, "server_name") else self._device_by_control_key(key)
+        if device is not None:
+            await self.state.refresh_after_configuration_clear(device, f"{action} acknowledged")
         return status
 
     async def discover_and_populate(self, timeout: float = 5.0) -> dict:
@@ -1641,8 +1644,8 @@ class DanteApplication:
                 self.notifications.unregister_waiter(waiter)
         if waiter.latest_result is None:
             raise RuntimeError(f"clock status readback was unavailable for {key}")
-        if apply_device_status(device, STATUS_KIND_CLOCK, waiter.latest_result):
-            self.state._emit_device_updated(device)
+        if changed := apply_device_status(device, STATUS_KIND_CLOCK, waiter.latest_result):
+            self.state._emit_status_change(device, changed)
         status = _clock_status_snapshot(device)
         if status.get("status_supported") is not True:
             raise RuntimeError("Clock status is malformed or unsupported.")

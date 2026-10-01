@@ -246,7 +246,10 @@ class DaemonOAuthHandlers:
         parameters = {key: value for key, value in parameters.items() if value}
         separator = "&" if urlsplit(redirect_uri).query else "?"
         location = f"{redirect_uri}{separator}{urlencode(parameters)}"
-        head = f"HTTP/1.1 302 Found\r\nLocation: {location}\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n"
+        head = (
+            f"HTTP/1.1 302 Found\r\nLocation: {location}\r\nCache-Control: no-store\r\n"
+            "Content-Length: 0\r\nConnection: close\r\n\r\n"
+        )
         writer.write(head.encode())
 
     def _write_oauth(
@@ -264,6 +267,7 @@ class DaemonOAuthHandlers:
             f"Content-Type: {content_type}\r\n"
             f"Content-Length: {len(body)}\r\n"
             "Cache-Control: no-store\r\n"
+            "Connection: close\r\n"
             f"Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action {form_action}; frame-ancestors 'none'\r\n"
             "Referrer-Policy: no-referrer\r\n"
             "X-Content-Type-Options: nosniff\r\n"

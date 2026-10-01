@@ -573,6 +573,44 @@ class DaemonConfigurationHandlers:
         await self.application.reboot(device)
         await self._send_json(writer, {"accepted": True, "verified": False}, 202)
 
+    async def _handle_clear_configuration(self, writer, params):
+        mode = params.get("mode")
+        if mode not in ("all", "keep_network"):
+            await self._send_json(writer, {"error": "mode must be 'all' or 'keep_network'"}, 400)
+            return
+        reboot = params.get("reboot", False)
+        if not isinstance(reboot, bool):
+            await self._send_json(writer, {"error": "reboot must be true or false"}, 400)
+            return
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+        try:
+            status = await self.application.clear_configuration(device, mode == "keep_network")
+        except (RuntimeError, NetaudioCoreError) as exception:
+            await self._send_json(writer, {"error": str(exception), "cleared": False}, 502)
+            return
+        if reboot:
+            await self.application.reboot(device)
+        await self._send_json(
+            writer,
+            {
+                "cleared": True,
+                "mode": mode,
+                "executed_mode": status.get("executed_mode"),
+                "rebooting": reboot,
+                "takes_effect": "now rebooting" if reboot else "at the next reboot on devices that defer clears",
+            },
+            200,
+        )
+
+    async def _handle_factory_reset(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+        await self.application.factory_reset(device)
+        await self._send_json(writer, {"accepted": True, "verified": False}, 202)
+
     async def _handle_set_interface(self, writer, params):
         device = await self._require_device(writer, params.get("device"))
         if not device:
@@ -722,6 +760,7 @@ class DaemonConfigurationHandlers:
             f"Content-Type: application/json\r\n"
             f"Content-Length: {len(body)}\r\n"
             f"Cache-Control: no-store\r\n"
+            "Connection: close\r\n"
             f"Access-Control-Allow-Origin: *\r\n"
             f"\r\n"
         ).encode() + body

@@ -269,8 +269,8 @@ class FakeApplication:
         device = self._device(target)
         self._record("clear_configuration", device, preserve_internet_protocol_settings)
         return {
-            "available_actions_mask": 3,
-            "action_result_code": 2 if preserve_internet_protocol_settings else 1,
+            "supported_modes_mask": 3,
+            "executed_mode": 2 if preserve_internet_protocol_settings else 1,
         }
 
     async def probe_sample_rate_status(self, target, timeout=2.0):

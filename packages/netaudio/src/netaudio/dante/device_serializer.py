@@ -238,7 +238,38 @@ def device_json_field_name(field_name: str) -> str:
     return DEVICE_JSON_FIELD_NAMES.get(field_name, field_name)
 
 
+def _presented_clock_status(status: dict, snapshot: dict) -> dict:
+    from netaudio.dante.clock_control import clock_status_fresh
+
+    clock = dict(status)
+    fresh = clock_status_fresh(snapshot)
+    clock["observation_state"] = "fresh" if fresh else "stale" if clock.get("status_supported") else "unavailable"
+    if not fresh:
+        clock["observed_synchronization"] = clock.get("synchronization", "unknown")
+        clock["synchronization"] = "unknown"
+    return clock
+
+
 class DanteDeviceSerializer:
+    @staticmethod
+    def telemetry_to_json(device, fields) -> dict:
+        values = {}
+        for field_name in fields:
+            value = getattr(device, field_name, None)
+            if isinstance(value, (bytes, bytearray)):
+                value = list(value)
+            values[device_json_field_name(field_name)] = value
+        if isinstance(values.get("clock_status"), dict):
+            snapshot = {
+                "online": device.online,
+                "clock_status": device.clock_status,
+                "clock_observed_at": device.clock_observed_at,
+            }
+            values["clock_status"] = _presented_clock_status(values["clock_status"], snapshot)
+        if "clock_status" in values:
+            values["clock_control_availability"] = core.clock_control_availability(device.clock_status or {})
+        return values
+
     @staticmethod
     def to_json(device):
         from netaudio.dante.self_connection import receiver_self_connection_support
@@ -290,17 +321,7 @@ class DanteDeviceSerializer:
         if connection and not connection["fresh"]:
             as_json["bluetooth_connected"] = None
         if isinstance(as_json.get("clock_status"), dict):
-            from netaudio.dante.clock_control import clock_status_fresh
-
-            clock = dict(as_json["clock_status"])
-            fresh = clock_status_fresh(as_json)
-            clock["observation_state"] = (
-                "fresh" if fresh else "stale" if clock.get("status_supported") else "unavailable"
-            )
-            if not fresh:
-                clock["observed_synchronization"] = clock.get("synchronization", "unknown")
-                clock["synchronization"] = "unknown"
-            as_json["clock_status"] = clock
+            as_json["clock_status"] = _presented_clock_status(as_json["clock_status"], as_json)
 
         if device.is_licensed is not None:
             as_json["is_licensed"] = device.is_licensed

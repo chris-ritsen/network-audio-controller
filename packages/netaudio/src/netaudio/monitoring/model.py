@@ -63,6 +63,9 @@ class MonitoringEventKind(str, Enum):
     SUBSCRIPTION_FAILED = "subscription_failed"
     SUBSCRIPTION_RECOVERED = "subscription_recovered"
     CONFIGURATION_OPERATION = "configuration_operation"
+    SETTING_CHANGED = "setting_changed"
+    CHANNEL_RENAMED = "channel_renamed"
+    ROUTE_CHANGED = "route_changed"
     PRESET_RUN = "preset_run"
 
 

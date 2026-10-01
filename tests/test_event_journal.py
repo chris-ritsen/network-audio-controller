@@ -397,7 +397,8 @@ def test_device_adapter_uses_serializer_state_and_keeps_observation_errors():
     device.failed_queries.add("clock status")
     device.ddm_status = {"errors": [{"message": "partial managed response"}]}
     journal = MonitoringEventJournal()
-    assert journal.observe_device(device, timestamp="2026-09-11T12:00:00Z") == []
+    first = journal.observe_device(device, timestamp="2026-09-11T12:00:00Z")
+    assert [event for event in first if event.kind is not MonitoringEventKind.ISSUE_OPENED] == []
 
     device.clock_role = "Leader"
     [event] = journal.observe_device(device, timestamp="2026-09-11T12:00:01Z")
@@ -441,4 +442,5 @@ def test_forgetting_releases_baselines_and_current_issues_but_keeps_bounded_even
     assert not any(key[0] == identity for key in journal._conditions)
     assert journal.issue_engine.list_issues(state="open") == []
     assert journal.list_events() == events
-    assert journal.observe_snapshot(current) == []
+    first = journal.observe_snapshot(current)
+    assert [event for event in first if event.kind is not MonitoringEventKind.ISSUE_OPENED] == []

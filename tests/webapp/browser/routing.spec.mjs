@@ -430,14 +430,14 @@ test("saved devices survive connection loss but an empty snapshot replaces them"
   await page.goto("http://netaudio.test/devices");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("netaudio.inventory.v1"))).not.toBeNull();
   const before = await page.locator("#content table").boundingBox();
-  await page.route("**/events", (route) => route.abort());
+  await page.route("**/events?*", (route) => route.abort());
   await page.reload();
   await expect(page.locator("#content table").getByRole("link", { name: "Windows-PC", exact: true })).toBeVisible();
   await expect(page.getByText("Showing saved devices.", { exact: false })).toHaveCount(0);
   const after = await page.locator("#content table").boundingBox();
   expect(after.y).toBe(before.y);
   expect(after.height).toBe(before.height);
-  await page.route("**/events", (route) => route.fulfill({ contentType: "text/event-stream", body: 'data: {"event":"snapshot","devices":{}}\n\n' }));
+  await page.route("**/events?*", (route) => route.fulfill({ contentType: "text/event-stream", body: 'data: {"event":"snapshot","devices":{}}\n\n' }));
   await page.reload();
   await expect.poll(() => page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("netaudio.inventory.v1")).devices).length)).toBe(0);
   await expect(page.locator(".topbar")).toBeVisible();

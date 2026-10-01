@@ -127,7 +127,7 @@ def test_clear_configuration_sends_one_verified_mode(mode, preserve_internet_pro
     result = invoke(device_commands.run_clear_configuration, application, application.devices, mode, "One")
 
     assert result.exit_code == 0
-    assert f"result {result_code}, mode {mode.value}" in result.output
+    assert f"executed mode {result_code}, mode {mode.value}" in result.output
     assert [(sent.operation, sent.device, sent.arguments) for sent in application.sent] == [
         ("clear_configuration", device, (preserve_internet_protocol_settings,))
     ]

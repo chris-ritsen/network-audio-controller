@@ -58,20 +58,20 @@ def test_parser_preserves_authentic_action_masks_and_result_codes():
         (SOURCE_BIT_TWO_STATUS, 2, 0),
         (SOURCE_BIT_THREE_STATUS, 1, 0),
     ]
-    for packet, available_actions_mask, action_result_code in expected_values:
+    for packet, supported_modes_mask, executed_mode in expected_values:
         assert core.parse_response("clear_configuration_status", packet) == {
             "record_protocol_identifier": 0x0724,
             "unmapped_first_word": 0,
-            "available_actions_mask": available_actions_mask,
-            "action_result_code": action_result_code,
-            "completed_action": {
+            "supported_modes_mask": supported_modes_mask,
+            "executed_mode": executed_mode,
+            "executed_action": {
                 1: "clear_all_configuration",
                 2: "clear_all_configuration_preserving_internet_protocol_settings",
-            }.get(action_result_code),
+            }.get(executed_mode),
         }
 
     unknown = MODE_ONE_STATUS[:-4] + bytes.fromhex("ffffffff")
-    assert core.parse_response("clear_configuration_status", unknown)["completed_action"] is None
+    assert core.parse_response("clear_configuration_status", unknown)["executed_action"] is None
 
 
 def test_state_service_applies_and_serializes_clear_configuration_status_once():

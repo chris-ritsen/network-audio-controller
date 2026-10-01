@@ -14,6 +14,7 @@ class EventType(Enum):
     DEVICE_DISCOVERED = auto()
     DEVICE_REMOVED = auto()
     DEVICE_STATUS_RECEIVED = auto()
+    DEVICE_TELEMETRY = auto()
     DEVICE_UPDATED = auto()
     EXTERNAL_FLOW_CHANGED = auto()
     METER_VALUES = auto()
@@ -60,7 +61,15 @@ class DanteEventDispatcher:
             return (event.type, event.server_name, event.data.get("notification_id"))
         if event.type == EventType.METER_VALUES and event.data.get("metering_source") == "detailed":
             return (event.type, event.server_name)
+        if event.type == EventType.DEVICE_TELEMETRY and event.server_name:
+            return (event.type, event.server_name)
         return None
+
+    @staticmethod
+    def _coalesced_data(existing: DanteEvent, event: DanteEvent) -> dict:
+        if event.type == EventType.DEVICE_TELEMETRY:
+            return {"fields": sorted({*existing.data.get("fields", ()), *event.data.get("fields", ())})}
+        return event.data
 
     def emit_nowait(self, event: DanteEvent) -> None:
         key = self._coalescing_key(event)
@@ -72,7 +81,7 @@ class DanteEventDispatcher:
             existing = self._coalesced_events.get(key)
             if existing is not None:
                 existing.device_name = event.device_name
-                existing.data = event.data
+                existing.data = self._coalesced_data(existing, event)
                 return
             self._coalesced_events[key] = event
         queue = self._queue

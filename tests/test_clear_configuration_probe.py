@@ -18,9 +18,9 @@ async def test_probe_clear_configuration_status_waits_for_the_matching_conmon_re
     expected_status = {
         "record_protocol_identifier": 0x0724,
         "unmapped_first_word": 0,
-        "available_actions_mask": 3,
-        "action_result_code": 0,
-        "completed_action": None,
+        "supported_modes_mask": 3,
+        "executed_mode": 0,
+        "executed_action": None,
     }
     application.send_probe_clear_configuration_status = AsyncMock(
         side_effect=lambda ip_address: application.notifications._on_packet(
@@ -70,8 +70,8 @@ async def test_clear_configuration_waits_for_the_requested_action_result(
         preserve_internet_protocol_settings,
     )
 
-    assert result["action_result_code"] == expected_result_code
-    assert result["completed_action"] == method_name.removeprefix("send_")
+    assert result["executed_mode"] == expected_result_code
+    assert result["executed_action"] == method_name.removeprefix("send_")
     command.assert_awaited_once_with(device_ip_address)
     assert not application.notifications.is_waiting("clear_configuration_status", device_ip_address)
 

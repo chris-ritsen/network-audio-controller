@@ -9,7 +9,8 @@ import pytest
 from netaudio.common import preferences
 from netaudio.daemon import mcp_oauth
 from netaudio.daemon.mcp_oauth import SCOPE_READ, SCOPE_WRITE, set_login_secret
-from tests.http_api_test_support import FakeWriter, make_device, make_http_server
+from netaudio.dante.device import DanteDevice
+from tests.http_api_test_support import FakeWriter, make_http_server
 
 PUBLIC_HEADERS = {"host": "netaudio.app", "x-forwarded-proto": "https", "cf-connecting-ip": "203.0.113.9"}
 REDIRECT = "https://claude.ai/api/mcp/auth_callback"
@@ -40,8 +41,11 @@ async def request(server, method, path, body=None, headers=PUBLIC_HEADERS, peer=
 
 
 def make_server():
-    device = make_device(server_name="lx-dante.local.", name="lx-dante")
-    return make_http_server(devices={device.server_name: device})
+    device = DanteDevice(server_name="lx-dante.local.")
+    device.name = "lx-dante"
+    server = make_http_server(devices={device.server_name: device})
+    server.server_info["started_at"] = "2000-01-01T00:00:00Z"
+    return server
 
 
 def pkce():
@@ -80,8 +84,9 @@ async def authorize(server, client_id, challenge, scope=SCOPE_WRITE, secret=SECR
 @pytest.mark.asyncio
 async def test_metadata_uses_the_public_url_or_forwarded_host():
     server = make_server()
-    status, body, _ = await request(server, "GET", "/.well-known/oauth-authorization-server")
+    status, body, response_headers = await request(server, "GET", "/.well-known/oauth-authorization-server")
     assert status == 200
+    assert response_headers["connection"] == "close"
     assert body["issuer"] == "https://netaudio.app"
     assert body["token_endpoint"] == "https://netaudio.app/oauth/token"
     assert body["code_challenge_methods_supported"] == ["S256"]
@@ -108,6 +113,7 @@ async def test_unauthenticated_mcp_requests_point_at_resource_metadata():
         headers={**PUBLIC_HEADERS, "content-type": "application/json"},
     )
     assert status == 401
+    assert headers["connection"] == "close"
     assert (
         'resource_metadata="https://netaudio.app/.well-known/oauth-protected-resource"' in headers["www-authenticate"]
     )
@@ -188,6 +194,7 @@ async def test_full_authorization_code_flow_then_tool_call_and_refresh():
 
     status, body, headers = await authorize(server, client_id, challenge)
     assert status == 302
+    assert headers["connection"] == "close"
     location = urlsplit(headers["location"])
     assert location.netloc == "claude.ai"
     query = parse_qs(location.query)
@@ -252,7 +259,7 @@ async def test_full_authorization_code_flow_then_tool_call_and_refresh():
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": "identify", "arguments": {"device": "lx-dante"}},
+            "params": {"name": "identify", "arguments": {"device": "lx-dante", "confirmed": True}},
         },
         headers=mcp_headers,
     )
@@ -321,12 +328,12 @@ async def test_read_only_scope_blocks_writes_but_allows_resources():
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": "identify", "arguments": {"device": "lx-dante"}},
+            "params": {"name": "identify", "arguments": {"device": "lx-dante", "confirmed": True}},
         },
         headers=mcp_headers,
     )
     assert body["result"]["isError"] is True
-    assert SCOPE_WRITE in body["result"]["structuredContent"]["error"]
+    assert SCOPE_WRITE in json.loads(body["result"]["content"][0]["text"])["error"]
     server.application.identify.assert_not_awaited()
 
     status, body, _ = await request(

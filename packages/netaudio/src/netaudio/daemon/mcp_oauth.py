@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from netaudio.common.preferences import read_preferences, save_preference
+from netaudio.daemon.mcp_access import authorization_matches
 
 ACCESS_TOKEN_LIFETIME = 60 * 60
 AUTHORIZATION_CODE_LIFETIME = 10 * 60
@@ -277,6 +278,22 @@ class OAuthStore:
         save_preference(TOKENS_PREFERENCE, {})
         save_preference(CLIENTS_PREFERENCE, {})
         return count
+
+
+def grant_for_authorization(header, static_token: str | None, store: OAuthStore | None) -> Grant | None:
+    if authorization_matches(header, static_token):
+        return Grant(
+            client_id="local-token",
+            client_name="netaudio daemon mcp-token",
+            scope=SCOPE_WRITE,
+            expires_at=float("inf"),
+        )
+    if not isinstance(header, str):
+        return None
+    scheme, _, token = header.strip().partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return store.grant_for(token.strip()) if store else None
 
 
 def json_bytes(value) -> bytes:

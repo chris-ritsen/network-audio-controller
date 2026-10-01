@@ -66,9 +66,9 @@ impl AudioCapabilityReadback {
 pub struct ClearConfigurationStatus {
     pub record_protocol_identifier: u16,
     pub unmapped_first_word: u32,
-    pub available_actions_mask: u32,
-    pub action_result_code: u32,
-    pub completed_action: Option<&'static str>,
+    pub supported_modes_mask: u32,
+    pub executed_mode: u32,
+    pub executed_action: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -185,12 +185,12 @@ pub struct CodecStatus {
 
 pub fn parse_clear_configuration_status(data: &[u8]) -> Option<ClearConfigurationStatus> {
     validate_conmon_envelope(data, CONMON_OPCODE_CLEAR_CONFIGURATION_STATUS)?;
-    if data.len() != CONMON_CLEAR_CONFIGURATION_PACKET_SIZE || data.get(25).copied()? != 0x24 {
+    if data.len() != CONMON_CLEAR_CONFIGURATION_PACKET_SIZE {
         return None;
     }
 
-    let action_result_code = read_u32(data, CONMON_CLEAR_CONFIGURATION_ACTION_RESULT_CODE_OFFSET)?;
-    let completed_action = match action_result_code {
+    let executed_mode = read_u32(data, CONMON_CLEAR_CONFIGURATION_EXECUTED_MODE_OFFSET)?;
+    let executed_action = match executed_mode {
         crate::commands::CLEAR_CONFIGURATION_ACTION_ALL => Some("clear_all_configuration"),
         crate::commands::CLEAR_CONFIGURATION_ACTION_PRESERVE_INTERNET_PROTOCOL => {
             Some("clear_all_configuration_preserving_internet_protocol_settings")
@@ -204,12 +204,12 @@ pub fn parse_clear_configuration_status(data: &[u8]) -> Option<ClearConfiguratio
             CONMON_CLEAR_CONFIGURATION_RECORD_IDENTIFIER_OFFSET,
         )?,
         unmapped_first_word: read_u32(data, CONMON_CLEAR_CONFIGURATION_FIRST_WORD_OFFSET)?,
-        available_actions_mask: read_u32(
+        supported_modes_mask: read_u32(
             data,
-            CONMON_CLEAR_CONFIGURATION_AVAILABLE_ACTIONS_MASK_OFFSET,
+            CONMON_CLEAR_CONFIGURATION_SUPPORTED_MODES_MASK_OFFSET,
         )?,
-        action_result_code,
-        completed_action,
+        executed_mode,
+        executed_action,
     })
 }
 

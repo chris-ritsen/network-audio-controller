@@ -91,6 +91,11 @@ def _unique_cross_source_matches(
         }
         if not candidates:
             candidates = {key for key, record in direct.items() if managed_macs & _direct_macs(record)}
+        if not candidates:
+            managed_ips = _managed_ips(observation.device)
+            candidates = {
+                key for key, record in direct.items() if not _direct_macs(record) and record.get("ipv4") in managed_ips
+            }
         candidate_sets[index] = candidates
 
     matches: dict[int, str] = {}
@@ -450,6 +455,7 @@ class ManagedInventoryService:
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
         self._callback: InventoryCallback | None = None
+        self._change_waiters: list[asyncio.Future] = []
         self.last_attempt: float | None = None
         self.last_success: float | None = None
         self.last_error: str | None = None
@@ -580,7 +586,23 @@ class ManagedInventoryService:
     def _device_map(devices) -> dict[str, Device]:
         return {device.id: device for device in devices or () if device is not None}
 
+    async def wait_for_change(self, timeout: float) -> bool:
+        waiter = asyncio.get_running_loop().create_future()
+        self._change_waiters.append(waiter)
+        try:
+            await asyncio.wait_for(waiter, timeout)
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            if waiter in self._change_waiters:
+                self._change_waiters.remove(waiter)
+        return True
+
     async def _notify(self) -> None:
+        waiters, self._change_waiters = self._change_waiters, []
+        for waiter in waiters:
+            if not waiter.done():
+                waiter.set_result(None)
         if self._callback is None:
             return
         result = self._callback()
@@ -715,7 +737,7 @@ class ManagedInventoryService:
         for domain in sorted(self._domains.values(), key=lambda item: item.name or item.id):
             record = asdict(domain)
             record["ddm_server_profile"] = self.configuration.name
-            record["ddm_context"] = self._contexts_by_domain.get(domain.id)
+            record["ddm_context"] = context.name if (context := self._contexts_by_domain.get(domain.id)) else None
             result.append(record)
         return result
 

@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.monitoring.model import (
     DEFAULT_EVENT_HISTORY_LIMIT,
     EVENT_JOURNAL_SCHEMA_VERSION,
@@ -36,6 +37,40 @@ from netaudio.monitoring.signals import (
     _unsigned_number,
     snapshot_from_device,
 )
+
+
+CORE_DECODED_TELEMETRY_FIELDS = frozenset({"clock_observations", "receiver_flow_connection_health"})
+
+
+CONFIGURATION_FIELDS = (
+    "name",
+    "sample_rate_hz",
+    "encoding",
+    "latency_ms",
+    "preferred_leader",
+    "is_locked",
+    "aes67_configured",
+)
+
+
+def _channel_labels(snapshot: Mapping[str, Any], direction: str) -> dict[str, str]:
+    channels = snapshot.get("channels") if isinstance(snapshot.get("channels"), Mapping) else {}
+    entries = channels.get(direction) if isinstance(channels.get(direction), Mapping) else {}
+    labels = {}
+    for number, channel in entries.items():
+        label = (channel.get("friendly_name") or channel.get("name")) if isinstance(channel, Mapping) else channel
+        if str(number).isdecimal() and isinstance(label, str) and label:
+            labels[str(number)] = label
+    return labels
+
+
+def _route_sources(subscriptions: Any) -> dict[str, str]:
+    sources = {}
+    for identity, subscription in _subscription_map(subscriptions).items():
+        status = subscription.get("status") if isinstance(subscription.get("status"), Mapping) else {}
+        if subscription.get("tx_device") and status.get("state") != "none":
+            sources[identity] = f"{subscription['tx_device']}:{subscription.get('tx_channel')}"
+    return sources
 
 
 class MonitoringEventJournal:
@@ -83,11 +118,23 @@ class MonitoringEventJournal:
     def observe_device(self, device, *, timestamp: str | None = None) -> list[MonitoringEvent]:
         return self._observe_normalized_snapshot(snapshot_from_device(device), timestamp=timestamp)
 
+    def observe_device_telemetry(self, device, fields, *, timestamp: str | None = None) -> list[MonitoringEvent]:
+        previous = self._snapshots.get(device.server_name) if device.server_name else None
+        if previous is None:
+            return self.observe_device(device, timestamp=timestamp)
+        current = dict(previous)
+        for key, value in DanteDeviceSerializer.telemetry_to_json(device, fields).items():
+            if value is None:
+                current.pop(key, None)
+            else:
+                current[key] = value if key in CORE_DECODED_TELEMETRY_FIELDS else _json_safe(value)
+        return self._observe_normalized_snapshot(current, timestamp=timestamp, telemetry_only=True)
+
     def observe_snapshot(self, snapshot: Mapping[str, Any], *, timestamp: str | None = None) -> list[MonitoringEvent]:
         return self._observe_normalized_snapshot(_json_safe(dict(snapshot)), timestamp=timestamp)
 
     def _observe_normalized_snapshot(
-        self, current: dict[str, Any], *, timestamp: str | None = None
+        self, current: dict[str, Any], *, timestamp: str | None = None, telemetry_only: bool = False
     ) -> list[MonitoringEvent]:
         identity = _device_identity(current)
         current["device_identity"] = identity
@@ -97,11 +144,14 @@ class MonitoringEventJournal:
         issue_transitions = self.issue_engine._observe_normalized_snapshot(
             current,
             timestamp=observed_at,
-            emit_transitions=previous is not None,
+            emit_transitions=True,
+            cross_device=not telemetry_only,
         )
         if previous is None:
             self._prime_conditions(current)
-            return []
+            primed: list[MonitoringEvent] = []
+            self._append_issue_transitions(issue_transitions, primed)
+            return primed
 
         generated: list[MonitoringEvent] = []
         self._observe_presence(previous, current, observed_at, generated)
@@ -110,6 +160,7 @@ class MonitoringEventJournal:
         self._observe_ptp_ports(previous, current, observed_at, generated)
         self._observe_mutes(previous, current, observed_at, generated)
         self._observe_subscriptions(previous, current, observed_at, generated)
+        self._observe_configuration(previous, current, observed_at, generated)
         self._observe_connection_health(previous, current, observed_at, generated)
         self._observe_interface_traffic(previous, current, observed_at, generated)
         self._append_issue_transitions(issue_transitions, generated)
@@ -444,6 +495,8 @@ class MonitoringEventJournal:
             "online": snapshot.get("online"),
             "availability_state": snapshot.get("availability_state"),
             "last_seen": snapshot.get("last_seen"),
+            "name": snapshot.get("name"),
+            "mac_address": snapshot.get("mac_address"),
         }
 
     def _observe_device_controls(self, previous, current, timestamp, generated):
@@ -617,6 +670,71 @@ class MonitoringEventJournal:
                     after.get("status"),
                     {"previous_subscription": before, "current_subscription": after},
                     "receiver_subscription_status",
+                    DerivationStatus.OBSERVED,
+                    channel_identity=identity,
+                )
+            )
+
+    def _observe_configuration(self, previous, current, timestamp, generated) -> None:
+        if previous.get("online") is False or current.get("online") is False:
+            return
+        for field in CONFIGURATION_FIELDS:
+            before, after = previous.get(field), current.get(field)
+            if before in (None, "") or after in (None, "") or before == after:
+                continue
+            generated.append(
+                self._append(
+                    current,
+                    timestamp,
+                    MonitoringEventKind.SETTING_CHANGED,
+                    EventSeverity.INFO,
+                    {field: before},
+                    {field: after},
+                    {"field": field},
+                    "device_state",
+                    DerivationStatus.OBSERVED,
+                )
+            )
+        for direction, prefix in (("receivers", "rx"), ("transmitters", "tx")):
+            before_labels = _channel_labels(previous, direction)
+            after_labels = _channel_labels(current, direction)
+            for number in sorted(before_labels.keys() & after_labels.keys(), key=int):
+                if before_labels[number] == after_labels[number]:
+                    continue
+                generated.append(
+                    self._append(
+                        current,
+                        timestamp,
+                        MonitoringEventKind.CHANNEL_RENAMED,
+                        EventSeverity.INFO,
+                        {"label": before_labels[number]},
+                        {"label": after_labels[number]},
+                        {"direction": direction},
+                        "device_state",
+                        DerivationStatus.OBSERVED,
+                        channel_identity=f"{prefix}:{number}",
+                    )
+                )
+        if not isinstance(previous.get("subscriptions"), list) or not isinstance(current.get("subscriptions"), list):
+            return
+        known = _channel_labels(previous, "receivers").keys() & _channel_labels(current, "receivers").keys()
+        before_routes = _route_sources(previous.get("subscriptions"))
+        after_routes = _route_sources(current.get("subscriptions"))
+        for number in sorted(known, key=int):
+            identity = f"rx:{number}"
+            before, after = before_routes.get(identity), after_routes.get(identity)
+            if before == after:
+                continue
+            generated.append(
+                self._append(
+                    current,
+                    timestamp,
+                    MonitoringEventKind.ROUTE_CHANGED,
+                    EventSeverity.INFO,
+                    {"source": before or "nothing"},
+                    {"source": after or "nothing"},
+                    {},
+                    "device_state",
                     DerivationStatus.OBSERVED,
                     channel_identity=identity,
                 )

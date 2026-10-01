@@ -234,7 +234,7 @@ def test_preset_force_save_failure_preserves_existing_file(monkeypatch, tmp_path
         lambda *_args, **_kwargs: "replacement",
     )
     monkeypatch.setattr(
-        preset_commands.os,
+        preset_commands.preset_storage.os,
         "replace",
         lambda *_args: (_ for _ in ()).throw(OSError("synthetic replace failure")),
     )

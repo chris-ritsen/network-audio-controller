@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from netaudio.dante.const import (
-    NOTIFICATION_CLEAR_CONFIG_STATUS,
     NOTIFICATION_RX_CHANNEL_CHANGE,
     NOTIFICATION_RX_FLOW_CHANGE,
     NOTIFICATION_TX_FLOW_CHANGE,
@@ -815,24 +814,6 @@ class TestControlNotifications:
         application.probe_encoding_status.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
-    async def test_clear_configuration_notification_refreshes_audio_capabilities(self):
-        device = make_device()
-        application = make_application({"dev1.local.": device})
-        state = DanteStateService(application)
-        state.fetch_device_controls = AsyncMock()
-        event = DanteEvent(
-            type=EventType.NOTIFICATION_RECEIVED,
-            server_name="dev1.local.",
-            data={"notification_id": NOTIFICATION_CLEAR_CONFIG_STATUS},
-        )
-
-        await state._on_device_state_changed(event)
-
-        state.fetch_device_controls.assert_awaited_once_with("dev1.local.")
-        application.probe_sample_rate_status.assert_awaited_once_with(device)
-        application.probe_encoding_status.assert_awaited_once_with(device)
-
-    @pytest.mark.asyncio
     async def test_clear_configuration_status_refreshes_controls_and_capabilities_when_refetching(self):
         device = make_device()
         application = make_application({"dev1.local.": device})
@@ -841,7 +822,10 @@ class TestControlNotifications:
         state.fetch_device_controls = AsyncMock()
 
         await state.on_device_status(
-            status_event("clear_configuration_status", {"action_result_code": 1, "available_actions_mask": 3})
+            status_event(
+                "clear_configuration_status",
+                {"executed_mode": 1, "executed_action": "clear_all_configuration", "supported_modes_mask": 3},
+            )
         )
 
         state.fetch_device_controls.assert_awaited_once_with("dev1.local.")

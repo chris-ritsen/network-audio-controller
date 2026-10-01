@@ -200,6 +200,16 @@ function applyEvent(payload) {
     externalFlows.value = next;
     return;
   }
+  if (kind === "managed_status") {
+    if (payload.managed) {
+      batch(() => {
+        managedState.value = payload.managed.status;
+        managedDomains.value = payload.managed.domains || [];
+        connectionProfiles.value = payload.managed.connections;
+      });
+    }
+    return;
+  }
   if (kind === "settings_updated") {
     backendSettings.value = payload.settings;
     return;
@@ -209,6 +219,13 @@ function applyEvent(payload) {
     return;
   }
   if (kind === "snapshot") {
+    if (payload.api_version != null) {
+      if (loadedApiVersion != null && loadedApiVersion !== payload.api_version) {
+        window.location.reload();
+        return;
+      }
+      loadedApiVersion = payload.api_version;
+    }
     setMeteringScale(payload.metering_scale);
     batch(() => {
       if (payload.managed) {
@@ -236,6 +253,27 @@ function applyEvent(payload) {
       }
     });
     saveInventorySoon();
+    return;
+  }
+  if (kind === "device_patch") {
+    const current = devices.value[payload.server_name];
+    if (current) {
+      const next = { ...current, ...(payload.changed || {}) };
+      for (const key of payload.removed || []) delete next[key];
+      batch(() => {
+        devices.value = { ...devices.value, [payload.server_name]: next };
+        clearPendingForDevice(next);
+      });
+      saveInventorySoon();
+    }
+    return;
+  }
+  if (kind === "telemetry_updated") {
+    const current = devices.value[payload.server_name];
+    if (current && payload.telemetry) {
+      devices.value = { ...devices.value, [payload.server_name]: { ...current, ...payload.telemetry } };
+      saveInventorySoon();
+    }
     return;
   }
   if (kind === "device_removed") {
@@ -267,8 +305,13 @@ function applyEvent(payload) {
   }
 }
 
+let loadedApiVersion = null;
+
+const EVENT_STREAM_PATH =
+  "/events?patches=1&telemetry=clock_frequency_offset_parts_per_billion,last_seen,network_interface_traffic";
+
 export function connect() {
-  const source = new EventSource("/events");
+  const source = new EventSource(EVENT_STREAM_PATH);
 
   source.addEventListener("open", () => {
     connectionState.value = "open";
