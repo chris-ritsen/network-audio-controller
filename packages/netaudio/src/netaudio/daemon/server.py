@@ -267,9 +267,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             try:
                 await candidate.config_set("notify-keyspace-events", "Kgh$")
             except REDIS_ERRORS as exception:
-                logger.warning(
-                    f"Could not set Redis keyspace notification config, relying on server config: {exception}"
-                )
+                logger.info(f"Redis keyspace notifications are left to the server's configuration: {exception}")
             self._redis = candidate
             self._redis_device_mappings = {}
             logger.info("Connected to Redis")
