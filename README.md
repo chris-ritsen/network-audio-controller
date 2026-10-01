@@ -329,6 +329,12 @@ The manually dispatched [CI workflow](.github/workflows/quality.yml) uses the
 same check commands. Browser tests and installed-wheel/platform matrices are
 separate, explicitly selected checks.
 
+`make audit` checks `uv.lock` and the Rust core's `Cargo.lock` for known
+vulnerabilities, and `make audit-fix` upgrades the affected packages and audits
+again. The daily [security workflow](.github/workflows/security.yml) runs the
+same audit on `master` and the latest release, and rebuilds the published
+container images when their Python base image is updated.
+
 ## Project background
 
 NetAudio is an independent interoperability project and is not affiliated with
