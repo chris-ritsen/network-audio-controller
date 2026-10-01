@@ -11,12 +11,12 @@ FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE} A
 
 ARG BUILDARCH
 RUN case "$BUILDARCH" in \
-        amd64) other=arm64 ;; \
-        arm64) other=amd64 ;; \
+        amd64) cross="gcc-aarch64-linux-gnu libc6-dev-arm64-cross" ;; \
+        arm64) cross="gcc-x86-64-linux-gnu libc6-dev-amd64-cross" ;; \
         *) echo "cannot build on $BUILDARCH" >&2; exit 1 ;; \
     esac \
     && apt-get update \
-    && apt-get install --yes --no-install-recommends build-essential "crossbuild-essential-$other" ca-certificates curl \
+    && apt-get install --yes --no-install-recommends gcc libc6-dev $cross ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CARGO_HOME=/usr/local/cargo \
