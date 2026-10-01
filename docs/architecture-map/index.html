@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NetAudio Signal Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>NetAudio Signal Map</h1>
+    <p>How the daemon, CLI, web UI and Rust core talk to Dante devices. Pick a journey to trace it.</p>
+    <div class="legend" aria-label="Zone colours">
+      <span><i style="background:var(--z-client)"></i>Clients</span>
+      <span><i style="background:var(--z-http)"></i>Daemon edge</span>
+      <span><i style="background:var(--z-daemon)"></i>Daemon internals</span>
+      <span><i style="background:var(--z-core)"></i>Rust core</span>
+      <span><i style="background:var(--z-net)"></i>On the wire</span>
+    </div>
+  </header>
+
+  <div id="viewport" aria-label="Architecture canvas. Drag to pan, scroll or pinch to zoom.">
+    <div id="world">
+      <div id="gridbg"></div>
+      <svg id="edges" width="1" height="1">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--edge)"></path>
+          </marker>
+          <marker id="arrhot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--hot)"></path>
+          </marker>
+        </defs>
+        <g id="edgeg"></g>
+      </svg>
+    </div>
+    <div class="controls">
+      <button id="zin" aria-label="Zoom in">+</button>
+      <button id="zout" aria-label="Zoom out">−</button>
+      <button id="zfit">Fit</button>
+      <span class="zoomread" id="zread">100%</span>
+    </div>
+    <div class="hint">Drag to pan · scroll to zoom · ← → step through a journey</div>
+  </div>
+
+  <aside>
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-j" aria-selected="true">Journeys</button>
+      <button role="tab" id="tab-s" aria-selected="false">Surprises</button>
+      <button role="tab" id="tab-d" aria-selected="false">Detail</button>
+    </div>
+    <div class="pane" id="pane"></div>
+  </aside>
+</div>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
