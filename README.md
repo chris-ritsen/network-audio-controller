@@ -170,6 +170,16 @@ tls_port = 9443
 To serve plain HTTP on the network instead, set `no_ssl = true` under
 `[daemon]`.
 
+The daemon can publish device state to Redis for other programs. Install
+`netaudio[redis]` and name the server; without a `[redis]` section the daemon
+does not use Redis:
+
+```toml
+[redis]
+host = "localhost"
+port = 6379
+```
+
 `netaudio config path` shows which configuration file is used. For a DDM
 network, `netaudio ddm login --default` guides you through connecting to a
 server and choosing a domain.
