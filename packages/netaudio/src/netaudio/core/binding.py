@@ -307,9 +307,7 @@ class _ObservationTracker:
     def _read_snapshot(self, *, include_history=False):
         with self._native_lock:
             self._require_open()
-            status, data = _call_buffer(
-                self._snapshot, self._handle, include_history, capacity=self._snapshot_capacity
-            )
+            status, data = _call_buffer(self._snapshot, self._handle, include_history, capacity=self._snapshot_capacity)
             if status != STATUS_OK:
                 raise NetaudioCoreError(status, "observation snapshot")
             if not include_history and len(data) > self._snapshot_capacity:

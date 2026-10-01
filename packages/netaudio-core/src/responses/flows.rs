@@ -618,8 +618,7 @@ fn parse_receiver_flow_record_48(body: &[u8], record_offset: usize) -> Option<Re
         if byte_count % 2 != 0 {
             return None;
         }
-        let mapping =
-            body.get(offset + 6..(offset + 6).checked_add(usize::from(byte_count))?)?;
+        let mapping = body.get(offset + 6..(offset + 6).checked_add(usize::from(byte_count))?)?;
         if byte_count != 0 && starting_receiver_channel == 0 {
             return None;
         }

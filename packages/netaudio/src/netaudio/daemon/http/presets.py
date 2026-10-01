@@ -230,7 +230,6 @@ class DaemonPresetHandlers:
             await self._send_json(writer, {"error": "Another preset operation is in progress."}, 409)
             return
         try:
-
             omitted = []
 
             async def read_selected():

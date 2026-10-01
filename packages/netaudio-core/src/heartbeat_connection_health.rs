@@ -257,8 +257,7 @@ impl ReceiverPath {
                 .and_then(|v| u16::try_from(v).ok());
             evidence["flow"] = matches[0].clone();
             evidence["source"] = matches[0]["source"].clone();
-            evidence["configured_latency_nanoseconds"] =
-                matches[0]["latency_nanoseconds"].clone();
+            evidence["configured_latency_nanoseconds"] = matches[0]["latency_nanoseconds"].clone();
             self.attribution_status = "resolved".into();
             self.attribution_reason = None;
         }

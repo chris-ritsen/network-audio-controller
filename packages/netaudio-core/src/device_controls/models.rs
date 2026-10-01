@@ -191,11 +191,12 @@ pub fn decode_application(family: &str, data: &[u8]) -> Option<Vec<PanelObservat
                         continue;
                     };
                     let raw = pb::bytes(&d, 2)?.unwrap_or_default();
-                    let (custom_name, custom_name_raw_hexadecimal) = match std::str::from_utf8(raw) {
+                    let (custom_name, custom_name_raw_hexadecimal) = match std::str::from_utf8(raw)
+                    {
                         Ok(name) => (name.to_owned(), None),
                         Err(_) => (
                             String::from_utf8_lossy(raw).into_owned(),
-                            Some(raw.iter().map(|byte| format!("{byte:02x}")).collect()),
+                            Some(crate::bytes::hexadecimal(raw)),
                         ),
                     };
                     PanelObservation::BluetoothIdentification(BluetoothIdentification {

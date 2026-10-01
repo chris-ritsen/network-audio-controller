@@ -1,3 +1,14 @@
+use std::fmt::Write;
+
+pub fn hexadecimal(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut text, byte| {
+            write!(text, "{byte:02x}").expect("writing to a String cannot fail");
+            text
+        })
+}
+
 pub fn u16_at(data: &[u8], offset: usize) -> u16 {
     u16::from_be_bytes([data[offset], data[offset + 1]])
 }

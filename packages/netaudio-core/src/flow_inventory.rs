@@ -9,8 +9,7 @@ use crate::protocol::{
 };
 use crate::responses::{
     parse_modern_arc_receiver_flow_status_page, parse_receiver_flow_page,
-    FIXED_RECEIVER_FLOW_PROTOCOL_IDS,
-    parse_transmitter_flow_status_page, parse_tx_flow_page,
+    parse_transmitter_flow_status_page, parse_tx_flow_page, FIXED_RECEIVER_FLOW_PROTOCOL_IDS,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]

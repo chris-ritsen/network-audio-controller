@@ -1,5 +1,7 @@
 use std::net::Ipv4Addr;
 
+use crate::bytes::hexadecimal;
+
 use serde::{Deserialize, Serialize};
 
 pub const MULTICAST_ADDRESS: &str = "239.255.255.255";
@@ -128,10 +130,7 @@ pub fn parse(data: &[u8]) -> Result<SapAnnouncement, &'static str> {
         authentication_length_words,
         message_hash,
         origin_address: origin.to_string(),
-        authentication_data_hexadecimal: data[8..payload_offset]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
+        authentication_data_hexadecimal: hexadecimal(&data[8..payload_offset]),
         content_type: "application/sdp",
         raw_sdp,
     })

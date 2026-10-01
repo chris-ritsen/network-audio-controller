@@ -3,6 +3,7 @@ use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
 
+use crate::bytes::hexadecimal;
 use crate::responses::ConmonExportFragment;
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -62,13 +63,7 @@ pub struct ExportCollector {
 impl ExportCollector {
     pub fn new(configuration: ExportConfiguration) -> Self {
         Self {
-            tag: configuration
-                .kind
-                .identity()
-                .0
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect(),
+            tag: hexadecimal(&configuration.kind.identity().0),
             configuration,
             total_size: None,
             record_protocol: None,

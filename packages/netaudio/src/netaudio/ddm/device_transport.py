@@ -138,7 +138,7 @@ class ManagedDeviceTransport:
         if not addresses:
             raise ManagedDeviceControlError(f"the DDM server {self.server} has no IPv4 address")
         try:
-            path = self.network_paths.resolve(addresses[0][4][0], app_settings.interface)
+            path = self.network_paths.resolve(str(addresses[0][4][0]), app_settings.interface)
         except NetworkPathError as exception:
             raise ManagedDeviceControlError(
                 f"no network path to the DDM server {self.server}: {exception}"

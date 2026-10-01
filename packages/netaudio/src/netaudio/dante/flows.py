@@ -436,15 +436,17 @@ def receiver_flow_inventory_family(device) -> str | None:
     cached = getattr(device, "receiver_flow_inventory_family", None)
     if cached in ("legacy", "modern"):
         return cached
-    return {"fixed": "legacy", "segmented": "modern"}.get(receiver_flow_query_family(device))
+    family = receiver_flow_query_family(device)
+    if family is None:
+        return None
+    return {"fixed": "legacy", "segmented": "modern"}.get(family)
 
 
 async def _read_channel_capability(device) -> None:
-    execute = getattr(device, "execute", None)
-    if not callable(execute) or getattr(device, "requires_managed_control", False):
+    if not callable(getattr(device, "execute", None)) or getattr(device, "requires_managed_control", False):
         return
     try:
-        response = await execute({"command": "channel_count"})
+        response = await device.execute({"command": "channel_count"})
         counts = core.parse_response("channel_count", response) if response else None
     except (OSError, RuntimeError, TimeoutError, core.NetaudioCoreError) as exception:
         logger.debug(f"{getattr(device, 'name', device)}: channel capability read failed: {exception!r}")

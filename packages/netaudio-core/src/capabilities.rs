@@ -148,10 +148,10 @@ pub fn availability(request: AvailabilityRequest) -> Availability {
                 .is_some_and(ReportedSource::reported)
     });
     let read_only_required = request.operation == Redundancy
-        && !request
+        && request
             .read_only_source
             .as_ref()
-            .is_some_and(|source| source.field_applicable == Some(false));
+            .is_none_or(|source| source.field_applicable != Some(false));
 
     match supported {
         Some(true) => {}

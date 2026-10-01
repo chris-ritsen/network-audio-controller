@@ -27,10 +27,7 @@ mod fixed_authoring_tests {
             assert_eq!(packet.len(), 76);
             assert_eq!(u16::from_be_bytes([packet[70], packet[71]]), port);
             assert_eq!(
-                packet
-                    .iter()
-                    .map(|b| format!("{b:02x}"))
-                    .collect::<String>(),
+                crate::bytes::hexadecimal(&packet),
                 expected,
                 "synthetic request for UDP port {port}"
             );

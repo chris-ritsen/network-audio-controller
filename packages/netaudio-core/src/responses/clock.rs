@@ -525,7 +525,7 @@ fn global_block(
         (rev >= 0x072e && identity_validity & bit != 0)
             .then(|| block.get(at..at + 8))
             .flatten()
-            .map(|bytes| bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+            .map(crate::bytes::hexadecimal)
     };
     s.ptpv2_device_identity = identity(1, 8);
     s.ptpv2_master_identity = identity(2, 16);

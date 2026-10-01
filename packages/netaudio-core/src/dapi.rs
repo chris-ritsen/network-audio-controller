@@ -1,5 +1,5 @@
+use crate::bytes::hexadecimal;
 use serde::{Deserialize, Serialize};
-use std::fmt::Write;
 
 const REQUEST_MARKER: [u8; 4] = [0xB9, 0x1A, 0x37, 0x26];
 pub const FRAME_HEADER_BYTES: usize = 12;
@@ -257,15 +257,6 @@ fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_be_bytes(
         bytes.get(offset..offset + 4)?.try_into().ok()?,
     ))
-}
-
-fn hexadecimal(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut text, byte| {
-            write!(text, "{byte:02x}").expect("writing to a String cannot fail");
-            text
-        })
 }
 
 fn aligned_to_four(length: usize) -> Option<usize> {

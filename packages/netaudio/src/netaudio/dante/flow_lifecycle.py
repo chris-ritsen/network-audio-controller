@@ -231,7 +231,7 @@ async def _fresh_authoring_protocol(device) -> tuple[int, int] | None:
     if protocol_id is None:
         logger.warning(f"{device.name}: no advertised ARC protocol for a fresh flow-authoring read")
         return None
-    query = {"command": "channel_count"}
+    query: dict[str, str | int] = {"command": "channel_count"}
     if protocol_id == PROTOCOL_ARC_2809:
         query["protocol_id"] = protocol_id
     try:
