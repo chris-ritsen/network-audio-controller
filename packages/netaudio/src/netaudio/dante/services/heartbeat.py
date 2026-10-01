@@ -77,6 +77,19 @@ def parse_connection_health_records(data: bytes) -> _requests.HeartbeatConnectio
         return None
 
 
+def connection_health_source_records(records) -> dict:
+    return {
+        kind: [
+            {
+                "sequence": record.get("sequence"),
+                "raw_record_hexadecimal": bytes(record.get("raw_record") or ()).hex(),
+            }
+            for record in records.get(key) or ()
+        ]
+        for kind, key in (("latency", "latency_records"), ("late_packets", "late_packet_records"))
+    }
+
+
 def receiver_topology(device) -> dict:
     return {
         "capacity": getattr(device, "receiver_telemetry_capacity", None),
@@ -207,6 +220,7 @@ class DanteHeartbeatService(DanteMulticastService):
                     topology=receiver_topology(device),
                 )
                 if state is not None:
+                    state["source_records"] = connection_health_source_records(connection_health_records)
                     device.receiver_flow_connection_health = state
                     self._schedule_connection_health_expiry(device_extended_unique_identifier)
                     device_state_changed = True

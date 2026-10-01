@@ -276,6 +276,7 @@ class _ObservationTracker:
         self._free = getattr(self._lib, f"netaudio_{kind}_tracker_free")
         self._accept = getattr(self._lib, f"netaudio_{kind}_tracker_accept")
         self._snapshot = getattr(self._lib, f"netaudio_{kind}_tracker_snapshot")
+        self._snapshot_capacity = 32768
         status = self._new(ctypes.byref(self._handle))
         if status != STATUS_OK:
             raise NetaudioCoreError(status, "observation tracker")
@@ -306,9 +307,13 @@ class _ObservationTracker:
     def _read_snapshot(self, *, include_history=False):
         with self._native_lock:
             self._require_open()
-            status, data = _call_buffer(self._snapshot, self._handle, include_history, capacity=32768)
+            status, data = _call_buffer(
+                self._snapshot, self._handle, include_history, capacity=self._snapshot_capacity
+            )
             if status != STATUS_OK:
                 raise NetaudioCoreError(status, "observation snapshot")
+            if not include_history and len(data) > self._snapshot_capacity:
+                self._snapshot_capacity = len(data) + len(data) // 4
 
             return _decode_json_output(data, "observation snapshot")
 

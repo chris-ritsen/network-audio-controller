@@ -158,7 +158,7 @@ class Observation(_extensions.TypedDict):
     observed_at: str
     observed_monotonic: float
     raw: int
-    raw_record: list[int]
+    raw_record: _extensions.NotRequired[list[int]]
     record_type: int
     sample_rate_hertz: _extensions.NotRequired[_typing.Union[int, None]]
     sequence: _extensions.NotRequired[_typing.Union[int, None]]

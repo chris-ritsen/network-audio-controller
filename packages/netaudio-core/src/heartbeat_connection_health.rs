@@ -146,7 +146,7 @@ pub struct ReceiverPath {
     pub global_flow_id: Option<u16>,
     pub attribution_status: String,
     pub attribution_reason: Option<String>,
-    pub evidence: Value,
+    pub evidence: Arc<Value>,
     pub latency: Series,
     pub late_packets: Series,
 }
@@ -162,7 +162,7 @@ impl ReceiverPath {
             global_flow_id: self.global_flow_id,
             attribution_status: self.attribution_status.clone(),
             attribution_reason: self.attribution_reason.clone(),
-            evidence: self.evidence.clone(),
+            evidence: Arc::new(compact_path_evidence(&self.evidence)),
             latency: self.latency.summary(),
             late_packets: self.late_packets.summary(),
         }
@@ -178,12 +178,18 @@ impl ReceiverPath {
             global_flow_id: None,
             attribution_status: "unresolved".into(),
             attribution_reason: None,
-            evidence: Value::Null,
+            evidence: Arc::new(Value::Null),
             latency: Series::default(),
             late_packets: Series::default(),
         }
     }
     fn attribute(&mut self, topology: &Topology) {
+        let mut evidence = Value::Null;
+        self.resolve(topology, &mut evidence);
+        self.evidence = Arc::new(evidence);
+    }
+
+    fn resolve(&mut self, topology: &Topology, evidence: &mut Value) {
         let capacity = topology.capacity.as_ref().unwrap_or(&Value::Null);
         let f = capacity["base_receive_flow_capacity"].as_u64().unwrap_or(0);
         let n = capacity["network_interface_count"].as_u64().unwrap_or(0);
@@ -193,7 +199,7 @@ impl ReceiverPath {
         self.global_flow_id = None;
         self.attribution_status = "unresolved".into();
         self.attribution_reason = Some("Audio capacity or network topology is unavailable".into());
-        self.evidence = json!({"capacity": capacity, "inventory_complete": topology.complete});
+        *evidence = json!({"capacity": capacity, "inventory_complete": topology.complete});
         if f == 0
             || n == 0
             || f > 65535
@@ -234,23 +240,65 @@ impl ReceiverPath {
                 .as_u64()
                 .or_else(|| matches[0]["flow_number"].as_u64())
                 .and_then(|v| u16::try_from(v).ok());
-            self.evidence["flow"] = matches[0].clone();
-            self.evidence["source"] = matches[0]["source"].clone();
-            self.evidence["configured_latency_nanoseconds"] =
+            evidence["flow"] = matches[0].clone();
+            evidence["source"] = matches[0]["source"].clone();
+            evidence["configured_latency_nanoseconds"] =
                 matches[0]["latency_nanoseconds"].clone();
             self.attribution_status = "resolved".into();
             self.attribution_reason = None;
         }
-        self.evidence["network_interface_index"] = json!(self.network_interface_index);
-        self.evidence["audio_receiver_flow_id"] = json!(local_id);
-        let flow = self.evidence["flow"].clone();
-        self.evidence["comparison_key"] = json!({"capacity": f, "networks": n,
+        evidence["network_interface_index"] = json!(self.network_interface_index);
+        evidence["audio_receiver_flow_id"] = json!(local_id);
+        let flow = evidence["flow"].clone();
+        evidence["comparison_key"] = json!({"capacity": f, "networks": n,
             "network": self.network_interface_index, "local_id": local_id,
             "global_id": self.global_flow_id, "source": flow["source"], "flow_name": flow["flow_name"],
             "endpoint": flow["endpoint_descriptor_hexadecimal"],
             "mapping": flow["receiver_mapping_descriptor_hexadecimal"],
             "budget": flow["latency_nanoseconds"]});
     }
+}
+
+fn compact_path_evidence(evidence: &Value) -> Value {
+    let Some(fields) = evidence.as_object() else {
+        return evidence.clone();
+    };
+    let mut compact: serde_json::Map<String, Value> = fields
+        .iter()
+        .filter(|(key, _)| {
+            matches!(
+                key.as_str(),
+                "source"
+                    | "configured_latency_nanoseconds"
+                    | "comparison_key"
+                    | "network_interface_index"
+                    | "audio_receiver_flow_id"
+                    | "inventory_complete"
+            )
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    if let Some(flow) = fields.get("flow").and_then(Value::as_object) {
+        let flow = flow
+            .iter()
+            .filter(|(key, _)| {
+                matches!(
+                    key.as_str(),
+                    "flow_number"
+                        | "flow_type"
+                        | "receiver_channel_numbers_by_flow_channel"
+                        | "latency_nanoseconds"
+                        | "sample_rate"
+                        | "encoding"
+                        | "flow_channel_slot_count"
+                        | "subscription_status_code"
+                )
+            })
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        compact.insert("flow".into(), Value::Object(flow));
+    }
+    Value::Object(compact)
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -388,6 +436,9 @@ pub fn update_in_place(
             && path.evidence["comparison_key"] != attributed.evidence["comparison_key"]
         {
             attributed.attribution_epoch += 1;
+        }
+        if path.evidence == attributed.evidence {
+            attributed.evidence = path.evidence.clone();
         }
         observation.evidence = attributed.evidence.clone();
         let series = if late {

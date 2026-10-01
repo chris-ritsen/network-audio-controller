@@ -51,8 +51,9 @@ pub struct Observation {
     pub timestamp_provenance: String,
     pub epoch: u64,
     pub display_epoch: u64,
-    pub evidence: Value,
+    pub evidence: Arc<Value>,
     pub clock_state_evidence: Option<Arc<Value>>,
+    #[serde(default, skip_serializing_if = "raw_record_is_empty")]
     pub raw_record: Arc<Vec<u8>>,
     pub value: Option<f64>,
     pub latency_microseconds: Option<u64>,
@@ -98,7 +99,7 @@ impl Observation {
             timestamp_provenance: "local_receive_time".into(),
             epoch: 0,
             display_epoch: 0,
-            evidence: Value::Null,
+            evidence: Arc::new(Value::Null),
             clock_state_evidence: None,
             raw_record: bytes.into(),
             value,
@@ -108,6 +109,37 @@ impl Observation {
                     .map(|s| s * 1_000_000 / u64::from(r))
             }),
         }
+    }
+
+    pub fn summary(&self) -> Self {
+        Self {
+            evidence: Arc::new(compact_sample_evidence(&self.evidence)),
+            clock_state_evidence: None,
+            raw_record: Arc::default(),
+            ..self.clone()
+        }
+    }
+}
+
+fn raw_record_is_empty(raw_record: &Arc<Vec<u8>>) -> bool {
+    raw_record.is_empty()
+}
+
+fn compact_sample_evidence(evidence: &Value) -> Value {
+    match evidence.as_object() {
+        Some(fields) => Value::Object(
+            fields
+                .iter()
+                .filter(|(key, _)| {
+                    matches!(
+                        key.as_str(),
+                        "comparison_key" | "configured_latency_nanoseconds"
+                    )
+                })
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        ),
+        None => evidence.clone(),
     }
 }
 
@@ -142,7 +174,7 @@ impl Series {
         Self {
             fresh: self.fresh,
             history: Vec::new(),
-            current: self.current.clone(),
+            current: self.current.as_ref().map(Observation::summary),
             delta: self.delta,
             baseline: self.baseline,
             increase_since_baseline: self.increase_since_baseline,

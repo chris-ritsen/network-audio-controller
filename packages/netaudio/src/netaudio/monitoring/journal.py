@@ -652,6 +652,7 @@ class MonitoringEventJournal:
                     increase_kind=MonitoringEventKind.LATE_PACKET_COUNT_INCREASED,
                     reset_kind=MonitoringEventKind.LATE_PACKET_COUNTER_RESET,
                     source="heartbeat_receiver_flow_late_packets",
+                    source_records=(after_health or {}).get("source_records"),
                 )
         self._observe_flow_latency(current, after_health, timestamp, generated)
 
@@ -699,6 +700,7 @@ class MonitoringEventJournal:
                         "warning_threshold_nanoseconds": warning,
                         "recovery_threshold_nanoseconds": recovery,
                         "latency_observation": sample,
+                        "source_records": health.get("source_records"),
                     },
                     "heartbeat_receiver_flow_latency",
                     DerivationStatus.DERIVED,
@@ -793,6 +795,7 @@ class MonitoringEventJournal:
         increase_kind,
         reset_kind,
         source,
+        source_records=None,
     ) -> None:
         before = previous_measurement.get(field)
         after = current_measurement.get(field)
@@ -805,6 +808,8 @@ class MonitoringEventJournal:
             "current_measurement": current_measurement,
             "delta": None if reset else after - before,
         }
+        if source_records is not None:
+            raw["source_records"] = source_records
         generated.append(
             self._append(
                 snapshot,
