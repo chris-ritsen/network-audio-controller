@@ -17,7 +17,6 @@ dependencies = [
     "rich>=13.0.0",
     "segno>=1.6.6",
     "pyyaml>=6.0",
-    "redis>=5.0.0",
     "tomli>=1.0.0; python_version < '3.11'",
     "typing-extensions>=4.0.0",
     "dbus-fast>=2.0.0; sys_platform == 'linux'",
@@ -26,6 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 capture = ["redis>=5.0.0"]
+redis = ["redis>=5.0.0"]
 dbus = ["dbus-fast>=2.0.0"]
 
 [project.scripts]

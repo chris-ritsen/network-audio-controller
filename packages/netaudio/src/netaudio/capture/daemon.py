@@ -72,7 +72,7 @@ def _get_redis_client(
 ):
     global _LAST_REDIS_ERROR
     if Redis is None:
-        _LAST_REDIS_ERROR = "python package 'redis' is not installed in this environment"
+        _LAST_REDIS_ERROR = "the redis package is not installed; install netaudio[redis]"
         return None
     try:
         resolved_socket = socket_path or os.environ.get("REDIS_SOCKET")
