@@ -11,7 +11,7 @@ from netaudio.dante.const import DEFAULT_MULTICAST_METERING_PORT
 logger = logging.getLogger("netaudio")
 
 DEFAULT_MDNS_TIMEOUT = 5
-DEFAULT_DAEMON_PORT = 9000
+DEFAULT_DAEMON_PORT = 4780
 DEFAULT_INTERFACE = None
 DEFAULT_STALE_DEVICE_MINUTES = 60
 
@@ -28,6 +28,15 @@ def get_available_interfaces():
     return sorted(interfaces)
 
 
+def configured_daemon_port() -> int:
+    value = os.environ.get("NETAUDIO_DAEMON_PORT")
+    if not value:
+        from netaudio.common.config_loader import load_daemon_config
+
+        value = load_daemon_config().get("port", DEFAULT_DAEMON_PORT)
+    return int(value)
+
+
 class AppSettings:
     def __init__(self):
         self._mdns_timeout: float = DEFAULT_MDNS_TIMEOUT
@@ -42,7 +51,7 @@ class AppSettings:
             if group.strip()
         )
         self.metering_port: int = int(os.environ.get("NETAUDIO_METERING_PORT", DEFAULT_MULTICAST_METERING_PORT))
-        self.daemon_port: int = int(os.environ.get("NETAUDIO_DAEMON_PORT", DEFAULT_DAEMON_PORT))
+        self._daemon_port: int | None = None
         self.dbus_enabled: bool = os.environ.get("NETAUDIO_DBUS", "").lower() in ("1", "true", "yes")
         self.lock_state_timeout: float = float(os.environ.get("NETAUDIO_LOCK_STATE_TIMEOUT", 4))
         self.stale_device_minutes: float = DEFAULT_STALE_DEVICE_MINUTES
@@ -50,6 +59,16 @@ class AppSettings:
         lock_key_value = os.environ.get("NETAUDIO_DEVICE_LOCK_KEY")
         if lock_key_value:
             self._device_lock_key = lock_key_value.encode("ascii")
+
+    @property
+    def daemon_port(self) -> int:
+        if self._daemon_port is None:
+            self._daemon_port = configured_daemon_port()
+        return self._daemon_port
+
+    @daemon_port.setter
+    def daemon_port(self, value: int | None) -> None:
+        self._daemon_port = value
 
     @property
     def device_lock_key(self) -> bytes | None:

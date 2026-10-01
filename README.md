@@ -86,6 +86,106 @@ pip install netaudio
 
 Install the [netaudio AUR package](https://aur.archlinux.org/packages/netaudio).
 
+### Containers
+
+The daemon, web interface and MCP server also run as a container image,
+`s00pcan/netaudio`, for Linux hosts on the Dante network. Dante discovery,
+heartbeats and metering need the host's network, so the container shares it
+instead of getting its own. Docker Desktop on macOS and Windows runs
+containers inside a virtual machine that cannot see Dante traffic.
+
+With Docker:
+
+```bash
+docker run -d --name netaudio --network host --init --restart unless-stopped \
+  -v netaudio:/var/lib/netaudio s00pcan/netaudio
+docker exec netaudio netaudio device list
+```
+
+From a checkout of this repository,
+`docker compose -f containers/compose.yaml up -d` does the same. Settings, the
+TLS identity, presets and MCP sign-ins are kept in the `netaudio` volume. Pass
+the options below with `-e`, or set them in `containers/.env` for Compose. The
+`latest` tag is the newest release, and `edge` is built from every change to
+`master`. To update, run `docker pull s00pcan/netaudio`, then remove and run
+the container again; with Compose, `pull` and then `up -d`.
+
+To build the image yourself, use
+`docker compose -f containers/compose.yaml -f containers/compose.build.yaml up -d --build`.
+One machine builds both architectures without emulation:
+`docker buildx build --platform linux/amd64,linux/arm64 --file containers/Dockerfile .`
+
+With systemd-nspawn (systemd 260 or newer), the same image runs without
+Docker. Save these settings as `/etc/systemd/nspawn/netaudio.nspawn`; they are
+also in `containers/netaudio.nspawn`:
+
+```ini
+[Exec]
+Boot=no
+KillSignal=TERM
+Parameters=/usr/local/bin/netaudio daemon run
+User=netaudio
+WorkingDirectory=/var/lib/netaudio
+Environment=HOME=/var/lib/netaudio
+Environment=NETAUDIO_CONFIG=/var/lib/netaudio/config.toml
+Environment=PYTHONUNBUFFERED=1
+Environment=NOTIFY_SOCKET=
+PrivateUsers=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Files]
+Bind=/var/lib/netaudio
+
+[Network]
+Private=no
+VirtualEthernet=no
+```
+
+Then name the container after this host, so the certificate, Bonjour name and
+MCP address use the host's name, pull the image, and start it now and at boot:
+
+```bash
+sudo sed -i "/^\[Exec\]/a Hostname=$(hostnamectl hostname)" /etc/systemd/nspawn/netaudio.nspawn
+sudo importctl pull-oci --class=machine docker.io/s00pcan/netaudio:latest netaudio
+sudo install -d -o 10001 -g 10001 -m 0750 /var/lib/netaudio
+sudo machinectl enable --now netaudio
+journalctl -u systemd-nspawn@netaudio -f
+```
+
+To update, stop the container, pull again with `--force`, and start it:
+
+```bash
+sudo machinectl stop netaudio
+sudo importctl pull-oci --force --class=machine docker.io/s00pcan/netaudio:latest netaudio
+sudo machinectl start netaudio
+```
+
+Settings and state live in `/var/lib/netaudio` on the host, including
+`config.toml`; add `Environment=` lines for the options below. To run CLI
+commands inside the container, save this as `/usr/local/bin/netaudio` and use
+`sudo netaudio device list`:
+
+```sh
+#!/bin/sh
+exec nsenter --target "$(machinectl show netaudio --property=Leader --value)" --all \
+  --setuid 10001 --setgid 10001 \
+  env HOME=/var/lib/netaudio NETAUDIO_CONFIG=/var/lib/netaudio/config.toml netaudio "$@"
+```
+
+Container options, as environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `NETAUDIO_INTERFACE` | Network interface for Dante traffic on hosts with more than one |
+| `NETAUDIO_DAEMON_PORT` | Plain HTTP port, loopback only while HTTPS is on (default 4780) |
+| `NETAUDIO_TLS_PORT` | HTTPS port for the web interface, apps and MCP (default 4781) |
+| `NETAUDIO_TLS_CERTIFICATE`, `NETAUDIO_TLS_KEY` | Your own certificate and key, mounted into the container and readable by user 10001 |
+| `NETAUDIO_NO_SSL` | `true` serves plain HTTP on the network instead of HTTPS |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_SOCKET`, `REDIS_DB`, `REDIS_PASSWORD` | Publish device state to this Redis server |
+
+The host firewall must allow the HTTPS port from clients, and UDP from the
+Dante network for discovery, heartbeats and metering.
+
 ### From source
 
 A source checkout requires Python 3.9 or newer, `uv`, and a Rust toolchain:
@@ -152,23 +252,34 @@ or supply an explicit `.xml` path. Saving over an existing file requires
 
 ### Configuration and troubleshooting
 
-The daemon serves HTTPS on port 9443 with a self-signed certificate that it
-creates and renews automatically. Plain HTTP on port 9000 stays available on
+The daemon serves HTTPS on port 4781 with a self-signed certificate that it
+creates and renews automatically. Plain HTTP on port 4780 stays available on
 loopback for the local CLI and browser. `netaudio daemon web` lists the
 addresses.
 
-To use your own certificate, add these settings to the configuration file
-shown by `netaudio config path` and restart the daemon:
+To use your own certificate or other ports, add these settings to the
+configuration file shown by `netaudio config path` and restart the daemon:
 
 ```toml
 [daemon]
 tls_certificate = "/path/to/certificate.pem"
 tls_key = "/path/to/private-key.pem"
-tls_port = 9443
+tls_port = 4781
+port = 4780
 ```
 
 To serve plain HTTP on the network instead, set `no_ssl = true` under
 `[daemon]`.
+
+The daemon can publish device state to Redis for other programs. Install
+`netaudio[redis]` and name the server; without a `[redis]` section the daemon
+does not use Redis:
+
+```toml
+[redis]
+host = "localhost"
+port = 6379
+```
 
 `netaudio config path` shows which configuration file is used. For a DDM
 network, `netaudio ddm login --default` guides you through connecting to a

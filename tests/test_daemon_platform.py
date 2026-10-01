@@ -30,6 +30,7 @@ async def test_failed_redis_connection_is_closed_and_disabled(monkeypatch):
     monkeypatch.setattr(server, "aioredis", SimpleNamespace(Redis=lambda **_kwargs: candidate))
     daemon = object.__new__(server.NetaudioDaemon)
     daemon._redis = None
+    daemon._redis_settings = {}
 
     await daemon._connect_redis()
 
@@ -44,6 +45,7 @@ async def test_redis_config_rejection_keeps_usable_connection(monkeypatch):
     monkeypatch.setattr(server, "aioredis", SimpleNamespace(Redis=lambda **_kwargs: candidate))
     daemon = object.__new__(server.NetaudioDaemon)
     daemon._redis = None
+    daemon._redis_settings = {}
 
     await daemon._connect_redis()
 

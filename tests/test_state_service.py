@@ -454,6 +454,7 @@ class TestFetchDeviceControls:
     @pytest.mark.asyncio
     async def test_initial_fetch_probes_unknown_sample_rate_capabilities(self):
         device = make_device()
+        device.platform_versions_record = {"platform_model_identifier": "DAI2"}
         application = make_application({"dev1.local.": device})
         device.fetch_controls_data = AsyncMock(return_value={"name": "Device1", "tx_count": 2, "rx_count": 2})
         state = DanteStateService(application)
@@ -477,6 +478,7 @@ class TestFetchDeviceControls:
     @pytest.mark.asyncio
     async def test_initial_fetch_probes_unknown_encoding_capabilities(self):
         device = make_device()
+        device.platform_versions_record = {"platform_model_identifier": "DAI2"}
         application = make_application({"dev1.local.": device})
         device.fetch_controls_data = AsyncMock(return_value={"name": "Device1", "tx_count": 2, "rx_count": 2})
         state = DanteStateService(application)
@@ -500,6 +502,7 @@ class TestFetchDeviceControls:
     @pytest.mark.asyncio
     async def test_initial_fetch_probes_unknown_codec_status(self):
         device = make_device()
+        device.platform_versions_record = {"platform_model_identifier": "DAI2"}
         application = make_application({"dev1.local.": device})
         device.fetch_controls_data = AsyncMock(return_value={"name": "Device1", "tx_count": 2, "rx_count": 2})
         state = DanteStateService(application)
@@ -846,7 +849,7 @@ class TestConmonRetry:
             waiter.set()
 
         application._send_conmon_query_for_device = AsyncMock(side_effect=send_query)
-        application.notifications.register_conmon_waiter = MagicMock(return_value=waiter)
+        application.notifications.register_waiter = MagicMock(return_value=waiter)
         application.notifications.unregister_waiter = MagicMock()
         state = DanteStateService(application)
 

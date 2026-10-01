@@ -60,6 +60,25 @@ STATUS_FIELD_REFRESH_INTERVAL_SECONDS = 300.0
 SHURE_METER_PUBLISH_INTERVAL_SECONDS = 0.25
 
 
+REDIS_ENVIRONMENT = {
+    "socket": "REDIS_SOCKET",
+    "host": "REDIS_HOST",
+    "port": "REDIS_PORT",
+    "db": "REDIS_DB",
+    "password": "REDIS_PASSWORD",
+}
+
+
+def _redis_settings(profile_config: dict) -> dict | None:
+    configured = profile_config.get("redis")
+    environment = {key: os.environ[name] for key, name in REDIS_ENVIRONMENT.items() if os.environ.get(name)}
+    if not isinstance(configured, dict) and not environment.keys() & {"socket", "host", "port"}:
+        return None
+    settings = dict(configured) if isinstance(configured, dict) else {}
+    settings.update(environment)
+    return settings
+
+
 def _stale_device_minutes_from_config(daemon_config: dict) -> float:
     raw_value = daemon_config.get("stale_device_minutes")
     if raw_value is None:
@@ -106,6 +125,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         profile_cfg, _ = load_capture_profile(None, None)
         daemon_config = load_daemon_config()
         app_settings.stale_device_minutes = _stale_device_minutes_from_config(daemon_config)
+        self._redis_settings = _redis_settings(profile_cfg)
         managed_configuration = resolve_ddm_configuration(
             load_config_document(),
             base_directory=default_config_path().parent,
@@ -219,21 +239,29 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         return self.application.devices
 
     async def _connect_redis(self):
+        settings = self._redis_settings
+        if settings is None:
+            logger.info("Redis is not configured; device records are not published to Redis")
+            return
         if aioredis is None:
-            logger.info("redis.asyncio not available, running without Redis")
+            logger.warning("Redis is configured, but the redis package is not installed; install netaudio[redis]")
             return
 
         candidate = None
         try:
-            redis_socket = os.environ.get("REDIS_SOCKET")
-            redis_host = os.environ.get("REDIS_HOST") or "localhost"
-            redis_port = int(os.environ.get("REDIS_PORT") or 6379)
-            redis_db = int(os.environ.get("REDIS_DB") or 0)
+            socket_path = settings.get("socket") or settings.get("socket_path") or settings.get("unix_socket")
+            database = int(settings.get("db") or 0)
+            password = settings.get("password")
 
-            if redis_socket:
-                candidate = aioredis.Redis(unix_socket_path=redis_socket, db=redis_db)
+            if socket_path:
+                candidate = aioredis.Redis(unix_socket_path=str(socket_path), db=database, password=password)
             else:
-                candidate = aioredis.Redis(host=redis_host, port=redis_port, db=redis_db)
+                candidate = aioredis.Redis(
+                    host=str(settings.get("host") or "localhost"),
+                    port=int(settings.get("port") or 6379),
+                    db=database,
+                    password=password,
+                )
 
             await cast(Awaitable[Any], candidate.ping())
             try:
@@ -246,7 +274,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             self._redis_device_mappings = {}
             logger.info("Connected to Redis")
         except REDIS_ERRORS as exception:
-            logger.info(f"Redis not available, continuing without it: {exception}")
+            logger.warning(f"Redis is configured but not reachable; continuing without it: {exception}")
             if candidate is not None:
                 try:
                     await candidate.aclose()
@@ -1060,14 +1088,18 @@ async def run_daemon(dissect=False, capture=False, daemon_port=None):
     def handle_signal():
         daemon.request_shutdown()
 
+    shutdown_signals = [signal.SIGTERM, signal.SIGINT] if sys.platform != "win32" else []
+    if os.getpid() == 1 and hasattr(signal, "SIGRTMIN"):
+        shutdown_signals.append(signal.SIGRTMIN + 4)
+
     installed_signals = []
-    if sys.platform != "win32":
-        for sig in (signal.SIGTERM, signal.SIGINT):
+    if shutdown_signals:
+        for sig in shutdown_signals:
             try:
                 loop.add_signal_handler(sig, handle_signal)
                 installed_signals.append(sig)
             except (NotImplementedError, RuntimeError) as exception:
-                logger.warning(f"Could not install {sig.name} handler: {exception}")
+                logger.warning(f"Could not install a handler for signal {int(sig)}: {exception}")
 
     try:
         await daemon.start()

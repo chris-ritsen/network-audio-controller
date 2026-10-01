@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-DEFAULT_TLS_PORT = 9443
+DEFAULT_TLS_PORT = 4781
 GENERATED_IDENTITY_LIFETIME = timedelta(days=365)
 GENERATED_IDENTITY_RENEWAL_WINDOW = timedelta(days=30)
 TLS_CERTIFICATE_KEY = "tls_certificate"
@@ -58,7 +58,31 @@ def _resolve_path(value: object, base_directory: Path | None, name: str) -> Path
     return path
 
 
+TLS_ENVIRONMENT = {
+    TLS_CERTIFICATE_KEY: "NETAUDIO_TLS_CERTIFICATE",
+    TLS_KEY_KEY: "NETAUDIO_TLS_KEY",
+    TLS_PORT_KEY: "NETAUDIO_TLS_PORT",
+    "no_ssl": "NETAUDIO_NO_SSL",
+}
+
+
+def _environment_overrides() -> dict:
+    overrides = {}
+    for key, name in TLS_ENVIRONMENT.items():
+        value = os.environ.get(name)
+        if not value:
+            continue
+        if key == TLS_PORT_KEY:
+            overrides[key] = int(value) if value.isdigit() else value
+        elif key == "no_ssl":
+            overrides[key] = value.lower() in ("1", "true", "yes")
+        else:
+            overrides[key] = value
+    return overrides
+
+
 def tls_settings_from_config(daemon_config: Mapping, base_directory: Path | None = None) -> TLSSettings | None:
+    daemon_config = {**daemon_config, **_environment_overrides()}
     certificate = daemon_config.get(TLS_CERTIFICATE_KEY)
     key = daemon_config.get(TLS_KEY_KEY)
     port = daemon_config.get(TLS_PORT_KEY)

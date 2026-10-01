@@ -1,0 +1,26 @@
+name: netaudio
+
+services:
+  netaudio:
+    image: ${NETAUDIO_IMAGE:-s00pcan/netaudio:latest}
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    volumes:
+      - netaudio:/var/lib/netaudio
+    environment:
+      NETAUDIO_INTERFACE: ${NETAUDIO_INTERFACE:-}
+      NETAUDIO_DAEMON_PORT: ${NETAUDIO_DAEMON_PORT:-}
+      NETAUDIO_TLS_PORT: ${NETAUDIO_TLS_PORT:-}
+      NETAUDIO_TLS_CERTIFICATE: ${NETAUDIO_TLS_CERTIFICATE:-}
+      NETAUDIO_TLS_KEY: ${NETAUDIO_TLS_KEY:-}
+      NETAUDIO_NO_SSL: ${NETAUDIO_NO_SSL:-}
+      NETAUDIO_LOG_LEVEL: ${NETAUDIO_LOG_LEVEL:-WARNING}
+      REDIS_HOST: ${REDIS_HOST:-}
+      REDIS_PORT: ${REDIS_PORT:-}
+      REDIS_SOCKET: ${REDIS_SOCKET:-}
+      REDIS_DB: ${REDIS_DB:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+
+volumes:
+  netaudio:

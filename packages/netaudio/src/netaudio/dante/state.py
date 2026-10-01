@@ -51,6 +51,7 @@ from netaudio.dante.services.notification_packet_handlers import (
 logger = logging.getLogger("netaudio")
 
 CONMON_RETRY_TIMEOUTS = [3, 5, 10]
+DEFERRED_CAPABILITY_TIMEOUT_SECONDS = sum(CONMON_RETRY_TIMEOUTS) + 5
 
 ALWAYS_OVERWRITTEN_MODEL_FIELDS = frozenset(
     {
@@ -266,6 +267,8 @@ class DanteStateService:
         self._device_locks: dict[str, asyncio.Lock] = {}
         self._pending_status: dict[str, list[tuple[str, object]]] = {}
         self._populating: set[str] = set()
+        self._capabilities_awaiting_model: set[str] = set()
+        self._deferred_capability_tasks: set[asyncio.Task] = set()
         self._readback_failures = WeakKeyDictionary()
         self._refetching = False
         self._status_applied = False
@@ -399,6 +402,8 @@ class DanteStateService:
 
         if not self._refetching:
             return
+        if kind == STATUS_KIND_DANTE_MODEL:
+            await self._refresh_deferred_capabilities(device, "Dante model received")
         if kind == STATUS_KIND_ROUTING_CAPACITY and changed and status["routing_ready"] is True:
             await self.fetch_device_controls(device.server_name)
         elif kind == STATUS_KIND_CLEAR_CONFIGURATION and _newly_executed_clear_mode(previous_clear_status, status):
@@ -820,21 +825,10 @@ class DanteStateService:
                         lambda: self.application.probe_aes67_state(device),
                     )
 
-                capability_tasks = []
-                if (device.requires_managed_control or device.supported_sample_rates is None) and probe_supported(
-                    device, "sample_rate"
-                ):
-                    capability_tasks.append(self._refresh_sample_rate_status(device, "device discovered"))
-                if (device.requires_managed_control or device.supported_encodings is None) and probe_supported(
-                    device, "encoding"
-                ):
-                    capability_tasks.append(self._refresh_encoding_status(device, "device discovered"))
-                if (device.requires_managed_control or device.codec_parameters is None) and probe_supported(
-                    device, "codec_control"
-                ):
-                    capability_tasks.append(self._refresh_codec_status(device, "device discovered"))
-                if capability_tasks:
-                    await asyncio.gather(*capability_tasks)
+                if self._dante_model_pending(device):
+                    self._defer_capabilities(device)
+                else:
+                    await self._refresh_discovered_capabilities(device)
 
                 await self._probe_with_retries(
                     device,
@@ -892,7 +886,51 @@ class DanteStateService:
             return False
         return (device.is_locked, device.lock_reset_status) != before
 
+    @staticmethod
+    def _dante_model_pending(device) -> bool:
+        return device.platform_versions_record is None and not device.requires_managed_control and bool(device.ipv4)
+
+    def _defer_capabilities(self, device) -> None:
+        if device.server_name in self._capabilities_awaiting_model:
+            return
+        self._capabilities_awaiting_model.add(device.server_name)
+        task = asyncio.create_task(self._refresh_deferred_capabilities_later(device))
+        self._deferred_capability_tasks.add(task)
+        task.add_done_callback(self._deferred_capability_tasks.discard)
+
+    async def _refresh_deferred_capabilities_later(self, device) -> None:
+        await asyncio.sleep(DEFERRED_CAPABILITY_TIMEOUT_SECONDS)
+        await self._refresh_deferred_capabilities(device, "Dante model not received")
+
+    async def _refresh_discovered_capabilities(self, device) -> None:
+        capability_tasks = []
+        if (device.requires_managed_control or device.supported_sample_rates is None) and probe_supported(
+            device, "sample_rate"
+        ):
+            capability_tasks.append(self._refresh_sample_rate_status(device, "device discovered"))
+        if (device.requires_managed_control or device.supported_encodings is None) and probe_supported(
+            device, "encoding"
+        ):
+            capability_tasks.append(self._refresh_encoding_status(device, "device discovered"))
+        if (device.requires_managed_control or device.codec_parameters is None) and probe_supported(
+            device, "codec_control"
+        ):
+            capability_tasks.append(self._refresh_codec_status(device, "device discovered"))
+        if capability_tasks:
+            await asyncio.gather(*capability_tasks)
+
+    async def _refresh_deferred_capabilities(self, device, reason: str) -> None:
+        if device.server_name not in self._capabilities_awaiting_model:
+            return
+        self._capabilities_awaiting_model.discard(device.server_name)
+        if not device.online:
+            return
+        logger.debug(f"Probing deferred capabilities for {device.server_name} ({reason})")
+        async with self._lock_for(device.server_name):
+            await self._refresh_discovered_capabilities(device)
+
     async def retry_conmon_query(self, server_name: str) -> None:
+        notifications = self.application.notifications
         for attempt, timeout in enumerate(CONMON_RETRY_TIMEOUTS, 1):
             device = self.devices.get(server_name)
 
@@ -905,8 +943,7 @@ class DanteStateService:
             if device.requires_managed_control or not device.ipv4 or not device.mac_address:
                 return
 
-            device_ip = str(device.ipv4)
-            waiter = self.application.notifications.register_conmon_waiter(device_ip, expected_count=1)
+            waiter = notifications.register_waiter(STATUS_KIND_DANTE_MODEL, str(device.ipv4))
 
             try:
                 logger.debug(f"Conmon retry {attempt} for {server_name}")
@@ -916,13 +953,15 @@ class DanteStateService:
                 )
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:
-                logger.warning(f"Conmon retry {attempt} timed out for {server_name}")
+                logger.debug(f"Conmon retry {attempt} timed out for {server_name}")
                 continue
             finally:
-                self.application.notifications.unregister_waiter(waiter)
+                notifications.unregister_waiter(waiter)
 
-            if device.platform_versions_record is not None:
-                logger.debug(f"Conmon platform versions populated for {server_name}")
-                return
+            logger.debug(f"Conmon Dante model received for {server_name}")
+            return
 
-        logger.debug(f"Conmon platform versions still missing for {server_name} after retries")
+        logger.warning(f"{server_name} did not answer the Dante model query after {len(CONMON_RETRY_TIMEOUTS)} attempts")
+        device = self.devices.get(server_name)
+        if device is not None:
+            await self._refresh_deferred_capabilities(device, "Dante model unavailable")
