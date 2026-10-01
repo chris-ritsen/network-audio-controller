@@ -94,17 +94,26 @@ heartbeats and metering need the host's network, so the container shares it
 instead of getting its own. Docker Desktop on macOS and Windows runs
 containers inside a virtual machine that cannot see Dante traffic.
 
-With Docker, from a checkout of this repository:
+With Docker:
 
 ```bash
-docker compose -f containers/compose.yaml up -d
-docker compose -f containers/compose.yaml exec netaudio netaudio device list
+docker run -d --name netaudio --network host --init --restart unless-stopped \
+  -v netaudio:/var/lib/netaudio s00pcan/netaudio
+docker exec netaudio netaudio device list
 ```
 
-Settings, the TLS identity, presets and MCP sign-ins are kept in the
-`netaudio` volume. Set the options below in `containers/.env`, or build the
-image yourself with
+From a checkout of this repository,
+`docker compose -f containers/compose.yaml up -d` does the same. Settings, the
+TLS identity, presets and MCP sign-ins are kept in the `netaudio` volume. Pass
+the options below with `-e`, or set them in `containers/.env` for Compose. The
+`latest` tag is the newest release, and `edge` is built from every change to
+`master`. To update, run `docker pull s00pcan/netaudio`, then remove and run
+the container again; with Compose, `pull` and then `up -d`.
+
+To build the image yourself, use
 `docker compose -f containers/compose.yaml -f containers/compose.build.yaml up -d --build`.
+One machine builds both architectures without emulation:
+`docker buildx build --platform linux/amd64,linux/arm64 --file containers/Dockerfile .`
 
 With systemd-nspawn (systemd 260 or newer), the same image runs without
 Docker. Save these settings as `/etc/systemd/nspawn/netaudio.nspawn`; they are
@@ -132,13 +141,23 @@ Private=no
 VirtualEthernet=no
 ```
 
-Then pull the image and start it now and at boot:
+Then name the container after this host, so the certificate, Bonjour name and
+MCP address use the host's name, pull the image, and start it now and at boot:
 
 ```bash
+sudo sed -i "/^\[Exec\]/a Hostname=$(hostnamectl hostname)" /etc/systemd/nspawn/netaudio.nspawn
 sudo importctl pull-oci --class=machine docker.io/s00pcan/netaudio:latest netaudio
 sudo install -d -o 10001 -g 10001 -m 0750 /var/lib/netaudio
 sudo machinectl enable --now netaudio
 journalctl -u systemd-nspawn@netaudio -f
+```
+
+To update, stop the container, pull again with `--force`, and start it:
+
+```bash
+sudo machinectl stop netaudio
+sudo importctl pull-oci --force --class=machine docker.io/s00pcan/netaudio:latest netaudio
+sudo machinectl start netaudio
 ```
 
 Settings and state live in `/var/lib/netaudio` on the host, including
