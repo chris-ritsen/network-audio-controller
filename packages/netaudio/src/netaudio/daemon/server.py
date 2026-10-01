@@ -1056,14 +1056,18 @@ async def run_daemon(dissect=False, capture=False, daemon_port=None):
     def handle_signal():
         daemon.request_shutdown()
 
+    shutdown_signals = [signal.SIGTERM, signal.SIGINT] if sys.platform != "win32" else []
+    if os.getpid() == 1 and hasattr(signal, "SIGRTMIN"):
+        shutdown_signals.append(signal.SIGRTMIN + 4)
+
     installed_signals = []
-    if sys.platform != "win32":
-        for sig in (signal.SIGTERM, signal.SIGINT):
+    if shutdown_signals:
+        for sig in shutdown_signals:
             try:
                 loop.add_signal_handler(sig, handle_signal)
                 installed_signals.append(sig)
             except (NotImplementedError, RuntimeError) as exception:
-                logger.warning(f"Could not install {sig.name} handler: {exception}")
+                logger.warning(f"Could not install a handler for signal {int(sig)}: {exception}")
 
     try:
         await daemon.start()
