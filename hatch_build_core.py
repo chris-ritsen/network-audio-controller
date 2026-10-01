@@ -53,7 +53,7 @@ def git_revision(root: Path) -> str | None:
 
 def write_build_information(root: Path) -> Path:
     destination = Path(root) / "packages" / "netaudio" / "src" / "netaudio" / "_build_info.json"
-    information = {"git_revision": git_revision(Path(root))}
+    information = {"git_revision": os.environ.get("NETAUDIO_GIT_REVISION") or git_revision(Path(root))}
     destination.write_text(json.dumps({key: value for key, value in information.items() if value}) + "\n")
     return destination
 
@@ -81,7 +81,7 @@ class CoreLibraryBuildHook(BuildHookInterface):
                     "install Rust (https://rustup.rs) or use a prebuilt wheel"
                 )
             raise RuntimeError(
-                f"netaudio-core library not found in {crate_dir / 'target' / 'release'} after cargo build"
+                f"netaudio-core library not found in {self._release_dir(crate_dir)} after cargo build"
             )
         installed_library = install_built_library(self.root, library_path)
         build_data["force_include"][str(installed_library)] = f"netaudio/core/{installed_library.name}"
@@ -90,9 +90,18 @@ class CoreLibraryBuildHook(BuildHookInterface):
         build_data["tag"] = f"py3-none-{self._platform_tag()}"
 
     def _find_library(self, crate_dir):
-        release_dir = crate_dir / "target" / "release"
-        library_path = release_dir / self._library_name()
+        library_path = self._release_dir(crate_dir) / self._library_name()
         return library_path if library_path.exists() else None
+
+    @staticmethod
+    def _cargo_target():
+        return os.environ.get("CARGO_BUILD_TARGET") or None
+
+    def _release_dir(self, crate_dir):
+        target = self._cargo_target()
+        if target:
+            return crate_dir / "target" / target / "release"
+        return crate_dir / "target" / "release"
 
     @staticmethod
     def _library_name():
@@ -112,6 +121,9 @@ class CoreLibraryBuildHook(BuildHookInterface):
         subprocess.run([cargo, "build", "--release"], cwd=crate_dir, check=True)
 
     def _platform_tag(self):
+        target = self._cargo_target()
+        if target and "-linux-" in target:
+            return f"linux_{target.split('-', 1)[0]}"
         if sys.platform == "darwin":
             target = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "11.0")
             major, _, minor = target.partition(".")
