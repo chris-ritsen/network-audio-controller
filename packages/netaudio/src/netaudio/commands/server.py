@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import socket
 import time
+import urllib.request
 from typing import Optional
 
 logger = logging.getLogger("netaudio")
@@ -18,6 +20,9 @@ from netaudio.daemon.client import forget_devices_on_daemon, get_device_summarie
 from netaudio.icons import icon
 
 app = typer.Typer(help="Manage the netaudio daemon.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
+
+LEGACY_DAEMON_PORT = 9000
+LEGACY_DAEMON_BEFORE = (0, 3, 15)
 
 
 def _port_in_use(port):
@@ -63,6 +68,71 @@ def _run_foreground(daemon_port):
     effective_port = _effective_daemon_port(daemon_port)
     app_settings.daemon_port = effective_port
     asyncio.run(run_daemon(dissect=state.dissect, capture=state.capture, daemon_port=effective_port))
+
+
+def _version_tuple(value: object) -> tuple[int, ...] | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return tuple(int(part) for part in value.split(".")[:3])
+    except ValueError:
+        return None
+
+
+def _legacy_daemon_version(daemon_port) -> str | None:
+    if daemon_port is not None or os.environ.get("NETAUDIO_DAEMON_PORT"):
+        return None
+    from netaudio.common.config_loader import load_daemon_config
+
+    if "port" in load_daemon_config() or not _port_in_use(LEGACY_DAEMON_PORT):
+        return None
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{LEGACY_DAEMON_PORT}/server-info", timeout=2) as response:
+            information = json.load(response)
+    except (OSError, ValueError) as exception:
+        logger.debug(f"Port {LEGACY_DAEMON_PORT} did not answer as a netaudio daemon: {exception}")
+        return None
+    if not isinstance(information, dict) or information.get("product") != "netaudio":
+        return None
+    version = information.get("version")
+    running = _version_tuple(version)
+    if running is None or running >= LEGACY_DAEMON_BEFORE:
+        return None
+    return version
+
+
+def _serving_summary(effective_port) -> str:
+    from netaudio.daemon.http.tls import TLSConfigurationError, daemon_tls_settings
+
+    try:
+        tls = daemon_tls_settings()
+    except TLSConfigurationError as exception:
+        return f"The TLS settings are invalid: {exception}."
+    if tls is None:
+        return f"This version serves plain HTTP on port {effective_port}."
+    return (
+        f"This version serves HTTPS on port {tls.port}, and plain HTTP on port {effective_port} only to this computer."
+    )
+
+
+def _stop_legacy_daemon(version: str, effective_port) -> bool:
+    if service_install.platform_name() == "systemd" and _service_active():
+        asyncio.run(service_install.systemd_stop())
+    else:
+        _pin_client_port(LEGACY_DAEMON_PORT)
+        try:
+            asyncio.run(shutdown_daemon())
+        finally:
+            _pin_client_port(effective_port)
+    stopped = _wait_for_shutdown(LEGACY_DAEMON_PORT)
+    if stopped:
+        typer.echo(
+            f"Stopped netaudio {version}, which was running on the old default port {LEGACY_DAEMON_PORT}. "
+            f"{_serving_summary(effective_port)} 'netaudio daemon web' lists its addresses."
+        )
+    else:
+        typer.echo(f"netaudio {version} is still running on port {LEGACY_DAEMON_PORT} and did not stop.", err=True)
+    return stopped
 
 
 def _uses_configured_port(effective_port) -> bool:
@@ -111,6 +181,9 @@ def start(
     if _port_in_use(effective_port):
         typer.echo(f"{icon('online')}Daemon is already running.")
         return
+    legacy_version = _legacy_daemon_version(daemon_port)
+    if legacy_version is not None and not _stop_legacy_daemon(legacy_version, effective_port):
+        raise typer.Exit(code=1)
 
     platform = service_install.platform_name()
     use_service = service_install.is_installed() and on_configured_port
@@ -160,6 +233,11 @@ def stop(
     _pin_client_port(effective_port)
 
     if not _port_in_use(effective_port):
+        legacy_version = _legacy_daemon_version(daemon_port)
+        if legacy_version is not None:
+            if not _stop_legacy_daemon(legacy_version, effective_port):
+                raise typer.Exit(code=1)
+            return
         typer.echo(f"{icon('offline')}Daemon is not running.")
         return
 
@@ -242,6 +320,15 @@ def status(
             typer.echo(message)
 
     if not _port_in_use(effective_port):
+        legacy_version = _legacy_daemon_version(daemon_port)
+        if legacy_version is not None:
+            finish(
+                False,
+                None,
+                f"{icon('offline')}This version's daemon is not running, but netaudio {legacy_version} is still "
+                f"running on the old default port {LEGACY_DAEMON_PORT}. Run 'netaudio daemon restart' to replace it.",
+            )
+            raise typer.Exit(code=1)
         finish(False, None, f"{icon('offline')}Daemon is not running.")
         raise typer.Exit(code=1)
 
