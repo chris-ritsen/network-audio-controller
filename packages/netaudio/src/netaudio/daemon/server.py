@@ -1088,7 +1088,7 @@ async def run_daemon(dissect=False, capture=False, daemon_port=None):
     def handle_signal():
         daemon.request_shutdown()
 
-    shutdown_signals = [signal.SIGTERM, signal.SIGINT] if sys.platform != "win32" else []
+    shutdown_signals: list[int] = [signal.SIGTERM, signal.SIGINT] if sys.platform != "win32" else []
     if os.getpid() == 1 and hasattr(signal, "SIGRTMIN"):
         shutdown_signals.append(signal.SIGRTMIN + 4)
 
