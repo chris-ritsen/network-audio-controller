@@ -136,6 +136,8 @@ pub struct BluetoothConnection {
 pub struct BluetoothIdentification {
     pub name_source: u32,
     pub custom_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_name_raw_hexadecimal: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "category", content = "value", rename_all = "snake_case")]
@@ -188,9 +190,18 @@ pub fn decode_application(family: &str, data: &[u8]) -> Option<Vec<PanelObservat
                     let Some(d) = pb::nested(&v, 1)? else {
                         continue;
                     };
+                    let raw = pb::bytes(&d, 2)?.unwrap_or_default();
+                    let (custom_name, custom_name_raw_hexadecimal) = match std::str::from_utf8(raw) {
+                        Ok(name) => (name.to_owned(), None),
+                        Err(_) => (
+                            String::from_utf8_lossy(raw).into_owned(),
+                            Some(raw.iter().map(|byte| format!("{byte:02x}")).collect()),
+                        ),
+                    };
                     PanelObservation::BluetoothIdentification(BluetoothIdentification {
                         name_source: pb::uint(&d, 1)?,
-                        custom_name: pb::string(&d, 2)?,
+                        custom_name,
+                        custom_name_raw_hexadecimal,
                     })
                 }
                 5 => {

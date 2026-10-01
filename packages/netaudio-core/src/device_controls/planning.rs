@@ -124,9 +124,10 @@ impl PanelPlanRequest {
                     "Bluetooth name source must be 1 (Dante device name) or 2 (custom name).",
                 ));
             }
-            if custom_name.chars().count() > BLUETOOTH_NAME_LIMIT {
+            if custom_name.len() > BLUETOOTH_NAME_LIMIT {
                 return Err(unsupported(format!(
-                    "Bluetooth custom names are limited to {BLUETOOTH_NAME_LIMIT} characters."
+                    "Bluetooth custom names are limited to {BLUETOOTH_NAME_LIMIT} bytes of UTF-8 text: \
+                     {BLUETOOTH_NAME_LIMIT} plain letters or digits, fewer with accented letters, symbols or emoji."
                 )));
             }
         }

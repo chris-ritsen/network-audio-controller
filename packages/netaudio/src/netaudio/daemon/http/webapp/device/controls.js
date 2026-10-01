@@ -64,7 +64,10 @@ function Setting({ device, category, observation, editor, title }) {
           disabled=${!writable || value.name_source !== editor.custom_name_source}
           onInput=${(event) => update({ ...value, custom_name: event.target.value })}
         />
-        <span>Up to ${editor.custom_name_limit} characters</span>
+        <span
+          >${new TextEncoder().encode(value.custom_name || "").length} of ${editor.custom_name_limit} bytes; accented
+          letters, symbols and emoji use more than one</span
+        >
       <//>`;
   }
 
@@ -185,7 +188,7 @@ export function DeviceControls({ device }) {
         </p>`
     }
       ${
-      observations.bluetooth_pairing &&
+      observations.bluetooth_pairing?.value > 0 &&
       html`<p>Remembered devices: ${observations.bluetooth_pairing.value}</p>
         <label
           ><input

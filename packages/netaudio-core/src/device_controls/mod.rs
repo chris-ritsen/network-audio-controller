@@ -202,9 +202,7 @@ impl PanelRequest {
                 name_source,
                 custom_name,
             } => {
-                if !matches!(name_source, 1 | 2)
-                    || custom_name.chars().count() > BLUETOOTH_NAME_LIMIT
-                {
+                if !matches!(name_source, 1 | 2) || custom_name.len() > BLUETOOTH_NAME_LIMIT {
                     return invalid();
                 }
                 let mut b = pb::scalar(1, *name_source);

@@ -40,7 +40,7 @@ test("Bluetooth keeps link loss distinct and clearing is explicitly confirmed", 
   const html = render(h(DeviceControls, { device }));
   assert.match(html, /Link lost/);
   assert.match(html, /Confirm forgetting all paired devices/);
-  assert.match(html, /Up to 32 characters/);
+  assert.match(html, /32 bytes/);
   assert.match(html, /disabled[^]*?Clear pairing list/);
 });
 test("video keeps configured format, actual format and observed HDCP separate", () => {

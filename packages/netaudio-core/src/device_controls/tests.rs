@@ -98,12 +98,6 @@ fn bluetooth_defaults_unknowns_utf8_and_reordering() {
     }
     assert!(PanelRequest::BluetoothIdentification {
         name_source: 2,
-        custom_name: "😀".repeat(32)
-    }
-    .encode()
-    .is_ok());
-    assert!(PanelRequest::BluetoothIdentification {
-        name_source: 2,
         custom_name: "😀".repeat(33)
     }
     .encode()

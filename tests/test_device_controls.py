@@ -192,8 +192,8 @@ async def test_managed_and_locked_fail_before_sending():
 
 def test_name_source_change_not_elided_and_names_count_characters():
     _, d = device()
-    observation(d, "bluetooth_identification", {"name_source": 1, "custom_name": "é" * 32})
-    assert plan_panel(d, "bluetooth_identification", {"name_source": 2, "custom_name": "é" * 32})["action"] == "change"
+    observation(d, "bluetooth_identification", {"name_source": 1, "custom_name": "é" * 16})
+    assert plan_panel(d, "bluetooth_identification", {"name_source": 2, "custom_name": "é" * 16})["action"] == "change"
     assert (
         plan_panel(d, "bluetooth_identification", {"name_source": 2, "custom_name": "é" * 33})["action"]
         == "unsupported"
