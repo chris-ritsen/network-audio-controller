@@ -118,6 +118,43 @@ def active_ipv4_interfaces(
     return tuple(sorted(interfaces))
 
 
+def preferred_device_address(
+    addresses: Iterable[str],
+    selected_interface: str | None = None,
+    *,
+    interfaces: Iterable[IPv4Interface] | None = None,
+) -> str | None:
+    advertised = list(addresses)
+    candidates = []
+    for address in advertised:
+        try:
+            candidates.append(ipaddress.IPv4Address(address))
+        except ipaddress.AddressValueError:
+            continue
+    if not candidates:
+        return advertised[0] if advertised else None
+    if len(candidates) == 1:
+        return str(candidates[0])
+
+    local_interfaces = tuple(active_ipv4_interfaces(selected_interface) if interfaces is None else interfaces)
+    ranked = []
+    for index, candidate in enumerate(candidates):
+        for interface in local_interfaces:
+            if candidate in interface.network:
+                ranked.append(
+                    (
+                        candidate in DANTE_SECONDARY_NETWORK,
+                        interface.priority,
+                        -interface.network_prefix,
+                        index,
+                        str(candidate),
+                    )
+                )
+    if not ranked:
+        return str(candidates[0])
+    return min(ranked)[-1]
+
+
 class NetworkPathManager:
     def __init__(
         self,

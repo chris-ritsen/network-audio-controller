@@ -13,6 +13,7 @@ from netaudio.dante.device import DanteDevice
 from netaudio.dante.discovery import request_discovery
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.latency import nanoseconds_to_milliseconds
+from netaudio.network_path import preferred_device_address
 
 
 logger = logging.getLogger("netaudio")
@@ -143,7 +144,7 @@ class DanteDiscoveryMixin:
             return None
 
         return _DiscoveredService(
-            address=addresses[0],
+            address=preferred_device_address(addresses, app_settings.interface),
             instance_name=name,
             port=info.port,
             properties=self._decode_service_properties(info.properties),

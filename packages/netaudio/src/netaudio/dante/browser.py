@@ -25,6 +25,7 @@ from netaudio.dante.const import MEDIA_SERVICE_TYPES, SERVICE_ARC, SERVICE_CMC, 
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.discovery import request_discovery
 from netaudio.dante.latency import nanoseconds_to_milliseconds
+from netaudio.network_path import preferred_device_address
 
 logger = logging.getLogger("netaudio")
 
@@ -92,7 +93,7 @@ class DanteBrowser:
 
         for record in records:
             if isinstance(record, DNSService):
-                ipv4 = addresses[0]
+                ipv4 = preferred_device_address(addresses, app_settings.interface)
 
                 message = {
                     "service": {
@@ -145,7 +146,7 @@ class DanteBrowser:
 
         for record in records:
             if isinstance(record, DNSService):
-                ipv4 = addresses[0]
+                ipv4 = preferred_device_address(addresses, app_settings.interface)
 
                 message = {
                     "service": {
@@ -410,7 +411,7 @@ class DanteBrowser:
         if not addresses:
             return
 
-        ipv4 = addresses[0]
+        ipv4 = preferred_device_address(addresses, app_settings.interface)
 
         try:
             for key, value in info.properties.items():
