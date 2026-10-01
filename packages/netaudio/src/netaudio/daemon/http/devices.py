@@ -371,6 +371,8 @@ class DaemonDeviceHandlers:
             return
         try:
             session_id = params.get("session_id")
+            if isinstance(session_id, int) and not isinstance(session_id, bool) and session_id >= 0:
+                session_id = str(session_id)
             if not isinstance(session_id, str) or not session_id.isascii() or not session_id.isdecimal():
                 raise ValueError("external session ID must be a decimal string")
             flow = self.application.external_flows.get(params.get("source_ipv4"), int(session_id))
@@ -380,7 +382,10 @@ class DaemonDeviceHandlers:
         if flow is None:
             await self._send_json(writer, {"error": "external flow not found"}, 404)
             return
-        if flow.expires_monotonic <= time.monotonic() or params.get("content_sha256") != flow.content_sha256:
+        content_sha256 = params.get("content_sha256")
+        if flow.expires_monotonic <= time.monotonic() or (
+            content_sha256 is not None and content_sha256 != flow.content_sha256
+        ):
             await self._send_json(writer, {"error": "source announcement expired or changed; refresh the source"}, 409)
             return
         try:
