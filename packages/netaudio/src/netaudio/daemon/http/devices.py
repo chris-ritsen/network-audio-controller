@@ -117,6 +117,12 @@ class DaemonDeviceHandlers:
         await self._send_json(writer, self._serialized_devices(context_name))
 
     async def _handle_get_device(self, writer, server_name, context_name=None):
+        device = self.application.devices.get(server_name) if context_name is None else None
+        if device is not None and server_name not in self._dismissed_offline_inventory:
+            device_json = self._serialized_device(server_name, device)
+            if device_json is not None:
+                await self._send_json(writer, device_json)
+                return
         devices = self._serialized_devices(context_name)
         device_json = devices.get(server_name)
         if device_json is None:
