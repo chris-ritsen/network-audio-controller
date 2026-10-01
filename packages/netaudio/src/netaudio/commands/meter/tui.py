@@ -14,10 +14,10 @@ from netaudio.commands.meter.models import (
     MeterRowKey,
     MeterViewModel,
     MeterViewport,
-    detailed_metering_targets,
 )
 from netaudio.commands.meter.rendering import meter_page_size, render_meter_filter_prompt, render_meter_frame
 from netaudio.commands.meter.terminal import MeterTerminal
+from netaudio.dante.metering import detailed_metering_targets
 
 logger = logging.getLogger("netaudio")
 

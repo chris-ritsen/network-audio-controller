@@ -457,7 +457,12 @@ async def test_escape_from_search_prompt_restores_previous_search():
 async def test_passive_tui_falls_back_to_cache_without_starting_or_stopping():
     server_name = "input.local."
     devices = {
-        server_name: _device(server_name, "Input", tx={1: _channel(1, "shelford")}),
+        server_name: _device(
+            server_name,
+            "Input",
+            tx={1: _channel(1, "shelford")},
+            per_channel_signal_presence_supported=True,
+        ),
     }
     terminal = FakeTerminal(["quit"])
     start_calls = []

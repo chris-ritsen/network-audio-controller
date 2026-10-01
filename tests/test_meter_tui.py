@@ -11,7 +11,6 @@ from netaudio.commands.meter.models import (
     MeterRowKey,
     MeterViewModel,
     MeterViewport,
-    detailed_metering_targets,
     format_meter_sample,
 )
 from netaudio.commands.meter.rendering import (
@@ -22,6 +21,7 @@ from netaudio.commands.meter.rendering import (
     render_meter_frame,
 )
 from netaudio.commands.meter.terminal import KeyDecoder
+from netaudio.dante.metering import detailed_metering_targets
 from rich.cells import cell_len
 
 
@@ -147,7 +147,7 @@ def test_view_model_rejects_malformed_sample_atomically_and_owns_accepted_maps()
         assert model.samples["input.local."]["tx"] == {1: 0x7B}
 
 
-def test_detailed_metering_targets_follow_advertised_capabilities():
+def test_detailed_metering_targets_include_unadvertised_devices_unless_ruled_out():
     devices = {
         "detailed.local.": _device(
             "detailed.local.",
@@ -189,7 +189,7 @@ def test_detailed_metering_targets_follow_advertised_capabilities():
         ),
     }
 
-    assert detailed_metering_targets(devices) == ["detailed.local.", "monitoring-unknown.local."]
+    assert detailed_metering_targets(devices) == ["detailed.local.", "monitoring-unknown.local.", "unknown.local."]
 
 
 def test_format_meter_sample_preserves_raw_values_and_channel_names():

@@ -467,6 +467,7 @@ class MeteringManager:
         }
         self._detailed_levels[server_name] = sample
         self._latest_levels[server_name] = sample
+        device.detailed_metering_supported = True
 
         if self._persistent_refs.get(server_name):
             self._dirty_devices.add(server_name)

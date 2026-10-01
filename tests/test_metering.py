@@ -262,6 +262,14 @@ async def test_passive_sample_completes_waiting_snapshot_consumer():
     application.cmc.stop_metering.assert_called_once()
 
 
+def test_detailed_sample_proves_detailed_metering_support_the_device_never_advertised():
+    manager, _, device = make_manager()
+    device.detailed_metering_supported = None
+    manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
+
+    assert device.detailed_metering_supported is True
+
+
 def test_fresh_detailed_sample_takes_precedence_over_newer_passive_sample():
     manager, _, _ = make_manager()
     manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))

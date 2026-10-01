@@ -22,18 +22,6 @@ _STATE_PLACEHOLDER = "¤"
 _METER_PLACEHOLDER = "§"
 
 
-def detailed_metering_targets(devices: dict) -> list[str]:
-    """Select devices that advertise detailed metering but not passive signal presence."""
-    return sorted(
-        server_name
-        for server_name, device in devices.items()
-        if getattr(device, "online", True)
-        and getattr(device, "ipv4", None)
-        and getattr(device, "detailed_metering_supported", None) is True
-        and getattr(device, "per_channel_signal_presence_supported", None) is not True
-    )
-
-
 @dataclass(frozen=True)
 class MeterRowKey:
     server_name: str
