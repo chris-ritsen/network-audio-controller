@@ -21,3 +21,6 @@ CLAUDE.md
 research/
 
 packages/netaudio/src/netaudio/_build_info.json
+
+# Per-host Docker Compose settings
+.env
