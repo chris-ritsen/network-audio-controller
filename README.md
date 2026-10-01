@@ -152,19 +152,20 @@ or supply an explicit `.xml` path. Saving over an existing file requires
 
 ### Configuration and troubleshooting
 
-The daemon serves HTTPS on port 9443 with a self-signed certificate that it
-creates and renews automatically. Plain HTTP on port 9000 stays available on
+The daemon serves HTTPS on port 4781 with a self-signed certificate that it
+creates and renews automatically. Plain HTTP on port 4780 stays available on
 loopback for the local CLI and browser. `netaudio daemon web` lists the
 addresses.
 
-To use your own certificate, add these settings to the configuration file
-shown by `netaudio config path` and restart the daemon:
+To use your own certificate or other ports, add these settings to the
+configuration file shown by `netaudio config path` and restart the daemon:
 
 ```toml
 [daemon]
 tls_certificate = "/path/to/certificate.pem"
 tls_key = "/path/to/private-key.pem"
-tls_port = 9443
+tls_port = 4781
+port = 4780
 ```
 
 To serve plain HTTP on the network instead, set `no_ssl = true` under

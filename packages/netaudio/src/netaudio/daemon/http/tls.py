@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-DEFAULT_TLS_PORT = 9443
+DEFAULT_TLS_PORT = 4781
 GENERATED_IDENTITY_LIFETIME = timedelta(days=365)
 GENERATED_IDENTITY_RENEWAL_WINDOW = timedelta(days=30)
 TLS_CERTIFICATE_KEY = "tls_certificate"
