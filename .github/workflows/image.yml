@@ -30,3 +30,10 @@ jobs:
             --platform linux/amd64,linux/arm64 \
             --tag "${IMAGE}:edge" \
             --push .
+      - uses: peter-evans/dockerhub-description@v4
+        with:
+          username: s00pcan
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: s00pcan/netaudio
+          short-description: Dante network audio daemon, web interface and MCP server
+          readme-filepath: README.md
