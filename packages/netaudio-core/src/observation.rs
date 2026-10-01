@@ -184,6 +184,23 @@ impl Series {
         }
     }
 
+    pub fn idle_summary(&self) -> Self {
+        Self {
+            fresh: self.fresh,
+            history: Vec::new(),
+            current: self.current.as_ref().map(|sample| Observation {
+                evidence: Arc::new(Value::Null),
+                ..sample.summary()
+            }),
+            delta: self.delta,
+            baseline: self.baseline,
+            increase_since_baseline: self.increase_since_baseline,
+            display_epoch: self.display_epoch,
+            statistics: Value::Null,
+            histogram: Value::Null,
+        }
+    }
+
     pub fn accept(
         &mut self,
         mut sample: Observation,

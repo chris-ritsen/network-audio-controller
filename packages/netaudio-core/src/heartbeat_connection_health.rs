@@ -163,8 +163,23 @@ impl ReceiverPath {
             attribution_status: self.attribution_status.clone(),
             attribution_reason: self.attribution_reason.clone(),
             evidence: Arc::new(compact_path_evidence(&self.evidence)),
-            latency: self.latency.summary(),
-            late_packets: self.late_packets.summary(),
+            latency: self.series_summary(&self.latency),
+            late_packets: self.series_summary(&self.late_packets),
+        }
+    }
+
+    fn idle(&self) -> bool {
+        self.attribution_status != "resolved"
+            && [&self.latency, &self.late_packets]
+                .iter()
+                .all(|series| series.current.as_ref().is_none_or(|sample| sample.raw == 0))
+    }
+
+    fn series_summary(&self, series: &Series) -> Series {
+        if self.idle() {
+            series.idle_summary()
+        } else {
+            series.summary()
         }
     }
 
