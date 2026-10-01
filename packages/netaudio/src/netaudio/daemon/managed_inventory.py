@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Awaitable, Callable, Iterable, Optional
 
-from netaudio.core import canonical_device_mac
+from netaudio.core import canonical_device_mac, receiver_self_connection_capabilities
 
 from netaudio.common.managed_api import (
     MANAGED_PERMISSION_OPERATIONS,
@@ -18,7 +18,7 @@ from netaudio.common.managed_api import (
     ManagedAPIConfiguration,
 )
 from netaudio.dante.device_serializer import DanteDeviceSerializer
-from netaudio.dante.self_connection import receiver_self_connection_support, self_connection_capability
+from netaudio.dante.self_connection import receiver_self_connection_support
 from netaudio.dante.subscription import managed_subscription_status
 from netaudio.ddm import Device, Domain, InventoryResult, ManagedAPIClient, ManagedAPIError
 
@@ -291,6 +291,7 @@ def _managed_device_json(observation: ManagedDeviceObservation, synced_at: float
 
 
 def _overlay_channel_metadata(direct_channels: dict, managed_channels: dict) -> None:
+    receivers: list[tuple[dict, dict]] = []
     for direction in ("receivers", "transmitters"):
         direct_direction = direct_channels.setdefault(direction, {})
         managed_direction = managed_channels.get(direction, {})
@@ -305,20 +306,29 @@ def _overlay_channel_metadata(direct_channels: dict, managed_channels: dict) -> 
                 for key, value in managed_channel.items():
                     if key.startswith("ddm_") or key.startswith("managed_"):
                         direct_channel[key] = copy.deepcopy(value)
-                if direction != "receivers":
-                    continue
-                capability = self_connection_capability(
-                    direct_channel.get("direct_can_subscribe_self"),
-                    managed_channel.get("managed_can_subscribe_self"),
-                    managed_channel.get("managed_can_subscribe_self_fresh"),
-                    authority="observed",
-                )
-                direct_channel["can_subscribe_self"] = capability["supported"]
-
-                if capability["conflict"]:
-                    direct_channel["can_subscribe_self_conflict"] = True
-                else:
-                    direct_channel.pop("can_subscribe_self_conflict", None)
+                if direction == "receivers":
+                    receivers.append((direct_channel, managed_channel))
+    if not receivers:
+        return
+    capabilities = receiver_self_connection_capabilities(
+        {
+            "authority": "observed",
+            "channels": [
+                {
+                    "direct": direct_channel.get("direct_can_subscribe_self"),
+                    "managed": managed_channel.get("managed_can_subscribe_self"),
+                    "managed_fresh": managed_channel.get("managed_can_subscribe_self_fresh") is True,
+                }
+                for direct_channel, managed_channel in receivers
+            ],
+        }
+    )["channels"]
+    for (direct_channel, _), capability in zip(receivers, capabilities):
+        direct_channel["can_subscribe_self"] = capability["supported"]
+        if capability["conflict"]:
+            direct_channel["can_subscribe_self_conflict"] = True
+        else:
+            direct_channel.pop("can_subscribe_self_conflict", None)
 
 
 def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
