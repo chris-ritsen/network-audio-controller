@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 import netaudio.daemon.http.api as api_module
+from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 import netaudio.daemon.http.tls as tls_module
 from netaudio.daemon.http.tls import (
     DEFAULT_TLS_PORT,
@@ -253,7 +254,7 @@ class TestServerWiring:
     def test_tls_port_must_differ_from_the_http_port(self, tmp_path):
         certificate, key = write_certificate(tmp_path)
         with pytest.raises(TLSConfigurationError):
-            make_http_server(tls=TLSSettings(certificate=certificate, key=key, port=9000))
+            make_http_server(tls=TLSSettings(certificate=certificate, key=key, port=DEFAULT_DAEMON_PORT))
 
     def test_bonjour_advertises_the_tls_port(self, tmp_path):
         certificate, key = write_certificate(tmp_path)
@@ -291,10 +292,10 @@ async def test_listener_mode_and_real_https_request(tmp_path, monkeypatch, no_ss
     await server.start()
     try:
         if no_ssl:
-            assert listeners == [("0.0.0.0", 9000, False)]
+            assert listeners == [("0.0.0.0", DEFAULT_DAEMON_PORT, False)]
             listener, context = server.tcp_server, None
         else:
-            assert listeners == [("127.0.0.1", 9000, False), ("0.0.0.0", 9443, True)]
+            assert listeners == [("127.0.0.1", DEFAULT_DAEMON_PORT, False), ("0.0.0.0", DEFAULT_TLS_PORT, True)]
             listener = server.tls_server
             context = ssl.create_default_context(cafile=str(settings.certificate))
 
