@@ -8,10 +8,10 @@ from typing import Any
 from netaudio.host_audio.links import bridge_channel, hardware_channel
 
 MAXIMUM_STARTS = 12
+REMOTE_PRIORITY = 3
 MAXIMUM_LINES = 80
 SIGNAL_FLOOR_DBFS = -80.0
 SHURE_LEVEL_OFFSET = 120
-NAME_PRIORITY = {"exact": 0, "label": 1, "group": 2}
 ARROWS = {"downstream": "→", "upstream": "←"}
 
 
@@ -233,16 +233,38 @@ def _ports_by_client(ports: dict) -> dict[str, dict[str, list[str]]]:
     return clients
 
 
-def _add_jack(
-    graph: SignalGraph,
-    jack: dict,
-    cards: list[dict],
-    card_links: dict[str, str],
-    bridges: dict[str, dict],
-    pulse_clients: set[str],
-) -> None:
-    ports = jack.get("ports") or {}
-    devices_by_card = {card: device for device, card in card_links.items()}
+@dataclass
+class HostScope:
+    host: str
+    remote: bool = False
+
+    def jack(self, port: str) -> str:
+        return f"jack@{self.host}:{port}"
+
+    def pulse(self, kind: str, key: Any) -> str:
+        return f"pulse@{self.host}:{kind}:{key}"
+
+    def label(self, text: str) -> str:
+        return f"{self.host} {text}" if self.remote else text
+
+    def names(self, names: dict[str, int]) -> dict[str, int]:
+        if not self.remote:
+            return names
+        scoped: dict[str, int] = {}
+        for name, priority in names.items():
+            if not name:
+                continue
+            scoped[f"{self.host} {name}"] = priority
+            scoped[f"{name}@{self.host}"] = priority
+            scoped.setdefault(name, priority + REMOTE_PRIORITY)
+        return scoped
+
+
+def _add_jack(graph: SignalGraph, scope: HostScope, snapshot: dict, pulse_clients: set[str]) -> None:
+    ports = snapshot["jack"].get("ports") or {}
+    cards = snapshot.get("cards") or []
+    bridges = snapshot.get("bridges") or {}
+    devices_by_card = {card: device for device, card in (snapshot.get("card_links") or {}).items()}
     clients = _ports_by_client(ports)
     for name, port in ports.items():
         hardware = hardware_channel(port, cards) or bridge_channel(name, bridges)
@@ -251,7 +273,7 @@ def _add_jack(
         where = (
             f"JACK, sound card {hardware['card']} {hardware['direction']} {hardware['channel']}" if hardware else "JACK"
         )
-        details = {"port": name, "direction": port["direction"], "hardware": hardware}
+        details = {"host": scope.host, "port": name, "direction": port["direction"], "hardware": hardware}
         if port["direction"] == "input" and len(port["connections"]) > 1:
             details["mixes"] = list(port["connections"])
         names = {name: 0, f"jack {name}": 0, port["client"]: 2}
@@ -259,46 +281,47 @@ def _add_jack(
             names[alias] = 1
         if port.get("pretty_name"):
             names[port["pretty_name"]] = 1
-        graph.add(Node(f"jack:{name}", "jack", f"{label} ({where})", details), names)
+        graph.add(Node(scope.jack(name), "jack", scope.label(f"{label} ({where})"), details), scope.names(names))
     for name, port in ports.items():
         if port["direction"] == "output":
             for destination in port["connections"]:
-                graph.link(f"jack:{name}", f"jack:{destination}", None)
-        hardware = graph.nodes[f"jack:{name}"].details.get("hardware")
+                graph.link(scope.jack(name), scope.jack(destination), None)
+        hardware = graph.nodes[scope.jack(name)].details.get("hardware")
         if hardware is None:
             continue
         device = devices_by_card.get(hardware["card"])
         if device is None:
             continue
+        note = f"card {hardware['card']}" + (f" on {scope.host}" if scope.remote else "")
         if hardware["direction"] == "capture":
-            graph.link(f"dante:{device}:rx:{hardware['channel']}", f"jack:{name}", f"card {hardware['card']}")
+            graph.link(f"dante:{device}:rx:{hardware['channel']}", scope.jack(name), note)
         else:
-            graph.link(f"jack:{name}", f"dante:{device}:tx:{hardware['channel']}", f"card {hardware['card']}")
+            graph.link(scope.jack(name), f"dante:{device}:tx:{hardware['channel']}", note)
     for client, directions in clients.items():
         inputs, outputs = directions["input"], directions["output"]
         if not inputs or not outputs or client in pulse_clients or client in bridges:
             continue
-        if any(graph.nodes[f"jack:{name}"].details.get("hardware") for name in inputs + outputs):
+        if any(graph.nodes[scope.jack(name)].details.get("hardware") for name in inputs + outputs):
             continue
         if len(inputs) == len(outputs):
             for source, destination in zip(inputs, outputs):
-                graph.link(f"jack:{source}", f"jack:{destination}", f"through {client}, ports paired in order")
+                graph.link(scope.jack(source), scope.jack(destination), f"through {client}, ports paired in order")
         else:
             for source in inputs:
                 for destination in outputs:
-                    graph.link(f"jack:{source}", f"jack:{destination}", f"through {client}")
+                    graph.link(scope.jack(source), scope.jack(destination), f"through {client}")
 
 
-def _add_pulse(graph: SignalGraph, pulse: dict, jack_ports: dict) -> set[str]:
+def _add_pulse(graph: SignalGraph, scope: HostScope, snapshot: dict) -> set[str]:
+    pulse = snapshot["pulse"]
     server = pulse.get("server") or {}
     jack_clients: set[str] = set()
-    clients = _ports_by_client(jack_ports)
+    clients = _ports_by_client(snapshot["jack"].get("ports") or {})
     for kind, entries, default_key, default_name in (
         ("sink", pulse.get("sinks") or [], "default_sink", "default output"),
         ("source", pulse.get("sources") or [], "default_source", "default input"),
     ):
         for entry in entries:
-            identity = f"pulse:{kind}:{entry['name']}"
             word = "output" if kind == "sink" else "input"
             default = entry["name"] == server.get(default_key)
             label = f"PulseAudio {word} {entry['name']}" + (" (default)" if default else "")
@@ -307,22 +330,25 @@ def _add_pulse(graph: SignalGraph, pulse: dict, jack_ports: dict) -> set[str]:
                 names[entry["description"]] = 1
             if default:
                 names[default_name] = 0
-            graph.add(Node(identity, f"pulse_{kind}", label, {"entry": entry}), names)
+            graph.add(
+                Node(scope.pulse(kind, entry["name"]), f"pulse_{kind}", scope.label(label), {"entry": entry}),
+                scope.names(names),
+            )
             if entry.get("jack_client") in clients:
                 jack_clients.add(entry["jack_client"])
     for entry in pulse.get("sources") or []:
         if entry.get("monitor_of"):
-            graph.link(f"pulse:sink:{entry['monitor_of']}", f"pulse:source:{entry['name']}", "monitor")
-    for kind, entries, device_key, word in (
-        ("playback", pulse.get("sink_inputs") or [], "sink", "plays to"),
-        ("recording", pulse.get("source_outputs") or [], "source", "records from"),
+            graph.link(scope.pulse("sink", entry["monitor_of"]), scope.pulse("source", entry["name"]), "monitor")
+    for kind, entries, device_key in (
+        ("playback", pulse.get("sink_inputs") or [], "sink"),
+        ("recording", pulse.get("source_outputs") or [], "source"),
     ):
         for entry in entries:
-            identity = f"pulse:{kind}:{entry['index']}"
+            identity = scope.pulse(kind, entry["index"])
             application = entry.get("application") or entry.get("binary") or "unknown application"
             label = f"{application} {kind} stream {entry['index']}"
             if entry.get("media") and entry.get("media") != application:
-                label += f" “{entry['media']}”"
+                label += f" \u201c{entry['media']}\u201d"
             names = {f"stream {entry['index']}": 0, f"{kind} {entry['index']}": 0}
             for value in (entry.get("application"), entry.get("binary")):
                 if value:
@@ -330,14 +356,34 @@ def _add_pulse(graph: SignalGraph, pulse: dict, jack_ports: dict) -> set[str]:
                     names[f"{value} {kind}"] = 0
             if entry.get("media"):
                 names[entry["media"]] = 2
-            graph.add(Node(identity, f"pulse_{kind}", f"{label} (PulseAudio)", {"entry": entry}), names)
+            graph.add(
+                Node(identity, f"pulse_{kind}", scope.label(f"{label} (PulseAudio)"), {"entry": entry}),
+                scope.names(names),
+            )
             device = entry.get(device_key)
             if device:
                 if kind == "playback":
-                    graph.link(identity, f"pulse:sink:{device}", None)
+                    graph.link(identity, scope.pulse("sink", device), None)
                 else:
-                    graph.link(f"pulse:source:{device}", identity, None)
+                    graph.link(scope.pulse("source", device), identity, None)
     return jack_clients
+
+
+def _add_pulse_links(graph: SignalGraph, scope: HostScope, snapshot: dict) -> None:
+    pulse = snapshot["pulse"]
+    clients = _ports_by_client(snapshot["jack"].get("ports") or {})
+    for kind, entries in (("sink", pulse.get("sinks") or []), ("source", pulse.get("sources") or [])):
+        for entry in entries:
+            jack_client = entry.get("jack_client")
+            if not jack_client or jack_client not in clients:
+                continue
+            identity = scope.pulse(kind, entry["name"])
+            if kind == "sink":
+                for port in clients[jack_client]["output"]:
+                    graph.link(identity, scope.jack(port), f"JACK client {jack_client}")
+            else:
+                for port in clients[jack_client]["input"]:
+                    graph.link(scope.jack(port), identity, f"JACK client {jack_client}")
 
 
 def build_graph(
@@ -345,61 +391,46 @@ def build_graph(
     records: dict,
     wireless: dict,
     wireless_links: dict[str, str],
-    jack: dict,
-    pulse: dict,
-    cards: list[dict],
-    card_links: dict[str, str],
-    bridges: dict[str, dict],
+    hosts: list[tuple[HostScope, dict]],
 ) -> SignalGraph:
     graph = SignalGraph()
     _add_dante(graph, records)
     _add_wireless(graph, wireless, wireless_links)
-    pulse_clients = _add_pulse(graph, pulse, jack.get("ports") or {}) if pulse.get("available") else set()
-    if jack.get("available"):
-        _add_jack(graph, jack, cards, card_links, bridges, pulse_clients)
-        _add_pulse_links_after_jack(graph, pulse, jack.get("ports") or {})
+    for scope, snapshot in hosts:
+        pulse_clients = _add_pulse(graph, scope, snapshot) if snapshot["pulse"].get("available") else set()
+        if snapshot["jack"].get("available"):
+            _add_jack(graph, scope, snapshot, pulse_clients)
+            if snapshot["pulse"].get("available"):
+                _add_pulse_links(graph, scope, snapshot)
     return graph
 
 
-def _add_pulse_links_after_jack(graph: SignalGraph, pulse: dict, jack_ports: dict) -> None:
-    clients = _ports_by_client(jack_ports)
-    for kind, entries in (("sink", pulse.get("sinks") or []), ("source", pulse.get("sources") or [])):
-        for entry in entries:
-            jack_client = entry.get("jack_client")
-            if not jack_client or jack_client not in clients:
-                continue
-            identity = f"pulse:{kind}:{entry['name']}"
-            if kind == "sink":
-                for port in clients[jack_client]["output"]:
-                    graph.link(identity, f"jack:{port}", f"JACK client {jack_client}")
-            else:
-                for port in clients[jack_client]["input"]:
-                    graph.link(f"jack:{port}", identity, f"JACK client {jack_client}")
+def _meter_target(node: Node, snapshots: dict[str, dict]) -> tuple[str, str, list[str]]:
+    host, name = node.details["host"], node.details["port"]
+    port = ((snapshots.get(host) or {}).get("jack", {}).get("ports") or {}).get(name) or {}
+    sources = [name] if port.get("direction") == "output" else list(port.get("connections") or ())
+    return host, name, sources
 
 
-def jack_meter_targets(graph: SignalGraph, identities: list[str], jack_ports: dict) -> dict[str, list[str]]:
-    targets: dict[str, list[str]] = {}
+def jack_meter_targets(
+    graph: SignalGraph, identities: list[str], snapshots: dict[str, dict]
+) -> dict[str, dict[str, list[str]]]:
+    targets: dict[str, dict[str, list[str]]] = {}
     for identity in identities:
         node = graph.nodes.get(identity)
         if node is None:
             continue
-        if node.kind == "jack":
-            port = jack_ports.get(node.details["port"]) or {}
-            targets[node.details["port"]] = (
-                [node.details["port"]] if port.get("direction") == "output" else list(port.get("connections") or ())
-            )
-        elif node.kind in {"pulse_sink", "pulse_source"}:
-            for following, _ in (
+        followers = [node]
+        if node.kind in {"pulse_sink", "pulse_source"}:
+            edges = (
                 graph.downstream.get(identity, ()) if node.kind == "pulse_sink" else graph.upstream.get(identity, ())
-            ):
-                follower = graph.nodes.get(following)
-                if follower is not None and follower.kind == "jack":
-                    port = jack_ports.get(follower.details["port"]) or {}
-                    targets[follower.details["port"]] = (
-                        [follower.details["port"]]
-                        if port.get("direction") == "output"
-                        else list(port.get("connections") or ())
-                    )
+            )
+            followers = [graph.nodes[following] for following, _ in edges if following in graph.nodes]
+        for follower in followers:
+            if follower.kind != "jack":
+                continue
+            host, name, sources = _meter_target(follower, snapshots)
+            targets.setdefault(host, {})[name] = sources
     return targets
 
 
@@ -461,7 +492,7 @@ def node_level(
     if node is None:
         return None
     if node.kind == "jack":
-        return _jack_level(jack_levels.get(node.details["port"]))
+        return _jack_level((jack_levels.get(node.details["host"]) or {}).get(node.details["port"]))
     if node.kind in {"dante_rx", "dante_tx"}:
         if node.details.get("online") is False:
             return "silent", "device offline"
@@ -478,7 +509,7 @@ def node_level(
             graph.downstream.get(identity, ()) if node.kind == "pulse_sink" else graph.upstream.get(identity, ())
         )
         results = [
-            jack_levels.get(graph.nodes[following].details["port"])
+            (jack_levels.get(graph.nodes[following].details["host"]) or {}).get(graph.nodes[following].details["port"])
             for following, _ in followers
             if graph.nodes.get(following) is not None and graph.nodes[following].kind == "jack"
         ]

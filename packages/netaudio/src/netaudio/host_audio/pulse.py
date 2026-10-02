@@ -299,6 +299,7 @@ class PulseGraph(AudioComponent):
         return {
             "available": self.available,
             "reason": self.reason,
+            "seen_running": self.seen_running,
             "connected_at": self.connected_at,
             "server": self.server,
             "sinks": self.sinks,

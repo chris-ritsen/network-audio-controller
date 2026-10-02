@@ -37,6 +37,7 @@ from netaudio.daemon.http.shure import DaemonShureHandlers
 from netaudio.daemon.http.sse_view import TELEMETRY_FIELDS, SseDeviceView, substantive_record
 from netaudio.daemon.http.tls import (
     TLSConfigurationError,
+    certificate_fingerprint,
     TLSSettings,
     build_ssl_context,
     ensure_generated_identity,
@@ -247,6 +248,7 @@ class DaemonHTTPServer(
         self.tls_server = None
         self._tls_context: ssl.SSLContext | None = None
         self._tls_coverage = None
+        self._tls_fingerprint: str | None = None
         self._tls_renewal_retry_wall_time = 0.0
         self.zeroconf = None
         self.service_info = None
@@ -320,6 +322,7 @@ class DaemonHTTPServer(
             "/diagnostics/policy": self._handle_diagnostics_policy,
             "/event-journal/operations": self._handle_append_operation_event,
             "/host-audio/levels": self._handle_host_audio_levels,
+            "/host-audio/meter": self._handle_host_audio_meter,
             "/host-audio/jack/connect": self._handle_jack_connect,
             "/host-audio/jack/disconnect": self._handle_jack_disconnect,
             "/host-audio/pulse/volume": self._handle_pulse_volume,
@@ -331,7 +334,18 @@ class DaemonHTTPServer(
             "/shutdown": self._handle_shutdown,
         }
         self.post_body_optional = {"/ddm/refresh", "/refresh", "/shutdown"}
-        self.loopback_only_paths = {"/shutdown", "/event-journal/operations"}
+        self.loopback_only_paths = {
+            "/shutdown",
+            "/event-journal/operations",
+            "/host-audio/jack/connect",
+            "/host-audio/jack/disconnect",
+            "/host-audio/pulse/volume",
+            "/host-audio/pulse/mute",
+            "/host-audio/pulse/default",
+            "/host-audio/pulse/move",
+            "/host-audio/cards",
+            "/shure/set",
+        }
 
     async def start(self):
         if self.tcp_server is not None:
@@ -346,6 +360,7 @@ class DaemonHTTPServer(
                 context = build_ssl_context(self.tls)
                 self._tls_context = context
                 self._tls_coverage = identity_coverage(self.tls.certificate) if self.tls.generated else None
+                self._tls_fingerprint = self._read_tls_fingerprint()
                 self.tls_server = await asyncio.start_server(
                     self.handle_connection, "0.0.0.0", self.tls.port, ssl=context
                 )
@@ -801,6 +816,15 @@ class DaemonHTTPServer(
             except (OSError, RuntimeError, ZeroconfError) as exception:
                 logger.warning(f"Daemon Bonjour monitor error: {exception}")
 
+    def _read_tls_fingerprint(self) -> str | None:
+        if self.tls is None:
+            return None
+        try:
+            return certificate_fingerprint(self.tls.certificate)
+        except TLSConfigurationError as exception:
+            logger.warning(f"Daemon TLS fingerprint unavailable for Bonjour: {exception}")
+            return None
+
     def _renew_tls_identity(self):
         if self.tls is None or not self.tls.generated or self._tls_context is None:
             return
@@ -816,6 +840,7 @@ class DaemonHTTPServer(
             return
 
         self._tls_coverage = identity_coverage(identity)
+        self._tls_fingerprint = self._read_tls_fingerprint()
         logger.info("Daemon TLS certificate renewed")
 
     async def _reconcile_bonjour(self, force=False, woke_from_sleep=False):
@@ -835,6 +860,10 @@ class DaemonHTTPServer(
         elif not self.zeroconf or not self.service_info:
             refresh_reason = "registration missing"
             recreate_service = True
+        elif (
+            self._tls_fingerprint and self.service_info.properties.get(b"tls_sha256") != self._tls_fingerprint.encode()
+        ):
+            refresh_reason = "TLS identity changed"
         elif current_addresses != self._bonjour_addresses:
             previous_addresses = ", ".join(self._bonjour_addresses) or "none"
             refresh_reason = f"address change: {previous_addresses} -> {', '.join(current_addresses)}"
@@ -934,6 +963,8 @@ class DaemonHTTPServer(
         properties["mcp_path"] = MCP_PATH
         if self.tls is not None:
             properties["tls_port"] = str(self.tls.port)
+            if self._tls_fingerprint:
+                properties["tls_sha256"] = self._tls_fingerprint
         properties["scheme"] = "https" if self.tls is not None else "http"
         return ServiceInfo(
             DAEMON_SERVICE_TYPE,

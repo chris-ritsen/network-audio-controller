@@ -1287,7 +1287,10 @@ RESOURCES: tuple[McpResource, ...] = (
                 "type": "array",
                 "items": {"type": "string"},
                 "minItems": 1,
-                "description": "Places to measure, such as system:capture_1, default input, Discord or AD4D-A ch1.",
+                "description": (
+                    "Places to measure, such as system:capture_1, default input, Discord or AD4D-A ch1; put another "
+                    "computer's name first for its points, such as workstation default input."
+                ),
             },
             "detail": {"type": "string", "enum": ["compact", "debug"], "default": "compact"},
         },
@@ -2594,7 +2597,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
         if payload == {} and tool.name in EMPTY_RESULTS:
             payload = {"result": EMPTY_RESULTS[tool.name]}
         if tool.name == "get_issues" and status < 400 and isinstance(payload, dict) and not request.get("device"):
-            conditions = self._host_conditions()
+            conditions = await self._host_conditions()
             if conditions:
                 payload["host_and_wireless"] = conditions
         return _tool_result(payload, is_error=status >= 400)
@@ -3011,7 +3014,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
             ddm_known = ddm_inventory_known(snapshots["ddm"])
             return _tool_result(device_list_view(snapshots["devices"], ddm_known), is_error=False)
         view = network_overview_view(**snapshots)
-        view.update(self._host_overview())
+        view.update(await self._host_overview())
         devices, problems = await self._stream_health(snapshots["devices"], writer)
         worst = [
             (entry["worst_latency_ms"] / entry["latency_budget_ms"], entry)

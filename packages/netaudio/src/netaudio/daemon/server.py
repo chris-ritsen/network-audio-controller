@@ -688,6 +688,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
         _sd_notify("STATUS=Starting mDNS browser...")
         self._start_discovery()
+        if self.host_audio:
+            self.host_audio.start_peers(self.zeroconf)
 
         logger.info("mDNS browser started, watching for devices...")
 

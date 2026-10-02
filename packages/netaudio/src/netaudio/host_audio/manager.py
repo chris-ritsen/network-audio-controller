@@ -12,6 +12,7 @@ from netaudio.host_audio.component import AudioComponent
 from netaudio.host_audio.jack_graph import JackGraph, server_name
 from netaudio.host_audio.jack_meter import JackMeter
 from netaudio.host_audio.links import bridge_clients, card_links
+from netaudio.host_audio.peers import HostAudioPeers
 from netaudio.host_audio.pulse import PulseGraph
 from netaudio.host_audio.watch import DirectoryWatch
 
@@ -27,6 +28,8 @@ class HostAudioManager:
         self.jack = JackGraph(self._changed)
         self.pulse = PulseGraph(self._changed)
         self.meter = JackMeter()
+        self.peers = HostAudioPeers()
+        self.host = socket.gethostname().removesuffix(".local")
         self._watch = DirectoryWatch(self._created)
         self._listeners: list[Callable[[str], None]] = []
         self._tasks: set[asyncio.Task] = set()
@@ -52,7 +55,11 @@ class HostAudioManager:
             "connected" if self.pulse.available else self.pulse.reason,
         )
 
+    def start_peers(self, zeroconf) -> None:
+        self.peers.start(zeroconf)
+
     async def stop(self) -> None:
+        await self.peers.stop()
         self._watch.stop()
         tasks = list(self._tasks)
         for task in tasks:
@@ -95,7 +102,7 @@ class HostAudioManager:
     def snapshot(self) -> dict:
         cards = alsa.cards()
         return {
-            "host": socket.gethostname(),
+            "host": self.host,
             "jack": self.jack.to_dict(),
             "pulse": self.pulse.to_dict(),
             "cards": cards,

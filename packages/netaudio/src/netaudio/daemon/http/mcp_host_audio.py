@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Any
 
+from netaudio.daemon.http.host_audio import SUMMARY_PEER_TIMEOUT_SECONDS
 from netaudio.daemon.http.host_audio_control import card_change, jack_change, pulse_change
 from netaudio.daemon.http.mcp_preview import NEXT_STEP
 from netaudio.daemon.http.mcp_schema import object_schema
@@ -19,7 +20,9 @@ RECENT_CHANGES = 8
 SECTIONS = ["summary", "connections", "ports", "pulse", "cards", "changes"]
 POINT_DESCRIPTION = (
     "Where to start: a Shure channel (AD4D-A ch1), a Dante channel (lx-dante rx 1), a JACK port or alias "
-    "(system:capture_1), a PulseAudio input or output (jack_in, default input), or an application (Discord)."
+    "(system:capture_1), a PulseAudio input or output (jack_in, default input), or an application (Discord). "
+    "Points on this server's computer need no prefix; put another computer's name first for its points, such as "
+    "workstation default input."
 )
 TARGET_DESCRIPTION = (
     "A PulseAudio output or input by name (jack_out, default output, default input), or an application's "
@@ -35,8 +38,9 @@ HOST_AUDIO_TOOL_SPECS: tuple[dict, ...] = (
         "description": (
             "Follow audio through the whole chain from any point: Shure wireless channels, Dante channels and "
             "routes, this computer's sound cards, JACK ports and connections, and PulseAudio inputs, outputs and "
-            "application streams. Lists every step upstream and downstream with its level, all measured at the "
-            "same moment, and says where signal stops. Use it to answer why something can't be heard."
+            "application streams, on this computer and on other computers running netaudio. Lists every step "
+            "upstream and downstream with its level, all measured at the same moment, and says where signal stops. "
+            "Use it to answer why something can't be heard."
         ),
         "input_schema": object_schema(
             {
@@ -65,6 +69,10 @@ HOST_AUDIO_TOOL_SPECS: tuple[dict, ...] = (
             {
                 "section": {"type": "string", "enum": SECTIONS, "default": "summary"},
                 "client": {"type": "string", "description": "A JACK client name, such as system or jack_out."},
+                "host": {
+                    "type": "string",
+                    "description": "Another computer running netaudio, such as workstation; defaults to this server's computer.",
+                },
             },
             [],
         ),
@@ -577,8 +585,10 @@ class McpHostAudioTools:
             status, payload = await self.host_audio_point_levels([points] if isinstance(points, str) else points)
             return compact(payload), status >= 400
         if name == "get_host_audio":
-            await self.host_audio.ensure()
-            payload = host_audio_view(self.host_audio.snapshot(), arguments)
+            status, snapshot = await self.host_audio_snapshot(arguments.get("host"))
+            if status >= 400:
+                return snapshot, True
+            payload = host_audio_view(snapshot, arguments)
             return payload, "error" in payload
         try:
             if arguments.get("confirmed") is not True:
@@ -592,65 +602,86 @@ class McpHostAudioTools:
         status, payload = await self._post_captured(WRITE_PATHS[name], body, writer)
         return compact(write_result_view(name, payload)), status >= 400
 
-    def _host_overview(self) -> dict:
+    async def _all_host_snapshots(self) -> dict[str, dict]:
+        if self.host_audio is None:
+            return {}
+        local = self.host_audio.snapshot()
+        snapshots, _ = await self._peer_snapshots(SUMMARY_PEER_TIMEOUT_SECONDS)
+        return {local["host"]: local, **snapshots}
+
+    async def _host_overview(self) -> dict:
         view: dict[str, Any] = {}
-        if self.host_audio is not None:
-            snapshot = self.host_audio.snapshot()
-            view["host_audio"] = compact(
+        snapshots = await self._all_host_snapshots()
+        for host, snapshot in snapshots.items():
+            summary = compact(
                 {
-                    "host": snapshot["host"],
                     "jack": _jack_line(snapshot["jack"]),
                     "pulseaudio": _pulse_line(snapshot["pulse"]),
-                    "cards": [line for line in _card_lines(snapshot) if "Dante" in line or "dante" in line] or None,
-                    "detail": "trace_signal follows audio through; get_host_audio lists clients and connections",
+                    "dante_cards": [line for line in _card_lines(snapshot) if "Dante" in line] or None,
                 }
             )
+            if host == self.host_audio.host:
+                view["host_audio"] = {
+                    "host": host,
+                    **summary,
+                    "detail": "trace_signal follows audio through; get_host_audio lists clients and connections",
+                }
+            else:
+                view.setdefault("other_computers_audio", {})[host] = summary
         if self.shure and self.shure.devices:
             view["wireless"] = wireless_lines({mac: device.to_json() for mac, device in self.shure.devices.items()})
         return view
 
-    def _host_conditions(self) -> list[str]:
+    def _snapshot_conditions(self, snapshot: dict, records: dict) -> list[str]:
         conditions: list[str] = []
-        if self.host_audio is not None:
-            snapshot = self.host_audio.snapshot()
-            jack = snapshot["jack"]
-            for key, label in (("jack", "JACK"), ("pulse", "PulseAudio")):
-                component = getattr(self.host_audio, key)
-                if component.seen_running and not component.available:
-                    conditions.append(f"{label} on {snapshot['host']} stopped: {component.reason}")
-            if jack.get("xruns"):
+        host = snapshot["host"]
+        jack = snapshot["jack"]
+        for key, label in (("jack", "JACK"), ("pulse", "PulseAudio")):
+            component = snapshot[key]
+            if component.get("seen_running") and not component.get("available"):
+                conditions.append(f"{label} on {host} stopped: {component.get('reason')}")
+        if jack.get("xruns"):
+            conditions.append(
+                f"JACK on {host} had {jack['xruns']} xrun{'' if jack['xruns'] == 1 else 's'} since "
+                f"{jack.get('xruns_since')}, last at {jack.get('last_xrun')}"
+            )
+        present = {card["id"] for card in snapshot["cards"]}
+        for device, card in sorted((snapshot.get("card_links") or {}).items()):
+            record = records.get(device)
+            if card not in present:
+                continue
+            if record is None or not record.get("online"):
                 conditions.append(
-                    f"JACK on {snapshot['host']} had {jack['xruns']} xrun{'' if jack['xruns'] == 1 else 's'} since "
-                    f"{jack.get('xruns_since')}, "
-                    f"last at {jack.get('last_xrun')}"
+                    f"sound card {card} on {host} is linked to Dante device {device}, which is not online"
                 )
+                continue
+            rate = record.get("sample_rate_hz")
+            if jack.get("available") and rate and jack.get("sample_rate") and rate != jack["sample_rate"]:
+                uses_card = any(
+                    (hardware_channel(port, snapshot["cards"]) or {}).get("card") == card
+                    for port in (jack.get("ports") or {}).values()
+                )
+                if uses_card:
+                    conditions.append(
+                        f"JACK on {host} runs at {jack['sample_rate']} Hz but {device} (card {card}) is at {rate} Hz"
+                    )
+        for card in snapshot["cards"]:
+            if is_dante_interface(card) and card["id"] not in (snapshot.get("card_links") or {}).values():
+                conditions.append(
+                    f"sound card {card['id']} on {host} is a Dante interface not linked to its Dante device; "
+                    "link_audio_card on that computer lets traces cross it"
+                )
+        return conditions
+
+    async def _host_conditions(self) -> list[str]:
+        conditions: list[str] = []
+        snapshots = await self._all_host_snapshots()
+        if snapshots:
             records = {
                 record.get("name"): record for record in self._serialized_devices().values() if isinstance(record, dict)
             }
-            present = {card["id"] for card in snapshot["cards"]}
-            for device, card in sorted((snapshot.get("card_links") or {}).items()):
-                record = records.get(device)
-                if card not in present:
-                    continue
-                if record is None or not record.get("online"):
-                    conditions.append(f"sound card {card} is linked to Dante device {device}, which is not online")
-                    continue
-                rate = record.get("sample_rate_hz")
-                if jack.get("available") and rate and jack.get("sample_rate") and rate != jack["sample_rate"]:
-                    uses_card = any(
-                        (hardware_channel(port, snapshot["cards"]) or {}).get("card") == card
-                        for port in (jack.get("ports") or {}).values()
-                    )
-                    if uses_card:
-                        conditions.append(
-                            f"JACK runs at {jack['sample_rate']} Hz but {device} (card {card}) is at {rate} Hz"
-                        )
-            for card in snapshot["cards"]:
-                if is_dante_interface(card) and card["id"] not in (snapshot.get("card_links") or {}).values():
-                    conditions.append(
-                        f"sound card {card['id']} on {snapshot['host']} is a Dante interface not linked to its Dante "
-                        "device; link_audio_card lets traces cross it"
-                    )
+            for snapshot in snapshots.values():
+                conditions.extend(self._snapshot_conditions(snapshot, records))
         if self.shure:
             conditions.extend(
                 wireless_conditions({mac: device.to_json() for mac, device in self.shure.devices.items()})

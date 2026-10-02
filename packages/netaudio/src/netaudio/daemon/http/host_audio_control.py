@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import difflib
 import logging
+import socket
 import time
 from typing import Any
 
-from netaudio.host_audio.links import save_card_link
+from netaudio.host_audio.links import bridge_channel, hardware_channel, save_card_link
 
 logger = logging.getLogger("netaudio")
 
@@ -26,9 +27,19 @@ def _fold(value: Any) -> str:
     return " ".join(str(value).split()).casefold()
 
 
+def _local_only(name: str) -> None:
+    host = name.rpartition("@")[2].strip() if "@" in name else ""
+    if host and host.casefold().removesuffix(".local") != socket.gethostname().removesuffix(".local").casefold():
+        raise ValueError(
+            f"this server changes only {socket.gethostname().removesuffix('.local')}'s audio; "
+            f"make changes on {host} through the netaudio server running there"
+        )
+
+
 def resolve_jack_port(ports: dict, name: Any) -> str:
     if not isinstance(name, str) or not name.strip():
         raise ValueError("name a JACK port, such as system:capture_1")
+    _local_only(name)
     if name in ports:
         return name
     wanted = _fold(name)
@@ -113,6 +124,7 @@ def resolve_pulse(pulse: Any, target: Any, kinds: tuple[str, ...]) -> tuple[str,
         target = str(target)
     if not isinstance(target, str) or not target.strip():
         raise ValueError("name a PulseAudio output, input or application")
+    _local_only(target)
     wanted = _fold(target)
     if wanted in DEFAULT_NAMES:
         kind, key = DEFAULT_NAMES[wanted]
@@ -236,8 +248,11 @@ def card_change(snapshot: dict, records: dict, params: dict) -> dict:
     current = next((name for name, linked in snapshot["card_links"].items() if linked == card), None)
     ports = sum(
         1
-        for port in (snapshot["jack"].get("ports") or {}).values()
-        if any(alias.startswith(f"alsa_pcm:hw:{card},") for alias in port.get("aliases") or ())
+        for name, port in (snapshot["jack"].get("ports") or {}).items()
+        if (hardware_channel(port, snapshot["cards"]) or bridge_channel(name, snapshot.get("bridges") or {}) or {}).get(
+            "card"
+        )
+        == card
     )
     return {
         "card": card,

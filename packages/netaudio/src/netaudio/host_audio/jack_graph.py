@@ -284,6 +284,7 @@ class JackGraph(AudioComponent):
         return {
             "available": self.available,
             "reason": self.reason,
+            "seen_running": self.seen_running,
             "server": server_name() or "default",
             "client_name": self.client_name,
             "connected_at": self.connected_at,
