@@ -49,7 +49,7 @@ core: header
 	fi
 
 install:
-	uv tool install netaudio --from . --force --reinstall-package netaudio
+	uv tool install '.[redis]' --force --reinstall-package netaudio
 
 restart:
 	launchctl kickstart -k gui/$$(id -u)/com.netaudio.daemon
