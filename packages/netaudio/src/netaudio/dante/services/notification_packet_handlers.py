@@ -280,8 +280,6 @@ def _parse_ptp_clock_status(data: bytes, source_ip: str, device) -> ParsedStatus
             },
             None,
         )
-    for field in ("ptpv1_device_uuid", "ptpv1_master_uuid", "ptpv1_grandmaster_uuid"):
-        parsed[field] = canonical_ptpv1_uuid(parsed.get(field))
     fields = (
         "clock_frequency_offset_parts_per_billion",
         "clock_port_records",
@@ -289,11 +287,10 @@ def _parse_ptp_clock_status(data: bytes, source_ip: str, device) -> ParsedStatus
         "clock_role",
         "clock_source_code",
         "preferred_leader",
-        "ptpv1_device_uuid",
-        "ptpv1_master_uuid",
-        "ptpv1_grandmaster_uuid",
     )
     status = {field: parsed.get(field) for field in fields}
+    for field in ("ptpv1_device_uuid", "ptpv1_master_uuid", "ptpv1_grandmaster_uuid"):
+        status[field] = canonical_ptpv1_uuid(parsed.get(field))
     name = parsed.get("clock_subdomain")
     status["clock_subdomain"] = bytes(name) if name is not None else None
     status["clock_status"] = parsed

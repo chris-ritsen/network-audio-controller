@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.dante.ptpv1_uuid import canonical_ptpv1_uuid
 from netaudio.monitoring.model import (
     DEFAULT_EVENT_HISTORY_LIMIT,
     EVENT_JOURNAL_SCHEMA_VERSION,
@@ -545,6 +546,8 @@ class MonitoringEventJournal:
         )
         before = {key: before_status.get(key) for key in fields}
         after = {key: after_status.get(key) for key in fields}
+        before["ptpv1_grandmaster_uuid"] = canonical_ptpv1_uuid(before["ptpv1_grandmaster_uuid"])
+        after["ptpv1_grandmaster_uuid"] = canonical_ptpv1_uuid(after["ptpv1_grandmaster_uuid"])
         if (
             before_status
             and after_status
