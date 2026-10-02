@@ -317,20 +317,6 @@ PLANNED_OPERATIONS: tuple[PlannedOperation, ...] = (
         blocked_by="Image eligibility, transfer and recovery are not yet established.",
     ),
     PlannedOperation(
-        name="set_wireless_value",
-        description="Set a value on a Shure wireless device, such as a channel name, frequency or gain.",
-        properties={
-            "device": {"type": "string", "description": "Shure device name or identifier."},
-            "key": {"type": "string"},
-            "value": {"type": ["string", "number", "boolean"]},
-            "channel": {"type": "integer", "minimum": 1},
-        },
-        required=("device", "key", "value"),
-        features=(),
-        blocker=IMPLEMENTATION,
-        blocked_by="The CLI sets Shure values directly; the daemon has no endpoint for it yet.",
-    ),
-    PlannedOperation(
         name="get_virtual_device_status",
         description="Whether netaudio's virtual Dante device is running, with its name and channels.",
         properties={},

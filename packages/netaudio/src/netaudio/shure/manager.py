@@ -281,6 +281,7 @@ class ShureManager:
         self._reconnect_tasks: dict[str, asyncio.Task[None]] = {}
         self._stop_event = DeferredAsyncioEvent()
         self._running = False
+        self._report_waiters: dict[tuple[str, int | None, str], list[asyncio.Future]] = {}
 
     async def start(self):
         if self._running:
@@ -352,6 +353,32 @@ class ShureManager:
                 await connection._send(command)
                 return True
         return False
+
+    def current_value(self, mac, key, channel=None):
+        raw_reports = self._raw_reports.get(_normalize_mac(mac), {})
+        if channel is None:
+            return raw_reports.get(key)
+        return raw_reports.get(int(channel), {}).get(key)
+
+    async def set_value(self, mac, key, value, channel=None, timeout=3.0):
+        normalized_mac_address = _normalize_mac(mac)
+        waiter_key = (normalized_mac_address, int(channel) if channel is not None else None, key)
+        future = asyncio.get_running_loop().create_future()
+        self._report_waiters.setdefault(waiter_key, []).append(future)
+        target = f"{channel} {key}" if channel is not None else key
+        try:
+            if not await self.send_command(mac, f"SET {target} {value}"):
+                raise ConnectionError(f"not connected to Shure device {mac}")
+            try:
+                return await asyncio.wait_for(future, timeout)
+            except asyncio.TimeoutError:
+                return None
+        finally:
+            waiters = self._report_waiters.get(waiter_key, [])
+            if future in waiters:
+                waiters.remove(future)
+            if not waiters:
+                self._report_waiters.pop(waiter_key, None)
 
     async def _scan_loop(self):
         try:
@@ -542,6 +569,9 @@ class ShureManager:
             raw_reports.setdefault(channel, {})[key] = value
         else:
             raw_reports[key] = value
+        for future in self._report_waiters.get((normalized_mac_address, channel, key), []):
+            if not future.done():
+                future.set_result(value)
 
         device = self.devices.get(normalized_mac_address)
         if not device:

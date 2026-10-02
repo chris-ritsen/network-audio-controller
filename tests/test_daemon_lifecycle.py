@@ -88,6 +88,7 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
     daemon._dbus = _component(stop=AsyncMock())
     daemon.heartbeat = _component(stop=AsyncMock())
     daemon.shure = _component(stop=AsyncMock())
+    daemon.host_audio = None
     daemon.http_api = _component(stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
@@ -146,6 +147,7 @@ async def test_component_failure_does_not_skip_remaining_shutdown():
     daemon._dbus = _component(stop=AsyncMock(side_effect=RuntimeError("dbus failed")))
     daemon.heartbeat = _component(stop=AsyncMock(side_effect=RuntimeError("heartbeat failed")))
     daemon.shure = None
+    daemon.host_audio = None
     daemon.http_api = _component(stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
@@ -180,6 +182,7 @@ async def test_partial_start_failure_unwinds_started_components():
     daemon._dbus = None
     daemon.heartbeat = None
     daemon.shure = _component(stop=AsyncMock())
+    daemon.host_audio = None
     daemon.http_api = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
@@ -238,6 +241,7 @@ async def test_concurrent_start_callers_share_one_initialization_and_exit_togeth
     daemon._dbus = None
     daemon.heartbeat = None
     daemon.shure = None
+    daemon.host_audio = None
     daemon.http_api = _component(stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())

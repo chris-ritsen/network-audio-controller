@@ -20,6 +20,8 @@ dependencies = [
     "typing-extensions>=4.0.0",
     "dbus-fast>=2.0.0; sys_platform == 'linux'",
     "pywin32>=306; sys_platform == 'win32'",
+    "jack-client>=0.5.4",
+    "pulsectl-asyncio>=1.2.0; sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]

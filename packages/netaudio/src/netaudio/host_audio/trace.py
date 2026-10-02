@@ -1,0 +1,541 @@
+from __future__ import annotations
+
+import difflib
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from netaudio.host_audio.links import bridge_channel, hardware_channel
+
+MAXIMUM_STARTS = 12
+MAXIMUM_LINES = 80
+SIGNAL_FLOOR_DBFS = -80.0
+SHURE_LEVEL_OFFSET = 120
+NAME_PRIORITY = {"exact": 0, "label": 1, "group": 2}
+ARROWS = {"downstream": "→", "upstream": "←"}
+
+
+def _natural(value: str) -> list:
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", value)]
+
+
+def _fold(value: Any) -> str:
+    return " ".join(str(value).split()).casefold()
+
+
+def _channel_label(channel: Any) -> str | None:
+    if isinstance(channel, dict):
+        label = channel.get("friendly_name") or channel.get("name")
+        return str(label) if label not in (None, "") else None
+    return None
+
+
+@dataclass
+class Node:
+    identity: str
+    kind: str
+    label: str
+    details: dict = field(default_factory=dict)
+
+
+@dataclass
+class Step:
+    depth: int
+    identity: str
+    note: str | None
+    repeated: bool = False
+    parent: str | None = None
+
+
+class SignalGraph:
+    def __init__(self) -> None:
+        self.nodes: dict[str, Node] = {}
+        self.downstream: dict[str, list[tuple[str, str | None]]] = {}
+        self.upstream: dict[str, list[tuple[str, str | None]]] = {}
+        self.names: dict[str, list[tuple[int, str]]] = {}
+
+    def add(self, node: Node, names: dict[str, int] | None = None) -> Node:
+        self.nodes.setdefault(node.identity, node)
+        for name, priority in (names or {}).items():
+            if name:
+                self.names.setdefault(_fold(name), []).append((priority, node.identity))
+        return self.nodes[node.identity]
+
+    def link(self, source: str, destination: str, note: str | None = None) -> None:
+        if source not in self.nodes or destination not in self.nodes:
+            return
+        if any(existing == destination for existing, _ in self.downstream.get(source, ())):
+            return
+        self.downstream.setdefault(source, []).append((destination, note))
+        self.upstream.setdefault(destination, []).append((source, note))
+
+    def resolve(self, point: str) -> tuple[list[str], list[str]]:
+        matches = self.names.get(_fold(point))
+        if matches:
+            best = min(priority for priority, _ in matches)
+            identities = sorted({identity for priority, identity in matches if priority == best}, key=_natural)
+            return identities[:MAXIMUM_STARTS], []
+        suggestions = difflib.get_close_matches(_fold(point), list(self.names), n=5, cutoff=0.6)
+        return [], suggestions
+
+    def walk(self, starts: list[str], direction: str) -> list[Step]:
+        edges = self.downstream if direction == "downstream" else self.upstream
+        steps: list[Step] = []
+        seen: set[str] = set(starts)
+
+        def visit(identity: str, depth: int) -> None:
+            for following, note in sorted(edges.get(identity, ()), key=lambda edge: _natural(edge[0])):
+                if len(steps) >= MAXIMUM_LINES:
+                    return
+                repeated = following in seen
+                steps.append(Step(depth, following, note, repeated, identity))
+                if not repeated:
+                    seen.add(following)
+                    visit(following, depth + 1)
+
+        for start in starts:
+            visit(start, 1)
+        return steps
+
+    def remaining(self, starts: list[str], direction: str, steps: list[Step]) -> int:
+        edges = self.downstream if direction == "downstream" else self.upstream
+        reachable: set[str] = set()
+        pending = list(starts)
+        while pending:
+            identity = pending.pop()
+            for following, _ in edges.get(identity, ()):
+                if following not in reachable:
+                    reachable.add(following)
+                    pending.append(following)
+        shown = {step.identity for step in steps}
+        return len(reachable - shown - set(starts))
+
+
+def _shure_state(channel: dict) -> str:
+    if "active" in channel and not channel["active"]:
+        return "no transmitter"
+    if channel.get("rf_mute"):
+        return "RF muted"
+    if channel.get("audio_mute"):
+        return "muted"
+    return "on"
+
+
+def _add_wireless(graph: SignalGraph, wireless: dict, wireless_links: dict[str, str]) -> None:
+    for mac, device in wireless.items():
+        if not isinstance(device, dict):
+            continue
+        device_name = device.get("name") or mac
+        for number, channel in sorted((device.get("channels") or {}).items(), key=lambda item: int(item[0])):
+            if not isinstance(channel, dict):
+                continue
+            channel_name = channel.get("name") or ""
+            identity = f"wireless:{mac}:{number}"
+            label = f"{device_name} ch{number}" + (f" {channel_name}" if channel_name else "")
+            graph.add(
+                Node(
+                    identity,
+                    "wireless",
+                    f"{label} (Shure {device.get('model') or device.get('device_type')})",
+                    {"device": device, "channel": channel, "state": _shure_state(channel)},
+                ),
+                {
+                    f"{device_name} ch{number}": 0,
+                    f"{device_name} ch {number}": 0,
+                    f"{device_name} {number}": 0,
+                    f"{device_name}:{number}": 0,
+                    f"{device_name} {channel_name}": 0,
+                    channel_name: 1,
+                    device_name: 2,
+                    mac: 2,
+                },
+            )
+            dante_device = wireless_links.get(mac)
+            if dante_device:
+                graph.link(identity, f"dante:{dante_device}:tx:{number}", "Dante output")
+
+
+def _add_dante(graph: SignalGraph, records: dict) -> None:
+    by_name = {}
+    for record in records.values():
+        if not isinstance(record, dict) or not record.get("name"):
+            continue
+        name = record["name"]
+        by_name[name] = record
+        channels = record.get("channels") or {}
+        for direction, key in (("rx", "receivers"), ("tx", "transmitters")):
+            for number, channel in (channels.get(key) or {}).items():
+                label = _channel_label(channel) or str(number)
+                identity = f"dante:{name}:{direction}:{number}"
+                graph.add(
+                    Node(
+                        identity,
+                        f"dante_{direction}",
+                        f"{name} {direction} {number}" + (f" {label}" if label != str(number) else "") + " (Dante)",
+                        {
+                            "device": name,
+                            "direction": direction,
+                            "channel": int(number),
+                            "online": record.get("online"),
+                        },
+                    ),
+                    {
+                        f"{name} {direction} {number}": 0,
+                        f"{name} {direction} {label}": 0,
+                        f"{name}:{label}": 1,
+                        f"{name} {label}": 1,
+                        label: 1,
+                    },
+                )
+    for name, record in by_name.items():
+        for subscription in record.get("subscriptions") or []:
+            if not isinstance(subscription, dict) or not subscription.get("tx_device"):
+                continue
+            raw_status = subscription.get("status")
+            status: dict = raw_status if isinstance(raw_status, dict) else {}
+            if status.get("state") == "none":
+                continue
+            rx_number = subscription.get("rx_channel_number")
+            transmitter = by_name.get(subscription["tx_device"])
+            tx_label = subscription.get("tx_channel")
+            tx_number = None
+            if transmitter is not None:
+                for number, channel in ((transmitter.get("channels") or {}).get("transmitters") or {}).items():
+                    if tx_label in {_channel_label(channel), (channel or {}).get("name"), str(number)}:
+                        tx_number = number
+                        break
+            if tx_number is None:
+                identity = f"dante:{subscription['tx_device']}:tx:{tx_label}"
+                graph.add(
+                    Node(
+                        identity,
+                        "dante_tx",
+                        f"{subscription['tx_device']} tx {tx_label} (Dante, not on the network)",
+                        {"device": subscription["tx_device"], "direction": "tx", "online": False},
+                    )
+                )
+                tx_identity = identity
+            else:
+                tx_identity = f"dante:{subscription['tx_device']}:tx:{tx_number}"
+            note = status.get("label")
+            if status.get("severity") not in (None, "ok", "none") and status.get("detail"):
+                note = f"{note}: {status['detail']}"
+            graph.link(tx_identity, f"dante:{name}:rx:{rx_number}", note)
+
+
+def _ports_by_client(ports: dict) -> dict[str, dict[str, list[str]]]:
+    clients: dict[str, dict[str, list[str]]] = {}
+    for name, port in ports.items():
+        clients.setdefault(port["client"], {"input": [], "output": []})[port["direction"]].append(name)
+    for directions in clients.values():
+        for names in directions.values():
+            names.sort(key=_natural)
+    return clients
+
+
+def _add_jack(
+    graph: SignalGraph,
+    jack: dict,
+    cards: list[dict],
+    card_links: dict[str, str],
+    bridges: dict[str, dict],
+    pulse_clients: set[str],
+) -> None:
+    ports = jack.get("ports") or {}
+    devices_by_card = {card: device for device, card in card_links.items()}
+    clients = _ports_by_client(ports)
+    for name, port in ports.items():
+        hardware = hardware_channel(port, cards) or bridge_channel(name, bridges)
+        aliases = [alias for alias in port.get("aliases") or () if not alias.startswith("alsa_pcm:")]
+        label = name + (f" [{', '.join(aliases)}]" if aliases else "")
+        where = (
+            f"JACK, sound card {hardware['card']} {hardware['direction']} {hardware['channel']}" if hardware else "JACK"
+        )
+        details = {"port": name, "direction": port["direction"], "hardware": hardware}
+        if port["direction"] == "input" and len(port["connections"]) > 1:
+            details["mixes"] = list(port["connections"])
+        names = {name: 0, f"jack {name}": 0, port["client"]: 2}
+        for alias in port.get("aliases") or ():
+            names[alias] = 1
+        if port.get("pretty_name"):
+            names[port["pretty_name"]] = 1
+        graph.add(Node(f"jack:{name}", "jack", f"{label} ({where})", details), names)
+    for name, port in ports.items():
+        if port["direction"] == "output":
+            for destination in port["connections"]:
+                graph.link(f"jack:{name}", f"jack:{destination}", None)
+        hardware = graph.nodes[f"jack:{name}"].details.get("hardware")
+        if hardware is None:
+            continue
+        device = devices_by_card.get(hardware["card"])
+        if device is None:
+            continue
+        if hardware["direction"] == "capture":
+            graph.link(f"dante:{device}:rx:{hardware['channel']}", f"jack:{name}", f"card {hardware['card']}")
+        else:
+            graph.link(f"jack:{name}", f"dante:{device}:tx:{hardware['channel']}", f"card {hardware['card']}")
+    for client, directions in clients.items():
+        inputs, outputs = directions["input"], directions["output"]
+        if not inputs or not outputs or client in pulse_clients or client in bridges:
+            continue
+        if any(graph.nodes[f"jack:{name}"].details.get("hardware") for name in inputs + outputs):
+            continue
+        if len(inputs) == len(outputs):
+            for source, destination in zip(inputs, outputs):
+                graph.link(f"jack:{source}", f"jack:{destination}", f"through {client}, ports paired in order")
+        else:
+            for source in inputs:
+                for destination in outputs:
+                    graph.link(f"jack:{source}", f"jack:{destination}", f"through {client}")
+
+
+def _add_pulse(graph: SignalGraph, pulse: dict, jack_ports: dict) -> set[str]:
+    server = pulse.get("server") or {}
+    jack_clients: set[str] = set()
+    clients = _ports_by_client(jack_ports)
+    for kind, entries, default_key, default_name in (
+        ("sink", pulse.get("sinks") or [], "default_sink", "default output"),
+        ("source", pulse.get("sources") or [], "default_source", "default input"),
+    ):
+        for entry in entries:
+            identity = f"pulse:{kind}:{entry['name']}"
+            word = "output" if kind == "sink" else "input"
+            default = entry["name"] == server.get(default_key)
+            label = f"PulseAudio {word} {entry['name']}" + (" (default)" if default else "")
+            names = {entry["name"]: 0, f"pulse {entry['name']}": 0, f"{word} {entry['name']}": 0}
+            if entry.get("description"):
+                names[entry["description"]] = 1
+            if default:
+                names[default_name] = 0
+            graph.add(Node(identity, f"pulse_{kind}", label, {"entry": entry}), names)
+            if entry.get("jack_client") in clients:
+                jack_clients.add(entry["jack_client"])
+    for entry in pulse.get("sources") or []:
+        if entry.get("monitor_of"):
+            graph.link(f"pulse:sink:{entry['monitor_of']}", f"pulse:source:{entry['name']}", "monitor")
+    for kind, entries, device_key, word in (
+        ("playback", pulse.get("sink_inputs") or [], "sink", "plays to"),
+        ("recording", pulse.get("source_outputs") or [], "source", "records from"),
+    ):
+        for entry in entries:
+            identity = f"pulse:{kind}:{entry['index']}"
+            application = entry.get("application") or entry.get("binary") or "unknown application"
+            label = f"{application} {kind} stream {entry['index']}"
+            if entry.get("media") and entry.get("media") != application:
+                label += f" “{entry['media']}”"
+            names = {f"stream {entry['index']}": 0, f"{kind} {entry['index']}": 0}
+            for value in (entry.get("application"), entry.get("binary")):
+                if value:
+                    names[value] = 1
+                    names[f"{value} {kind}"] = 0
+            if entry.get("media"):
+                names[entry["media"]] = 2
+            graph.add(Node(identity, f"pulse_{kind}", f"{label} (PulseAudio)", {"entry": entry}), names)
+            device = entry.get(device_key)
+            if device:
+                if kind == "playback":
+                    graph.link(identity, f"pulse:sink:{device}", None)
+                else:
+                    graph.link(f"pulse:source:{device}", identity, None)
+    return jack_clients
+
+
+def build_graph(
+    *,
+    records: dict,
+    wireless: dict,
+    wireless_links: dict[str, str],
+    jack: dict,
+    pulse: dict,
+    cards: list[dict],
+    card_links: dict[str, str],
+    bridges: dict[str, dict],
+) -> SignalGraph:
+    graph = SignalGraph()
+    _add_dante(graph, records)
+    _add_wireless(graph, wireless, wireless_links)
+    pulse_clients = _add_pulse(graph, pulse, jack.get("ports") or {}) if pulse.get("available") else set()
+    if jack.get("available"):
+        _add_jack(graph, jack, cards, card_links, bridges, pulse_clients)
+        _add_pulse_links_after_jack(graph, pulse, jack.get("ports") or {})
+    return graph
+
+
+def _add_pulse_links_after_jack(graph: SignalGraph, pulse: dict, jack_ports: dict) -> None:
+    clients = _ports_by_client(jack_ports)
+    for kind, entries in (("sink", pulse.get("sinks") or []), ("source", pulse.get("sources") or [])):
+        for entry in entries:
+            jack_client = entry.get("jack_client")
+            if not jack_client or jack_client not in clients:
+                continue
+            identity = f"pulse:{kind}:{entry['name']}"
+            if kind == "sink":
+                for port in clients[jack_client]["output"]:
+                    graph.link(identity, f"jack:{port}", f"JACK client {jack_client}")
+            else:
+                for port in clients[jack_client]["input"]:
+                    graph.link(f"jack:{port}", identity, f"JACK client {jack_client}")
+
+
+def jack_meter_targets(graph: SignalGraph, identities: list[str], jack_ports: dict) -> dict[str, list[str]]:
+    targets: dict[str, list[str]] = {}
+    for identity in identities:
+        node = graph.nodes.get(identity)
+        if node is None:
+            continue
+        if node.kind == "jack":
+            port = jack_ports.get(node.details["port"]) or {}
+            targets[node.details["port"]] = (
+                [node.details["port"]] if port.get("direction") == "output" else list(port.get("connections") or ())
+            )
+        elif node.kind in {"pulse_sink", "pulse_source"}:
+            for following, _ in (
+                graph.downstream.get(identity, ()) if node.kind == "pulse_sink" else graph.upstream.get(identity, ())
+            ):
+                follower = graph.nodes.get(following)
+                if follower is not None and follower.kind == "jack":
+                    port = jack_ports.get(follower.details["port"]) or {}
+                    targets[follower.details["port"]] = (
+                        [follower.details["port"]]
+                        if port.get("direction") == "output"
+                        else list(port.get("connections") or ())
+                    )
+    return targets
+
+
+def _jack_level(result: dict | None) -> tuple[str, str]:
+    if not result:
+        return "unknown", "not measured"
+    if result.get("error"):
+        return "unknown", result["error"]
+    if result.get("connected") is False:
+        return "silent", "nothing connected"
+    peak, rms = result.get("peak_dbfs"), result.get("rms_dbfs")
+    if peak is None:
+        return "silent", "digital silence"
+    text = f"peak {peak:g} dBFS, RMS {rms:g} dBFS" if rms is not None else f"peak {peak:g} dBFS"
+    return ("signal" if peak >= SIGNAL_FLOOR_DBFS else "silent"), text
+
+
+def _dante_level(reading: dict | None) -> tuple[str, str]:
+    if not isinstance(reading, dict):
+        return "unknown", "not metered"
+    state = reading.get("state")
+    dbfs = reading.get("dbfs")
+    if state in {"signal_present", "clipping"}:
+        text = f"{dbfs:g} dBFS" if isinstance(dbfs, (int, float)) else "signal"
+        return "signal", text + (" (clipping)" if state == "clipping" else "")
+    if state == "below_threshold":
+        return "quiet", f"very quiet ({dbfs:g} dBFS)" if isinstance(dbfs, (int, float)) else "very quiet"
+    if state in {"mute_or_floor", "muted"}:
+        return "silent", "silent"
+    return "unknown", str(state or "unknown")
+
+
+def _wireless_level(details: dict) -> tuple[str, str]:
+    channel = details.get("channel") or {}
+    state = details.get("state")
+    if state == "no transmitter":
+        return "silent", "no transmitter"
+    if state in {"muted", "RF muted"}:
+        return "silent", state
+    rms = channel.get("audio_level_rms")
+    peak = channel.get("audio_level_peak")
+    if isinstance(rms, int):
+        rms_dbfs = rms - SHURE_LEVEL_OFFSET
+        peak_text = f", peak {peak - SHURE_LEVEL_OFFSET} dBFS" if isinstance(peak, int) else ""
+        return ("signal" if rms_dbfs >= SIGNAL_FLOOR_DBFS else "silent"), f"RMS {rms_dbfs} dBFS{peak_text}"
+    levels = [channel.get(key) for key in ("audio_in_level_l", "audio_in_level_r")]
+    if any(isinstance(level, int) for level in levels):
+        return "unknown", f"input level {levels[0]}/{levels[1]} (device units)"
+    return "unknown", state or "on"
+
+
+def node_level(
+    graph: SignalGraph,
+    identity: str,
+    jack_levels: dict[str, dict],
+    dante_levels: dict[str, dict],
+) -> tuple[str, str] | None:
+    node = graph.nodes.get(identity)
+    if node is None:
+        return None
+    if node.kind == "jack":
+        return _jack_level(jack_levels.get(node.details["port"]))
+    if node.kind in {"dante_rx", "dante_tx"}:
+        if node.details.get("online") is False:
+            return "silent", "device offline"
+        readings = (dante_levels.get(node.details["device"]) or {}).get(node.details["direction"]) or {}
+        reading = readings.get(node.details.get("channel"))
+        if reading is None:
+            reading = readings.get(str(node.details.get("channel")))
+        return _dante_level(reading)
+    if node.kind == "wireless":
+        return _wireless_level(node.details)
+    if node.kind in {"pulse_sink", "pulse_source"}:
+        entry = node.details["entry"]
+        followers = (
+            graph.downstream.get(identity, ()) if node.kind == "pulse_sink" else graph.upstream.get(identity, ())
+        )
+        results = [
+            jack_levels.get(graph.nodes[following].details["port"])
+            for following, _ in followers
+            if graph.nodes.get(following) is not None and graph.nodes[following].kind == "jack"
+        ]
+        volume = entry.get("volume_percent") or []
+        suffix = f", volume {'/'.join(str(value) for value in volume)}%" if volume else ""
+        if entry.get("mute"):
+            suffix += ", muted"
+        if results:
+            loudest = max(results, key=lambda result: (result or {}).get("peak_dbfs") or -1000.0)
+            state, text = _jack_level(loudest)
+            return state, (f"loudest channel {text}" if len(results) > 1 else text) + suffix
+        return "unknown", (entry.get("state") or "unknown") + suffix
+    if node.kind in {"pulse_playback", "pulse_recording"}:
+        entry = node.details["entry"]
+        parts = []
+        if entry.get("corked"):
+            parts.append("paused")
+        if entry.get("mute"):
+            parts.append("muted")
+        volume = entry.get("volume_percent") or []
+        if volume:
+            parts.append(f"volume {'/'.join(str(value) for value in volume)}%")
+        state = "silent" if entry.get("mute") or entry.get("corked") else "unknown"
+        return state, ", ".join(parts) or "running"
+    return None
+
+
+def render(
+    graph: SignalGraph,
+    starts: list[str],
+    steps: list[Step],
+    direction: str,
+    levels: dict[str, tuple[str, str]],
+) -> tuple[list[str], list[str]]:
+    arrow = ARROWS[direction]
+    lines = []
+    for step in steps:
+        node = graph.nodes[step.identity]
+        text = f"{'  ' * (step.depth - 1)}{arrow} {node.label}"
+        if step.note:
+            text += f" via {step.note}"
+        if step.repeated:
+            text += " (shown above)"
+        elif step.identity in levels:
+            text += f": {levels[step.identity][1]}"
+        if direction == "downstream" and not step.repeated and node.details.get("mixes"):
+            text += f" (a mix of {', '.join(node.details['mixes'])})"
+        lines.append(text)
+    stops = []
+    for step in steps:
+        if step.parent is None or step.repeated:
+            continue
+        upstream, downstream = (
+            (step.parent, step.identity) if direction == "downstream" else (step.identity, step.parent)
+        )
+        upstream_state = levels.get(upstream, ("unknown", ""))[0]
+        downstream_state = levels.get(downstream, ("unknown", ""))[0]
+        if upstream_state in {"signal", "quiet"} and downstream_state == "silent":
+            stops.append(f"{graph.nodes[upstream].label} has signal but {graph.nodes[downstream].label} is silent")
+    return lines, stops

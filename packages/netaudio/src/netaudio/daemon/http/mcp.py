@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
+from netaudio.daemon.http.mcp_host_audio import HOST_AUDIO_TOOL_NAMES, HOST_AUDIO_TOOL_SPECS, McpHostAudioTools
 from netaudio.daemon.http.mcp_planned import PLANNED_BY_NAME, PLANNED_OPERATIONS, PlannedOperation
 from netaudio.daemon.http.mcp_presets import PRESET_TOOLS, McpPresetTools
 from netaudio.daemon.http.mcp_preview import (
@@ -97,7 +98,9 @@ MCP_INSTRUCTIONS = (
     "get_routing for the patch, find_channels to locate a channel by its label, and get_device for focused "
     "details. Use discover_tools to find other operations and their exact schemas, then invoke_tool to run them: "
     "get_device_diagnostics for per-flow latency and late packets, get_signal_levels for whether audio is "
-    "present, get_wireless_devices for Shure mics, inspect_device_controls for a device's own panel (AVIO "
+    "present, trace_signal to follow audio from any point through Shure wireless, Dante, this computer's sound "
+    "cards, JACK and PulseAudio with levels at each step, get_host_audio for this computer's JACK and PulseAudio, "
+    "get_wireless_devices for Shure mics, inspect_device_controls for a device's own panel (AVIO "
     "Bluetooth pairing and name, analog levels, Dante AV video), and save_preset/apply_preset to keep and restore "
     "setups by name. Reads are compact by default; detail=debug exposes raw evidence. Channels accept unique labels or "
     "numbers. Call a write without confirmed to see exactly what it would change; nothing changes until the "
@@ -1275,10 +1278,17 @@ RESOURCES: tuple[McpResource, ...] = (
             "Whether audio is present. Without a device: for each device, the channels carrying signal with their "
             "dBFS level and how many are silent. With a device: the rx and tx channels with signal and their level, "
             "and the silent ones by name or number range. Devices with detailed metering are sampled on request. "
-            "Debug includes every channel and the raw meter codes."
+            "points measures named places anywhere in the chain instead: JACK ports, PulseAudio inputs, outputs "
+            "and applications, Shure channels or Dante channels. Debug includes every channel and the raw meter codes."
         ),
         tool_properties={
             "device": device_property(),
+            "points": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "description": "Places to measure, such as system:capture_1, default input, Discord or AD4D-A ch1.",
+            },
             "detail": {"type": "string", "enum": ["compact", "debug"], "default": "compact"},
         },
     ),
@@ -1299,7 +1309,14 @@ RESOURCES: tuple[McpResource, ...] = (
 )
 
 TOOLS: tuple[McpTool, ...] = tuple(
-    sorted((*ACTION_TOOLS, *(resource.to_tool() for resource in RESOURCES)), key=lambda tool: tool.name)
+    sorted(
+        (
+            *ACTION_TOOLS,
+            *(resource.to_tool() for resource in RESOURCES),
+            *(McpTool(**specification) for specification in HOST_AUDIO_TOOL_SPECS),
+        ),
+        key=lambda tool: tool.name,
+    )
 )
 PUBLIC_TOOL_NAMES = frozenset(
     {
@@ -1317,6 +1334,7 @@ PUBLIC_TOOL_NAMES = frozenset(
         "get_server_info",
         "set_subscriptions",
         "get_device_diagnostics",
+        "trace_signal",
     }
 )
 PUBLIC_TOOLS = tuple(tool for tool in TOOLS if tool.name in PUBLIC_TOOL_NAMES)
@@ -1507,6 +1525,34 @@ DISCOVERY_HINTS = {
     "list_presets": {"preset", "saved"},
     "create_transmit_flow": {"multicast", "stream"},
     "get_wireless_devices": {"mic", "microphone", "wireless", "battery", "transmitter", "receiver"},
+    "trace_signal": {
+        "audio",
+        "sound",
+        "silent",
+        "silence",
+        "hear",
+        "chain",
+        "path",
+        "trace",
+        "follow",
+        "where",
+        "mic",
+        "microphone",
+        "jack",
+        "pulseaudio",
+        "pulse",
+        "discord",
+        "application",
+    },
+    "get_host_audio": {"jack", "pulse", "pulseaudio", "computer", "host", "linux", "card", "alsa", "xrun", "xruns"},
+    "connect_audio_ports": {"jack", "port", "connect", "patch", "route", "computer"},
+    "disconnect_audio_ports": {"jack", "port", "disconnect", "unpatch", "computer"},
+    "set_audio_volume": {"volume", "louder", "quieter", "pulseaudio", "pulse", "application", "computer"},
+    "set_audio_mute": {"mute", "unmute", "pulseaudio", "pulse", "application", "computer"},
+    "set_default_audio_device": {"default", "output", "input", "speakers", "microphone", "pulseaudio"},
+    "move_audio_stream": {"move", "stream", "application", "output", "input", "pulseaudio"},
+    "link_audio_card": {"card", "alsa", "pcie", "usb", "link", "computer"},
+    "set_wireless_value": {"mic", "wireless", "gain", "frequency", "name", "mute", "shure", "transmitter"},
     "inspect_device_controls": {"bluetooth", "paired", "pairing", "panel", "video", "hdmi", "analog", "settings"},
     "plan_device_control": {"bluetooth", "name", "discoverable", "discovery", "pairing", "forget", "analog", "level"},
     "apply_device_control": {
@@ -1535,6 +1581,19 @@ DISCOVERY_ALIASES = {
     "subscribe": {"route"},
 }
 DISCOVERY_CATEGORIES = (
+    (
+        "this computer's audio",
+        (
+            "host_audio",
+            "audio_ports",
+            "audio_volume",
+            "audio_mute",
+            "audio_device",
+            "audio_stream",
+            "audio_card",
+            "trace_signal",
+        ),
+    ),
     ("Dante Domain Manager", ("ddm",)),
     ("presets", ("preset",)),
     ("clock", ("clock", "leader", "signal_reference")),
@@ -2099,7 +2158,7 @@ def _result_payload(result: dict):
     return payload
 
 
-class DaemonMcpHandlers(McpPresetTools):
+class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
     mcp_token: str | None = None
 
     def mcp_server_info(self) -> dict:
@@ -2313,6 +2372,14 @@ class DaemonMcpHandlers(McpPresetTools):
             await self._await_inventory(_request_selectors(arguments), writer)
         if tool.name == "apply_to_devices":
             return await self._apply_to_devices(arguments, writer)
+        if tool.name in HOST_AUDIO_TOOL_NAMES or (tool.name == "get_signal_levels" and arguments.get("points")):
+            try:
+                payload, is_error = await self._host_audio_tool(
+                    tool.name, arguments, writer, grant.client_name if grant else "unknown client"
+                )
+            except ValueError as exception:
+                return _tool_result({"error": str(exception)}, is_error=True)
+            return _tool_result(payload, is_error=is_error)
         if tool.name in PRESET_TOOLS:
             if arguments.get("confirmed") is True:
                 logger.info("MCP %s called %s", grant.client_name if grant else "unknown client", tool.name)
@@ -2526,6 +2593,10 @@ class DaemonMcpHandlers(McpPresetTools):
         payload = compact(payload)
         if payload == {} and tool.name in EMPTY_RESULTS:
             payload = {"result": EMPTY_RESULTS[tool.name]}
+        if tool.name == "get_issues" and status < 400 and isinstance(payload, dict) and not request.get("device"):
+            conditions = self._host_conditions()
+            if conditions:
+                payload["host_and_wireless"] = conditions
         return _tool_result(payload, is_error=status >= 400)
 
     async def _fresh_transmit_flows(self, server_name: str, writer) -> list | None:
@@ -2940,6 +3011,7 @@ class DaemonMcpHandlers(McpPresetTools):
             ddm_known = ddm_inventory_known(snapshots["ddm"])
             return _tool_result(device_list_view(snapshots["devices"], ddm_known), is_error=False)
         view = network_overview_view(**snapshots)
+        view.update(self._host_overview())
         devices, problems = await self._stream_health(snapshots["devices"], writer)
         worst = [
             (entry["worst_latency_ms"] / entry["latency_budget_ms"], entry)

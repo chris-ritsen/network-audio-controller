@@ -31,6 +31,7 @@ from netaudio.daemon.systemd import notify_systemd as _sd_notify
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.services.heartbeat import DanteHeartbeatService
+from netaudio.host_audio.manager import HostAudioManager
 from netaudio.shure.manager import ShureManager
 
 
@@ -181,6 +182,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self.managed_signals = ManagedSignalReceiver(self.application, self.metering)
         self.managed_inventory = ManagedInventoryRegistry(managed_configuration)
         self.shure = ShureManager(self.application.dispatcher) if ShureManager else None
+        self.host_audio = HostAudioManager() if daemon_config.get("host_audio", True) is not False else None
         self.http_api = DaemonHTTPServer(
             self.application,
             self.state,
@@ -194,6 +196,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             refresh_discovery=self.refresh_discovery,
             event_journal=self.event_journal,
             tls=daemon_tls_settings(),
+            host_audio=self.host_audio,
         )
         self.managed_inventory.set_callback(self._on_managed_inventory_changed)
         self.heartbeat: DanteHeartbeatService | None = None
@@ -652,6 +655,10 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if self.shure:
             await self.shure.start()
 
+        if self.host_audio:
+            _sd_notify("STATUS=Connecting to JACK and PulseAudio...")
+            await self.host_audio.start()
+
         self.heartbeat = DanteHeartbeatService(
             device_by_ip=self.application._device_by_ip,
             get_devices=lambda: self.application.devices,
@@ -764,6 +771,12 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 await self.shure.stop()
             except (OSError, RuntimeError) as exception:
                 logger.warning(f"Shure stop error: {exception}", exc_info=True)
+
+        if self.host_audio:
+            try:
+                await self.host_audio.stop()
+            except (OSError, RuntimeError) as exception:
+                logger.warning(f"Host audio stop error: {exception}", exc_info=True)
 
         try:
             await self.managed_signals.stop()

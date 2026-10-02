@@ -269,6 +269,18 @@ wheels = [
 ]
 
 [[package]]
+name = "jack-client"
+version = "0.5.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0c/d9/f960dec29e0d2719abf3b995e4925e1885ce7c95c8082ace0e626c0d9238/jack_client-0.5.7.tar.gz", hash = "sha256:573b13b2c231b671ffa3f9dddc5ed53fe534744190c1ff27a62e3915846067e5", size = 131205, upload-time = "2026-09-23T18:31:57.144Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/dd/ba4f56992e958a2b6a4a0603a7bf69f5de275538eee4041e77e1f9882719/jack_client-0.5.7-py3-none-any.whl", hash = "sha256:395c4c6d095a95c4fde588ba3675df2d72683737c38c8790810c73bf6629dfb6", size = 28854, upload-time = "2026-09-23T18:31:55.94Z" },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -298,6 +310,8 @@ dependencies = [
     { name = "cryptography" },
     { name = "dbus-fast", marker = "sys_platform == 'linux'" },
     { name = "ifaddr" },
+    { name = "jack-client" },
+    { name = "pulsectl-asyncio", marker = "sys_platform == 'linux'" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -337,6 +351,8 @@ requires-dist = [
     { name = "dbus-fast", marker = "sys_platform == 'linux'", specifier = ">=2.0.0" },
     { name = "dbus-fast", marker = "extra == 'dbus'", specifier = ">=2.0.0" },
     { name = "ifaddr", specifier = ">=0.2.0" },
+    { name = "jack-client", specifier = ">=0.5.4" },
+    { name = "pulsectl-asyncio", marker = "sys_platform == 'linux'", specifier = ">=1.2.0" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", marker = "extra == 'capture'", specifier = ">=5.0.0" },
@@ -386,6 +402,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
+name = "pulsectl"
+version = "24.12.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/c5/f070a8c5f0a5742f7aebb5d90869ee1805174c03928dfafd3833de58bd57/pulsectl-24.12.0.tar.gz", hash = "sha256:288d6715232ac6f3dcdb123fbecaa2c0b9a50ea4087e6e87c3f841ab0a8a07fc", size = 41200, upload-time = "2024-12-26T13:22:57.389Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/a9/5b119f86dd1a053c55da7d0355fca2ad215bae6f7f4777d46b307a8cc3e9/pulsectl-24.12.0-py2.py3-none-any.whl", hash = "sha256:13a60be940594f03ead3245b3dfe3aff4a3f9a792af347674bde5e716d4f76d2", size = 35133, upload-time = "2024-12-26T13:22:53.395Z" },
+]
+
+[[package]]
+name = "pulsectl-asyncio"
+version = "1.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pulsectl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/66/ea5b68261ff9c3f00a1499fe6acea0aa833b2080ac41978b09d1af01e61e/pulsectl_asyncio-1.3.2.tar.gz", hash = "sha256:89f6f0706e53e2492c0baebb13961acfedb1fadadda1dbcb7159572d3037d307", size = 22630, upload-time = "2026-06-27T11:27:59.458Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/85/ac/bef22729728727cf2314bd80563e834e3ab17bfb7b703e9e34f44ff44810/pulsectl_asyncio-1.3.2-py3-none-any.whl", hash = "sha256:aa3adf89fe91a80ec1a5c92de3dcfd17a8f171006a07a2ec59a4a13d031fc70d", size = 16725, upload-time = "2026-06-27T11:27:58.591Z" },
 ]
 
 [[package]]

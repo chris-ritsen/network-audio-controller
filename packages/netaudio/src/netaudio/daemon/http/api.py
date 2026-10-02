@@ -25,12 +25,15 @@ from netaudio.daemon.api_contract import API_VERSION, api_contract
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.connections import DaemonConnectionHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
+from netaudio.daemon.http.host_audio import DaemonHostAudioHandlers
+from netaudio.daemon.http.host_audio_control import DaemonHostAudioControlHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
 from netaudio.daemon.http.mcp import MCP_PATH, DaemonMcpHandlers
 from netaudio.daemon.http.oauth import DaemonOAuthHandlers
 from netaudio.daemon.http.presets import DaemonPresetHandlers
 from netaudio.daemon.http.request_scope import REQUEST_INVENTORY
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
+from netaudio.daemon.http.shure import DaemonShureHandlers
 from netaudio.daemon.http.sse_view import TELEMETRY_FIELDS, SseDeviceView, substantive_record
 from netaudio.daemon.http.tls import (
     TLSConfigurationError,
@@ -176,6 +179,9 @@ class DaemonHTTPServer(
     DaemonConfigurationHandlers,
     DaemonDeviceHandlers,
     DaemonManagedHandlers,
+    DaemonHostAudioHandlers,
+    DaemonHostAudioControlHandlers,
+    DaemonShureHandlers,
     DaemonMcpHandlers,
     DaemonOAuthHandlers,
     DaemonWebHandlers,
@@ -195,6 +201,7 @@ class DaemonHTTPServer(
         event_journal=None,
         tls: TLSSettings | None = None,
         mcp_token: str | None = None,
+        host_audio=None,
     ):
         self.application = application
         self.diagnostics: DanteHeartbeatService | None = None
@@ -225,6 +232,10 @@ class DaemonHTTPServer(
         self.subscription_readback = SubscriptionReadback(self._emit_device_updated, application)
         self.metering = metering
         self.shure = shure
+        self.host_audio = host_audio
+        self._host_audio_broadcasts: set[asyncio.Task] = set()
+        if host_audio is not None:
+            host_audio.add_listener(self._on_host_audio_changed)
         self.on_shutdown = on_shutdown
         self.mark_offline = mark_offline or application.mark_device_offline
         self.forget_device = forget_device or application.unregister_device
@@ -308,6 +319,15 @@ class DaemonHTTPServer(
             "/diagnostics/reset": self._handle_reset_diagnostics,
             "/diagnostics/policy": self._handle_diagnostics_policy,
             "/event-journal/operations": self._handle_append_operation_event,
+            "/host-audio/levels": self._handle_host_audio_levels,
+            "/host-audio/jack/connect": self._handle_jack_connect,
+            "/host-audio/jack/disconnect": self._handle_jack_disconnect,
+            "/host-audio/pulse/volume": self._handle_pulse_volume,
+            "/host-audio/pulse/mute": self._handle_pulse_mute,
+            "/host-audio/pulse/default": self._handle_pulse_default,
+            "/host-audio/pulse/move": self._handle_pulse_move,
+            "/host-audio/cards": self._handle_link_card,
+            "/shure/set": self._handle_shure_set,
             "/shutdown": self._handle_shutdown,
         }
         self.post_body_optional = {"/ddm/refresh", "/refresh", "/shutdown"}
@@ -504,6 +524,15 @@ class DaemonHTTPServer(
                 "device": device.to_json(),
             }
         )
+
+    def _on_host_audio_changed(self, component: str) -> None:
+        if not self.sse_clients:
+            return
+        task = asyncio.get_running_loop().create_task(
+            self._broadcast_sse({"event": "host_audio_changed", "component": component})
+        )
+        self._host_audio_broadcasts.add(task)
+        task.add_done_callback(self._host_audio_broadcasts.discard)
 
     async def _on_shure_removed(self, event: DanteEvent):
         await self._broadcast_sse(
@@ -999,6 +1028,7 @@ class DaemonHTTPServer(
                 "/ddm/domains/update",
                 "/device-lock-key",
                 "/settings/monitoring",
+                "/host-audio/cards",
             }
         ) and headers:
             origin = headers.get("origin")
@@ -1024,6 +1054,10 @@ class DaemonHTTPServer(
                 await self._handle_get_shure_devices(writer)
             elif route.startswith("/shure/devices/"):
                 await self._handle_get_shure_device(writer, route[len("/shure/devices/") :])
+            elif route == "/host-audio":
+                await self._handle_get_host_audio(writer, query)
+            elif route == "/host-audio/trace":
+                await self._handle_get_host_audio_trace(writer, query)
             elif route == "/devices":
                 await self._handle_get_devices(writer, context_name)
             elif route == "/external-flows":
