@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import struct
 from pathlib import Path
 
 from netaudio.common.manifest import write_manifest
@@ -16,6 +15,7 @@ from netaudio.dante.const import (
 )
 from netaudio.dante.debug_formatter import _external_labels
 from netaudio.dante.dissection.header import parse_packet_header
+from netaudio.dante.dissection.values import decode_field, hexadecimal_display
 from netaudio.dante.packet_store.payloads import decompress_payload
 
 logger = logging.getLogger("netaudio")
@@ -468,34 +468,14 @@ def _extract_field(payload: bytes, field: dict) -> dict | None:
         return None
 
     raw = payload[offset : offset + length]
-
-    try:
-        if dtype == "uint8" and length == 1:
-            value = raw[0]
-            display = str(value)
-        elif dtype == "uint16_be" and length == 2:
-            value = struct.unpack(">H", raw)[0]
-            display = f"0x{value:04X}" if name in ("opcode", "protocol_id", "message_type", "status") else str(value)
-        elif dtype == "uint32_be" and length == 4:
-            value = struct.unpack(">I", raw)[0]
-            display = str(value)
-        elif dtype == "int32_be" and length == 4:
-            value = struct.unpack(">i", raw)[0]
-            display = str(value)
-        elif dtype == "ascii":
-            value = raw.rstrip(b"\x00").decode("ascii", errors="replace")
-            display = value if value else "(empty)"
-        elif dtype == "ipv4" and length == 4:
-            display = f"{raw[0]}.{raw[1]}.{raw[2]}.{raw[3]}"
-            value = display
-        elif dtype == "hex":
-            display = ":".join(f"{b:02x}" for b in raw)
-            value = display
-        else:
-            display = raw.hex()
-            value = display
-    except (struct.error, UnicodeDecodeError):
-        return None
+    value = decode_field(raw, dtype)
+    if dtype == "hex":
+        value = ":".join(f"{byte:02x}" for byte in raw)
+    display = str(value)
+    if dtype == "ascii" and not value:
+        display = "(empty)"
+    elif dtype == "uint16_be" and name in ("opcode", "protocol_id", "message_type", "status"):
+        display = hexadecimal_display(value, dtype) or display
 
     profile_key = None
     if name in ("current_name", "factory_name", "receiver_name"):

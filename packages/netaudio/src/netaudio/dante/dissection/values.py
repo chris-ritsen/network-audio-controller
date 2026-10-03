@@ -4,6 +4,8 @@ import struct
 
 from netaudio.dante.dissection.models import DECIMAL_FIELD_NAMES, NANOSECOND_FIELD_NAMES
 
+HEXADECIMAL_DIGITS = {"uint16_be": 4, "uint32_be": 8, "uint8": 2}
+
 
 def _format_ns(value: int) -> str:
     if value == 0:
@@ -53,42 +55,38 @@ def _format_detail(name: str, raw: bytes, int_val, dtype: str) -> str:
     return ""
 
 
+def decode_field(raw: bytes, dtype: str):
+    if dtype == "ascii":
+        return raw.split(b"\x00", 1)[0].decode("ascii", errors="replace")
+    if dtype == "int32_be" and len(raw) == 4:
+        return struct.unpack(">i", raw)[0]
+    if dtype == "ipv4" and len(raw) == 4:
+        return ".".join(str(byte) for byte in raw)
+    if dtype == "uint16_be" and len(raw) == 2:
+        return struct.unpack(">H", raw)[0]
+    if dtype == "uint32_be" and len(raw) == 4:
+        return struct.unpack(">I", raw)[0]
+    if dtype == "uint8" and len(raw) == 1:
+        return raw[0]
+    return raw.hex()
+
+
+def hexadecimal_display(value, dtype: str) -> str | None:
+    digits = HEXADECIMAL_DIGITS.get(dtype)
+    if digits is None or not isinstance(value, int):
+        return None
+    return f"0x{value:0{digits}X}"
+
+
 def _extract_value(payload: bytes, offset: int, length: int, dtype: str, name: str = ""):
-    raw = payload[offset : offset + length]
-
-    if dtype == "uint8" and length == 1:
-        val = raw[0]
-        if name in DECIMAL_FIELD_NAMES:
-            return val, str(val)
-        return val, f"0x{val:02X}"
-    elif dtype == "uint16_be" and length == 2:
-        val = struct.unpack(">H", raw)[0]
-        if name in DECIMAL_FIELD_NAMES:
-            return val, str(val)
-        return val, f"0x{val:04X}"
-    elif dtype == "uint32_be" and length == 4:
-        val = struct.unpack(">I", raw)[0]
-        if name in DECIMAL_FIELD_NAMES:
-            return val, str(val)
-        return val, f"0x{val:08X}"
-    elif dtype == "int32_be" and length == 4:
-        val = struct.unpack(">i", raw)[0]
-        return val, str(val)
-    elif dtype == "ascii":
-        null_pos = raw.find(b"\x00")
-        if null_pos >= 0:
-            val = raw[:null_pos].decode("ascii", errors="replace")
-        else:
-            val = raw.decode("ascii", errors="replace")
-        return val, f'"{val}"'
-    elif dtype == "ipv4" and length == 4:
-        val = f"{raw[0]}.{raw[1]}.{raw[2]}.{raw[3]}"
-        return val, val
-    elif dtype == "hex":
-        val = raw.hex()
-        return val, val
-
-    return raw.hex(), raw.hex()
+    value = decode_field(payload[offset : offset + length], dtype)
+    if dtype == "ascii":
+        return value, f'"{value}"'
+    if name not in DECIMAL_FIELD_NAMES:
+        display = hexadecimal_display(value, dtype)
+        if display is not None:
+            return value, display
+    return value, str(value)
 
 
 def _humanize_value(name: str, int_val, display: str, dtype: str) -> str:

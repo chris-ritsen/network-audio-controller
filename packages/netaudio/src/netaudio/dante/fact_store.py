@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-import struct
 import tarfile
 import time
 from pathlib import Path
+
+from netaudio.dante.dissection.values import decode_field, hexadecimal_display
 
 
 DEFAULT_PROVENANCE_DIRECTORY = Path.home() / ".local" / "share" / "netaudio" / "provenance"
@@ -532,36 +533,9 @@ def _load_bundle(bundle_path: Path) -> tuple[dict, dict[str, bytes]]:
 
 def _extract_field_value(payload: bytes, field: dict) -> tuple[object, str]:
     offset = field.get("offset", 0)
-    length = field.get("length", 0)
     dtype = field.get("dtype", "")
-
-    raw = payload[offset : offset + length]
-
-    if dtype == "uint8" and length == 1:
-        value = raw[0]
-    elif dtype == "uint16_be" and length == 2:
-        value = struct.unpack(">H", raw)[0]
-    elif dtype == "uint32_be" and length == 4:
-        value = struct.unpack(">I", raw)[0]
-    elif dtype == "int32_be" and length == 4:
-        value = struct.unpack(">i", raw)[0]
-    elif dtype == "ascii":
-        value = raw.rstrip(b"\x00").decode("ascii", errors="replace")
-    elif dtype == "ipv4" and length == 4:
-        value = f"{raw[0]}.{raw[1]}.{raw[2]}.{raw[3]}"
-    elif dtype == "hex":
-        value = raw.hex()
-    else:
-        value = raw.hex()
-
-    if isinstance(value, int) and dtype in ("uint16_be", "uint32_be", "uint8"):
-        display = (
-            f"0x{value:04X}" if dtype == "uint16_be" else f"0x{value:08X}" if dtype == "uint32_be" else f"0x{value:02X}"
-        )
-    else:
-        display = str(value)
-
-    return value, display
+    value = decode_field(payload[offset : offset + field.get("length", 0)], dtype)
+    return value, hexadecimal_display(value, dtype) or str(value)
 
 
 def _field_applies_to_direction(field: dict, direction: str) -> bool:
@@ -583,14 +557,7 @@ def _verify_field(payload: bytes, field: dict) -> dict:
             "error": f"field {name}: offset {offset}+{length} exceeds payload length {len(payload)}",
         }
 
-    try:
-        actual, actual_display = _extract_field_value(payload, field)
-    except (LookupError, ValueError, struct.error) as exc:
-        return {
-            "ok": False,
-            "name": name,
-            "error": f"field {name}: parse error: {exc}",
-        }
+    actual, actual_display = _extract_field_value(payload, field)
 
     if expected_value is None:
         return {"ok": True, "name": name, "expected": None, "actual": actual_display, "value": actual}
