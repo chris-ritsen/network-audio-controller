@@ -322,22 +322,22 @@ fn flow_create_opcode(flow_protocol_id: u16) -> Result<u16, NetaudioError> {
 
 pub fn build_query_tx_flows(
     flow_protocol_id: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_query_tx_flows_from(flow_protocol_id, 1, transaction_id)
+    build_query_tx_flows_from(flow_protocol_id, 1, message_id)
 }
 
 pub fn build_query_tx_flows_from(
     flow_protocol_id: u16,
     starting_flow: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !(1..=MAX_LEGACY_FLOW_ID).contains(&starting_flow) {
         return Err(NetaudioError::InvalidFlowSlot);
     }
     match flow_protocol_id {
         PROTOCOL_DANTE_FLOW | PROTOCOL_DANTE_FLOW_2801 => {
-            build_query_fixed_tx_flows_from(flow_protocol_id, starting_flow, transaction_id)
+            build_query_fixed_tx_flows_from(flow_protocol_id, starting_flow, message_id)
         }
         flow_protocol_id
             if crate::protocol::is_modern_arc_protocol(flow_protocol_id) && starting_flow == 1 =>
@@ -348,7 +348,7 @@ pub fn build_query_tx_flows_from(
                 flow_protocol_id,
                 OPCODE_QUERY_TX_FLOWS_2809,
                 &body,
-                transaction_id,
+                message_id,
             )
         }
         flow_protocol_id if crate::protocol::is_modern_arc_protocol(flow_protocol_id) => {
@@ -361,7 +361,7 @@ pub fn build_query_tx_flows_from(
 pub fn build_query_fixed_tx_flows_from(
     protocol: u16,
     starting_flow: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !matches!(
         protocol,
@@ -375,7 +375,7 @@ pub fn build_query_fixed_tx_flows_from(
     let mut body = [0u8; 6];
     body[1] = 1;
     body[2..4].copy_from_slice(&starting_flow.to_be_bytes());
-    arc_packet_with_reserved_word(protocol, OPCODE_QUERY_TX_FLOWS, &body, transaction_id)
+    arc_packet_with_reserved_word(protocol, OPCODE_QUERY_TX_FLOWS, &body, message_id)
 }
 
 fn build_channel_status_query(
@@ -384,7 +384,7 @@ fn build_channel_status_query(
     media_selector: u16,
     starting_channel_identifier: u16,
     ending_channel_identifier: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !crate::protocol::is_modern_arc_protocol(protocol_id)
         || media_selector == 0
@@ -402,7 +402,7 @@ fn build_channel_status_query(
     if protocol_id == PROTOCOL_ARC_2809 {
         body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);
     }
-    arc_packet_with_reserved_word(protocol_id, opcode, &body, transaction_id)
+    arc_packet_with_reserved_word(protocol_id, opcode, &body, message_id)
 }
 
 pub fn build_query_transmitter_channel_status(
@@ -410,7 +410,7 @@ pub fn build_query_transmitter_channel_status(
     media_selector: u16,
     starting_channel_identifier: u16,
     ending_channel_identifier: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     build_channel_status_query(
         protocol_id,
@@ -418,7 +418,7 @@ pub fn build_query_transmitter_channel_status(
         media_selector,
         starting_channel_identifier,
         ending_channel_identifier,
-        transaction_id,
+        message_id,
     )
 }
 
@@ -430,7 +430,7 @@ pub struct TransmitterChannelNameReconciliationRecord {
 
 pub fn build_reconcile_transmitter_channel_names_2809(
     records: &[TransmitterChannelNameReconciliationRecord],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let record_count = u8::try_from(records.len()).map_err(|_| NetaudioError::PacketTooLarge)?;
     if record_count == 0 {
@@ -477,7 +477,7 @@ pub fn build_reconcile_transmitter_channel_names_2809(
         PROTOCOL_ARC_2809,
         OPCODE_RECONCILE_TRANSMITTER_CHANNEL_NAMES_2809,
         &body,
-        transaction_id,
+        message_id,
     )
 }
 
@@ -486,7 +486,7 @@ pub fn build_query_receiver_channel_status(
     media_selector: u16,
     starting_channel_identifier: u16,
     ending_channel_identifier: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     build_channel_status_query(
         protocol_id,
@@ -494,14 +494,14 @@ pub fn build_query_receiver_channel_status(
         media_selector,
         starting_channel_identifier,
         ending_channel_identifier,
-        transaction_id,
+        message_id,
     )
 }
 
 pub fn build_query_receiver_flow_status(
     protocol_id: u16,
     starting_flow: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !crate::protocol::is_modern_arc_protocol(protocol_id) || starting_flow == 0 {
         return Err(NetaudioError::InvalidFlowProtocol);
@@ -518,7 +518,7 @@ pub fn build_query_receiver_flow_status(
         protocol_id,
         OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809,
         &body,
-        transaction_id,
+        message_id,
     )
 }
 
@@ -526,7 +526,7 @@ pub fn build_set_receiver_channel_name_for_protocol(
     protocol_id: u16,
     channel_number: u16,
     name: &str,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !matches!(
         protocol_id,
@@ -553,14 +553,14 @@ pub fn build_set_receiver_channel_name_for_protocol(
         protocol_id,
         OPCODE_SET_RECEIVER_CHANNEL_NAME_2809,
         &body,
-        transaction_id,
+        message_id,
     )
 }
 
 pub fn build_query_receiver_flows(
     protocol_id: u16,
     starting_flow: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !crate::responses::FIXED_RECEIVER_FLOW_PROTOCOL_IDS.contains(&protocol_id) {
         return Err(NetaudioError::InvalidFlowProtocol);
@@ -575,14 +575,14 @@ pub fn build_query_receiver_flows(
         protocol_id,
         OPCODE_QUERY_RECEIVER_FLOWS,
         &body,
-        transaction_id,
+        message_id,
     )
 }
 
 pub fn build_query_transmit_channel_capabilities(
     starting_channel_identifier: u16,
     maximum_channel_count: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if starting_channel_identifier == 0 {
         return Err(NetaudioError::InvalidChannel);
@@ -595,17 +595,17 @@ pub fn build_query_transmit_channel_capabilities(
         PROTOCOL_DANTE_FLOW,
         OPCODE_QUERY_TRANSMIT_CHANNEL_CAPABILITIES,
         &body,
-        transaction_id,
+        message_id,
     )
 }
 
-pub fn build_query_receiver_port_ranges(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_query_receiver_port_ranges_for_protocol(PROTOCOL_DANTE_FLOW, transaction_id)
+pub fn build_query_receiver_port_ranges(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_query_receiver_port_ranges_for_protocol(PROTOCOL_DANTE_FLOW, message_id)
 }
 
 pub fn build_query_receiver_port_ranges_for_protocol(
     protocol_id: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !matches!(protocol_id, PROTOCOL_DANTE_FLOW | PROTOCOL_ARC_2809) {
         return Err(NetaudioError::UnsupportedProtocolOperation);
@@ -614,7 +614,7 @@ pub fn build_query_receiver_port_ranges_for_protocol(
         protocol_id,
         OPCODE_QUERY_RECEIVER_PORT_RANGES,
         &[],
-        transaction_id,
+        message_id,
     )
 }
 
@@ -622,7 +622,7 @@ pub fn build_create_tx_flow(
     flow_protocol_id: u16,
     flow_slot: u16,
     channels: &[u16],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let create_opcode = flow_create_opcode(flow_protocol_id)?;
     if !(1..=MAX_LEGACY_FLOW_ID).contains(&flow_slot) {
@@ -676,13 +676,13 @@ pub fn build_create_tx_flow(
     body.extend(std::iter::repeat_n(0, 14));
     body.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
 
-    arc_packet_with_reserved_word(flow_protocol_id, create_opcode, &body, transaction_id)
+    arc_packet_with_reserved_word(flow_protocol_id, create_opcode, &body, message_id)
 }
 
 pub fn build_delete_tx_flow(
     flow_protocol_id: u16,
     selection: TxFlowDeleteSelection,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !matches!(flow_protocol_id, PROTOCOL_DANTE_FLOW | PROTOCOL_ARC_2809) {
         return Err(NetaudioError::InvalidFlowProtocol);
@@ -699,7 +699,7 @@ pub fn build_delete_tx_flow(
                 flow_protocol_id,
                 OPCODE_DELETE_TX_FLOW,
                 &body,
-                transaction_id,
+                message_id,
             )
         }
         TxFlowDeleteSelection::Segmented {
@@ -717,7 +717,7 @@ pub fn build_delete_tx_flow(
                 flow_protocol_id,
                 OPCODE_DELETE_TX_FLOW_2809,
                 &body,
-                transaction_id,
+                message_id,
             )
         }
     }

@@ -962,11 +962,11 @@ fn channel_mutations_reject_channel_zero() {
 #[test]
 fn volume_builder_rejects_unrepresentable_names_before_constructing_offsets() {
     assert_eq!(
-        build_volume_start(&"a".repeat(65_521), [0; 4], [0; 6], 0, 0),
+        build_metering_start(&"a".repeat(65_521), [0; 4], [0; 6], 0, 0),
         Err(NetaudioError::NameTooLong)
     );
     assert_eq!(
-        build_volume_start("dev\0name", [0; 4], [0; 6], 0, 0),
+        build_metering_start("dev\0name", [0; 4], [0; 6], 0, 0),
         Err(NetaudioError::NameInvalidChars)
     );
 }
@@ -974,7 +974,7 @@ fn volume_builder_rejects_unrepresentable_names_before_constructing_offsets() {
 #[test]
 fn metering_start_for_ad4d_uses_the_controller_layout() {
     assert_eq!(
-            build_volume_start(
+            build_metering_start(
                 "ad4d",
                 [192, 168, 1, 156],
                 [0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24],
@@ -991,7 +991,7 @@ fn metering_start_for_ad4d_uses_the_controller_layout() {
 #[test]
 fn metering_start_for_a32_uses_the_controller_layout() {
     assert_eq!(
-            build_volume_start(
+            build_metering_start(
                 "a32",
                 [192, 168, 1, 156],
                 [0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24],

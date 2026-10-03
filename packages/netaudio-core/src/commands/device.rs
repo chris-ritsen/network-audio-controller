@@ -1,58 +1,58 @@
 use super::*;
 
-pub fn build_device_info(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_device_info_for_protocol(crate::protocol::PROTOCOL_ID, transaction_id)
+pub fn build_device_info(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_device_info_for_protocol(crate::protocol::PROTOCOL_ID, message_id)
 }
 
 pub fn build_device_info_for_protocol(
     protocol_id: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     build_common_device_query(
         protocol_id,
         OPCODE_DEVICE_INFO,
         &[0x00, 0x00],
-        transaction_id,
+        message_id,
     )
 }
 
-pub fn build_device_name(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_control_packet(OPCODE_DEVICE_NAME, &[0x00, 0x00], transaction_id)
+pub fn build_device_name(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_control_packet(OPCODE_DEVICE_NAME, &[0x00, 0x00], message_id)
 }
 
-pub fn build_channel_count(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_channel_count_for_protocol(crate::protocol::PROTOCOL_ID, transaction_id)
+pub fn build_channel_count(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_channel_count_for_protocol(crate::protocol::PROTOCOL_ID, message_id)
 }
 
 pub fn build_channel_count_for_protocol(
     protocol_id: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     build_common_device_query(
         protocol_id,
         OPCODE_CHANNEL_COUNT,
         &[0x00, 0x00],
-        transaction_id,
+        message_id,
     )
 }
 
-pub fn build_device_settings(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_control_packet(OPCODE_DEVICE_SETTINGS, &[0x00, 0x00], transaction_id)
+pub fn build_device_settings(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_control_packet(OPCODE_DEVICE_SETTINGS, &[0x00, 0x00], message_id)
 }
 
-pub fn build_property_directory(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_property_directory_for_protocol(crate::protocol::PROTOCOL_ID, transaction_id)
+pub fn build_property_directory(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_property_directory_for_protocol(crate::protocol::PROTOCOL_ID, message_id)
 }
 
 pub fn build_property_directory_for_protocol(
     protocol_id: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     build_common_device_query(
         protocol_id,
         OPCODE_PROPERTY_DIRECTORY,
         &[0x00, 0x00],
-        transaction_id,
+        message_id,
     )
 }
 
@@ -60,7 +60,7 @@ fn build_common_device_query(
     protocol_id: u16,
     opcode: u16,
     body: &[u8],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !matches!(
         protocol_id,
@@ -68,11 +68,11 @@ fn build_common_device_query(
     ) {
         return Err(NetaudioError::UnsupportedProtocolOperation);
     }
-    build_control_packet_for_protocol(protocol_id, opcode, body, transaction_id)
+    build_control_packet_for_protocol(protocol_id, opcode, body, message_id)
 }
 
-pub fn build_reset_name(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_control_packet(OPCODE_DEVICE_NAME_SET, &[0x00, 0x00], transaction_id)
+pub fn build_reset_name(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_control_packet(OPCODE_DEVICE_NAME_SET, &[0x00, 0x00], message_id)
 }
 
 fn page_starting_channel(page: u16, channels_per_page: u16) -> Result<u16, NetaudioError> {
@@ -81,19 +81,19 @@ fn page_starting_channel(page: u16, channels_per_page: u16) -> Result<u16, Netau
         .ok_or(NetaudioError::InvalidPage)
 }
 
-pub fn build_receivers(page: u16, transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
+pub fn build_receivers(page: u16, message_id: u16) -> Result<Vec<u8>, NetaudioError> {
     let starting_channel = page_starting_channel(page, 16)?;
     build_control_packet(
         OPCODE_RX_CHANNELS,
         &channel_query_payload(starting_channel),
-        transaction_id,
+        message_id,
     )
 }
 
 pub fn build_transmitters(
     page: u16,
     friendly_names: bool,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if friendly_names {
         return Err(NetaudioError::InvalidChannel);
@@ -102,25 +102,25 @@ pub fn build_transmitters(
     build_control_packet(
         OPCODE_TX_CHANNEL_INFO,
         &channel_query_payload(starting_channel),
-        transaction_id,
+        message_id,
     )
 }
 
 pub fn build_transmitter_names(
     channel_count: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     build_transmitter_names_for_protocol(
         crate::protocol::PROTOCOL_ID,
         channel_count,
-        transaction_id,
+        message_id,
     )
 }
 
 pub fn build_transmitter_names_for_protocol(
     protocol_id: u16,
     channel_count: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if channel_count == 0 {
         return Err(NetaudioError::InvalidChannel);
@@ -135,7 +135,7 @@ pub fn build_transmitter_names_for_protocol(
         protocol_id,
         OPCODE_TX_CHANNEL_NAMES,
         &channel_range_query_payload(1, channel_count),
-        transaction_id,
+        message_id,
     )
 }
 
@@ -224,7 +224,7 @@ pub fn parse_set_channel_name_request(data: &[u8]) -> Option<ChannelNameChange> 
 pub fn build_reset_channel_name(
     channel_type: ChannelType,
     channel_number: u8,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if channel_number == 0 {
         return Err(NetaudioError::InvalidChannel);
@@ -236,7 +236,7 @@ pub fn build_reset_channel_name(
     build_control_packet(
         opcode,
         &channel_name_payload(channel_type, channel_number, None),
-        transaction_id,
+        message_id,
     )
 }
 
@@ -245,7 +245,7 @@ pub fn build_set_channel_name_for_protocol(
     channel_type: ChannelType,
     channel_number: u16,
     name: &str,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if channel_number == 0 {
         return Err(NetaudioError::InvalidChannel);
@@ -263,7 +263,7 @@ pub fn build_set_channel_name_for_protocol(
                 protocol_id,
                 opcode,
                 &channel_name_payload(channel_type, channel_number, Some(name)),
-                transaction_id,
+                message_id,
             )
         }
         (PROTOCOL_ARC_2809 | crate::protocol::PROTOCOL_ARC_280F, ChannelType::Rx) => {
@@ -271,7 +271,7 @@ pub fn build_set_channel_name_for_protocol(
                 protocol_id,
                 channel_number,
                 name,
-                transaction_id,
+                message_id,
             )
         }
         (PROTOCOL_ARC_2809 | crate::protocol::PROTOCOL_ARC_280F, ChannelType::Tx) => {
@@ -281,7 +281,7 @@ pub fn build_set_channel_name_for_protocol(
                 protocol_id,
                 OPCODE_TX_CHANNEL_NAME_SET,
                 &channel_name_payload(ChannelType::Tx, channel_number, Some(name)),
-                transaction_id,
+                message_id,
             )
         }
         _ => Err(NetaudioError::UnsupportedProtocolOperation),

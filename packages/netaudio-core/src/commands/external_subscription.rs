@@ -214,7 +214,7 @@ fn build_bitmap_payload(
 
 pub fn build_external_receiver_subscription(
     specification: &ExternalReceiverSubscription<'_>,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !crate::protocol::is_supported_arc_protocol(specification.device_protocol) {
         return Err(NetaudioError::UnsupportedProtocolOperation);
@@ -230,7 +230,7 @@ pub fn build_external_receiver_subscription(
             .min(EXTERNAL_SUBSCRIPTION_PROTOCOL_CAP),
         OPCODE_EXTERNAL_RECEIVER_SUBSCRIPTION,
         &payload,
-        transaction_id,
+        message_id,
     )
 }
 

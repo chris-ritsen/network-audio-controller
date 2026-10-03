@@ -68,7 +68,7 @@ fn require_properties(
 fn build_property_write(
     negotiated_protocol_id: u16,
     properties: &[(u16, PropertyValue)],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let protocol_id = require_performance_protocol(negotiated_protocol_id)?;
     let body = property_write_body(properties)?;
@@ -77,7 +77,7 @@ fn build_property_write(
         protocol_id,
         OPCODE_DEVICE_SETTINGS_SET,
         &body,
-        transaction_id,
+        message_id,
     )
 }
 
@@ -122,20 +122,20 @@ pub(crate) fn property_write_body(
 
 pub fn build_store_current_configuration(
     negotiated_protocol_id: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     arc_packet_with_reserved_word(
         require_performance_protocol(negotiated_protocol_id)?,
         OPCODE_STORE_CURRENT_CONFIGURATION,
         &[],
-        transaction_id,
+        message_id,
     )
 }
 
 pub fn build_query_performance_settings(
     negotiated_protocol_id: u16,
     property_ids: &[u16],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let protocol_id = require_performance_protocol(negotiated_protocol_id)?;
     let count = u16::try_from(property_ids.len()).map_err(|_| NetaudioError::PacketTooLarge)?;
@@ -144,7 +144,7 @@ pub fn build_query_performance_settings(
     for property_id in property_ids {
         body.extend_from_slice(&property_id.to_be_bytes());
     }
-    arc_packet_with_reserved_word(protocol_id, OPCODE_DEVICE_SETTINGS, &body, transaction_id)
+    arc_packet_with_reserved_word(protocol_id, OPCODE_DEVICE_SETTINGS, &body, message_id)
 }
 
 pub fn build_set_receive_flow_performance(
@@ -153,7 +153,7 @@ pub fn build_set_receive_flow_performance(
     latency_microseconds: u64,
     frames_per_packet: u16,
     platform_software_version: [u16; 3],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let properties = receive_flow_performance_properties(
         supported_property_ids,
@@ -161,7 +161,7 @@ pub fn build_set_receive_flow_performance(
         frames_per_packet,
         platform_software_version,
     )?;
-    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+    build_property_write(negotiated_protocol_id, &properties, message_id)
 }
 
 pub(crate) fn receive_flow_performance_properties(
@@ -201,14 +201,14 @@ pub fn build_set_transmit_flow_performance(
     supported_property_ids: &[u16],
     latency_microseconds: u64,
     frames_per_packet: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let properties = transmit_flow_performance_properties(
         supported_property_ids,
         latency_microseconds,
         frames_per_packet,
     )?;
-    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+    build_property_write(negotiated_protocol_id, &properties, message_id)
 }
 
 pub(crate) fn transmit_flow_performance_properties(
@@ -242,7 +242,7 @@ pub fn build_set_unicast_performance(
     latency_microseconds: u64,
     frames_per_packet: u16,
     platform_software_version: [u16; 3],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let properties = unicast_performance_properties(
         supported_property_ids,
@@ -250,7 +250,7 @@ pub fn build_set_unicast_performance(
         frames_per_packet,
         platform_software_version,
     )?;
-    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+    build_property_write(negotiated_protocol_id, &properties, message_id)
 }
 
 pub(crate) fn unicast_performance_properties(
@@ -299,10 +299,10 @@ pub fn build_set_receive_flow_default_slots(
     negotiated_protocol_id: u16,
     supported_property_ids: &[u16],
     default_slots: u16,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let properties = receive_flow_default_slot_properties(supported_property_ids, default_slots)?;
-    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+    build_property_write(negotiated_protocol_id, &properties, message_id)
 }
 
 pub(crate) fn receive_flow_default_slot_properties(

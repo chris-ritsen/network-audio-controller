@@ -1,6 +1,6 @@
 use super::*;
 
-pub fn build_volume_start(
+pub fn build_metering_start(
     device_name: &str,
     ipv4: [u8; 4],
     mac: [u8; 6],
@@ -64,7 +64,7 @@ pub fn build_volume_stop(
     mac: [u8; 6],
     port: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    let mut packet = build_volume_start(device_name, [0u8; 4], mac, port, 0)?;
+    let mut packet = build_metering_start(device_name, [0u8; 4], mac, port, 0)?;
     clear_metering_destinations(&mut packet);
     Ok(packet)
 }
@@ -92,7 +92,7 @@ mod tests {
     fn generated_start_matches_captured_controller_request() {
         let captured = include_bytes!("../../../../tests/fixtures/metering/controller_start.bin");
         let generated =
-            build_volume_start("ad4d", [192, 0, 2, 10], [2, 0, 0, 0, 0, 1], 8751, 0x25c7).unwrap();
+            build_metering_start("ad4d", [192, 0, 2, 10], [2, 0, 0, 0, 0, 1], 8751, 0x25c7).unwrap();
         assert_eq!(generated.len(), captured.len());
         let synthetic_client_identifier = 10..18;
         let controller_name_padding = 0x23;
@@ -110,7 +110,7 @@ mod tests {
     fn generated_stop_preserves_subscription_identity_and_selector() {
         for name in ["ad4d", "a32", "lx-dante"] {
             let start =
-                build_volume_start(name, [192, 0, 2, 10], [2, 0, 0, 0, 0, 1], 8752, 0).unwrap();
+                build_metering_start(name, [192, 0, 2, 10], [2, 0, 0, 0, 0, 1], 8752, 0).unwrap();
             let stop = build_volume_stop(name, [2, 0, 0, 0, 0, 1], 8752).unwrap();
             let destinations_start = start.len() - 16;
             assert_eq!(start[..destinations_start], stop[..destinations_start]);

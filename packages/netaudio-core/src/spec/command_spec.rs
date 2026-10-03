@@ -1398,7 +1398,7 @@ pub(super) fn build_command(
             mac,
             port,
             message_id,
-        } => commands::build_volume_start(
+        } => commands::build_metering_start(
             &device_name,
             parse_optional_ipv4_address(&ipv4)?,
             parse_mac_required(&mac)?,

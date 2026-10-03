@@ -53,7 +53,7 @@ fn checked_mul(left: usize, right: usize) -> Result<usize, NetaudioError> {
 /// independently captured device exchange.
 pub fn build_create_multicast_flow_2809(
     specification: &MulticastFlow2809<'_>,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if ![0, 0x0001, 0x0071].contains(&specification.request_options_word) {
         return Err(NetaudioError::InvalidFlowProtocol);
@@ -216,7 +216,7 @@ pub fn build_create_multicast_flow_2809(
         PROTOCOL_ARC_2809,
         OPCODE_CREATE_TX_FLOW_2809,
         &body,
-        transaction_id,
+        message_id,
     )
 }
 

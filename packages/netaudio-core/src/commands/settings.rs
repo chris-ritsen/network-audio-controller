@@ -55,12 +55,12 @@ pub fn parse_set_latency_request(data: &[u8]) -> Option<u32> {
 
 pub fn build_set_latency(
     latency_milliseconds: f64,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     build_set_latency_for_protocol(
         crate::protocol::PROTOCOL_ID,
         latency_milliseconds,
-        transaction_id,
+        message_id,
     )
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn require_latency_protocol(protocol_id: u16) -> Result<(), NetaudioE
 pub fn build_set_latency_for_protocol(
     protocol_id: u16,
     latency_milliseconds: f64,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     require_latency_protocol(protocol_id)?;
     let latency_ns = crate::latency_configuration::requested_nanoseconds(latency_milliseconds)?;
@@ -94,7 +94,7 @@ pub fn build_set_latency_for_protocol(
         protocol_id,
         OPCODE_DEVICE_SETTINGS_SET,
         &payload,
-        transaction_id,
+        message_id,
     )
 }
 
@@ -429,18 +429,18 @@ pub fn build_dante_model(mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
     )
 }
 
-pub fn build_query_latency_config(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
+pub fn build_query_latency_config(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
     arc_packet_with_reserved_word(
         PROTOCOL_ARC_2809,
         OPCODE_DEVICE_SETTINGS,
         &LATENCY_CONFIG_QUERY_INFO_CODES,
-        transaction_id,
+        message_id,
     )
 }
 
 pub fn build_set_aes67_multicast_prefix(
     prefix: std::net::Ipv4Addr,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let mut body = Vec::with_capacity(10);
     body.extend_from_slice(&0x0101u16.to_be_bytes());
@@ -453,6 +453,6 @@ pub fn build_set_aes67_multicast_prefix(
         PROTOCOL_ARC_2809,
         OPCODE_DEVICE_SETTINGS_SET,
         &body,
-        transaction_id,
+        message_id,
     )
 }

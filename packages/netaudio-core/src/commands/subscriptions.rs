@@ -22,7 +22,7 @@ pub struct ReceiveChannelNamePageRecord {
 
 pub fn build_receive_channel_name_page_2729(
     records: &[ReceiveChannelNamePageRecord],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if records.len() != RECEIVE_CHANNEL_NAME_PAGE_CAPACITY {
         return Err(NetaudioError::InvalidPage);
@@ -64,7 +64,7 @@ pub fn build_receive_channel_name_page_2729(
         PROTOCOL_DANTE_FLOW,
         OPCODE_RX_CHANNEL_NAME_SET,
         &payload,
-        transaction_id,
+        message_id,
     )
 }
 
@@ -91,7 +91,7 @@ pub fn build_modern_arc_subscription_page(
     page_capacity: u8,
     media_type_code: u16,
     records: &[SubscriptionPageRecord],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !crate::protocol::is_modern_arc_protocol(protocol_id)
         || page_capacity == 0
@@ -181,7 +181,7 @@ pub fn build_modern_arc_subscription_page(
         protocol_id,
         OPCODE_MODERN_ARC_SUBSCRIPTION,
         &payload,
-        transaction_id,
+        message_id,
     )
 }
 
@@ -206,7 +206,7 @@ fn intern_subscription_page_string(
 
 pub fn build_subscription_page_2729(
     records: &[SubscriptionPageRecord],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if records.is_empty() || records.len() > SUBSCRIPTION_PAGE_CAPACITY {
         return Err(NetaudioError::SubscriptionCount);
@@ -269,7 +269,7 @@ pub fn build_subscription_page_2729(
         PROTOCOL_DANTE_FLOW,
         OPCODE_SUBSCRIPTION_ADD,
         &payload,
-        transaction_id,
+        message_id,
     )
 }
 
@@ -341,7 +341,7 @@ pub fn parse_add_subscriptions_request(data: &[u8]) -> Option<Vec<SubscriptionTa
 
 pub fn build_add_subscriptions(
     subscriptions: &[(u16, String, String)],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let count = subscriptions.len();
     if !(1..=LEGACY_SUBSCRIPTION_BATCH_CAPACITY).contains(&count) {
@@ -402,7 +402,7 @@ pub fn build_add_subscriptions(
     payload.extend(std::iter::repeat_n(0, padding_size));
     payload.extend_from_slice(&string_table);
 
-    build_control_packet(OPCODE_SUBSCRIPTION_ADD, &payload, transaction_id)
+    build_control_packet(OPCODE_SUBSCRIPTION_ADD, &payload, message_id)
 }
 
 /// Decode the disconnect request emitted by the legacy ARC subscription encoder.
@@ -435,7 +435,7 @@ pub fn parse_remove_subscriptions_request(data: &[u8]) -> Option<Vec<u32>> {
 
 pub fn build_remove_subscriptions(
     rx_channels: &[u32],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if rx_channels.is_empty() {
         return Err(NetaudioError::SubscriptionCount);
@@ -461,5 +461,5 @@ pub fn build_remove_subscriptions(
     for channel in rx_channels {
         payload.extend_from_slice(&channel.to_be_bytes());
     }
-    build_control_packet(OPCODE_SUBSCRIPTION_REMOVE, &payload, transaction_id)
+    build_control_packet(OPCODE_SUBSCRIPTION_REMOVE, &payload, message_id)
 }
