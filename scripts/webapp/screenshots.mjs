@@ -11,6 +11,7 @@ const SHOTS = [
   { name: "device-a32-status", path: "/devices/a32/status", viewport: { width: 960, height: 760 } },
   { name: "device-avio-bt-1-bluetooth", path: "/devices/avio-bt-1/device-config", scrollTo: "Bluetooth", viewport: { width: 960, height: 700 } },
   { name: "device-lx-dante-network", path: "/devices/lx-dante/network-config", viewport: { width: 960, height: 680 } },
+  { name: "devices", path: "/devices", viewport: { width: 1280, height: 660 } },
   {
     name: "routing",
     path: "/routing",
