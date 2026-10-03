@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from netaudio.common.config_loader import load_config_document
@@ -25,6 +26,8 @@ DEFAULT_METER_SECONDS = 0.5
 METERING_TIMEOUT_SECONDS = 4.0
 PEER_TIMEOUT_SECONDS = 3.0
 SUMMARY_PEER_TIMEOUT_SECONDS = 1.5
+FIND_LIMIT = 24
+NEIGHBOUR_LIMIT = 4
 POINT_FORMS = (
     "a Shure channel (AD4D-A ch1), a Dante channel (lx-dante rx 1), a JACK port or alias, "
     "a PulseAudio input or output, or an application name; add @computer for another computer"
@@ -226,6 +229,65 @@ class DaemonHostAudioHandlers:
             for key, label in (("jack", "JACK"), ("pulse", "PulseAudio"))
             if not (snapshot.get(key) or {}).get("available")
         ]
+
+    @staticmethod
+    def _short_label(graph: SignalGraph, identity: str) -> str:
+        node = graph.nodes.get(identity)
+        if node is None:
+            return identity
+        if node.kind == "jack":
+            return node.details["port"]
+        return node.label
+
+    def _neighbours(self, graph: SignalGraph, identity: str, edges: dict) -> str | None:
+        labels = [self._short_label(graph, other) for other, _ in edges.get(identity, ())]
+        if not labels:
+            return None
+        shown = ", ".join(labels[:NEIGHBOUR_LIMIT])
+        return shown + (f" and {len(labels) - NEIGHBOUR_LIMIT} more" if len(labels) > NEIGHBOUR_LIMIT else "")
+
+    async def host_audio_find(self, query: str) -> dict | None:
+        if self.host_audio is None:
+            return None
+        words = re.findall(r"[a-z0-9]+", query.casefold())
+        if not words:
+            return None
+        graph, snapshots, records, _ = await self._signal_graph()
+        names: dict[str, list[str]] = {}
+        for name, entries in graph.names.items():
+            for _, identity in entries:
+                names.setdefault(identity, []).append(name)
+        matches = []
+        for identity, node in graph.nodes.items():
+            if node.kind.startswith("dante"):
+                continue
+            text = " ".join(re.findall(r"[a-z0-9]+", " ".join([node.label, *names.get(identity, [])]).casefold()))
+            if all(word in text for word in words):
+                matches.append(identity)
+        if not matches:
+            return None
+        matches.sort(key=lambda identity: graph.nodes[identity].label)
+        shown = matches[:FIND_LIMIT]
+        measured, level_notes = await self._levels(graph, shown, snapshots, records, DEFAULT_METER_SECONDS)
+        lines = []
+        for identity in shown:
+            line = graph.nodes[identity].label
+            fed_by = self._neighbours(graph, identity, graph.upstream)
+            feeds = self._neighbours(graph, identity, graph.downstream)
+            if fed_by:
+                line += f" \u2190 {fed_by}"
+            if feeds:
+                line += f" \u2192 {feeds}"
+            if identity in measured:
+                line += f": {measured[identity][1]}"
+            lines.append(line)
+        return {
+            "matches": lines,
+            "omitted": len(matches) - len(shown) or None,
+            "measured_at": utc_now(),
+            "notes": level_notes or None,
+            "trace": "trace_signal follows any of these through the whole chain",
+        }
 
     async def host_audio_trace(
         self, point: str, direction: str = "both", levels: bool = True, seconds: float = DEFAULT_METER_SECONDS

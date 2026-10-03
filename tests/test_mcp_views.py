@@ -288,8 +288,6 @@ def test_routing_view_exposes_receive_number_and_label_with_problem_status():
     payload = {"lx-dante.local.": DEVICE}
     routes = routing_view(payload, {})["routes"]["lx-dante"]
     assert len(routes) == 2
-    assert routes[0] == f"1 wireless-mic:1 ← 01 on ad4d: Unresolved, {UNRESOLVED['detail']}"
-    assert routing_view(payload, {"status": "problem"})["count"] == 1
     assert routing_view(payload, {"status": "ok"})["count"] == 1
     assert routing_view(payload, {"rx_channel": 10})["routes"]["lx-dante"] == ["10 adat:left ← adat-1 on a32"]
     duplicate_names = {

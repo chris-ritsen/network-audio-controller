@@ -59,12 +59,17 @@ from netaudio.daemon.http.mcp_views import (
     flow_result_view,
     free_flow_ids,
     hexadecimal_byte_fields,
-    issues_view,
+    issue_groups_view,
     management_state,
     missing_devices,
     name_meter_channels,
     network_levels_view,
     network_overview_view,
+    last_seen_text,
+    off_devices,
+    receive_channels_text,
+    routes_by_source,
+    is_off,
     record_fields_view,
     renamed_devices,
     routing_view,
@@ -105,8 +110,10 @@ MCP_INSTRUCTIONS = (
     "setups by name. Reads are compact by default; detail=debug exposes raw evidence. Channels accept unique labels or "
     "numbers. Call a write without confirmed to see exactly what it would change; nothing changes until the "
     "user agrees and you call it again with confirmed=true, and the result reads the device back. Use "
-    "apply_to_devices to make one change on several devices. Operations with status planned are designed but "
-    "not built; calling one explains what blocks it."
+    "apply_to_devices to make one change on several devices. A device that is off the network is normal unless it "
+    "is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it are not "
+    "failures, and it is worth mentioning only when the question is about it. forget_device removes devices that "
+    "no longer matter. Operations with status planned are designed but not built; calling one explains what blocks it."
 )
 
 
@@ -646,8 +653,9 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
         name="get_network_overview",
         path="/devices",
         description=(
-            "One compact snapshot of known devices, clock leaders, open issues and Dante Domain Manager state. "
-            "Use focused tools for channels, routes or forensic detail."
+            "One compact snapshot of known devices, clock leaders, problems and Dante Domain Manager state. A device "
+            "that is off the network is listed only with when it was last seen; that is not a problem unless the "
+            "device is enrolled in Dante Domain Manager. Use focused tools for channels, routes or forensic detail."
         ),
         input_schema=object_schema({}, []),
         method="GET",
@@ -679,9 +687,10 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
         name="find_channels",
         path="/devices",
         description=(
-            "Find channels by label or device name across the whole network, such as 'tv speakers' or 'vrroom'. "
-            "Each receive channel shows what feeds it, each transmit channel shows where it goes, and every channel "
-            "shows whether it has signal right now."
+            "Find anything that carries audio by name, such as 'tv speakers', 'vrroom' or 'chromium': Dante channels "
+            "across the network, plus Shure wireless channels and the JACK ports, PulseAudio inputs, outputs and "
+            "application streams on every computer running netaudio. Each match shows what feeds it, where it goes "
+            "and whether it has signal right now; a channel on an offline device says so."
         ),
         input_schema=object_schema(
             {
@@ -706,7 +715,13 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
             {
                 "device": device_property(),
                 "rx_channel": {"oneOf": [{"type": "string"}, {"type": "integer", "minimum": 1}]},
-                "status": {"type": "string", "enum": ["all", "ok", "problem"], "default": "all"},
+                "status": {
+                    "type": "string",
+                    "enum": ["all", "ok", "problem", "waiting"],
+                    "default": "all",
+                    "description": "waiting selects routes whose transmitting device is off the network; those are "
+                    "not problems.",
+                },
             },
             [],
         ),
@@ -844,6 +859,28 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
         path="/identify",
         description="Flash the device's identify LED so someone can find it physically.",
         input_schema=object_schema({"device": device_property()}, ["device"]),
+    ),
+    McpTool(
+        name="forget_device",
+        path="/devices/{device}",
+        description=(
+            "Forget a device that is off the network so it no longer appears in the device list. Use it when the "
+            "user, or you, decide the device no longer matters, such as gear that was attached for a while and then "
+            "removed. A forgotten device comes back by itself if it returns to the network. Routes on other devices "
+            "that point at it stay as they are, and the reply lists them. every_device_off forgets every device "
+            "that is off, including ones enrolled in Dante Domain Manager."
+        ),
+        input_schema=object_schema(
+            {
+                "device": device_property(),
+                "every_device_off": {
+                    "type": "boolean",
+                    "description": "Forget every device that is off the network instead of one.",
+                },
+            },
+            [],
+        ),
+        method="DELETE",
     ),
     McpTool(
         name="lock_device",
@@ -1205,8 +1242,10 @@ RESOURCES: tuple[McpResource, ...] = (
         tool_name="list_devices",
         tool_description=(
             "Every known device keyed by its name: product, address, online state, management (and DDM domain), "
-            "sample rate, latency, channel counts, route count and any failing routes. Any tool's device argument "
-            "takes these names. Use get_device for channels, routes, network and operation availability."
+            "sample rate, latency, channel counts, route count and any failing routes. A device that is off the "
+            "network shows only its product and when it was last seen; forget_device removes ones that no longer "
+            "matter. Any tool's device argument takes these names. Use get_device for channels, routes, network and "
+            "operation availability."
         ),
     ),
     McpResource(
@@ -1258,10 +1297,13 @@ RESOURCES: tuple[McpResource, ...] = (
         description="Open and recently resolved problems detected on the network, with suggested remediation.",
         tool_name="get_issues",
         tool_description=(
-            "Problems detected on the network, most recently seen first. Defaults to open issues; set state to "
-            "resolved or all for history. Filter by device and page with limit."
+            "Problems detected on the network, grouped by kind and device, worst first. A failing route group names "
+            "the transmitting device behind each channel and whether that device is offline or never seen, and a "
+            "group on an offline device is marked as its last report. Defaults to open issues; set state to resolved "
+            "or all for history. Filter by device and page with limit; debug lists every issue separately."
         ),
         tool_properties={
+            "detail": {"type": "string", "enum": ["compact", "debug"], "default": "compact"},
             "device": device_property(),
             "limit": LIMIT_PROPERTY,
             "offset": {"type": "integer", "minimum": 0, "default": 0},
@@ -1356,7 +1398,6 @@ TOOL_VIEWS = {
     "find_channels": find_channels_view,
     "get_ddm_domains": ddm_domains_view,
     "get_event_journal": events_view,
-    "get_issues": issues_view,
     "get_routing": routing_view,
     "get_signal_levels": signal_levels_view,
 }
@@ -1506,6 +1547,7 @@ DISCOVERY_HINTS = {
     "get_event_journal": {"issue", "latency"},
     "get_network_overview": {"status", "health", "network"},
     "list_devices": {"network", "online", "offline"},
+    "forget_device": {"forget", "remove", "dismiss", "offline", "off", "old", "stale", "clean", "gone", "inventory"},
     "get_routing": {"subscription"},
     "rename_device": {"name", "device"},
     "set_subscriptions": {"route", "subscription", "many", "several", "bulk"},
@@ -1621,6 +1663,7 @@ DISCOVERY_CATEGORY_OVERRIDES = {
     "get_director_sites": "Dante Domain Manager",
     "set_discovery_interfaces": "devices and server",
 }
+DISCOVERY_SCHEMA_LIMIT = 6
 DISCOVERY_DEFAULT_CATEGORY = "devices and server"
 
 
@@ -1714,10 +1757,18 @@ def _discovery_result(query: str, limit: int, offset: int, include_schema: bool)
     matches = _discover_matches(query)
     selected = matches[offset : offset + limit]
     result = {
-        "operations": [_discovery_entry(candidate, include_schema) for candidate in selected],
+        "operations": [
+            _discovery_entry(candidate, include_schema and position < DISCOVERY_SCHEMA_LIMIT)
+            for position, candidate in enumerate(selected)
+        ],
         "matched": len(matches),
         "next_offset": offset + len(selected) if offset + len(selected) < len(matches) else None,
     }
+    if include_schema and len(selected) > DISCOVERY_SCHEMA_LIMIT:
+        result["schema_note"] = (
+            f"schemas are included for the first {DISCOVERY_SCHEMA_LIMIT} matches; search for another by its name "
+            "to get its schema"
+        )
     if not matches:
         result["hint"] = "Nothing matched; call discover_tools without a query to see every operation by category."
     return result
@@ -2469,6 +2520,8 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
         logger.info("MCP %s called %s", grant.client_name if grant else "unknown client", tool.name)
         if tool.name == "set_ddm_enrollment":
             return await self._enroll(request, records, writer)
+        if tool.name == "forget_device":
+            return await self._forget_device(request, records, writer)
         read_back = tool.name in READBACK_TOOLS or tool.name in ROUTE_TOOLS
         before = copy.deepcopy(records) if read_back else records
         captured = CapturedResponse(writer.get_extra_info("peername"))
@@ -2529,7 +2582,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
         elif status < 400 and tool.name == "get_device" and isinstance(payload, dict):
             ddm_known = ddm_inventory_known(await self._ddm_status_snapshot(writer))
             manufacturer = str(payload.get("manufacturer") or "")
-            payload = device_view(payload, request["sections"], ddm_known, device_addresses(records))
+            payload = device_view(payload, request["sections"], ddm_known, device_addresses(records), records)
             if "summary" in request["sections"] and "shure" in manufacturer.casefold():
                 shure = CapturedResponse(writer.get_extra_info("peername"))
                 await self._dispatch("GET", "/shure/devices", None, shure, {"accept": "application/json"})
@@ -2556,16 +2609,34 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
             payload = flow_result_view(
                 payload, _record_for_selector(current, request["device"]), device_addresses(current)
             )
+        elif tool.name == "get_issues" and status < 400:
+            payload = issue_groups_view(payload, request, records)
         elif status < 400 and tool.name in TOOL_VIEWS and isinstance(payload, (dict, list)):
             payload = TOOL_VIEWS[tool.name](payload, request)
         if status < 400 and tool.name == "find_channels":
             payload = with_channel_signal(
                 payload, self.metering.get_cached_levels_by_server() if self.metering else {}, records
             )
+            if request.get("channel_type", "any") == "any":
+                found = await self.host_audio_find(str(request.get("query") or ""))
+                if found and isinstance(payload, dict):
+                    payload["jack_pulseaudio_and_wireless"] = found
         if status < 400 and tool.name == "get_signal_levels":
             payload = name_meter_channels(payload, self._serialized_devices())
-            if not request.get("device") and request.get("detail") != "debug":
-                payload = network_levels_view(payload)
+            off = off_devices(records)
+            selected = _record_for_selector(records, request["device"]) if request.get("device") else None
+            if selected is not None and last_seen_text(selected):
+                payload = {
+                    selected.get("name") or request["device"]: (
+                        f"no levels: it is off the network, {last_seen_text(selected)}"
+                    )
+                }
+            elif not request.get("device") and request.get("detail") != "debug":
+                payload = network_levels_view(
+                    {name: entry for name, entry in payload.items() if name not in off}
+                    if isinstance(payload, dict)
+                    else payload
+                )
             elif request.get("device") and isinstance(payload, dict):
                 if request.get("detail") != "debug":
                     for name, entry in payload.items():
@@ -2976,13 +3047,16 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
             for entry in missing_devices(records, journal):
                 if str(entry["name"]).casefold() == str(selector).casefold():
                     when = (
-                        f"it disappeared at {entry['disappeared_at']}"
+                        f"last seen {entry['disappeared_at']}"
                         if entry.get("disappeared_at")
-                        else "it has not been seen since the server started"
+                        else "not seen since the server started"
                     )
-                    message = f"{entry['name']} is not on the network now; {when}"
-                    if entry.get("routes_waiting"):
-                        message += f", and {entry['routes_waiting']} route(s) are waiting for it"
+                    message = (
+                        f"{entry['name']} is off the network ({when}), so its own routes, settings and levels are "
+                        "not known"
+                    )
+                    if entry.get("waiting_routes"):
+                        message += f"; routes on other devices that wait for it: {entry['waiting_routes']}"
                     if entry.get("routes_still_connected"):
                         message += (
                             f". {entry['routes_still_connected']} route(s) to it are still receiving audio, so it was "
@@ -3037,6 +3111,47 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
             }
         )
         return _tool_result(view, is_error=False)
+
+    async def _forget_device(self, request: dict, records: dict, writer) -> dict:
+        captured = CapturedResponse(writer.get_extra_info("peername"))
+        if request.get("every_device_off"):
+            path = "/devices?selection=offline"
+        elif request.get("device"):
+            record = _record_for_selector(records, request["device"])
+            if record is None:
+                message = await self._device_not_found(records, request["device"], writer)
+                return _tool_result({"error": message}, is_error=True)
+            if not is_off(record):
+                return _tool_result(
+                    {"error": f"{record.get('name')} is on the network; only a device that is off can be forgotten"},
+                    is_error=True,
+                )
+            path = f"/devices/{quote(str(record.get('server_name') or record.get('name')), safe='')}"
+        else:
+            return _tool_result({"error": "give a device, or every_device_off=true"}, is_error=True)
+        await self._dispatch("DELETE", path, None, captured, {"accept": "application/json"})
+        status, payload = captured.result()
+        if status >= 400:
+            return _tool_result(payload, is_error=True)
+        forgotten = [
+            entry.get("name") or entry.get("server_name")
+            for entry in (payload or {}).get("forgotten") or ()
+            if isinstance(entry, dict)
+        ]
+        sources = routes_by_source(records)
+        routes = {name: receive_channels_text(sources[name]) for name in forgotten if name in sources}
+        return _tool_result(
+            compact(
+                {
+                    "forgotten": forgotten or None,
+                    "result": None if forgotten else "nothing was off the network",
+                    "routes_still_pointing_at_them": routes or None,
+                    "note": "a forgotten device comes back by itself if it returns to the network; "
+                    "set_subscriptions clears routes that are no longer wanted",
+                }
+            ),
+            is_error=False,
+        )
 
     async def _ddm_status_snapshot(self, writer) -> dict:
         captured = CapturedResponse(writer.get_extra_info("peername"))
