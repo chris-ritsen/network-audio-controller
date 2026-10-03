@@ -23,6 +23,7 @@ class EventType(Enum):
     SHURE_DEVICE_REMOVED = auto()
     SHURE_DEVICE_UPDATED = auto()
     SHURE_METER_VALUES = auto()
+    SHURE_SAMPLE = auto()
 
 
 @dataclass

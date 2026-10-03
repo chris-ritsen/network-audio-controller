@@ -97,6 +97,7 @@ class ShureDeviceInfo:
     dante_mac: str | None = None
     online: bool = True
     last_seen: float | None = None
+    properties: dict = field(default_factory=lambda: {"device": {}, "channels": {}})
 
     def mark_seen(self, timestamp: float | None = None) -> None:
         self.last_seen = time.time() if timestamp is None else timestamp
@@ -131,10 +132,16 @@ class ShureDeviceInfo:
             if field_value is not None:
                 result[field_name] = field_value
 
-        if self.channels:
+        result["properties"] = dict(self.properties.get("device", {}))
+        channel_properties = self.properties.get("channels", {})
+        numbers = sorted(set(self.channels) | set(channel_properties))
+        if numbers:
             result["channels"] = {}
-            for channel_number, channel in sorted(self.channels.items()):
-                result["channels"][channel_number] = _channel_to_json(channel)
+            for channel_number in numbers:
+                channel = self.channels.get(channel_number)
+                entry = _channel_to_json(channel) if channel is not None else {}
+                entry["properties"] = dict(channel_properties.get(channel_number, {}))
+                result["channels"][channel_number] = entry
 
         return result
 

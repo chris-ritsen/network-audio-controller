@@ -344,7 +344,6 @@ class DaemonHTTPServer(
             "/host-audio/pulse/default",
             "/host-audio/pulse/move",
             "/host-audio/cards",
-            "/shure/set",
         }
 
     async def start(self):
@@ -426,6 +425,7 @@ class DaemonHTTPServer(
         dispatcher.on(EventType.SHURE_DEVICE_UPDATED, self._on_shure_event)
         dispatcher.on(EventType.SHURE_DEVICE_REMOVED, self._on_shure_removed)
         dispatcher.on(EventType.SHURE_METER_VALUES, self._on_shure_meter)
+        dispatcher.on(EventType.SHURE_SAMPLE, self._on_shure_sample)
         self._events_registered = True
 
     def _unregister_events(self):
@@ -442,6 +442,7 @@ class DaemonHTTPServer(
         dispatcher.off(EventType.SHURE_DEVICE_UPDATED, self._on_shure_event)
         dispatcher.off(EventType.SHURE_DEVICE_REMOVED, self._on_shure_removed)
         dispatcher.off(EventType.SHURE_METER_VALUES, self._on_shure_meter)
+        dispatcher.off(EventType.SHURE_SAMPLE, self._on_shure_sample)
         self._events_registered = False
 
     async def _on_device_event(self, event: DanteEvent):
@@ -557,7 +558,21 @@ class DaemonHTTPServer(
             }
         )
 
+    async def _on_shure_sample(self, event: DanteEvent):
+        if self.sse_clients and not self._clients_want("meters"):
+            return
+        await self._broadcast_sse(
+            {
+                "event": "shure_meter_values",
+                "mac": event.device_name,
+                "channel": event.data.get("channel"),
+                "values": event.data.get("values", {}),
+            }
+        )
+
     async def _on_shure_meter(self, event: DanteEvent):
+        if event.data.get("sampled"):
+            return
         if self.sse_clients and not self._clients_want("meters"):
             return
         await self._broadcast_sse(
