@@ -1,29 +1,51 @@
 @layer components {
   :root {
+    --accent: #ff2323;
+    --bad: #ff4d4d;
+    --black: #17191b;
     --color-base-100: #202326;
     --color-base-200: #2b2f32;
     --color-base-300: #43484c;
     --color-base-content: #ffffff;
-    --accent: #ff2323;
-    --bad: #ff4d4d;
-    --black: #17191b;
-    --good: #2fe36a;
-    --hover: #264f53;
-    --line: #353a3e;
-    --line-strong: #50575d;
-    --panel: #202326;
-    --raised: #2b2f32;
-    --muted: #b3bcc4;
-    --text: #ffffff;
-    --warn: #ffc400;
     --font-data:
       "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
     --font-ui:
       -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui,
       sans-serif;
+    --good: #2fe36a;
+    --hover: #264f53;
+    --line: #353a3e;
+    --line-strong: #50575d;
+    --matrix-hover: #245663;
+    --muted: #b3bcc4;
+    --panel: #202326;
     --radius: 6px;
     --radius-small: 4px;
+    --raised: #2b2f32;
+    --text: #ffffff;
     --topbar-height: 40px;
+    --warn: #ffc400;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bad: #e02424;
+      --black: #eef0f2;
+      --color-base-100: #ffffff;
+      --color-base-200: #f1f3f4;
+      --color-base-300: #d5d9dc;
+      --color-base-content: #1c1f22;
+      --good: #1fa850;
+      --hover: #d5ebee;
+      --line: #dde1e4;
+      --line-strong: #bfc5ca;
+      --matrix-hover: #c9e4ea;
+      --muted: #5c646b;
+      --panel: #ffffff;
+      --raised: #f4f5f6;
+      --text: #1c1f22;
+      --warn: #d49b00;
+    }
   }
 
   * {

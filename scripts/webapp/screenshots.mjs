@@ -75,22 +75,28 @@ async function answerFromFixture(page) {
 
 const metering = Object.fromEntries(Object.entries(fixture.devices).map(([serverName, device]) => [serverName, meteringFor(serverName, device)]));
 const output = resolve(values.output);
-await mkdir(output, { recursive: true });
+const APPEARANCES = [
+  { colorScheme: "dark", directory: output },
+  { colorScheme: "light", directory: join(output, "light") },
+];
+for (const appearance of APPEARANCES) await mkdir(appearance.directory, { recursive: true });
 const browser = await chromium.launch();
 try {
   for (const shot of SHOTS) {
-    const context = await browser.newContext({ colorScheme: "dark", deviceScaleFactor: shot.scale ?? 2, viewport: shot.viewport });
-    const page = await context.newPage();
-    await page.addInitScript((storage) => {
-      for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, JSON.stringify(value));
-    }, { "netaudio.routing.filters": { panelOpen: false }, ...shot.storage });
-    await serveWebapp(page, { devices: fixture.devices, metering, meteringScale });
-    await answerFromFixture(page);
-    await page.goto(`http://netaudio.test${shot.path}`, { waitUntil: "networkidle" });
-    if (shot.scrollTo) await page.getByText(shot.scrollTo, { exact: true }).first().scrollIntoViewIfNeeded();
-    await page.waitForTimeout(1000);
-    await page.screenshot({ path: join(output, `${shot.name}.png`) });
-    await context.close();
+    for (const appearance of APPEARANCES) {
+      const context = await browser.newContext({ colorScheme: appearance.colorScheme, deviceScaleFactor: shot.scale ?? 2, viewport: shot.viewport });
+      const page = await context.newPage();
+      await page.addInitScript((storage) => {
+        for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, JSON.stringify(value));
+      }, { "netaudio.routing.filters": { panelOpen: false }, ...shot.storage });
+      await serveWebapp(page, { devices: fixture.devices, metering, meteringScale });
+      await answerFromFixture(page);
+      await page.goto(`http://netaudio.test${shot.path}`, { waitUntil: "networkidle" });
+      if (shot.scrollTo) await page.getByText(shot.scrollTo, { exact: true }).first().scrollIntoViewIfNeeded();
+      await page.waitForTimeout(1000);
+      await page.screenshot({ path: join(appearance.directory, `${shot.name}.png`) });
+      await context.close();
+    }
     console.log(`web: ${shot.name}`);
   }
 } finally {

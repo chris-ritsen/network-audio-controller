@@ -1,3 +1,4 @@
+import { prefersLight } from "./color-scheme.js";
 import * as format from "./format.js";
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
 import { meterValuesFor, onMeterValues } from "./store.js";
@@ -24,7 +25,7 @@ function meterReadout(value, presence, source) {
   return label ? `${level}  ${label}` : level;
 }
 
-const COLORS = {
+const DARK_COLORS = {
   background: "#000000",
   clip: "#ff2323",
   grid: "#242424",
@@ -33,6 +34,17 @@ const COLORS = {
   peak: "#ffffff",
   text: "#ffffff",
   track: "#1b1b1b",
+};
+
+const LIGHT_COLORS = {
+  background: "#ffffff",
+  clip: "#e02424",
+  grid: "#e3e6e8",
+  hot: "#e0a800",
+  nominal: "#1fa850",
+  peak: "#1c1f22",
+  text: "#1c1f22",
+  track: "#e3e6e8",
 };
 
 function deviceChannels(device, direction) {
@@ -173,6 +185,7 @@ function meterLayout(context, width, numbers, names) {
 export function drawMeters(node, width, numbers, values, presence, names, peaks, elapsed, source) {
   const ratio = window.devicePixelRatio || 1;
   const context = node.getContext("2d");
+  const colors = prefersLight() ? LIGHT_COLORS : DARK_COLORS;
   let cached = layouts.get(node);
   if (!cached || cached.width !== width || cached.names !== names || cached.numbers.length !== numbers.length || cached.numbers.some((number, index) => number !== numbers[index])) {
     cached = { width, names, numbers: [...numbers], layout: meterLayout(context, width, numbers, names) };
@@ -199,17 +212,17 @@ export function drawMeters(node, width, numbers, values, presence, names, peaks,
     const decibels = format.meteringDecibelsFullScale(raw, source);
 
     context.font = LABEL_FONT;
-    context.fillStyle = COLORS.text;
+    context.fillStyle = colors.text;
     context.textAlign = "left";
     row.lines.forEach((line, lineIndex) => context.fillText(line, COLUMN_GAP, compact ? row.y + (lineIndex + 0.5) * ROW_HEIGHT : centre));
 
-    context.fillStyle = COLORS.track;
+    context.fillStyle = colors.track;
     context.fillRect(barLeft, y + 5, barWidth, ROW_HEIGHT - 10);
 
     const filled = Math.round(barWidth * fraction);
     if (filled > 0) {
-      context.fillStyle = format.meteringSignalPresence(raw, source) === "clipping" || (decibels !== null && decibels >= -3) ? COLORS.clip
-        : decibels !== null && decibels >= -12 ? COLORS.hot : COLORS.nominal;
+      context.fillStyle = format.meteringSignalPresence(raw, source) === "clipping" || (decibels !== null && decibels >= -3) ? colors.clip
+        : decibels !== null && decibels >= -12 ? colors.hot : colors.nominal;
       context.fillRect(barLeft, y + 5, filled, ROW_HEIGHT - 10);
     }
 
@@ -218,18 +231,18 @@ export function drawMeters(node, width, numbers, values, presence, names, peaks,
     const peak = Math.max(decayed, fraction);
     peaks.set(number, peak);
     if (peak > 0.01) {
-      context.fillStyle = COLORS.peak;
+      context.fillStyle = colors.peak;
       context.fillRect(barLeft + Math.min(barWidth - 2, Math.round(barWidth * peak) - 1), y + 4, 2, ROW_HEIGHT - 8);
     }
 
-    context.fillStyle = COLORS.text;
+    context.fillStyle = colors.text;
     context.textAlign = "right";
     const indication = presence[number];
     const label = meterReadout(raw, indication, source);
     context.fillText(label, canvasWidth - COLUMN_GAP, compact ? centre + ROW_HEIGHT : centre, Math.min(columns.valueWidth, canvasWidth - COLUMN_GAP * 2));
   });
 
-  context.strokeStyle = COLORS.grid;
+  context.strokeStyle = colors.grid;
   context.beginPath();
   for (let index = 1; index < numbers.length; index += 1) {
     const y = Math.floor(rows[index].y) + 0.5;

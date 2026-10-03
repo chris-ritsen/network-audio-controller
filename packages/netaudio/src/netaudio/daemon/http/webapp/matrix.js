@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { channelGroups, groupChannels, setGroupsExpanded } from "./channel-groups.js";
+import { useColorScheme } from "./color-scheme.js";
 import { Icon } from "./icons.js";
 import * as format from "./format.js";
 import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
@@ -298,7 +299,7 @@ function readTheme() {
     background: read("--black", "#000000"),
     dataFont: read("--font-data", "ui-monospace, Menlo, monospace"),
     good: read("--good", "#2fe36a"),
-    hover: "#245663",
+    hover: read("--matrix-hover", "#245663"),
     line: read("--line", "#242424"),
     lineStrong: read("--line-strong", "#3d3d3d"),
     muted: read("--muted", "#b3bcc4"),
@@ -365,7 +366,8 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
   const stage = useRef(null);
   const viewport = useRef(null);
   const canvas = useRef(null);
-  const theme = useMemo(() => readTheme(), []);
+  const colorScheme = useColorScheme();
+  const theme = useMemo(() => readTheme(), [colorScheme]);
   const [size, setSize] = useState({ height: 0, width: 0 });
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [hover, setHover] = useState(null);

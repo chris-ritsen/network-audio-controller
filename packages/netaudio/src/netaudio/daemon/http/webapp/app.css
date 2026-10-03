@@ -3635,6 +3635,13 @@
     }
   }
   @layer daisyui.l1.l2.l3 {
+    .stats {
+      position: relative;
+      display: inline-grid;
+      grid-auto-flow: column;
+      overflow-x: auto;
+      border-radius: var(--radius-box);
+    }
     .progress {
       position: relative;
       height: calc(0.25rem * 2);
@@ -4610,30 +4617,51 @@
 }
 @layer components {
   :root {
+    --accent: #ff2323;
+    --bad: #ff4d4d;
+    --black: #17191b;
     --color-base-100: #202326;
     --color-base-200: #2b2f32;
     --color-base-300: #43484c;
     --color-base-content: #ffffff;
-    --accent: #ff2323;
-    --bad: #ff4d4d;
-    --black: #17191b;
-    --good: #2fe36a;
-    --hover: #264f53;
-    --line: #353a3e;
-    --line-strong: #50575d;
-    --panel: #202326;
-    --raised: #2b2f32;
-    --muted: #b3bcc4;
-    --text: #ffffff;
-    --warn: #ffc400;
     --font-data:
       "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
     --font-ui:
       -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui,
       sans-serif;
+    --good: #2fe36a;
+    --hover: #264f53;
+    --line: #353a3e;
+    --line-strong: #50575d;
+    --matrix-hover: #245663;
+    --muted: #b3bcc4;
+    --panel: #202326;
     --radius: 6px;
     --radius-small: 4px;
+    --raised: #2b2f32;
+    --text: #ffffff;
     --topbar-height: 40px;
+    --warn: #ffc400;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bad: #e02424;
+      --black: #eef0f2;
+      --color-base-100: #ffffff;
+      --color-base-200: #f1f3f4;
+      --color-base-300: #d5d9dc;
+      --color-base-content: #1c1f22;
+      --good: #1fa850;
+      --hover: #d5ebee;
+      --line: #dde1e4;
+      --line-strong: #bfc5ca;
+      --matrix-hover: #c9e4ea;
+      --muted: #5c646b;
+      --panel: #ffffff;
+      --raised: #f4f5f6;
+      --text: #1c1f22;
+      --warn: #d49b00;
+    }
   }
   * {
     box-sizing: border-box;
@@ -5870,7 +5898,7 @@
   .signal-track {
     width: 42px;
     height: 6px;
-    background: #333;
+    background: var(--line);
     border-radius: 2px;
     overflow: hidden;
   }
@@ -6859,6 +6887,103 @@
 }
 @layer base {
   :where(:root),
+  :root:has(input.theme-controller[value="light"]:checked),
+  [data-theme="light"] {
+    color-scheme: light;
+    --color-base-100: oklch(100% 0 0);
+    --color-base-200: oklch(98% 0 0);
+    --color-base-300: oklch(95% 0 0);
+    --color-base-content: oklch(21% 0.006 285.885);
+    --color-primary: oklch(45% 0.24 277.023);
+    --color-primary-content: oklch(93% 0.034 272.788);
+    --color-secondary: oklch(65% 0.241 354.308);
+    --color-secondary-content: oklch(94% 0.028 342.258);
+    --color-accent: oklch(77% 0.152 181.912);
+    --color-accent-content: oklch(38% 0.063 188.416);
+    --color-neutral: oklch(14% 0.005 285.823);
+    --color-neutral-content: oklch(92% 0.004 286.32);
+    --color-info: oklch(74% 0.16 232.661);
+    --color-info-content: oklch(29% 0.066 243.157);
+    --color-success: oklch(76% 0.177 163.223);
+    --color-success-content: oklch(37% 0.077 168.94);
+    --color-warning: oklch(82% 0.189 84.429);
+    --color-warning-content: oklch(41% 0.112 45.904);
+    --color-error: oklch(71% 0.194 13.428);
+    --color-error-content: oklch(27% 0.105 12.094);
+    --radius-selector: 0.5rem;
+    --radius-field: 0.25rem;
+    --radius-box: 0.5rem;
+    --size-selector: 0.25rem;
+    --size-field: 0.25rem;
+    --border: 1px;
+    --depth: 1;
+    --noise: 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      color-scheme: dark;
+      --color-base-100: oklch(25.33% 0.016 252.42);
+      --color-base-200: oklch(23.26% 0.014 253.1);
+      --color-base-300: oklch(21.15% 0.012 254.09);
+      --color-base-content: oklch(97.807% 0.029 256.847);
+      --color-primary: oklch(58% 0.233 277.117);
+      --color-primary-content: oklch(96% 0.018 272.314);
+      --color-secondary: oklch(65% 0.241 354.308);
+      --color-secondary-content: oklch(94% 0.028 342.258);
+      --color-accent: oklch(77% 0.152 181.912);
+      --color-accent-content: oklch(38% 0.063 188.416);
+      --color-neutral: oklch(14% 0.005 285.823);
+      --color-neutral-content: oklch(92% 0.004 286.32);
+      --color-info: oklch(74% 0.16 232.661);
+      --color-info-content: oklch(29% 0.066 243.157);
+      --color-success: oklch(76% 0.177 163.223);
+      --color-success-content: oklch(37% 0.077 168.94);
+      --color-warning: oklch(82% 0.189 84.429);
+      --color-warning-content: oklch(41% 0.112 45.904);
+      --color-error: oklch(71% 0.194 13.428);
+      --color-error-content: oklch(27% 0.105 12.094);
+      --radius-selector: 0.5rem;
+      --radius-field: 0.25rem;
+      --radius-box: 0.5rem;
+      --size-selector: 0.25rem;
+      --size-field: 0.25rem;
+      --border: 1px;
+      --depth: 1;
+      --noise: 0;
+    }
+  }
+  :root:has(input.theme-controller[value="light"]:checked),
+  [data-theme="light"] {
+    color-scheme: light;
+    --color-base-100: oklch(100% 0 0);
+    --color-base-200: oklch(98% 0 0);
+    --color-base-300: oklch(95% 0 0);
+    --color-base-content: oklch(21% 0.006 285.885);
+    --color-primary: oklch(45% 0.24 277.023);
+    --color-primary-content: oklch(93% 0.034 272.788);
+    --color-secondary: oklch(65% 0.241 354.308);
+    --color-secondary-content: oklch(94% 0.028 342.258);
+    --color-accent: oklch(77% 0.152 181.912);
+    --color-accent-content: oklch(38% 0.063 188.416);
+    --color-neutral: oklch(14% 0.005 285.823);
+    --color-neutral-content: oklch(92% 0.004 286.32);
+    --color-info: oklch(74% 0.16 232.661);
+    --color-info-content: oklch(29% 0.066 243.157);
+    --color-success: oklch(76% 0.177 163.223);
+    --color-success-content: oklch(37% 0.077 168.94);
+    --color-warning: oklch(82% 0.189 84.429);
+    --color-warning-content: oklch(41% 0.112 45.904);
+    --color-error: oklch(71% 0.194 13.428);
+    --color-error-content: oklch(27% 0.105 12.094);
+    --radius-selector: 0.5rem;
+    --radius-field: 0.25rem;
+    --radius-box: 0.5rem;
+    --size-selector: 0.25rem;
+    --size-field: 0.25rem;
+    --border: 1px;
+    --depth: 1;
+    --noise: 0;
+  }
   :root:has(input.theme-controller[value="dark"]:checked),
   [data-theme="dark"] {
     color-scheme: dark;

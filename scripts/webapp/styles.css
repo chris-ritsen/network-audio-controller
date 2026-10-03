@@ -20,6 +20,6 @@
 @source "../../packages/netaudio/src/netaudio/daemon/http/webapp/index.html";
 
 @plugin "daisyui" {
-  themes: dark --default;
+  themes: light --default, dark --prefersdark;
   logs: false;
 }
