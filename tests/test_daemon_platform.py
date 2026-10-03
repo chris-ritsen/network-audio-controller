@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from typer.testing import CliRunner
 
-from netaudio.commands import server as server_commands
+from netaudio.commands import daemon as daemon_commands
 from netaudio.daemon import server, service_install
 
 
@@ -138,7 +138,7 @@ def test_launchd_force_install_reloads_running_job(monkeypatch, tmp_path):
     monkeypatch.setattr(service_install, "launchd_bootout", bootout)
     monkeypatch.setattr(service_install, "launchd_bootstrap", bootstrap)
 
-    result = command_runner.invoke(server_commands.app, ["install", "--force"])
+    result = command_runner.invoke(daemon_commands.app, ["install", "--force"])
 
     assert result.exit_code == 0
     assert service_path.read_text() == "new"
@@ -158,7 +158,7 @@ def test_launchd_no_start_unloads_existing_job_without_reloading(monkeypatch, tm
     monkeypatch.setattr(service_install, "launchd_bootout", bootout)
     monkeypatch.setattr(service_install, "launchd_bootstrap", bootstrap)
 
-    result = command_runner.invoke(server_commands.app, ["install", "--force", "--no-start"])
+    result = command_runner.invoke(daemon_commands.app, ["install", "--force", "--no-start"])
 
     assert result.exit_code == 0
     assert "without loading it" in result.output

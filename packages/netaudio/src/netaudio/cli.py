@@ -259,13 +259,13 @@ def _global_options(
 
 from netaudio.commands import (
     channel,
+    daemon,
     discovery,
     events,
     flow,
     issues,
     key,
     report,
-    server,
     shure,
     status,
     subscription,
@@ -297,7 +297,7 @@ lock_app.add_typer(key.app, name="key")
 app.add_typer(channel.app, name="channel")
 app.command("clock")(device_clock)
 app.add_typer(config_app, name="config")
-app.add_typer(server.app, name="daemon")
+app.add_typer(daemon.app, name="daemon")
 app.add_typer(ddm_app, name="ddm")
 app.add_typer(device_app, name="device")
 app.add_typer(discovery.app, name="discovery")

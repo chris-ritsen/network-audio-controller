@@ -52,7 +52,7 @@ def test_daemon_tls_json_reports_null_when_disabled(monkeypatch):
 
 
 def test_daemon_remote_urls_use_tls_by_default(monkeypatch):
-    monkeypatch.setattr("netaudio.commands.server._port_in_use", lambda port: True)
+    monkeypatch.setattr("netaudio.commands.daemon._port_in_use", lambda port: True)
     monkeypatch.setattr("netaudio.daemon.http.api.advertisement_addresses", lambda: ["192.0.2.10"])
     monkeypatch.setattr("netaudio.daemon.mcp_access.ensure_mcp_token", lambda: "offline-test-token")
     result = runner.invoke(app, ["-j", "daemon", "web"])
@@ -90,8 +90,8 @@ def test_meter_status_json_when_nothing_is_metered():
 
 
 def test_daemon_status_json_when_the_daemon_is_not_running(monkeypatch):
-    monkeypatch.setattr("netaudio.commands.server._port_in_use", lambda port: False)
-    monkeypatch.setattr("netaudio.commands.server.service_install.is_installed", lambda: False)
+    monkeypatch.setattr("netaudio.commands.daemon._port_in_use", lambda port: False)
+    monkeypatch.setattr("netaudio.commands.daemon.service_install.is_installed", lambda: False)
     result = runner.invoke(app, ["-j", "daemon", "status"])
     assert result.exit_code == 1
     payload = _json(result)
