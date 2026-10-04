@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { Panel } from "../components.js";
+import * as format from "../format.js";
 import { Icon } from "../icons.js";
 import { html, useLayoutEffect, useRef, useState } from "../lib/preact.js";
 import { inventoryReady, scopedDevices, selectedContext } from "../store.js";
@@ -9,7 +10,7 @@ function readable(message) {
     message || "Preset operation failed. Review the selection and try again.",
   );
   return /\b0x[\da-f]+\b|\b[\da-f]{16,}\b/i.test(text)
-    ? "The device returned an unavailable or unsupported response. Refresh its status before trying again."
+    ? "The device returned an unsupported response."
     : text;
 }
 
@@ -85,7 +86,7 @@ function SavePreset() {
                     >
                   </label>`,
               )
-            : html`<p class="text-sm">No devices in this view.</p>`
+            : html`<p class="text-sm">No devices</p>`
         }
       </fieldset>
       <fieldset disabled=${busy} class="flex flex-col gap-2">
@@ -239,10 +240,6 @@ function LoadPreset() {
           disabled=${busy}
           onChange=${(event) => open(event.target.files[0])}
       /></label>
-      <p class="text-sm">
-        Opening a file only previews it. Devices match by name within the
-        current view; choose explicitly when more than one matches.
-      </p>
       ${
         preview
           ? html`<form class="flex flex-col gap-4" onSubmit=${apply}>
@@ -268,11 +265,9 @@ function LoadPreset() {
                     ? html`<ul class="text-sm">
                         ${device.settings.map((setting) => html`<li>${setting.label}: ${readable(setting.value)}</li>`)}
                       </ul>`
-                    : html`<p class="text-sm">
-                        No supported settings in this entry.
-                      </p>`
+                    : null
                 }
-                      ${device.preserved.length ? html`<p class="text-sm">Preserved and skipped when no verified writer is available: ${device.preserved.join(", ")}.</p>` : null}
+                      ${device.preserved.length ? html`<p class="text-sm">Not applied: ${device.preserved.join(", ")}</p>` : null}
                       ${
                   choices[index].include
                     ? html`<label class="flex flex-col gap-2 text-sm"
@@ -282,7 +277,7 @@ function LoadPreset() {
                           onChange=${(event) => change(index, { target: event.target.value })}
                         >
                           <option value="">
-                            ${device.targets.some((target) => target.online) ? "Choose a device" : "No online matching device — skip this entry"}
+                            ${device.targets.some((target) => target.online) ? "Choose a device" : "No matching device online"}
                           </option>
                           ${device.targets.map((target) => html`<option value=${target.id} disabled=${!target.online}>${target.name}${target.address ? ` · ${target.address}` : ""}${target.context ? ` · ${target.context}` : ""}${target.online ? "" : " · Offline"}</option>`)}
                         </select></label
@@ -301,7 +296,7 @@ function LoadPreset() {
                         setDestructive(event.target.checked);
                         setConfirmed(false);
                       }}
-                    />Allow sample-rate changes that rebuild routing.</label
+                    />Allow sample-rate changes that rebuild routing</label
                   >
                   <label class="flex items-start gap-2 mt-3 text-sm"
                     ><input
@@ -311,28 +306,16 @@ function LoadPreset() {
                         setStoreCurrent(event.target.checked);
                         setConfirmed(false);
                       }}
-                    />Request configuration storage after every changed setting
-                    has a successful effective-state readback.</label
+                    />Store the configuration on each device after applying</label
                   >
-                  <p class="text-sm mt-2">
-                    A storage acknowledgement does not confirm persistence.
-                    Persistence needs an independent signal or post-reboot
-                    readback.
-                  </p>
                 </details>
-                <p class="text-sm">
-                  Applying can interrupt audio or change network access. Changes
-                  are not rolled back automatically. No devices will be
-                  rebooted.
-                </p>
                 <label class="flex items-start gap-2"
                   ><input
                     type="checkbox"
                     checked=${confirmed}
                     disabled=${!valid || !inventoryReady.value}
                     onChange=${(event) => setConfirmed(event.target.checked)}
-                  />I have reviewed the selected devices and settings and want
-                  to apply them.</label
+                  />Apply these settings to the selected devices</label
                 >
               </fieldset>
               <div>
@@ -355,9 +338,9 @@ function LoadPreset() {
                 ${result.complete ? "Preset applied and verified" : "Preset not fully applied or verified"}
               </h3>
               <ul class="text-sm">
-                ${result.report.operations.map((operation) => html`<li><strong>${operation.state}</strong> · ${operation.device_name}: ${readable(operation.message)}</li>`)}
+                ${result.report.operations.map((operation) => html`<li><strong>${format.stateLabel(operation.state)}</strong> · ${operation.device_name}: ${readable(operation.message)}</li>`)}
               </ul>
-              ${result.report.needs_reboot.length ? html`<p class="text-sm">Reboot pending: ${result.report.needs_reboot.join(", ")}. Review each device before rebooting.</p>` : null}
+              ${result.report.needs_reboot.length ? html`<p class="text-sm">Needs a reboot: ${result.report.needs_reboot.join(", ")}</p>` : null}
             </div>`
           : null
       }
@@ -367,14 +350,7 @@ function LoadPreset() {
 
 function PresetsView() {
   return html`<div class="flex flex-col gap-6 w-full max-w-3xl">
-    <p class="text-sm">
-      Save, plan and load versioned Dante preset XML. NetAudio preserves device
-      identity, channel names, receiver routing, transmit flows, clock and
-      format settings, codec gain, redundancy and every reported interface. Each
-      load reports skipped, acknowledged, confirmed and failed operations
-      separately.
-    </p>
-    ${!inventoryReady.value ? html`<p class="text-sm" role="status">Waiting for live inventory. You can still preview a file.</p>` : null}
+    ${!inventoryReady.value ? html`<p class="text-sm" role="status">Loading devices…</p>` : null}
     <${SavePreset} key=${`save:${selectedContext.value}`} />
     <${LoadPreset} key=${`load:${selectedContext.value}`} />
   </div>`;

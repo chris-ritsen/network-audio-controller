@@ -1,6 +1,6 @@
 export function externalSourceKey(flow) {
   if (typeof flow.session_id !== "string" || !/^\d+$/.test(flow.session_id)) {
-    throw new Error("External source session identity is unavailable.");
+    throw new Error("External source is unavailable.");
   }
   return `${flow.source_ipv4}/${flow.session_id}`;
 }
@@ -53,7 +53,7 @@ export function externalColumns(flows, filter = "") {
     if (!audio) continue;
     const count = hasSlots ? flow.channel_count : 0;
     const sourceKey = externalSourceKey(flow);
-    const label = `${flow.flow_name || "External audio"} · ${sourceKey}`;
+    const label = `${flow.flow_name || "External audio"} · ${flow.source_ipv4}`;
     if (filter && !label.toLowerCase().includes(filter.toLowerCase())) continue;
     const channels = Array.from({ length: count }, (_, index) => ({
       number: index + 1,
@@ -97,11 +97,11 @@ export function externalSubscriptionRequest(
   if (!flow.routable) {
     throw new Error(
       (flow.routability_errors || []).join("; ") ||
-        "This announcement is not a routable audio sender.",
+        "Not routable",
     );
   }
   if (Date.parse(flow.expires_at) <= Date.now())
-    throw new Error("This source announcement has expired.");
+    throw new Error("This source has expired.");
   externalSourceKey(flow);
   return {
     rx_device: receiver,
@@ -133,11 +133,9 @@ export function externalCellState(row, column, pending) {
         identity.flow_slot === column.number,
     );
   if (matches.length === 1) {
-    // Inventory identity is evidence of configuration, not a media-health verdict.
     return {
       kind: "partial",
       subscription: matches[0],
-      reason: "External receiver assignment reported; media health unverified",
     };
   }
   if (!flow.routable || Date.parse(flow.expires_at) <= Date.now()) {
@@ -145,7 +143,7 @@ export function externalCellState(row, column, pending) {
       kind: "self-unavailable",
       reason:
         (flow.routability_errors || []).join("; ") ||
-        "Source unavailable for routing",
+        "Not routable",
     };
   }
   return { kind: "empty" };

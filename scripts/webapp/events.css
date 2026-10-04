@@ -1,6 +1,5 @@
 @layer components {
   .event-log-table-wrapper {
-    min-height: 320px;
     max-height: min(58dvh, 720px);
   }
 
@@ -17,31 +16,11 @@
 
   .event-log-table .event-device {
     width: 28%;
-    max-width: 340px;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .event-log-table .event-message {
     width: auto;
-    padding: 0;
     white-space: normal;
-  }
-
-  .event-message-button {
-    display: block;
-    width: 100%;
-    min-height: 38px;
-    padding: 8px 11px;
-    color: inherit;
-    text-align: left;
-    overflow-wrap: anywhere;
-    cursor: pointer;
-  }
-
-  .event-message-button:focus-visible {
-    outline: 2px solid var(--text);
-    outline-offset: -3px;
   }
 
   .event-severity-icon {
@@ -75,15 +54,6 @@
     background: var(--muted);
   }
 
-  .event-log-empty {
-    display: grid;
-    min-height: 260px;
-    place-items: center;
-    padding: 24px;
-    color: var(--muted);
-    text-align: center;
-  }
-
   .event-log-controls {
     display: flex;
     align-items: center;
@@ -112,13 +82,6 @@
     gap: 8px;
   }
 
-  .event-log-count {
-    margin-left: auto;
-    color: var(--muted);
-    font-size: 12px;
-    white-space: nowrap;
-  }
-
   .event-detail-panel {
     padding: 15px;
     border: 1px solid var(--line-strong);
@@ -140,57 +103,8 @@
     font-weight: 600;
   }
 
-  .event-detail-kicker {
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .event-detail-grid {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr);
-    gap: 7px 14px;
-    font-size: 13px;
-  }
-
-  .event-detail-grid dt {
-    color: var(--muted);
-  }
-
-  .event-detail-grid dd {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .event-raw-evidence {
-    margin-top: 14px;
-    border-top: 1px solid var(--line);
-    padding-top: 10px;
-  }
-
-  .event-raw-evidence summary {
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .event-raw-evidence pre {
-    max-height: 280px;
-    margin-top: 8px;
-    overflow: auto;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-small);
-    padding: 10px;
-    background: var(--canvas);
-    font-size: 12px;
-    white-space: pre-wrap;
-  }
-
   @media (max-width: 900px) {
     .event-log-table-wrapper {
-      min-height: 0;
       max-height: none;
     }
 
@@ -215,16 +129,6 @@
     .event-log-search {
       order: -1;
       width: 100%;
-    }
-
-    .event-log-count {
-      width: 100%;
-      margin-left: 0;
-      text-align: right;
-    }
-
-    .event-detail-grid {
-      grid-template-columns: max-content minmax(0, 1fr);
     }
   }
 }

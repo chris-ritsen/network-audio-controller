@@ -133,6 +133,7 @@ export const api = {
   getShureDevices: () => get("/shure/devices"),
   getShureDevice: (identifier) =>
     get(`/shure/devices/${encodeURIComponent(identifier)}`),
+  setShureValue: (body) => post("/shure/set", body),
   getManagedDevices: (context) =>
     get(
       `/ddm/devices${context ? `?context=${encodeURIComponent(context)}` : ""}`,
@@ -154,8 +155,6 @@ export const api = {
   getMeteringSnapshot: (name) =>
     get(`/metering/snapshot/${encodeURIComponent(name)}`),
   getEventJournal: () => get("/event-journal"),
-  getIssues: (state) =>
-    get(`/issues${state ? `?state=${encodeURIComponent(state)}` : ""}`),
   clearEventJournal: () => destroy("/event-journal"),
   getTransmitFlows: (device) =>
     get(`/transmit-flows/${encodeURIComponent(device)}`),

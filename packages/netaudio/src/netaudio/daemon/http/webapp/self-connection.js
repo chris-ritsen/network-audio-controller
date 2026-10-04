@@ -68,8 +68,7 @@ export function selfConnectionTargetState(
   }
   return {
     allowed: false,
-    reason:
-      "Support for connecting this input to an output on the same device is unknown.",
+    reason: "This input cannot connect to an output on the same device.",
     selfConnection: true,
     state: "unavailable",
   };

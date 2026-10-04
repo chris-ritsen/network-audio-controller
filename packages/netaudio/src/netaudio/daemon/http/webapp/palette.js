@@ -29,13 +29,13 @@ function buildEntries() {
       kind: "device",
       label: name,
       online: device.online,
-      path: `/devices/${encodeURIComponent(name)}/receive`,
+      path: `/devices/${encodeURIComponent(name)}`,
     });
   }
   for (const device of format.sortedShureDevices(shureDevices.value)) {
     const name = device.name || device.mac;
     entries.push({
-      detail: format.text(format.deviceModelName(device)),
+      detail: format.deviceModelName(device) || "",
       kind: "shure",
       label: name,
       online: device.online,
@@ -132,7 +132,7 @@ export function CommandPalette() {
       />
       <div class="palette-results">
         ${results.length === 0
-          ? html`<div class="palette-empty">No match for “${query}”.</div>`
+          ? html`<div class="palette-empty">No matches</div>`
           : results.map(
               (entry, index) => html`
                 <div

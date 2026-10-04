@@ -624,14 +624,15 @@ export function describeHover(hover, rows, columns, subscriptionIndex, pending, 
   const receiver = row.kind === "device" ? row.label : `${row.name}@${row.label}`;
   const transmitter = column.kind === "device" ? column.label : `${column.name}@${column.label}`;
   if (state.kind === "aggregate") {
-    return `${receiver} ← ${transmitter}\n${state.count} subscribed (${state.severity})`;
+    const problems = { error: ", some with errors", warning: ", some with warnings" }[state.severity] || "";
+    return `${receiver} ← ${transmitter}\n${state.count} subscribed${problems}`;
   }
   if (state.kind === "pending") {
     return `${receiver} ← ${transmitter}\nSubscription change pending`;
   }
   if (state.kind === "partial") {
     if (column.sourceKind === "external") {
-      return `${receiver} ← ${transmitter}\n${state.reason}`;
+      return `${receiver} ← ${transmitter}`;
     }
     return `${receiver} ← ${state.subscription.tx_channel}@${state.subscription.tx_device}\n${format.subscriptionStatusText(state.subscription)}`;
   }

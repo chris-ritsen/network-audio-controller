@@ -3,6 +3,7 @@ import { readInventoryCache, writeInventoryCache } from "./inventory-cache.js";
 import { visibleInventory } from "./inventory-visibility.js";
 import { inventoryFilters, matchesDeviceFilters } from "./device-filters.js";
 import { setMeteringScale } from "./format.js";
+import { createShureLevels, observeShureMeters, shureLevels } from "./shure-levels.js";
 
 const EVENT_LOG_LIMIT = 400;
 const METER_TABLE_INTERVAL_MILLISECONDS = 250;
@@ -235,7 +236,13 @@ function applyEvent(payload) {
       }
       devices.value = payload.devices || {};
       externalFlows.value = payload.external_flows || {};
-      shureDevices.value = payload.shure_devices || {};
+      const incomingShure = payload.shure_devices || {};
+      const keptShure = Object.fromEntries(
+        Object.entries(shureDevices.value)
+          .filter(([mac]) => !(mac in incomingShure))
+          .map(([mac, device]) => [mac, { ...device, online: false }]),
+      );
+      shureDevices.value = { ...keptShure, ...incomingShure };
       inventoryReady.value = true;
     });
     writeInventoryCache(devices.value);
@@ -299,10 +306,39 @@ function applyEvent(payload) {
     return;
   }
   if (kind === "shure_meter_values") {
-    const existing = shureMeters.value[payload.mac] || {};
-    const channel = { ...(existing[payload.channel] || {}), [payload.key]: payload.value };
-    shureMeters.value = { ...shureMeters.value, [payload.mac]: { ...existing, [payload.channel]: channel } };
+    const device = shureMeterLatest.get(payload.mac) || {};
+    const channel = device[payload.channel] || {};
+    const values = payload.values && typeof payload.values === "object" ? payload.values : payload.key ? { [payload.key]: payload.value } : {};
+    for (const [key, value] of Object.entries(values)) {
+      channel[key] = value && typeof value === "object" ? { ...(channel[key] || {}), ...value } : value;
+    }
+    observeShureMeters(shureLevelState, payload.mac, payload.channel, values, performance.now() / 1000);
+    device[payload.channel] = channel;
+    shureMeterLatest.set(payload.mac, device);
+    scheduleShureMeterCommit();
   }
+}
+
+const SHURE_METER_COMMIT_MILLISECONDS = 150;
+const shureMeterLatest = new Map();
+const shureLevelState = createShureLevels();
+let shureMeterCommitPending = false;
+
+function scheduleShureMeterCommit() {
+  if (shureMeterCommitPending) return;
+  shureMeterCommitPending = true;
+  setTimeout(() => {
+    shureMeterCommitPending = false;
+    const next = {};
+    for (const [mac, device] of shureMeterLatest) {
+      next[mac] = Object.fromEntries(Object.entries(device).map(([channel, values]) => [channel, { ...values }]));
+    }
+    shureMeters.value = next;
+  }, SHURE_METER_COMMIT_MILLISECONDS);
+}
+
+export function shureLevelsFor(mac, channel) {
+  return shureLevels(shureLevelState, mac, channel);
 }
 
 let loadedApiVersion = null;

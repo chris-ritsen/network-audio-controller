@@ -25,15 +25,19 @@ from netaudio.daemon.api_contract import API_VERSION, api_contract
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.connections import DaemonConnectionHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
+from netaudio.daemon.http.host_audio import DaemonHostAudioHandlers
+from netaudio.daemon.http.host_audio_control import DaemonHostAudioControlHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
 from netaudio.daemon.http.mcp import MCP_PATH, DaemonMcpHandlers
 from netaudio.daemon.http.oauth import DaemonOAuthHandlers
 from netaudio.daemon.http.presets import DaemonPresetHandlers
 from netaudio.daemon.http.request_scope import REQUEST_INVENTORY
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
+from netaudio.daemon.http.shure import DaemonShureHandlers
 from netaudio.daemon.http.sse_view import TELEMETRY_FIELDS, SseDeviceView, substantive_record
 from netaudio.daemon.http.tls import (
     TLSConfigurationError,
+    certificate_fingerprint,
     TLSSettings,
     build_ssl_context,
     ensure_generated_identity,
@@ -57,6 +61,7 @@ from netaudio.monitoring import (
     MonitoringEventKind,
     MutationAuditRecorder,
 )
+from netaudio.monitoring.level_history import LevelHistory
 
 logger = logging.getLogger("netaudio")
 
@@ -176,6 +181,9 @@ class DaemonHTTPServer(
     DaemonConfigurationHandlers,
     DaemonDeviceHandlers,
     DaemonManagedHandlers,
+    DaemonHostAudioHandlers,
+    DaemonHostAudioControlHandlers,
+    DaemonShureHandlers,
     DaemonMcpHandlers,
     DaemonOAuthHandlers,
     DaemonWebHandlers,
@@ -195,8 +203,11 @@ class DaemonHTTPServer(
         event_journal=None,
         tls: TLSSettings | None = None,
         mcp_token: str | None = None,
+        host_audio=None,
+        level_history=None,
     ):
         self.application = application
+        self.level_history = level_history or LevelHistory()
         self.diagnostics: DanteHeartbeatService | None = None
         self.mcp_token = mcp_token if mcp_token is not None else ensure_mcp_token()
         self.oauth_store = OAuthStore()
@@ -225,6 +236,10 @@ class DaemonHTTPServer(
         self.subscription_readback = SubscriptionReadback(self._emit_device_updated, application)
         self.metering = metering
         self.shure = shure
+        self.host_audio = host_audio
+        self._host_audio_broadcasts: set[asyncio.Task] = set()
+        if host_audio is not None:
+            host_audio.add_listener(self._on_host_audio_changed)
         self.on_shutdown = on_shutdown
         self.mark_offline = mark_offline or application.mark_device_offline
         self.forget_device = forget_device or application.unregister_device
@@ -236,6 +251,7 @@ class DaemonHTTPServer(
         self.tls_server = None
         self._tls_context: ssl.SSLContext | None = None
         self._tls_coverage = None
+        self._tls_fingerprint: str | None = None
         self._tls_renewal_retry_wall_time = 0.0
         self.zeroconf = None
         self.service_info = None
@@ -308,10 +324,31 @@ class DaemonHTTPServer(
             "/diagnostics/reset": self._handle_reset_diagnostics,
             "/diagnostics/policy": self._handle_diagnostics_policy,
             "/event-journal/operations": self._handle_append_operation_event,
+            "/host-audio/levels": self._handle_host_audio_levels,
+            "/host-audio/meter": self._handle_host_audio_meter,
+            "/host-audio/history": self._handle_host_audio_history,
+            "/host-audio/jack/connect": self._handle_jack_connect,
+            "/host-audio/jack/disconnect": self._handle_jack_disconnect,
+            "/host-audio/pulse/volume": self._handle_pulse_volume,
+            "/host-audio/pulse/mute": self._handle_pulse_mute,
+            "/host-audio/pulse/default": self._handle_pulse_default,
+            "/host-audio/pulse/move": self._handle_pulse_move,
+            "/host-audio/cards": self._handle_link_card,
+            "/shure/set": self._handle_shure_set,
             "/shutdown": self._handle_shutdown,
         }
         self.post_body_optional = {"/ddm/refresh", "/refresh", "/shutdown"}
-        self.loopback_only_paths = {"/shutdown", "/event-journal/operations"}
+        self.loopback_only_paths = {
+            "/shutdown",
+            "/event-journal/operations",
+            "/host-audio/jack/connect",
+            "/host-audio/jack/disconnect",
+            "/host-audio/pulse/volume",
+            "/host-audio/pulse/mute",
+            "/host-audio/pulse/default",
+            "/host-audio/pulse/move",
+            "/host-audio/cards",
+        }
 
     async def start(self):
         if self.tcp_server is not None:
@@ -326,6 +363,7 @@ class DaemonHTTPServer(
                 context = build_ssl_context(self.tls)
                 self._tls_context = context
                 self._tls_coverage = identity_coverage(self.tls.certificate) if self.tls.generated else None
+                self._tls_fingerprint = self._read_tls_fingerprint()
                 self.tls_server = await asyncio.start_server(
                     self.handle_connection, "0.0.0.0", self.tls.port, ssl=context
                 )
@@ -391,6 +429,7 @@ class DaemonHTTPServer(
         dispatcher.on(EventType.SHURE_DEVICE_UPDATED, self._on_shure_event)
         dispatcher.on(EventType.SHURE_DEVICE_REMOVED, self._on_shure_removed)
         dispatcher.on(EventType.SHURE_METER_VALUES, self._on_shure_meter)
+        dispatcher.on(EventType.SHURE_SAMPLE, self._on_shure_sample)
         self._events_registered = True
 
     def _unregister_events(self):
@@ -407,6 +446,7 @@ class DaemonHTTPServer(
         dispatcher.off(EventType.SHURE_DEVICE_UPDATED, self._on_shure_event)
         dispatcher.off(EventType.SHURE_DEVICE_REMOVED, self._on_shure_removed)
         dispatcher.off(EventType.SHURE_METER_VALUES, self._on_shure_meter)
+        dispatcher.off(EventType.SHURE_SAMPLE, self._on_shure_sample)
         self._events_registered = False
 
     async def _on_device_event(self, event: DanteEvent):
@@ -505,6 +545,15 @@ class DaemonHTTPServer(
             }
         )
 
+    def _on_host_audio_changed(self, component: str) -> None:
+        if not self.sse_clients:
+            return
+        task = asyncio.get_running_loop().create_task(
+            self._broadcast_sse({"event": "host_audio_changed", "component": component})
+        )
+        self._host_audio_broadcasts.add(task)
+        task.add_done_callback(self._host_audio_broadcasts.discard)
+
     async def _on_shure_removed(self, event: DanteEvent):
         await self._broadcast_sse(
             {
@@ -513,7 +562,21 @@ class DaemonHTTPServer(
             }
         )
 
+    async def _on_shure_sample(self, event: DanteEvent):
+        if self.sse_clients and not self._clients_want("meters"):
+            return
+        await self._broadcast_sse(
+            {
+                "event": "shure_meter_values",
+                "mac": event.device_name,
+                "channel": event.data.get("channel"),
+                "values": event.data.get("values", {}),
+            }
+        )
+
     async def _on_shure_meter(self, event: DanteEvent):
+        if event.data.get("sampled"):
+            return
         if self.sse_clients and not self._clients_want("meters"):
             return
         await self._broadcast_sse(
@@ -772,6 +835,15 @@ class DaemonHTTPServer(
             except (OSError, RuntimeError, ZeroconfError) as exception:
                 logger.warning(f"Daemon Bonjour monitor error: {exception}")
 
+    def _read_tls_fingerprint(self) -> str | None:
+        if self.tls is None:
+            return None
+        try:
+            return certificate_fingerprint(self.tls.certificate)
+        except TLSConfigurationError as exception:
+            logger.warning(f"Daemon TLS fingerprint unavailable for Bonjour: {exception}")
+            return None
+
     def _renew_tls_identity(self):
         if self.tls is None or not self.tls.generated or self._tls_context is None:
             return
@@ -787,6 +859,7 @@ class DaemonHTTPServer(
             return
 
         self._tls_coverage = identity_coverage(identity)
+        self._tls_fingerprint = self._read_tls_fingerprint()
         logger.info("Daemon TLS certificate renewed")
 
     async def _reconcile_bonjour(self, force=False, woke_from_sleep=False):
@@ -806,6 +879,10 @@ class DaemonHTTPServer(
         elif not self.zeroconf or not self.service_info:
             refresh_reason = "registration missing"
             recreate_service = True
+        elif (
+            self._tls_fingerprint and self.service_info.properties.get(b"tls_sha256") != self._tls_fingerprint.encode()
+        ):
+            refresh_reason = "TLS identity changed"
         elif current_addresses != self._bonjour_addresses:
             previous_addresses = ", ".join(self._bonjour_addresses) or "none"
             refresh_reason = f"address change: {previous_addresses} -> {', '.join(current_addresses)}"
@@ -905,6 +982,8 @@ class DaemonHTTPServer(
         properties["mcp_path"] = MCP_PATH
         if self.tls is not None:
             properties["tls_port"] = str(self.tls.port)
+            if self._tls_fingerprint:
+                properties["tls_sha256"] = self._tls_fingerprint
         properties["scheme"] = "https" if self.tls is not None else "http"
         return ServiceInfo(
             DAEMON_SERVICE_TYPE,
@@ -999,6 +1078,7 @@ class DaemonHTTPServer(
                 "/ddm/domains/update",
                 "/device-lock-key",
                 "/settings/monitoring",
+                "/host-audio/cards",
             }
         ) and headers:
             origin = headers.get("origin")
@@ -1024,6 +1104,10 @@ class DaemonHTTPServer(
                 await self._handle_get_shure_devices(writer)
             elif route.startswith("/shure/devices/"):
                 await self._handle_get_shure_device(writer, route[len("/shure/devices/") :])
+            elif route == "/host-audio":
+                await self._handle_get_host_audio(writer, query)
+            elif route == "/host-audio/trace":
+                await self._handle_get_host_audio_trace(writer, query)
             elif route == "/devices":
                 await self._handle_get_devices(writer, context_name)
             elif route == "/external-flows":

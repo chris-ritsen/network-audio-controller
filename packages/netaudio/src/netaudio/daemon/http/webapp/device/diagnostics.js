@@ -1,79 +1,145 @@
 import { html, useEffect, useState } from "../lib/preact.js";
-import { Fields, Panel } from "../components.js";
+import { Fields, Notice, Panel } from "../components.js";
 
-const number = (value) => value == null ? "Unavailable" : Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 });
+const MINIMUM_FREQUENCY_OBSERVATIONS = 10;
 
-function Histogram({ series }) {
-  const histogram = series?.histogram;
-  if (!histogram) return null;
-  const hasUnderflow = histogram.underflow != null;
-  const counts = [...(hasUnderflow ? [histogram.underflow] : []), ...histogram.counts, histogram.overflow || 0];
-  const maximum = Math.max(1, ...counts);
-  return html`<figure>
-    <figcaption>${histogram.semantics === "reported_maxima" ? "Reported maximum latency observations" : "Frequency offset observations"} · ${counts.reduce((a, b) => a + b, 0)} observations</figcaption>
-    <svg viewBox=${`0 0 ${counts.length * 4} 50`} role="img" aria-label="Observation histogram">
-      ${counts.map((count, index) => html`<rect x=${index * 4} y=${50 - count / maximum * 48} width="3" height=${count / maximum * 48} fill="currentColor"><title>${hasUnderflow && index === 0 ? "Underflow" : index === counts.length - 1 ? "Overflow" : `Bin ${index + (hasUnderflow ? 0 : 1)}`}: ${count}</title></rect>`)}
-    </svg>
-  </figure>`;
+function finite(value) {
+  return value != null && Number.isFinite(Number(value));
 }
 
-function History({ series }) {
-  const samples = (series?.history || []).filter((sample) => sample.display_epoch === series.display_epoch);
-  if (!samples.length) return null;
-  const finite = samples.filter((sample) => sample.value != null);
-  if (!finite.length) return null;
-  const low = Math.min(...finite.map((s) => s.value));
-  const span = Math.max(1, Math.max(...finite.map((s) => s.value)) - low);
+function milliseconds(nanoseconds) {
+  return finite(nanoseconds) ? `${Number((Number(nanoseconds) / 1_000_000).toFixed(3))} ms` : "";
+}
+
+function partsPerMillion(value) {
+  return finite(value) ? `${Number(Number(value).toFixed(3))} ppm` : "";
+}
+
+function Sparkline({ series, label }) {
+  const samples = (series?.history || []).filter(
+    (sample) => sample.display_epoch === series.display_epoch && finite(sample.value),
+  );
+  if (samples.length < 2) return null;
+  const values = samples.map((sample) => Number(sample.value));
+  const low = Math.min(...values);
+  const span = Math.max(Math.max(...values) - low, Math.abs(low) * 1e-6, 1e-9);
   const begin = samples[0].observed_monotonic;
-  const duration = Math.max(1, samples.at(-1).observed_monotonic - begin);
-  const epochs = [...new Set(samples.map((s) => s.epoch))];
-  return html`<svg viewBox="0 0 300 60" role="img" aria-label="Observation history with continuity gaps">
-    ${epochs.map((epoch) => html`<polyline fill="none" stroke="currentColor" points=${finite.filter((s) => s.epoch === epoch).map((s) => `${(s.observed_monotonic - begin) / duration * 300},${58 - (s.value - low) / span * 56}`).join(" ")} />`)}
+  const duration = Math.max(samples.at(-1).observed_monotonic - begin, 1e-9);
+  const points = samples
+    .map((sample) => `${(((sample.observed_monotonic - begin) / duration) * 158 + 1).toFixed(1)},${(31 - ((Number(sample.value) - low) / span) * 30).toFixed(1)}`)
+    .join(" ");
+  return html`<svg class="sparkline" width="160" height="32" viewBox="0 0 160 32" role="img" aria-label=${label}>
+    <polyline fill="none" stroke="currentColor" stroke-width="1.5" points=${points} />
   </svg>`;
 }
 
-export function DiagnosticsView({ data }) {
-  return html`<div>
-    ${(data.receiver?.paths || []).map((path) => {
-      const latency = path.latency;
-      const late = path.late_packets;
-      const stats = latency.statistics || {};
-      const budget = latency.current?.evidence?.configured_latency_nanoseconds;
-      return html`<section>
-        <h3>${path.attribution_status === "resolved" ? `Audio flow ${path.audio_receiver_flow_id} · Network ${path.network_interface_index + 1}` : `Telemetry index ${path.telemetry_index}`}</h3>
-        ${path.attribution_reason && html`<p>${path.attribution_reason}</p>`}
-        <${Fields} entries=${[
-          ["Transmitter", path.evidence?.source || "Unavailable"],
-          ["Latency configuration source", budget == null ? "Unavailable" : "Receiver flow inventory"],
-          ["Configured latency", budget == null ? "Unavailable" : `${number(budget / 1000)} µs`],
-          ["Reported maximum", `${number(latency.current?.latency_microseconds)} µs · ${latency.fresh ? "fresh" : "stale"}`],
-          ["Mean of retained maxima", `${number(stats.mean == null ? null : stats.mean / 1000)} µs`],
-          ["Peak reported maximum", `${number(stats.maximum == null ? null : stats.maximum / 1000)} µs · ${stats.peak_observed_at || "Unavailable"}`],
-          ["Remaining latency margin", budget != null && latency.current?.value != null ? `${number((budget - latency.current.value) / 1000)} µs` : "Unavailable"],
-          ["Late packet counter", `${number(late.current?.raw)} · ${late.fresh ? "fresh" : "stale"}`],
-          ["Counter increase since local baseline", number(late.increase_since_baseline)],
-          ["Retained observations", number(stats.count)],
-          ["Window", `${stats.window_start || "Unavailable"} – ${stats.window_end || "Unavailable"}`],
-          ["Continuity epoch", number(latency.current?.epoch)],
-        ]} />
-        <${History} series=${latency} /><${Histogram} series=${latency} />
-      </section>`;
-    })}
-    ${["heartbeat", "conmon"].filter((name) => data.clock?.[name]?.current).map((name) => {
-      const series = data.clock[name];
-      const stats = series.statistics || {};
-      return html`<section><h3>${name === "heartbeat" ? "Heartbeat frequency offset" : "Clock-status frequency offset"}</h3>
-        <${Fields} entries=${[
-          ["Current", `${number(series.current.value)} ppm · ${series.fresh ? "fresh" : "stale"}`],
-          ["Minimum / maximum", `${number(stats.minimum)} / ${number(stats.maximum)} ppm`],
-          ["Mean", `${number(stats.mean)} ppm`],
-          ["Population standard deviation", `${number(stats.population_standard_deviation)} ppm`],
-          ["Observations", number(stats.count)],
-        ]} />
-        <${History} series=${series} /><${Histogram} series=${series} />
-      </section>`;
-    })}
-  </div>`;
+function displayedPaths(data) {
+  return (data?.receiver?.paths || []).filter((path) => {
+    if (path.attribution_status === "resolved") return true;
+    const latency = Number(path.latency?.current?.value) || 0;
+    const late = Number(path.late_packets?.current?.raw) || 0;
+    return latency > 0 || late > 0;
+  });
+}
+
+function flowLabel(path) {
+  if (path.attribution_status !== "resolved") return "Unidentified flow";
+  const secondary = path.network_interface_index === 1 ? " · secondary" : "";
+  return `Flow ${path.audio_receiver_flow_id}${secondary}`;
+}
+
+function LatePackets({ series }) {
+  const total = series?.current?.raw;
+  if (!finite(total)) return "";
+  const increase = Number(series.increase_since_baseline) || 0;
+  return html`<span>${Number(total).toLocaleString()}${increase > 0 ? html` <span class="state-warn">(+${increase.toLocaleString()} since reset)</span>` : ""}</span>`;
+}
+
+function ReceiveLatency({ data, endpoint, onReset }) {
+  const paths = displayedPaths(data);
+  if (!paths.length) return null;
+  return html`<${Panel}
+    title="Receive latency"
+    headerActions=${html`
+      <a class="btn btn-xs" href=${endpoint} download="netaudio-diagnostics.json">Export</a>
+      <button type="button" class="btn btn-xs" onClick=${onReset}>Reset</button>
+    `}
+  >
+    <div class="table-wrapper">
+      <table class="data receive-latency-table">
+        <thead>
+          <tr>
+            <th>Flow</th>
+            <th class="numeric">Latency setting</th>
+            <th class="numeric">Now</th>
+            <th class="numeric">Peak</th>
+            <th class="numeric">Headroom</th>
+            <th class="numeric">Late packets</th>
+            <th>Last 5 minutes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${paths.map((path) => {
+            const latency = path.latency || {};
+            const budget = path.evidence?.configured_latency_nanoseconds ?? latency.current?.evidence?.configured_latency_nanoseconds;
+            const current = latency.current?.value;
+            const peak = latency.statistics?.maximum;
+            const headroom = finite(budget) && finite(current) ? Number(budget) - Number(current) : null;
+            return html`<tr key=${`${path.telemetry_index}:${path.network_interface_index}`}>
+              <td data-label="Flow">${flowLabel(path)}</td>
+              <td class="numeric" data-label="Latency setting">${milliseconds(budget)}</td>
+              <td class="numeric" data-label="Now">${milliseconds(current)}</td>
+              <td class="numeric" data-label="Peak">${milliseconds(peak)}</td>
+              <td class=${`numeric${headroom != null && headroom <= 0 ? " state-bad" : ""}`} data-label="Headroom">${milliseconds(headroom)}</td>
+              <td class="numeric" data-label="Late packets"><${LatePackets} series=${path.late_packets} /></td>
+              <td data-label="Last 5 minutes"><${Sparkline} series=${latency} label="Maximum latency over the last 5 minutes" /></td>
+            </tr>`;
+          })}
+        </tbody>
+      </table>
+    </div>
+  <//>`;
+}
+
+function frequencySeries(data) {
+  const candidates = ["conmon", "heartbeat"]
+    .map((name) => data?.clock?.[name])
+    .filter((series) => series?.fresh && finite(series.current?.value) && (series.statistics?.count || 0) >= MINIMUM_FREQUENCY_OBSERVATIONS);
+  return candidates[0] || null;
+}
+
+function ClockFrequency({ data, onWarnings }) {
+  const series = frequencySeries(data);
+  if (!series) return null;
+  const stats = series.statistics || {};
+  return html`<${Panel}
+    title="Clock frequency"
+    headerActions=${html`<label class="status-toggle">
+      <input
+        type="checkbox"
+        checked=${data.clock?.warning_enabled === true}
+        onChange=${(event) => onWarnings(event.target.checked)}
+      />
+      Warn on drift
+    </label>`}
+  >
+    <div class="clock-frequency">
+      <${Fields}
+        entries=${[
+          ["Offset now", partsPerMillion(series.current.value)],
+          ["Range", finite(stats.minimum) && finite(stats.maximum) ? `${partsPerMillion(stats.minimum)} to ${partsPerMillion(stats.maximum)}` : undefined],
+        ]}
+      />
+      <${Sparkline} series=${series} label="Clock frequency offset over the last 5 minutes" />
+    </div>
+  <//>`;
+}
+
+async function post(path, body) {
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error);
+  return payload;
 }
 
 export function DiagnosticsSection({ device }) {
@@ -94,27 +160,17 @@ export function DiagnosticsSection({ device }) {
     const timer = setInterval(refresh, 5000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [endpoint]);
-  async function reset() {
-    try {
-      const response = await fetch("/diagnostics/reset", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({device: device.server_name})});
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error);
-      setData(body);
-    } catch (failure) { setError(failure.message); }
-  }
-  async function configureWarnings(enabled) {
-    try {
-      const response = await fetch("/diagnostics/policy", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({device: device.server_name, clock_variation_warnings: enabled})});
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error);
-      setData(body);
-    } catch (failure) { setError(failure.message); }
-  }
-  return html`<${Panel} title="Receiver and clock diagnostics">
-    <a href=${endpoint} download="netaudio-diagnostics.json">Export retained observations</a>
-    <button onClick=${reset}>Reset local statistics</button>
-    <label><input type="checkbox" checked=${data?.clock?.warning_enabled === true} onChange=${(event) => configureWarnings(event.target.checked)} />Clock frequency variation warnings</label>
-    ${error && html`<p>${error}</p>`}
-    ${data ? html`<p>Retaining up to ${data.retention_limit} observations per series.</p><${DiagnosticsView} data=${data} />` : html`<p>Loading observations…</p>`}
-  <//>`;
+  const run = (path, body) => post(path, body).then(setData, (failure) => setError(failure.message));
+  return html`
+    ${error ? html`<${Notice}>${error}<//>` : null}
+    <${ReceiveLatency}
+      data=${data}
+      endpoint=${endpoint}
+      onReset=${() => run("/diagnostics/reset", { device: device.server_name })}
+    />
+    <${ClockFrequency}
+      data=${data}
+      onWarnings=${(enabled) => run("/diagnostics/policy", { device: device.server_name, clock_variation_warnings: enabled })}
+    />
+  `;
 }

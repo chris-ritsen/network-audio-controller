@@ -300,42 +300,6 @@ def test_latency_telemetry_requests_missing_flow_inventory():
     assert path["evidence"]["source"] == "sender-a"
 
 
-def test_browser_renders_native_path_and_histogram_values(tmp_path):
-    import json
-    import subprocess
-
-    tracker = ReceiverFlowConnectionHealthTracker()
-    update(tracker, 1, (2, (24,)), now=100)
-    payload = {"device": "receiver", "receiver": tracker.history_snapshot(DEVICE), "clock": None}
-    script = """
-      import {readFileSync} from 'node:fs';
-      import {h} from 'preact';
-      import {render} from 'preact-render-to-string';
-      import {DiagnosticsView} from './packages/netaudio/src/netaudio/daemon/http/webapp/device/diagnostics.js';
-      console.log(render(h(DiagnosticsView, {data: JSON.parse(readFileSync(0, 'utf8'))})));
-    """
-    result = subprocess.run(
-        [
-            "node",
-            "--import",
-            "./tests/webapp/loader.mjs",
-            "--import",
-            "./tests/webapp/setup.mjs",
-            "--input-type=module",
-            "-e",
-            script,
-        ],
-        input=json.dumps(payload),
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    assert "Audio flow 1" in result.stdout and "Network 2" in result.stdout
-    assert "500" in result.stdout and "Reported maximum" in result.stdout
-    assert "1 observations" in result.stdout
-    (tmp_path / "receiver-diagnostics.html").write_text(result.stdout)
-
-
 def test_path_pressure_issue_keeps_network_scope_and_does_not_recover_when_missing():
     from netaudio.monitoring.issues import IssueEngine
 

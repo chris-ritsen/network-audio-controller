@@ -2,7 +2,7 @@ import { api } from "../api.js";
 import { AsyncButton, Fields, FieldRow, Panel } from "../components.js";
 import { html, useEffect, useRef, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
-import { operationReasonText, operationWritable } from "./availability.js";
+import { operationWritable } from "./availability.js";
 
 const modeLabel = (value) =>
   ({
@@ -10,15 +10,11 @@ const modeLabel = (value) =>
     redundant: "Redundant",
     split_redundant: "Split/Redundant",
     dynamic: "DHCP",
+    dhcp: "DHCP",
     static: "Static",
-  })[value] || "Unavailable";
+  })[value];
 
-const modeEvidenceLabel = (evidence) => {
-  if (evidence?.mode) return modeLabel(evidence.mode);
-  if (evidence?.raw_label || Number.isInteger(evidence?.raw_code))
-    return "Unknown";
-  return "Unavailable";
-};
+const usableAddress = (value) => (value && value !== "0.0.0.0" ? value : undefined);
 
 function InterfaceCard({
   device,
@@ -52,32 +48,26 @@ function InterfaceCard({
       <h3 class="section-label">${title}</h3>
       <${Fields}
         entries=${[
-        ["Active mode", modeLabel(entry.mode)],
-        ["Active address", entry.ip_address],
-        ["Subnet mask", entry.netmask],
-        ...(entry.gateway && entry.gateway !== "0.0.0.0"
-          ? [["Gateway", entry.gateway]]
+        ["Mode", modeLabel(entry.mode)],
+        ["Address", usableAddress(entry.ip_address)],
+        ["Subnet mask", usableAddress(entry.netmask)],
+        ["Gateway", usableAddress(entry.gateway)],
+        ["DNS server", usableAddress(entry.dns_server)],
+        ["MAC address", entry.mac_address || undefined],
+        ...(configured && !editable && configured.mode !== entry.mode
+          ? [["Mode after reboot", modeLabel(configured.mode)]]
           : []),
-        ...(entry.dns_server && entry.dns_server !== "0.0.0.0"
-          ? [["DNS server", entry.dns_server]]
-          : []),
-        ["MAC address", entry.mac_address],
-        ...(configured
+        ...(configured?.mode === "static" && !editable && configured.ip_address !== entry.ip_address
           ? [
-              ["Configured mode", modeLabel(configured.mode)],
-              ...(configured.mode === "static"
-                ? [
-                    ["Configured address", configured.ip_address],
-                    ["Configured subnet mask", configured.netmask],
-                    ["Configured gateway", configured.gateway],
-                    ["Configured DNS server", configured.dns_server],
-                  ]
-                : []),
+              ["Address after reboot", usableAddress(configured.ip_address)],
+              ["Subnet mask after reboot", usableAddress(configured.netmask)],
+              ["Gateway after reboot", usableAddress(configured.gateway)],
+              ["DNS server after reboot", usableAddress(configured.dns_server)],
             ]
           : []),
       ]}
       />
-      ${entry.reboot_required ? html`<p role="status">Pending network change — reboot required.</p>` : null}
+      ${entry.reboot_required ? html`<p role="status">Reboot to apply the new network settings.</p>` : null}
       ${
         editable
           ? html`
@@ -148,16 +138,7 @@ function InterfaceCard({
                 >Save ${roleTitle.toLowerCase()} settings<//
               >
             `
-          : configured
-            ? html`<p>
-                Network changes are unavailable for this interface.
-                ${
-                  writable
-                    ? "No configuration modes were reported."
-                    : operationReasonText(device, "static_ipv4")
-                }
-              </p>`
-            : null
+          : null
       }
     </section>
   `;
@@ -171,9 +152,6 @@ function Redundancy({ device, status, requestName, onReadback }) {
   const writable = operationWritable(device, "redundancy");
   const knownModes = (status?.available_modes || []).filter(
     (choice) => choice?.mode,
-  );
-  const unknownModes = (status?.available_modes || []).filter(
-    (choice) => !choice?.mode,
   );
   const changeMode = async (event) => {
     const mode = event.currentTarget.value;
@@ -196,41 +174,17 @@ function Redundancy({ device, status, requestName, onReadback }) {
       setBusy(false);
     }
   };
-  if (!status) return html`<p>Dante Redundancy capability is unknown.</p>`;
-  const capability =
-    status.advertised_support === true
-      ? "Supported"
-      : status.advertised_support === false
-        ? "Unsupported"
-        : "Unknown";
+  const editable = writable && knownModes.length > 0;
+  if (!status || (status.advertised_support !== true && !editable)) return null;
+  const active = modeLabel(status.current_mode_evidence?.mode);
+  const configured = modeLabel(status.configured_mode_evidence?.mode);
   return html`
     <section class="network-section">
       <h3 class="section-label">Dante Redundancy</h3>
-      <${Fields}
-        entries=${[
-        ["Capability", capability],
-        ["Active", modeEvidenceLabel(status.current_mode_evidence)],
-        ["Configured", modeEvidenceLabel(status.configured_mode_evidence)],
-        [
-          "Interface inventory",
-          status.interface_inventory?.completeness || "unknown",
-        ],
-        ...(status.licensed_redundancy?.enabled == null
-          ? []
-          : [
-              [
-                "Licensed redundancy diagnostic",
-                status.licensed_redundancy.enabled ? "Enabled" : "Disabled",
-              ],
-            ]),
-      ]}
-      />
-      ${status.reboot_required ? html`<p role="status">Pending redundancy change — reboot required.</p>` : null}
-      ${unknownModes.length ? html`<p>Some advertised modes are unknown.</p>` : null}
       ${
-        writable && knownModes.length
+        editable
           ? html`
-              <${FieldRow} label="Dante Redundancy">
+              <${FieldRow} label="Mode">
                 <select
                   aria-label="Dante Redundancy"
                   value=${selection}
@@ -243,15 +197,14 @@ function Redundancy({ device, status, requestName, onReadback }) {
               ${busy ? html`<p role="status">Applying redundancy mode…</p>` : null}
               ${error ? html`<p role="alert">Could not change redundancy mode: ${error}</p>` : null}
             `
-          : html`<p>
-              Dante Redundancy changes are unavailable.
-              ${
-                writable
-                  ? "No supported modes were reported."
-                  : operationReasonText(device, "redundancy")
-              }
-            </p>`
+          : html`<${Fields}
+              entries=${[
+                ["Mode", active],
+                ["Mode after reboot", configured && configured !== active ? configured : undefined],
+              ]}
+            />`
       }
+      ${status.reboot_required ? html`<p role="status">Reboot to apply the new redundancy mode.</p>` : null}
     </section>
   `;
 }
@@ -259,19 +212,15 @@ function Redundancy({ device, status, requestName, onReadback }) {
 export function NetworkSection({ device }) {
   const requestName = deviceRequestName(device);
   const [probe, setProbe] = useState(null);
-  const [loadError, setLoadError] = useState(false);
   useEffect(() => {
     let active = true;
     setProbe(null);
-    setLoadError(false);
     if (device.online !== false)
       api.getInterfaces(requestName).then(
         (result) => {
           if (active) setProbe(result);
         },
-        () => {
-          if (active) setLoadError(true);
-        },
+        (error) => console.error(error),
       );
     return () => {
       active = false;
@@ -279,7 +228,6 @@ export function NetworkSection({ device }) {
   }, [requestName]);
   const onReadback = (result) => {
     setProbe((previous) => ({ ...previous, ...result }));
-    setLoadError(false);
   };
   const interfaces = probe?.interfaces ?? device.interfaces ?? [];
   const status = probe?.redundancy ?? device.network_redundancy;
@@ -294,11 +242,9 @@ export function NetworkSection({ device }) {
   return html`
     <div class="network-config">
       <${Panel} title="Network config">
-        ${loadError ? html`<p role="status">The device did not respond. Showing last-known network settings.</p>` : null}
-        ${speed ? html`<p>Link speed: ${speed} Mbps</p>` : null}
+        ${speed ? html`<${Fields} entries=${[["Link speed", `${speed} Mbps`]]} />` : null}
         ${
-        interfaces.length
-          ? interfaces.map(
+        interfaces.map(
               (entry) => html`
                 <${InterfaceCard}
                   key=${requestName + entry.interface + JSON.stringify(entry.configured)}
@@ -311,7 +257,6 @@ export function NetworkSection({ device }) {
                 />
               `,
             )
-          : html`<p>Network settings are unavailable.</p>`
       }
         <${Redundancy}
           key=${requestName + status?.configured_mode}

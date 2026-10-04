@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from netaudio.daemon.http.mcp_views import availability_verdict, channel_label, device_addresses, transmit_flow_view
+from netaudio.daemon.http.mcp_views import (
+    availability_verdict,
+    channel_label,
+    device_addresses,
+    is_off,
+    last_seen_text,
+    transmit_flow_view,
+)
 
 NEXT_STEP = (
     "Nothing has changed. Tell the user what this will do; after they agree, call again with the same "
@@ -104,6 +111,29 @@ def _routes_from(records: dict, device_name: str, tx_channel: str | None = None)
                 f"{_display(record, '?')}:{subscription.get('rx_channel')} <- {device_name}:{subscription.get('tx_channel')}"
             )
     return sorted(routes)
+
+
+def _forget_change(request: dict, records: dict, warnings: list[str]) -> dict:
+    if request.get("every_device_off"):
+        targets = [record for record in records.values() if is_off(record)]
+    else:
+        record = _record(records, request.get("device"))
+        if record is None:
+            warnings.append(f"{request.get('device')} is not in the device list, so there is nothing to forget")
+            return {}
+        if not is_off(record):
+            warnings.append(f"{_display(record, '?')} is on the network; only a device that is off can be forgotten")
+            return {}
+        targets = [record]
+    for record in targets:
+        routes = _routes_from(records, _display(record, "?"))
+        if routes:
+            warnings.append(f"routes that point at {_display(record, '?')} stay as they are: {', '.join(routes)}")
+    return {
+        "forget": sorted(f"{_display(record, '?')} ({last_seen_text(record)})" for record in targets)
+        or "nothing is off the network",
+        "comes_back": "a forgotten device returns by itself if it comes back on the network",
+    }
 
 
 def _route_change(route: dict, records: dict, warnings: list[str]) -> dict:
@@ -309,6 +339,8 @@ def write_preview(name: str, request: dict, records: dict, arguments: dict | Non
         preview["change"] = _route_change(request, records, warnings)
     elif name == "set_subscriptions":
         preview["changes"] = [_route_change(route, records, warnings) for route in request.get("routes") or []]
+    elif name == "forget_device":
+        preview["change"] = _forget_change(request, records, warnings)
     elif "device" in request:
         record = _record(records, request["device"])
         preview["device"] = _display(record, request["device"])

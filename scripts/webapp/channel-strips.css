@@ -1,0 +1,246 @@
+@layer components {
+  .channel-strips {
+    --channel-strip-width: 56px;
+    --channel-strip-segment: 3px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    padding: 0 1px 1px 0;
+  }
+
+  .channel-strip {
+    display: flex;
+    flex: 0 0 var(--channel-strip-width);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    width: var(--channel-strip-width);
+    margin: 0 -1px -1px 0;
+    padding: 5px 3px 6px;
+    background: var(--black);
+    border: 1px solid var(--line);
+    text-align: center;
+  }
+
+  .channel-strip-over {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    color: var(--text);
+    background: none;
+    border: 0;
+    border-radius: 0;
+    cursor: pointer;
+  }
+
+  .channel-strip-over:focus-visible,
+  .channel-strip-toggle:focus-visible {
+    outline: 2px solid var(--text);
+    outline-offset: 1px;
+  }
+
+  .channel-strip-over-lamp {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: center;
+    height: 14px;
+    font-family: var(--font-ui);
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.06em;
+    color: var(--text);
+    background: var(--meter-critical-unlit);
+    border: 1px solid var(--line-strong);
+    border-radius: 0;
+  }
+
+  .channel-strip-over[data-lit] .channel-strip-over-lamp {
+    color: #000000;
+    background: var(--meter-critical);
+    border-color: var(--meter-critical);
+  }
+
+  .channel-strip-over-count {
+    flex: 0 0 3ch;
+    font-family: var(--font-data);
+    font-size: 9px;
+    line-height: 14px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: var(--text);
+  }
+
+  .channel-strip-meter {
+    --channel-strip-track-width: 7px;
+    display: grid;
+    grid-template-columns: auto;
+    grid-auto-columns: var(--channel-strip-track-width);
+    justify-content: center;
+    column-gap: 2px;
+    row-gap: 2px;
+    padding: 6px 0 2px;
+  }
+
+  .channel-strip-meter[data-tracks="1"] {
+    --channel-strip-track-width: 10px;
+  }
+
+  .channel-strip-scale {
+    position: relative;
+    grid-row: 1;
+    grid-column: 1;
+    width: 3ch;
+    margin-right: 1px;
+    font-family: var(--font-data);
+    font-size: 9px;
+  }
+
+  .channel-strip-scale-label {
+    position: absolute;
+    right: 0;
+    line-height: 10px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    white-space: nowrap;
+    transform: translateY(50%);
+  }
+
+  .channel-strip-track {
+    position: relative;
+    grid-row: 1;
+    height: calc(var(--channel-strip-segments) * var(--channel-strip-segment));
+    background: linear-gradient(
+      to top,
+      var(--meter-nominal-unlit) 0 var(--channel-strip-nominal-top),
+      var(--meter-high-unlit) var(--channel-strip-nominal-top) var(--channel-strip-high-top),
+      var(--meter-critical-unlit) var(--channel-strip-high-top) 100%
+    );
+    outline: 1px solid var(--meter-well);
+  }
+
+  .channel-strip-track::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      to top,
+      transparent 0 calc(var(--channel-strip-segment) - 1px),
+      var(--meter-well) calc(var(--channel-strip-segment) - 1px) var(--channel-strip-segment)
+    );
+    pointer-events: none;
+  }
+
+  .channel-strip-fill {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      to top,
+      var(--meter-nominal) 0 var(--channel-strip-nominal-top),
+      var(--meter-high) var(--channel-strip-nominal-top) var(--channel-strip-high-top),
+      var(--meter-critical) var(--channel-strip-high-top) 100%
+    );
+    clip-path: inset(100% 0 0 0);
+  }
+
+  .channel-strip-peak {
+    position: absolute;
+    right: 0;
+    left: 0;
+    height: calc(100% / var(--channel-strip-segments));
+    background: var(--meter-nominal);
+  }
+
+  .channel-strip-peak[data-region="high"] {
+    background: var(--meter-high);
+  }
+
+  .channel-strip-peak[data-region="critical"] {
+    background: var(--meter-critical);
+  }
+
+  .channel-strip-track-label {
+    grid-row: 2;
+    font-family: var(--font-data);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 10px;
+    color: var(--text);
+  }
+
+  .channel-strip-readout {
+    min-height: 16px;
+    padding: 0 2px;
+    font-family: var(--font-data);
+    font-size: 10px;
+    line-height: 14px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    background: var(--meter-well);
+    border: 1px solid var(--line);
+  }
+
+  .channel-strip-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .channel-strip-toggle {
+    width: 100%;
+    min-height: 20px;
+    margin: 0;
+    padding: 2px 3px;
+    font-family: var(--font-ui);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text);
+    background: var(--raised);
+    border: 1px solid var(--line-strong);
+    border-radius: 0;
+    cursor: pointer;
+  }
+
+  .channel-strip-toggle[aria-pressed="true"] {
+    color: #000000;
+    background: var(--meter-critical);
+    border-color: var(--meter-critical);
+  }
+
+  .channel-strip-toggle:disabled {
+    color: var(--text);
+    opacity: 1;
+    cursor: progress;
+  }
+
+  .channel-strip-toggle[aria-pressed="true"]:disabled {
+    color: #000000;
+  }
+
+  .channel-strip-toggle[aria-busy="true"] {
+    border-style: dashed;
+  }
+
+  .channel-strip-number {
+    margin-top: 2px;
+    font-family: var(--font-data);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--text);
+  }
+
+  .channel-strip-name {
+    font-size: 10px;
+    line-height: 1.25;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+}

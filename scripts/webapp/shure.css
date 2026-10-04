@@ -1,0 +1,62 @@
+@layer components {
+  .shure-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+    gap: 16px 24px;
+    align-items: start;
+  }
+
+  .shure-heading {
+    margin: 4px 0 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .shure-fields dd {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .shure-field,
+  .shure-edit,
+  .shure-inline {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+  }
+
+  .shure-edit .input {
+    width: auto;
+    min-width: 10ch;
+  }
+
+  .shure-leds {
+    display: inline-flex;
+    gap: 3px;
+    vertical-align: middle;
+  }
+
+  .shure-led {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #2a2a2a;
+  }
+
+  .shure-antenna {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .shure-slots td,
+  .shure-slots th {
+    white-space: nowrap;
+  }
+}

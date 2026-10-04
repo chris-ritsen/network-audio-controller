@@ -22,7 +22,6 @@ function SettingsView() {
     <${Panel} title="Interface">
       <label class="inline-flex items-center gap-2"><input type="checkbox" checked=${allowTextSelection.value}
         onChange=${(event) => setAllowTextSelection(event.target.checked)} />Allow text selection</label>
-      <p class="text-sm text-muted mt-2">Select and copy interface text for development. Saved in this browser.</p>
     <//>
     <${Panel} title="Metering">
       <form class="flex flex-col items-start gap-4" onSubmit=${async (event) => {
@@ -37,7 +36,7 @@ function SettingsView() {
         finally { setBusy(false); }
       }}>
         <label class="flex flex-col gap-2">UDP port<input class="w-32" type="number" min="1024" max="65535" required disabled=${busy || !settings} value=${port} onInput=${(event) => setPort(event.target.value)} /></label>
-        ${Number(port) === 8751 ? html`<p class="text-sm text-warning" role="alert"><${Icon} name="warning" /> UDP 8751 is Dante Controller's default metering port. Running both applications on this port can cause a conflict. Use a different port, such as 8752.</p>` : null}
+        ${Number(port) === 8751 ? html`<p class="text-sm text-warning" role="alert"><${Icon} name="warning" /> Dante Controller meters on UDP 8751. Use another port, such as 8752.</p>` : null}
         ${settings && settings.active_monitoring_port !== settings.monitoring_port ? html`<p class="text-sm" role="status">${settings.active_monitoring_port == null ? "Not listening" : `Currently listening on port ${settings.active_monitoring_port}`}</p>` : null}
         <button class="btn btn-sm btn-primary" type="submit" disabled=${busy || !changed}><${Icon} name="check" />${busy ? "Saving…" : "Save"}</button>
       </form>

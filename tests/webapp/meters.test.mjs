@@ -64,7 +64,7 @@ test("meter tracks keep their geometry as readable signal labels and levels chan
     [0, "clipping", "Clipping"],
     [254, "muted", "Muted"],
     [255, "framing_marker", "Signal unavailable"],
-    [undefined, undefined, "—"],
+    [undefined, undefined, ""],
   ];
   for (const [level, presence] of samples) {
     drawMeters(node, 600, [1], { 1: level }, { 1: presence }, { 1: "Left" }, new Map(), 0, "detailed");

@@ -94,9 +94,9 @@ test("video keeps configured format, actual format and observed HDCP separate", 
     },
   };
   const html = render(h(DeviceControls, { device }));
-  assert.match(html, /Configured: Unknown/);
-  assert.match(html, /Actual: 800×600 60 Hz/);
-  assert.match(html, /Observed HDCP: 2.x/);
+  assert.match(html, /Configured<\/dt><dd>Unknown/);
+  assert.match(html, /Actual<\/dt><dd>800×600 60 Hz/);
+  assert.match(html, /HDCP<\/dt><dd>2.x/);
   assert.match(html, /Automatic/);
   assert.match(html, /aria-label="Resolution"[^>]*disabled/);
 });

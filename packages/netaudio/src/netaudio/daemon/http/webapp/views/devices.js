@@ -1,4 +1,4 @@
-import { Notice, OnlineState, Panel } from "../components.js";
+import { Notice, Panel } from "../components.js";
 import { ReceiveSection, TransmitSection } from "../device/channels.js";
 import { Aes67Section } from "../device/aes67.js";
 import { DeviceConfigSection } from "../device/config.js";
@@ -6,35 +6,75 @@ import { aes67Status } from "../aes67.js";
 import { isEnrolled, ManagedSection } from "../device/managed.js";
 import { NetworkSection } from "../device/network.js";
 import { LockSection } from "../device/security.js";
-import { StatusSection } from "../device/status.js";
+import { clockLeaderLabel, StatusSection } from "../device/status.js";
 import { DeviceMeters } from "../device/meters.js";
 import * as format from "../format.js";
-import { html } from "../lib/preact.js";
+import { html, useLayoutEffect } from "../lib/preact.js";
 import { devicePath, navigate, setQueryParameter } from "../router.js";
-import { deviceByName, scopedDevices as devices } from "../store.js";
+import { deviceByName, inventoryReady, scopedDevices as devices } from "../store.js";
 import { ConfigurableTable } from "../table.js";
+
+function shown(value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) return value.map(shown).filter(Boolean).join(", ");
+  if (typeof value === "object") return "";
+  return String(value);
+}
+
+function words(value) {
+  const text = shown(value).replaceAll("_", " ");
+  if (!text || ["unknown", "none", "unset", "unavailable"].includes(text.toLowerCase())) return "";
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function present(value) {
+  return value === format.ABSENT ? "" : value;
+}
+
+function DeviceState({ online }) {
+  return html`<span class="state-inline">
+    <span class="status-dot${online ? " online" : ""}" aria-hidden="true"></span>
+    ${online ? "Online" : "Offline"}
+  </span>`;
+}
+
+function clockSync(device) {
+  const synchronization = device.clock_status?.synchronization;
+  if (format.clockStatusFresh(device) && synchronization === "synchronized") return "Synchronized";
+  if (format.clockStatusFresh(device) && synchronization === "lost") return "Not synchronized";
+  const locked = device.ddm_clocking_state?.locked;
+  if (locked === true || locked === "LOCKED") return "Synchronized";
+  if (locked === false || locked === "UNLOCKED") return "Not synchronized";
+  return "";
+}
+
+function megabits(value) {
+  return value == null || !Number.isFinite(Number(value)) ? "" : `${value} Mbps`;
+}
 
 const INFO_COLUMNS = [
   {
-    cell: (device) => html`<${OnlineState} online=${device.online} />`,
+    cell: (device) => html`<${DeviceState} online=${device.online} />`,
+    sortValue: (device) => (device.online ? "Online" : "Offline"),
     id: "state",
     label: "State",
   },
   { cell: (device) => format.deviceLabel(device), id: "name", label: "Name" },
   {
-    cell: (device) => format.text(format.deviceModelName(device)),
+    cell: (device) => format.deviceModelName(device),
     id: "model",
     label: "Model name",
   },
   {
-    cell: (device) => format.text(device.manufacturer),
+    cell: (device) => shown(device.manufacturer),
     id: "manufacturer",
     label: "Manufacturer",
     defaultHidden: true,
   },
   {
     cell: (device) =>
-      format.text(
+      shown(
         device.friendly_product_version ||
           device.product_version ||
           device.ddm_product_version,
@@ -45,13 +85,13 @@ const INFO_COLUMNS = [
   },
   {
     cell: (device) =>
-      format.text(device.platform_software_version || device.ddm_dante_version),
+      shown(device.platform_software_version || device.ddm_dante_version),
     id: "dante-version",
     label: "Dante software/firmware",
   },
   {
     cell: (device) =>
-      format.text(
+      shown(
         device.platform_hardware_version || device.ddm_dante_hardware_version,
       ),
     id: "hardware-version",
@@ -59,64 +99,46 @@ const INFO_COLUMNS = [
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.cmc_server_version),
-    id: "cmc-server-version",
-    label: "CMC server version",
-    defaultHidden: true,
-  },
-  {
-    cell: (device) => format.text(device.router_protocol_version),
-    id: "router-protocol-version",
-    label: "Router protocol version",
-    defaultHidden: true,
-  },
-  {
     cell: (device) =>
-      device.is_locked == null
-        ? "Unknown"
-        : device.is_locked
-          ? "Locked"
-          : "Unlocked",
+      device.is_locked == null ? "" : device.is_locked ? "Locked" : "Unlocked",
     id: "lock",
     label: "Device lock",
   },
   {
-    cell: (device) => format.text(device.ipv4),
+    cell: (device) => shown(device.ipv4),
     id: "primary-address",
     label: "Primary address",
   },
   {
-    cell: (device) =>
-      device.link_speed_mbps ? `${device.link_speed_mbps} Mbps` : format.ABSENT,
+    cell: (device) => (device.link_speed_mbps ? megabits(device.link_speed_mbps) : ""),
     id: "link-speed",
     label: "Primary link speed",
   },
   {
-    cell: (device) => format.sampleRate(device.sample_rate_hz),
+    cell: (device) => present(format.sampleRate(device.sample_rate_hz)),
     id: "sample-rate",
     label: "Sample rate",
   },
   {
-    cell: (device) =>
-      device.encoding ? `PCM ${device.encoding}` : format.ABSENT,
+    cell: (device) => (device.encoding ? `PCM ${device.encoding}` : ""),
     id: "encoding",
     label: "Encoding",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.latency(device.latency_ms),
+    cell: (device) => present(format.latency(device.latency_ms)),
     id: "latency",
     label: "Latency",
   },
   {
     align: "right",
-    cell: (device) => format.text(device.tx_count),
+    cell: (device) => shown(device.tx_count),
     id: "transmit",
     label: "Tx channels",
   },
   {
     align: "right",
-    cell: (device) => format.text(device.rx_count),
+    cell: (device) => shown(device.rx_count),
     id: "receive",
     label: "Rx channels",
   },
@@ -128,72 +150,59 @@ const INFO_COLUMNS = [
     label: "Subscriptions",
   },
   {
-    cell: (device) => format.macAddress(device),
+    cell: (device) => present(format.macAddress(device)),
     id: "mac",
     label: "MAC address",
   },
   {
-    cell: (device) => format.text(device.platform_model_name),
+    cell: (device) => shown(device.platform_model_name),
     id: "dante-model",
     label: "Dante platform model",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.kind),
-    id: "kind",
-    label: "Kind",
-    defaultHidden: true,
-  },
-  {
-    cell: (device) => format.text(device.inventory_sources),
-    id: "sources",
-    label: "Inventory sources",
-    defaultHidden: true,
-  },
-  {
-    cell: (device) => format.text(device.ddm_domain_name),
+    cell: (device) => shown(device.ddm_domain_name),
     id: "domain",
     label: "Domain",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.timestamp(device.last_seen),
+    cell: (device) => present(format.timestamp(device.last_seen)),
     id: "last-seen",
     label: "Last seen",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.clock_role),
+    cell: (device) => words(device.clock_role),
     id: "clock-role",
     label: "Clock role",
   },
   {
-    cell: (device) => format.clockLeaderName(device, devices.value),
+    cell: (device) => clockLeaderLabel(device, devices.value),
     id: "clock-leader",
     label: "Clock leader",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.preferredLeader(device.preferred_leader),
+    cell: (device) => shown(device.preferred_leader),
     id: "preferred-leader",
     label: "Preferred leader",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.clock_source || "Unknown"),
+    cell: (device) => words(device.clock_source),
     id: "clock-source",
     label: "Clock source",
     defaultHidden: true,
   },
   {
-    cell: (device) =>
-      device.clock_subdomain_presentation?.label || "Unavailable",
+    cell: (device) => words(device.clock_subdomain_presentation?.label),
     id: "clock-subdomain",
     label: "Clock subdomain",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.ddm_clocking_state?.locked),
+    cell: (device) => clockSync(device),
     id: "clock-sync",
     label: "Clock sync",
     defaultHidden: true,
@@ -201,26 +210,26 @@ const INFO_COLUMNS = [
   {
     cell: (device) =>
       device.clock_frequency_offset_parts_per_billion == null
-        ? format.ABSENT
-        : `${device.clock_frequency_offset_parts_per_billion} ppb`,
+        ? ""
+        : `${Number((device.clock_frequency_offset_parts_per_billion / 1000).toFixed(3))} ppm`,
     id: "frequency-offset",
     label: "Frequency offset",
     defaultHidden: true,
   },
   {
-    cell: (device) => aes67Status(device).label,
+    cell: (device) => aes67Label(device),
     id: "aes67",
     label: "AES67",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.interfaces?.[0]?.mode),
+    cell: (device) => ({ dynamic: "DHCP", static: "Static" })[device.interfaces?.[0]?.mode] || "",
     id: "primary-mode",
     label: "Primary mode",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.interfaces?.[1]?.ip_address),
+    cell: (device) => shown(device.interfaces?.[1]?.ip_address),
     id: "secondary-address",
     label: "Secondary address",
     defaultHidden: true,
@@ -230,26 +239,26 @@ const INFO_COLUMNS = [
       const speed =
         device.interfaces?.[1]?.link_speed_mbps ??
         device.interfaces?.[1]?.speed;
-      return speed == null ? format.ABSENT : `${speed} Mbps`;
+      return megabits(speed);
     },
     id: "secondary-link-speed",
     label: "Secondary link speed",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.interfaces?.[0]?.gateway),
+    cell: (device) => shown(device.interfaces?.[0]?.gateway),
     id: "gateway",
     label: "Gateway",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.interfaces?.[0]?.dns_server),
+    cell: (device) => shown(device.interfaces?.[0]?.dns_server),
     id: "dns",
     label: "DNS",
     defaultHidden: true,
   },
   {
-    cell: (device) => format.text(device.interface_reboot_required),
+    cell: (device) => shown(device.interface_reboot_required),
     id: "reboot-required",
     label: "Reboot required",
     defaultHidden: true,
@@ -267,11 +276,25 @@ const INFO_COLUMNS = [
           `total_${field}_rate_bits_per_second`
         ];
       return value == null || !Number.isFinite(Number(value))
-        ? format.ABSENT
+        ? ""
         : `${(Number(value) / 1_000_000).toFixed(2)} Mbps`;
     },
   })),
 ];
+
+const AES67_STATES = new Set([
+  "Enabled",
+  "Disabled",
+  "Enable pending",
+  "Disable pending",
+  "Configured enabled",
+  "Configured disabled",
+]);
+
+function aes67Label(device) {
+  const label = aes67Status(device).label;
+  return AES67_STATES.has(label) ? label : "";
+}
 
 const INVENTORY_VIEWS = {
   devices: {
@@ -343,18 +366,15 @@ function DeviceInfo({ location }) {
       <${Panel}>
         ${
           all.length === 0
-            ? html`<${Notice}
-                >No Dante devices have been discovered yet. The daemon browses
-                mDNS continuously.<//
-              >`
+            ? html`<${Notice}>No Dante devices found.<//>`
             : html`<${ConfigurableTable}
                 key=${mode}
                 tableId=${mode}
-                mobileSummary=${(device) => ({ title: format.deviceLabel(device), detail: html`<${OnlineState} online=${device.online} />` })}
+                mobileSummary=${(device) => ({ title: format.deviceLabel(device), detail: html`<${DeviceState} online=${device.online} />` })}
                 columns=${columns}
                 rows=${visible}
                 rowKey=${(device) => device.server_name || device.name}
-                rowHref=${(device) => devicePath("devices", format.deviceLabel(device), "receive")}
+                rowHref=${(device) => devicePath("devices", format.deviceLabel(device), deviceTabs(device)[0].id)}
                 toolbar=${html`
                   <input
                     type="search"
@@ -414,28 +434,67 @@ function tabContent(tab, device) {
   return html`<${ReceiveSection} device=${device} />`;
 }
 
+function channelCount(device, direction) {
+  const declared = device.channels?.[direction === "tx" ? "transmitters" : "receivers"];
+  const listed = declared && typeof declared === "object" ? Object.keys(declared).length : 0;
+  const reported = Number(direction === "tx" ? device.tx_count : device.rx_count);
+  return Math.max(listed, Number.isFinite(reported) ? reported : 0);
+}
+
+function flowCount(flows) {
+  return Array.isArray(flows) ? flows.length : flows && typeof flows === "object" ? Object.keys(flows).length : 0;
+}
+
+const TAB_AVAILABILITY = {
+  receive: (device) => channelCount(device, "rx") > 0 || flowCount(device.receiver_flows) > 0,
+  transmit: (device) => channelCount(device, "tx") > 0 || flowCount(device.transmitter_flows) > 0,
+  metering: (device) => channelCount(device, "rx") > 0 || channelCount(device, "tx") > 0,
+  "aes67-config": (device) =>
+    isEnrolled(device)
+      ? device.ddm_capabilities?.rtp_audio_supported === true
+      : device.aes67_configuration_supported === true,
+  lock: (device) =>
+    device.device_locking_supported === true ||
+    device.operation_availability?.locking?.supported === true,
+};
+
+export function deviceTabs(device) {
+  const tabs = isEnrolled(device)
+    ? [...DEVICE_TABS, { id: "domain", label: "Domain" }]
+    : DEVICE_TABS;
+  return tabs.filter((entry) => !TAB_AVAILABILITY[entry.id] || TAB_AVAILABILITY[entry.id](device));
+}
+
+function SectionRedirect({ path }) {
+  useLayoutEffect(() => {
+    navigate(path, { replace: true });
+  }, [path]);
+  return null;
+}
+
 function DeviceView({ location }) {
   const deviceName = location.parameters.device;
   const device = deviceByName(deviceName);
   if (!device) {
-    return html`<${Notice}>
-      No device named ${deviceName} is visible in this view. It may be offline,
-      filtered out, or forgotten.
-    <//>`;
+    return html`<${Notice}>No device named ${deviceName}.<//>`;
   }
   if (!device.online) {
     return html`<div class="flex flex-col gap-4">
       <h1 class="content-title">${format.deviceLabel(device)}</h1>
-      <${Notice}
-        >This device is offline. Controls are unavailable until it
-        reconnects.<//
-      >
+      <${Notice}>This device is offline.<//>
     </div>`;
   }
-  const tabs = isEnrolled(device)
-    ? [...DEVICE_TABS, { id: "domain", label: "Domain" }]
-    : DEVICE_TABS;
-  const tab = location.parameters.section || "receive";
+  const requested = location.parameters.section;
+  const available = deviceTabs(device);
+  const known = DEVICE_TABS.some((entry) => entry.id === requested) || requested === "domain";
+  const waiting = !inventoryReady.value && known && !available.some((entry) => entry.id === requested);
+  const tabs = waiting
+    ? [...DEVICE_TABS, { id: "domain", label: "Domain" }].filter(
+        (entry) => entry.id === requested || available.some((item) => item.id === entry.id),
+      )
+    : available;
+  const tab = tabs.some((entry) => entry.id === requested) ? requested : tabs[0].id;
+  const redirect = tab === requested ? null : devicePath("devices", format.deviceLabel(device), tab);
 
   return html`
     <div class="flex flex-col gap-4">
@@ -480,7 +539,8 @@ function DeviceView({ location }) {
           `,
         )}
       </nav>
-      ${tabs.some((entry) => entry.id === tab) ? tabContent(tab, device) : html`<${Notice}>This section is unavailable for this device.<//>`}
+      ${redirect ? html`<${SectionRedirect} path=${redirect} />` : null}
+      ${tabContent(tab, device)}
     </div>
   `;
 }

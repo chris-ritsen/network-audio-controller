@@ -24,6 +24,57 @@ SHURE_CONTROL_PORT = 2202
 METER_RATE_MS = 100
 NEIGHBOR_SCAN_INTERVAL = 30
 RECONNECT_DELAY = 5
+UPDATE_COALESCE_SECONDS = 0.05
+AUDIO_METER_KEYS = frozenset({"AUDIO_LEVEL_PEAK", "AUDIO_LEVEL_RMS", "AUDIO_IN_LVL_L", "AUDIO_IN_LVL_R"})
+METERED_KEYS = AUDIO_METER_KEYS | frozenset(
+    {
+        "CHAN_QUALITY",
+        "AUDIO_LED_BITMAP",
+        "ANTENNA_STATUS",
+        "ANTENNA_STATUS2",
+        "RSSI",
+        "RSSI2",
+        "RSSI_LED_BITMAP",
+        "RSSI_LED_BITMAP2",
+    }
+)
+INDEXED_KEYS = frozenset({"RSSI", "RSSI2", "RSSI_LED_BITMAP", "RSSI_LED_BITMAP2", "NET_SETTINGS"})
+NETWORK_INTERFACES = ("SC", "D1", "D2")
+
+
+def is_indexed_key(key):
+    return key in INDEXED_KEYS or key.startswith("SLOT_")
+
+
+def split_indexed_value(value):
+    index, _, rest = value.partition(" ")
+    return index, rest.strip().lstrip("{").rstrip("}").strip()
+
+
+def sample_reports(fields):
+    if len(fields) < 4:
+        return []
+    reports = [
+        ("CHAN_QUALITY", fields[0]),
+        ("AUDIO_LED_BITMAP", fields[1]),
+        ("AUDIO_LEVEL_PEAK", fields[2]),
+        ("AUDIO_LEVEL_RMS", fields[3]),
+    ]
+    position = 4
+    group = 1
+    while position < len(fields):
+        suffix = "" if group == 1 else str(group)
+        status = fields[position]
+        position += 1
+        reports.append((f"ANTENNA_STATUS{suffix}", status))
+        for antenna in range(1, len(status) + 1):
+            if position + 1 >= len(fields):
+                break
+            reports.append((f"RSSI_LED_BITMAP{suffix}", f"{antenna} {fields[position]}"))
+            reports.append((f"RSSI{suffix}", f"{antenna} {fields[position + 1]}"))
+            position += 2
+        group += 1
+    return reports
 
 AD4D_DEVICE_KEYS = [
     "DEVICE_ID",
@@ -102,6 +153,8 @@ def _detect_protocol(model_name):
 
 _ad4d_rep_re = re.compile(r"<\s*REP\s+(?:(\d)\s+)?([A-Z0-9_]+)\s+\{?([^>}]*?)\}?\s*>")
 _p10t_report_re = re.compile(r"<\s*REPORT\s+(?:(\d)\s+)?([A-Z0-9_]+)\s+([^>]*?)\s*>")
+_ad4d_sample_re = re.compile(r"<\s*SAMPLE\s+(\d)\s+ALL\s+([^>]*?)\s*>")
+_ad4d_error_re = re.compile(r"<\s*REP\s+ERR\s*>")
 
 
 class ShureConnection:
@@ -152,7 +205,11 @@ class ShureConnection:
             for channel in ("1", "2", "3", "4"):
                 for key in AD4D_CHANNEL_KEYS:
                     await self._send(f"GET {channel} {key}")
-                await self._send(f"SET {channel} METER_RATE {METER_RATE_MS}")
+            await self._send("GET 0 ALL")
+            for interface in NETWORK_INTERFACES:
+                await self._send(f"GET NET_SETTINGS {interface}")
+            for channel in ("1", "2", "3", "4"):
+                await self._send(f"SET {channel} METER_RATE {METER_RATE_MS:05d}")
         else:
             for key in P10T_DEVICE_KEYS:
                 await self._send(f"GET {key}")
@@ -224,6 +281,13 @@ class ShureConnection:
 
     def _handle_message(self, message):
         if self.protocol == "ad4d":
+            sample = _ad4d_sample_re.search(message)
+            if sample:
+                self.manager._on_shure_sample(self.ip, self.mac, int(sample.group(1)), sample.group(2).split())
+                return
+            if _ad4d_error_re.search(message):
+                self.manager._on_shure_error(self.mac)
+                return
             match = _ad4d_rep_re.search(message)
             if not match:
                 return
@@ -281,6 +345,9 @@ class ShureManager:
         self._reconnect_tasks: dict[str, asyncio.Task[None]] = {}
         self._stop_event = DeferredAsyncioEvent()
         self._running = False
+        self._report_waiters: dict[tuple[str, int | None, str, str | None], list[asyncio.Future]] = {}
+        self._properties: dict[str, dict] = {}
+        self._pending_updates: dict[str, asyncio.TimerHandle] = {}
 
     async def start(self):
         if self._running:
@@ -293,6 +360,9 @@ class ShureManager:
     async def stop(self):
         self._running = False
         self._stop_event.set()
+        for handle in self._pending_updates.values():
+            handle.cancel()
+        self._pending_updates.clear()
 
         scan_tasks = [self._scan_task] if self._scan_task is not None else []
         await self._cancel_tasks(scan_tasks, "neighbor scan")
@@ -352,6 +422,36 @@ class ShureManager:
                 await connection._send(command)
                 return True
         return False
+
+    def current_value(self, mac, key, channel=None):
+        raw_reports = self._raw_reports.get(_normalize_mac(mac), {})
+        if channel is None:
+            return raw_reports.get(key)
+        return raw_reports.get(int(channel), {}).get(key)
+
+    def properties(self, mac):
+        return self._properties.setdefault(_normalize_mac(mac), {"device": {}, "channels": {}})
+
+    async def set_value(self, mac, key, value, channel=None, timeout=3.0):
+        normalized_mac_address = _normalize_mac(mac)
+        index = value.partition(" ")[0] if is_indexed_key(key) else None
+        waiter_key = (normalized_mac_address, int(channel) if channel is not None else None, key, index)
+        future = asyncio.get_running_loop().create_future()
+        self._report_waiters.setdefault(waiter_key, []).append(future)
+        target = f"{channel} {key}" if channel is not None else key
+        try:
+            if not await self.send_command(mac, f"SET {target} {value}"):
+                raise ConnectionError(f"not connected to Shure device {mac}")
+            try:
+                return await asyncio.wait_for(future, timeout)
+            except asyncio.TimeoutError:
+                return None
+        finally:
+            waiters = self._report_waiters.get(waiter_key, [])
+            if future in waiters:
+                waiters.remove(future)
+            if not waiters:
+                self._report_waiters.pop(waiter_key, None)
 
     async def _scan_loop(self):
         try:
@@ -443,6 +543,7 @@ class ShureManager:
                 )
 
             device.mark_seen()
+            device.properties = self.properties(normalized_mac_address)
             self.devices[normalized_mac_address] = device
             logger.info(f"Shure device connected: {ip_address} ({connection.model})")
 
@@ -534,6 +635,7 @@ class ShureManager:
         channel,
         key,
         value,
+        sampled=False,
     ):
         normalized_mac_address = _normalize_mac(mac_address)
         raw_reports = self._raw_reports.setdefault(normalized_mac_address, {})
@@ -542,13 +644,18 @@ class ShureManager:
             raw_reports.setdefault(channel, {})[key] = value
         else:
             raw_reports[key] = value
+        property_changed = self._store_property(normalized_mac_address, channel, key, value)
+        index = value.partition(" ")[0] if is_indexed_key(key) else None
+        for future in self._report_waiters.get((normalized_mac_address, channel, key, index), []):
+            if not future.done():
+                future.set_result(value)
 
         device = self.devices.get(normalized_mac_address)
         if not device:
             return
 
         device.last_seen = time.time()
-        changed = False
+        changed = property_changed and key not in METERED_KEYS
         if not device.online:
             device.online = True
             changed = True
@@ -582,25 +689,14 @@ class ShureManager:
                         changed = True
         else:
             if protocol == "ad4d":
-                changed = self._update_ad4d_channel(device, channel, key, value)
+                changed = self._update_ad4d_channel(device, channel, key, value) or changed
             else:
-                changed = self._update_p10t_channel(device, channel, key, value)
+                changed = self._update_p10t_channel(device, channel, key, value) or changed
 
         if changed:
-            self.dispatcher.emit_nowait(
-                DanteEvent(
-                    type=EventType.SHURE_DEVICE_UPDATED,
-                    device_name=normalized_mac_address,
-                    data={
-                        "ip": ip_address,
-                        "channel": channel,
-                        "key": key,
-                        "value": value,
-                    },
-                )
-            )
+            self._schedule_update(normalized_mac_address, ip_address)
 
-        if key in ("AUDIO_LEVEL_PEAK", "AUDIO_LEVEL_RMS", "AUDIO_IN_LVL_L", "AUDIO_IN_LVL_R"):
+        if key in AUDIO_METER_KEYS:
             self.dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.SHURE_METER_VALUES,
@@ -610,9 +706,74 @@ class ShureManager:
                         "channel": channel,
                         "key": key,
                         "value": value,
+                        "sampled": sampled,
                     },
                 )
             )
+
+    def _store_property(self, mac, channel, key, value):
+        if key == "ERR":
+            return False
+        properties = self.properties(mac)
+        target = properties["device"] if channel is None else properties["channels"].setdefault(channel, {})
+        if is_indexed_key(key):
+            index, rest = split_indexed_value(value)
+            values = target.setdefault(key, {})
+            if values.get(index) == rest:
+                return False
+            values[index] = rest
+            return True
+        if target.get(key) == value:
+            return False
+        target[key] = value
+        return True
+
+    def _schedule_update(self, mac, ip_address):
+        if mac in self._pending_updates:
+            return
+        loop = asyncio.get_running_loop()
+        self._pending_updates[mac] = loop.call_later(UPDATE_COALESCE_SECONDS, self._emit_update, mac, ip_address)
+
+    def _emit_update(self, mac, ip_address):
+        self._pending_updates.pop(mac, None)
+        if mac not in self.devices:
+            return
+        self.dispatcher.emit_nowait(
+            DanteEvent(
+                type=EventType.SHURE_DEVICE_UPDATED,
+                device_name=mac,
+                data={"ip": ip_address},
+            )
+        )
+
+    def _on_shure_sample(self, ip_address, mac_address, channel, fields):
+        reports = sample_reports(fields)
+        for key, value in reports:
+            self._on_shure_report(ip_address, mac_address, "ad4d", channel, key, value, sampled=True)
+        values = {}
+        for key, value in reports:
+            if is_indexed_key(key):
+                index, rest = split_indexed_value(value)
+                values.setdefault(key, {})[index] = rest
+            else:
+                values[key] = value
+        self.dispatcher.emit_nowait(
+            DanteEvent(
+                type=EventType.SHURE_SAMPLE,
+                device_name=_normalize_mac(mac_address),
+                data={"ip": ip_address, "channel": channel, "values": values},
+            )
+        )
+
+    def _on_shure_error(self, mac_address):
+        mac = _normalize_mac(mac_address)
+        pending = [key for key, futures in self._report_waiters.items() if key[0] == mac and futures]
+        if len(pending) != 1:
+            logger.info(f"Shure device {mac} rejected a command")
+            return
+        for future in self._report_waiters[pending[0]]:
+            if not future.done():
+                future.set_exception(ValueError(f"the device rejected {pending[0][2]}"))
 
     def _update_ad4d_channel(self, device, channel_number, key, value):
         channel = device.channels.get(channel_number)
@@ -635,9 +796,15 @@ class ShureManager:
         elif key == "FREQUENCY":
             channel.frequency = _safe_int(value)
         elif key == "AUDIO_GAIN":
-            channel.audio_gain = _safe_int(value)
+            gain = _safe_int(value)
+            if channel.audio_gain != gain:
+                channel.audio_gain = gain
+                changed = True
         elif key == "AUDIO_MUTE":
-            channel.audio_mute = value == "ON"
+            muted = value == "ON"
+            if channel.audio_mute != muted:
+                channel.audio_mute = muted
+                changed = True
         elif key == "AUDIO_LEVEL_PEAK":
             channel.audio_level_peak = _safe_int(value)
         elif key == "AUDIO_LEVEL_RMS":

@@ -7,10 +7,9 @@ export function DeviceFilterPanel({ all, filters, onChange }) {
       <button type="button" class="btn btn-xs" onClick=${() => onChange({ ...filters, search: "", receiverSearch: "", transmitterSearch: "", values: {} })}>Clear all</button>
     </div>
     <label class="routing-filter-search">Search devices
-      <input type="search" placeholder="Name, address, model…" value=${filters.search || ""}
+      <input type="search" value=${filters.search || ""}
         onInput=${(event) => onChange({ ...filters, search: event.target.value })} />
     </label>
-    <p class="routing-filter-help">Filters device lists across views.</p>
     ${deviceFilterOptions(all, filters).map((group) => html`<details key=${group.id}
       open=${filters.expandedGroups?.includes(group.id) || false}
       onToggle=${(event) => {

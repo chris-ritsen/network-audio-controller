@@ -44,7 +44,7 @@ export function Fields({ entries }) {
   return html`
     <dl class="fields">
       ${entries
-        .filter(([, value]) => value !== undefined)
+        .filter(([, value]) => value !== undefined && value !== null && value !== "")
         .map(
           ([term, value]) => html`
             <${Fragment} key=${term}>
@@ -68,7 +68,7 @@ export function StatusDot({ online }) {
 export function OnlineState({ online }) {
   return html`<span class="state-inline">
     <span class="status-dot${online ? " online" : ""}" aria-hidden="true"></span>
-    ${online ? "online" : "offline"}
+    ${online ? "Online" : "Offline"}
   </span>`;
 }
 
@@ -101,26 +101,6 @@ export function DataTable({ headers, rows, numericColumns = [] }) {
         </tbody>
       </table>
     </div>
-  `;
-}
-
-export function Tabs({ active, items, onSelect }) {
-  return html`
-    <nav class="tabs tabs-border mb-4">
-      ${items.map(
-        (item) => html`
-          <button
-            key=${item.id}
-            type="button"
-            class="tab min-h-11${item.id === active ? " tab-active" : ""}"
-            aria-current=${item.id === active ? "page" : null}
-            onClick=${() => onSelect(item.id)}
-          >
-            ${item.label}
-          </button>
-        `,
-      )}
-    </nav>
   `;
 }
 
@@ -179,17 +159,18 @@ export function Disclosure({ children, summary }) {
 
 export function Value({ value }) {
   if (value === null || value === undefined || value === "") {
-    return html`<span>—</span>`;
+    return null;
   }
   if (typeof value === "boolean") {
-    return html`<span>${value ? "yes" : "no"}</span>`;
+    return html`<span>${value ? "Yes" : "No"}</span>`;
   }
   if (typeof value !== "object") {
     return html`<span>${String(value)}</span>`;
   }
   if (Array.isArray(value)) {
-    return html`<span>${value.length ? value.map((entry, index) => html`<${Fragment} key=${index}>${index ? ", " : ""}<${Value} value=${entry} /><//>`) : "—"}</span>`;
+    if (!value.length) return null;
+    return html`<span>${value.map((entry, index) => html`<${Fragment} key=${index}>${index ? ", " : ""}<${Value} value=${entry} /><//>`)}</span>`;
   }
   const summary = [value.label, value.summary, value.name].find((entry) => typeof entry === "string" && entry.length);
-  return html`<span>${summary || "—"}</span>`;
+  return summary ? html`<span>${summary}</span>` : null;
 }

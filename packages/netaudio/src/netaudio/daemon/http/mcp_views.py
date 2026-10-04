@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from netaudio.dante.device_serializer import DEVICE_SCALAR_FIELDS
+from netaudio.daemon.http.shure import described_value
 from netaudio.dante.metering import normalize_metering_value
+from netaudio.host_audio.trace import shure_level_text
 
 DEVICE_SECTIONS = ("availability", "channels", "flows", "full", "network", "subscriptions", "summary")
 DEVICE_SUMMARY_FIELDS = (
@@ -98,14 +100,85 @@ def _subscription_view(subscription: dict) -> dict:
     return view
 
 
-def _subscription_problems(device: dict) -> list[str]:
+def _subscription_problems(device: dict, records: dict[str, dict] | None = None) -> tuple[list[str], list[str]]:
     problems = []
+    waiting: dict[str, list] = {}
     for subscription in _subscription_list(device):
         status = subscription.get("status")
-        if isinstance(status, dict) and status.get("severity") in PROBLEM_SEVERITIES:
-            detail = status.get("detail")
-            problems.append(f"{_subscription_line(subscription)}: {detail or status.get('label')}")
-    return problems
+        if not isinstance(status, dict) or status.get("severity") not in PROBLEM_SEVERITIES:
+            continue
+        source = subscription.get("tx_device")
+        wait = waiting_text(str(source), records) if records is not None and source else None
+        if wait:
+            number = subscription.get("rx_channel_number")
+            waiting.setdefault(wait, []).append(number if isinstance(number, int) else subscription.get("rx_channel"))
+            continue
+        detail = status.get("detail")
+        problems.append(f"{_subscription_line(subscription)}: {detail or status.get('label')}")
+    return problems, [f"rx {channels_text(channels)} {wait}" for wait, channels in waiting.items()]
+
+
+def iso_time(timestamp: Any) -> str | None:
+    if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool):
+        return datetime.fromtimestamp(timestamp, timezone.utc).isoformat().replace("+00:00", "Z")
+    return timestamp if isinstance(timestamp, str) else None
+
+
+def is_off(device: Any) -> bool:
+    return isinstance(device, dict) and device.get("online") is False
+
+
+def last_seen_text(device: Any) -> str | None:
+    if not is_off(device):
+        return None
+    seen = iso_time(device.get("last_seen"))
+    return f"last seen {seen}" if seen else "last seen at an unknown time"
+
+
+def off_devices(devices: dict) -> dict[str, str]:
+    off = {}
+    for server_name, device in devices.items():
+        text = last_seen_text(device)
+        if text:
+            for key in (device.get("name"), server_name, device.get("server_name")):
+                if key:
+                    off[key] = text
+    return off
+
+
+def waiting_text(source: str, records: dict[str, dict]) -> str | None:
+    record = records.get(source)
+    if record is None:
+        return f"waiting for {source}, which has not been seen since the server started"
+    if is_off(record):
+        return f"waiting for {source}, {last_seen_text(record)}"
+    return None
+
+
+def routes_by_source(devices: dict) -> dict[str, dict[str, list]]:
+    sources: dict[str, dict[str, list]] = {}
+    for server_name, device in devices.items():
+        if not isinstance(device, dict) or device.get("online") is False:
+            continue
+        receiver = device.get("name") or server_name
+        for subscription in _subscription_list(device):
+            source = subscription.get("tx_device")
+            if not source:
+                continue
+            number = subscription.get("rx_channel_number")
+            channel = number if isinstance(number, int) else subscription.get("rx_channel")
+            sources.setdefault(str(source), {}).setdefault(receiver, []).append(channel)
+    return sources
+
+
+def channels_text(channels: list) -> str:
+    numbers = [channel for channel in channels if isinstance(channel, int)]
+    names = [str(channel) for channel in channels if not isinstance(channel, int)]
+    return ", ".join(([number_ranges(numbers)] if numbers else []) + names)
+
+
+def receive_channels_text(receivers: dict[str, list]) -> str:
+    return "; ".join(f"{receiver} rx {channels_text(channels)}" for receiver, channels in sorted(receivers.items()))
 
 
 def ddm_inventory_known(ddm_status: Any) -> bool:
@@ -130,7 +203,7 @@ def device_model(device: dict) -> str | None:
     return model
 
 
-def device_summary(device: Any, ddm_known: bool = False) -> Any:
+def device_summary(device: Any, ddm_known: bool = False, devices: dict | None = None) -> Any:
     if not isinstance(device, dict):
         return device
     summary = {key: device.get(key) for key in DEVICE_SUMMARY_FIELDS}
@@ -140,8 +213,11 @@ def device_summary(device: Any, ddm_known: bool = False) -> Any:
     if device.get("server_name") != summary.get("inventory_id"):
         summary["server_name"] = device.get("server_name")
     routes = _subscription_list(device)
+    summary["last_seen"] = iso_time(device.get("last_seen")) if is_off(device) else None
     summary["subscription_count"] = len(routes)
-    summary["subscription_problems"] = _subscription_problems(device)
+    problems, waiting = _subscription_problems(device, _device_records(devices) if devices is not None else None)
+    summary["subscription_problems"] = problems
+    summary["routes_waiting"] = waiting or None
     return compact(summary)
 
 
@@ -198,6 +274,8 @@ def clock_status_view(payload: Any, arguments: dict) -> Any:
     identities = {device["ptpv1_device_uuid"]: device["name"] for device in devices if device.get("ptpv1_device_uuid")}
     domains: dict[str, dict] = {}
     for device in sorted(devices, key=lambda device: device["name"]):
+        if is_off(device):
+            continue
         clock = clock_view(device)
         leader_identity = device.get("ptpv1_master_uuid")
         if leader_identity in identities:
@@ -375,8 +453,14 @@ def with_channel_signal(payload: Any, cache: dict, records: dict) -> Any:
     for server_name, record in records.items():
         if isinstance(record, dict):
             servers[record.get("name") or server_name] = record.get("server_name") or server_name
+    off = off_devices(records)
     for entry in payload.get("channels") or ():
-        if not isinstance(entry, dict) or "number" not in entry:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("device") in off:
+            entry["signal"] = f"none, {entry['device']} is off the network ({off[entry['device']]})"
+            continue
+        if "number" not in entry:
             continue
         levels = cache.get(servers.get(entry.get("device"))) or {}
         normalized = levels.get(f"{entry.get('channel_type')}_normalized") or {}
@@ -433,7 +517,13 @@ def _availability_view(availability: Any) -> dict:
     return view
 
 
-def device_view(device: Any, sections: list[str], ddm_known: bool = False, addresses: dict | None = None) -> Any:
+def device_view(
+    device: Any,
+    sections: list[str],
+    ddm_known: bool = False,
+    addresses: dict | None = None,
+    devices: dict | None = None,
+) -> Any:
     if not isinstance(device, dict):
         return device
     if "full" in sections:
@@ -452,7 +542,7 @@ def device_view(device: Any, sections: list[str], ddm_known: bool = False, addre
         return record
     view: dict[str, Any] = {}
     if "summary" in sections:
-        view.update(device_summary(device, ddm_known))
+        view.update(device_summary(device, ddm_known, devices))
         if "subscriptions" in sections:
             view.pop("subscription_problems", None)
         view["clock"] = clock_view(device)
@@ -475,6 +565,12 @@ def device_view(device: Any, sections: list[str], ddm_known: bool = False, addre
         )
     if "flows" in sections:
         view["flows"] = flows_view(device, addresses or {})
+    seen = last_seen_text(device)
+    if seen:
+        view = {
+            "off_the_network": f"{seen}; everything below is how it was then",
+            **view,
+        }
     return compact(view)
 
 
@@ -500,6 +596,7 @@ def find_channels_view(payload: Any, arguments: dict) -> Any:
     words = re.findall(r"[a-z0-9]+", str(arguments.get("query", "")).casefold())
     wanted = arguments.get("channel_type", "any")
     devices = {server_name: device for server_name, device in payload.items() if isinstance(device, dict)}
+    records = _device_records(devices)
     feeds: dict[tuple[str, str], list[str]] = {}
     for server_name, device in devices.items():
         receiver = device.get("name") or server_name
@@ -530,7 +627,11 @@ def find_channels_view(payload: Any, arguments: dict) -> Any:
                         status = subscription.get("status") if isinstance(subscription.get("status"), dict) else {}
                         entry["fed_by"] = f"{subscription.get('tx_device')}:{subscription.get('tx_channel')}"
                         if status.get("severity") in PROBLEM_SEVERITIES:
-                            entry["problem"] = status.get("detail") or status.get("label")
+                            wait = waiting_text(str(subscription.get("tx_device")), records)
+                            if wait:
+                                entry["waiting"] = wait
+                            else:
+                                entry["problem"] = status.get("detail") or status.get("label")
                 else:
                     entry["feeds"] = sorted(feeds.get((str(name), str(label)), []))
                 record = (channels.get(key) or {}).get(str(number)) or (channels.get(key) or {}).get(number)
@@ -980,11 +1081,14 @@ def routing_view(payload: Any, arguments: dict) -> Any:
     if not isinstance(payload, dict):
         return payload
     routes: dict[str, list[str]] = {}
+    records = _device_records(payload)
     for server_name, device in sorted(payload.items()):
         if not isinstance(device, dict):
             continue
         receiver = device.get("name") or server_name
         if arguments.get("device") not in (None, receiver, server_name):
+            continue
+        if arguments.get("device") is None and is_off(device):
             continue
         channels = device.get("channels") if isinstance(device.get("channels"), dict) else {}
         rx_names = _channel_names(channels.get("receivers"))
@@ -1000,21 +1104,41 @@ def routing_view(payload: Any, arguments: dict) -> Any:
                 continue
             status = subscription.get("status") if isinstance(subscription.get("status"), dict) else {}
             severity = status.get("severity")
-            if arguments.get("status") == "problem" and severity not in PROBLEM_SEVERITIES:
+            wait = (
+                waiting_text(str(subscription.get("tx_device")), records)
+                if severity in PROBLEM_SEVERITIES and subscription.get("tx_device")
+                else None
+            )
+            wanted = arguments.get("status", "all")
+            if wanted == "problem" and (severity not in PROBLEM_SEVERITIES or wait):
                 continue
-            if arguments.get("status") == "ok" and severity != "ok":
+            if wanted == "waiting" and not wait:
+                continue
+            if wanted == "ok" and severity != "ok":
                 continue
             line = f"{channel_number} {channel_name}" if channel_number is not None else str(channel_name)
             line += f" \u2190 {subscription.get('tx_channel')} on {subscription.get('tx_device')}"
             label = str(status.get("label") or "")
-            if severity in PROBLEM_SEVERITIES:
+            if wait:
+                line += f" ({wait})"
+            elif severity in PROBLEM_SEVERITIES:
                 line += f": {label}, {status.get('detail')}" if status.get("detail") else f": {label}"
             elif label.startswith("Subscribed (") and label != "Subscribed (unicast)":
                 line += f" ({label.removeprefix('Subscribed (').removesuffix(')')})"
             elif label and not label.startswith("Subscribed"):
                 line += f" ({label})"
             routes.setdefault(receiver, []).append(line)
-    return {"count": sum(len(lines) for lines in routes.values()), "routes": routes}
+    off = off_devices(payload)
+    receivers_off = {
+        receiver: f"{off[receiver]}; these are its routes as they were then" for receiver in routes if receiver in off
+    }
+    return compact(
+        {
+            "count": sum(len(lines) for lines in routes.values()),
+            "receivers_off_the_network": receivers_off or None,
+            "routes": routes,
+        }
+    )
 
 
 def _mac(value: Any) -> str | None:
@@ -1049,6 +1173,7 @@ def missing_devices(devices: dict, journal: Any) -> list[dict]:
         if isinstance(device, dict):
             present |= {device.get("name"), device.get("server_name")}
     renamed = renamed_devices(devices, journal)
+    sources = routes_by_source(devices)
     last_seen: dict[str, dict] = {}
     events = journal.get("events") if isinstance(journal, dict) else None
     for event in sorted(events or [], key=lambda item: item.get("sequence") or 0 if isinstance(item, dict) else 0):
@@ -1081,6 +1206,8 @@ def missing_devices(devices: dict, journal: Any) -> list[dict]:
             **renamed.get(name, {}),
             "routes_waiting": waiting.get(name, 0),
         }
+        if waiting.get(name) and name in sources:
+            entry["waiting_routes"] = receive_channels_text(sources[name])
         if name in renamed:
             entry.pop("disappeared_at", None)
         if connected.get(name):
@@ -1104,8 +1231,22 @@ def device_list_view(devices: dict, ddm_known: bool) -> dict:
     for server_name, device in sorted(devices.items()):
         if not isinstance(device, dict):
             continue
-        summary = device_summary(device, ddm_known)
+        summary = device_summary(device, ddm_known, devices)
         problems = summary.get("subscription_problems") or []
+        if is_off(device):
+            entries.append(
+                (
+                    summary.get("name") or server_name,
+                    server_name,
+                    compact(
+                        {
+                            "product": summary.get("product") or summary.get("model"),
+                            "last_seen": summary.get("last_seen") or "unknown",
+                        }
+                    ),
+                )
+            )
+            continue
         entries.append(
             (
                 summary.get("name") or server_name,
@@ -1138,15 +1279,164 @@ def device_list_view(devices: dict, ddm_known: bool) -> dict:
 def ddm_domains_summary(devices: dict) -> list[dict] | None:
     domains: dict[str, dict] = {}
     for device in devices.values():
-        if not isinstance(device, dict) or device.get("management_state") != "managed":
+        if not isinstance(device, dict) or device.get("management_state") != "managed" or is_off(device):
             continue
         name = device.get("ddm_domain_name") or device.get("ddm_domain_id")
         if not name:
             continue
         domain = domains.setdefault(name, {"name": name, "server": device.get("ddm_server_profile"), "devices": []})
         label = device.get("name") or device.get("server_name")
-        domain["devices"].append(label if device.get("online") else f"{label} (offline)")
+        domain["devices"].append(label)
     return [compact({**domain, "devices": sorted(domain["devices"])}) for domain in domains.values()] or None
+
+
+OVERVIEW_ISSUE_GROUPS = 10
+SEVERITY_ORDER = {"critical": 0, "error": 1, "warning": 2, "info": 3}
+CHANNEL_IDENTITY = re.compile(r"^(rx|tx):(\d+)$")
+
+
+def _identities_text(identities: set) -> str | None:
+    numbers: dict[str, list[int]] = {}
+    others = []
+    for identity in sorted(identities, key=str):
+        match = CHANNEL_IDENTITY.match(str(identity))
+        if match:
+            numbers.setdefault(match.group(1), []).append(int(match.group(2)))
+        else:
+            others.append(str(identity))
+    parts = [f"{direction} {number_ranges(values)}" for direction, values in sorted(numbers.items())] + others
+    return "; ".join(parts) or None
+
+
+def _device_records(devices: dict) -> dict[str, dict]:
+    records = {}
+    for server_name, device in devices.items():
+        if isinstance(device, dict):
+            for key in (device.get("name"), server_name, device.get("server_name")):
+                if key:
+                    records[key] = device
+    return records
+
+
+def _route_source(record: dict | None, identity: Any) -> str | None:
+    match = CHANNEL_IDENTITY.match(str(identity or ""))
+    if record is None or match is None or match.group(1) != "rx":
+        return None
+    for subscription in _subscription_list(record):
+        if subscription.get("rx_channel_number") == int(match.group(2)):
+            return subscription.get("tx_device")
+    return None
+
+
+def issue_groups(issues: Any, devices: dict, state: str = "open", device: str | None = None) -> list[dict]:
+    raw_issues = issues.get("issues") if isinstance(issues, dict) else None
+    if isinstance(raw_issues, dict):
+        raw_issues = list(raw_issues.values())
+    records = _device_records(devices)
+    groups: dict[tuple, dict] = {}
+    for issue in raw_issues or ():
+        if not isinstance(issue, dict) or (state != "all" and issue.get("state") != state):
+            continue
+        if not _matches_device(issue, device):
+            continue
+        scope = issue.get("scope") if isinstance(issue.get("scope"), dict) else {}
+        name = scope.get("device_name") or scope.get("server_name")
+        record = records.get(name)
+        if is_off(record) and not device:
+            continue
+        identity = (issue.get("kind"), issue.get("severity"), name, issue.get("summary"), issue.get("state"))
+        group = groups.setdefault(
+            identity,
+            {
+                "kind": issue.get("kind"),
+                "severity": issue.get("severity"),
+                "state": issue.get("state") if state == "all" else None,
+                "device": name,
+                "summary": readable_summary(issue.get("summary")),
+                "issue_count": 0,
+                "first_seen": issue.get("first_seen"),
+                "last_seen": issue.get("last_seen"),
+                "resolved_at": issue.get("resolved_at"),
+                "channels": set(),
+                "flows": set(),
+                "interfaces": set(),
+                "sources": {},
+                "waiting": set(),
+            },
+        )
+        group["issue_count"] += 1
+        for field, latest in (("first_seen", False), ("last_seen", True), ("resolved_at", True)):
+            value = issue.get(field)
+            if isinstance(value, str) and (
+                not group[field] or (value > group[field] if latest else value < group[field])
+            ):
+                group[field] = value
+        for field, target in (
+            ("channel_identity", "channels"),
+            ("flow_identity", "flows"),
+            ("interface_identity", "interfaces"),
+        ):
+            if scope.get(field):
+                group[target].add(scope[field])
+        source = _route_source(record, scope.get("channel_identity"))
+        if source:
+            if issue.get("state") == "open" and waiting_text(source, records):
+                group["waiting"].add(scope["channel_identity"])
+            else:
+                group["sources"].setdefault(source, set()).add(scope["channel_identity"])
+    problems = []
+    for group in groups.values():
+        waiting = group.pop("waiting")
+        sources = group.pop("sources")
+        remaining = group["channels"] - waiting
+        if waiting and not remaining:
+            continue
+        group["issue_count"] -= len(waiting)
+        problems.append(
+            compact(
+                {
+                    **group,
+                    "channels": _identities_text(remaining),
+                    "flows": _identities_text(group["flows"]),
+                    "interfaces": _identities_text(group["interfaces"]),
+                    "from": "; ".join(
+                        f"{source}: {_identities_text(identities)}" for source, identities in sorted(sources.items())
+                    )
+                    or None,
+                    "device_state": (
+                        f"{last_seen_text(records.get(group['device']))}; this is its last report"
+                        if is_off(records.get(group["device"]))
+                        else None
+                    ),
+                }
+            )
+        )
+    problems.sort(
+        key=lambda group: (
+            SEVERITY_ORDER.get(group.get("severity"), 4),
+            -group.get("issue_count", 0),
+            str(group.get("kind")),
+            str(group.get("device")),
+        )
+    )
+    return problems
+
+
+def issue_groups_view(payload: Any, arguments: dict, devices: dict) -> Any:
+    if not isinstance(payload, dict) or arguments.get("detail") == "debug":
+        return issues_view(payload, arguments)
+    limit = arguments.get("limit", 50)
+    offset = arguments.get("offset", 0)
+    problems = issue_groups(payload, devices, arguments.get("state", "open"), arguments.get("device"))
+    selected = problems[offset : offset + limit]
+    return compact(
+        {
+            "problems": selected,
+            "problem_count": sum(group["issue_count"] for group in problems),
+            "next_offset": offset + len(selected) if offset + len(selected) < len(problems) else None,
+            "detail": "detail=debug lists each issue separately with its identifier",
+        }
+    )
 
 
 def network_overview_view(devices: dict, issues: dict, ddm: dict, journal: Any = None) -> dict:
@@ -1155,7 +1445,9 @@ def network_overview_view(devices: dict, issues: dict, ddm: dict, journal: Any =
     for server_name, device in sorted(devices.items()):
         if not isinstance(device, dict):
             continue
-        summary = device_summary(device, ddm_known)
+        if is_off(device):
+            continue
+        summary = device_summary(device, ddm_known, devices)
         summaries.append(
             compact(
                 {
@@ -1172,61 +1464,20 @@ def network_overview_view(devices: dict, issues: dict, ddm: dict, journal: Any =
             )
         )
     clocks = clock_status_view(devices, {})["domains"]
-    raw_issues = issues.get("issues") or []
-    if isinstance(raw_issues, dict):
-        raw_issues = raw_issues.values()
-    groups: dict[tuple, dict] = {}
-    for issue in raw_issues:
-        if not isinstance(issue, dict) or issue.get("state") != "open":
-            continue
-        scope = issue.get("scope") if isinstance(issue.get("scope"), dict) else {}
-        device = scope.get("device_name") or scope.get("server_name")
-        identity = (issue.get("kind"), issue.get("severity"), device, issue.get("summary"))
-        group = groups.setdefault(
-            identity,
-            {
-                "kind": issue.get("kind"),
-                "severity": issue.get("severity"),
-                "device": device,
-                "summary": issue.get("summary"),
-                "issue_count": 0,
-                "channels": set(),
-                "flows": set(),
-                "interfaces": set(),
-            },
-        )
-        group["issue_count"] += 1
-        for field, target in (
-            ("channel_identity", "channels"),
-            ("flow_identity", "flows"),
-            ("interface_identity", "interfaces"),
-        ):
-            if scope.get(field):
-                group[target].add(scope[field])
-    severity_order = {"critical": 0, "error": 1, "warning": 2, "info": 3}
-    issue_groups = sorted(
-        groups.values(),
-        key=lambda group: (
-            severity_order.get(group["severity"], 4),
-            -group["issue_count"],
-            str(group["kind"]),
-            str(group["device"]),
-        ),
-    )
-    shown_groups = [
-        compact({**group, **{field: sorted(group[field]) for field in ("channels", "flows", "interfaces")}})
-        for group in issue_groups[:10]
-    ]
+    problems = issue_groups(issues, devices)
     return compact(
         {
             "as_of": utc_now(),
             "devices": summaries,
             "online_count": sum(device.get("online") is True for device in summaries),
             "clock_leaders": {name: domain["leaders"] for name, domain in clocks.items()},
-            "open_issue_count": issues.get("active_count"),
-            "issue_groups": shown_groups,
-            "omitted_issue_count": sum(group["issue_count"] for group in issue_groups[10:]) or None,
-            "missing_devices": missing_devices(devices, journal) or None,
+            "open_issue_count": sum(group["issue_count"] for group in problems),
+            "renamed_devices": [
+                entry for entry in missing_devices(devices, journal) if entry.get("renamed_to") or entry.get("note")
+            ]
+            or None,
+            "issue_groups": problems[:OVERVIEW_ISSUE_GROUPS],
+            "omitted_issue_count": sum(group["issue_count"] for group in problems[OVERVIEW_ISSUE_GROUPS:]) or None,
             "ddm": compact(
                 {
                     **{key: ddm.get(key) for key in ("enabled", "state", "fresh", "server_count", "domain_count")},
@@ -1400,6 +1651,38 @@ def _dante_match(device_type: Any, records: dict) -> dict | None:
     return matches[0] if len(matches) == 1 else None
 
 
+WIRELESS_SETTING_NAMES = {
+    "audio_gain": "gain",
+    "audio_mute": "mute",
+    "audio_in_level": "input_level",
+    "audio_in_line_level": "line_level",
+    "rf_tx_level": "rf_power",
+    "audio_tx_mode": "transmit_mode",
+}
+WIRELESS_METER_FIELDS = frozenset({"audio_level_rms", "audio_level_peak", "audio_in_level_l", "audio_in_level_r"})
+
+
+def _wireless_channel(device_type: Any, channel: dict) -> dict:
+    entry: dict[str, Any] = {"name": channel.get("name")}
+    if "active" in channel:
+        entry["transmitter"] = (
+            "receiving a transmitter" if channel["active"] else "no transmitter signal (antenna status XX)"
+        )
+    if isinstance(channel.get("frequency"), (int, float)):
+        entry["frequency_mhz"] = channel["frequency"] / 1000
+    if channel.get("active") is not False:
+        entry["level"] = shure_level_text(channel)
+    for key, value in channel.items():
+        if key in {"name", "active", "frequency"} or key in WIRELESS_METER_FIELDS:
+            continue
+        if key == "signal_quality" and channel.get("active") is False:
+            continue
+        if key == "audio_gain" and device_type == "ad4d":
+            value = described_value("ad4d", "AUDIO_GAIN", value)
+        entry[WIRELESS_SETTING_NAMES.get(key, key)] = value
+    return entry
+
+
 def wireless_view(payload: Any, records: dict) -> Any:
     if not isinstance(payload, dict):
         return payload
@@ -1420,14 +1703,7 @@ def wireless_view(payload: Any, records: dict) -> Any:
         for number, channel in sorted((device.get("channels") or {}).items(), key=lambda item: int(item[0])):
             if not isinstance(channel, dict):
                 continue
-            entry: dict[str, Any] = {"number": int(number), "name": channel.get("name")}
-            if "active" in channel:
-                entry["transmitter"] = (
-                    "receiving a transmitter" if channel["active"] else "no transmitter signal (antenna status XX)"
-                )
-            if isinstance(channel.get("frequency"), (int, float)):
-                entry["frequency_mhz"] = channel["frequency"] / 1000
-            entry.update({key: value for key, value in channel.items() if key not in {"name", "active", "frequency"}})
+            entry = {"number": int(number), **_wireless_channel(device.get("device_type"), channel)}
             label = outputs.get(int(number))
             if dante is not None and label is not None:
                 entry["dante_output"] = f"{dante.get('name')}:{label}"

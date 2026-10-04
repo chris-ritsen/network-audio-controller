@@ -1,21 +1,23 @@
 import { api } from "../api.js";
-import { AsyncButton, FieldRow, Panel } from "../components.js";
-import { html, useState } from "../lib/preact.js";
+import { AsyncButton, FieldRow, Fields, Panel } from "../components.js";
+import { html, useEffect, useRef, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
 
-function fresh(observation) {
-  const age = Date.now() / 1000 - observation.observed_at_unix;
-  return observation.fresh && age >= 0 && age <= 10;
-}
-
-function Setting({ device, category, observation, editor, title }) {
+function Setting({ device, category, editor, title }) {
   const [value, setValue] = useState(editor.initial);
   const [fields, setFields] = useState(editor.initial_fields);
+  const [dirty, setDirty] = useState(false);
   const [plan, setPlan] = useState(null);
-  const writable =
-    !editor.reason && device.device_controls?.writable && fresh(observation);
+  const initial = JSON.stringify([editor.initial, editor.initial_fields]);
+  useEffect(() => {
+    if (dirty) return;
+    setValue(editor.initial);
+    setFields(editor.initial_fields);
+  }, [initial]);
+  const writable = !editor.reason && device.device_controls?.writable === true;
   const update = (next) => {
     setValue(next);
+    setDirty(true);
     setPlan(null);
   };
   const select = (label, name) => {
@@ -64,10 +66,7 @@ function Setting({ device, category, observation, editor, title }) {
           disabled=${!writable || value.name_source !== editor.custom_name_source}
           onInput=${(event) => update({ ...value, custom_name: event.target.value })}
         />
-        <span
-          >${new TextEncoder().encode(value.custom_name || "").length} of ${editor.custom_name_limit} bytes; accented
-          letters, symbols and emoji use more than one</span
-        >
+        <span>${new TextEncoder().encode(value.custom_name || "").length}/${editor.custom_name_limit} bytes</span>
       <//>`;
   }
 
@@ -117,14 +116,16 @@ function Setting({ device, category, observation, editor, title }) {
   if (category === "codec_format") inputs = select("Codec", "codec");
 
   if (category === "video_format") {
-    inputs = html`<p>Configured: ${editor.details.configured}</p>
-      <p>Actual: ${editor.details.actual}</p>
-      <p>Direction: ${editor.details.direction}</p>
+    inputs = html`<${Fields} entries=${[
+        ["Configured", editor.details.configured || undefined],
+        ["Actual", editor.details.actual || undefined],
+        ["Direction", editor.details.direction || undefined],
+      ]} />
       ${select("Resolution", "resolution")}${select("Bit depth", "bit_depth")}${select("Color space", "color_space")}`;
   }
 
+  if (device.device_controls?.writable !== true) return null;
   return html`<${Panel} title=${title}>
-    ${!writable && html`<p>${editor.reason || device.device_controls?.write_unavailable_reason || "Refresh status to check whether this setting is available."}</p>`}
     ${inputs}
     <div class="flex gap-2">
       <${AsyncButton}
@@ -145,7 +146,12 @@ function Setting({ device, category, observation, editor, title }) {
       <${AsyncButton}
         small
         disabled=${!writable || plan?.action !== "change"}
-        onRun=${() => api.deviceControls(deviceRequestName(device), "apply", category, value)}
+        onRun=${async () => {
+          const result = await api.deviceControls(deviceRequestName(device), "apply", category, value);
+          setDirty(false);
+          setPlan(null);
+          return result;
+        }}
         >Apply<//
       >
     </div>
@@ -156,6 +162,16 @@ function Setting({ device, category, observation, editor, title }) {
 export function DeviceControls({ device }) {
   const state = device.device_controls || {};
   const [confirm, setConfirm] = useState(false);
+  const lastInspection = useRef(0);
+  const inspect = () => {
+    if (!state.family || !state.readable || Date.now() - lastInspection.current < 5000) return;
+    lastInspection.current = Date.now();
+    api.deviceControls(deviceRequestName(device), "inspect").catch((error) => console.error(error));
+  };
+  useEffect(() => {
+    lastInspection.current = 0;
+    inspect();
+  }, [deviceRequestName(device), state.family]);
   if (!state.family) return null;
   const observations = state.observations || {};
   const presentation = state.presentation;
@@ -169,28 +185,25 @@ export function DeviceControls({ device }) {
     hdcp: "HDCP",
     serial: "Serial port",
   };
-  return html`<${Panel}
+  return html`<div class="device-controls" onPointerEnter=${inspect} onPointerDown=${inspect} onFocusIn=${inspect}><${Panel}
       title=${state.family === "bluetooth" ? "Bluetooth" : "Video and serial"}
-      actions=${html`<${AsyncButton}
+      headerActions=${state.readable ? html`<${AsyncButton}
       small
-      disabled=${!state.readable}
+      description=${`refresh device controls on ${device.name || "device"}`}
       onRun=${() => api.deviceControls(deviceRequestName(device), "inspect")}
-      >Refresh device controls<//
-    >`}
+      >Refresh<//
+    >` : null}
     >
-      ${state.write_unavailable_reason && html`<p>${state.write_unavailable_reason}</p>`}
-      ${connection && html`<p>Connection: ${presentation?.summary.connection || "Unknown"}${connection.peer_name ? " — " + connection.peer_name : ""}</p>`}
-      ${
-      observations.video_channel &&
-      html`<p>Signal: ${presentation?.summary.signal || "Unknown"}</p>
-        <p>
-          Observed HDCP: ${presentation?.summary.observed_hdcp || "Unavailable"}
-        </p>`
-    }
+      <${Fields} entries=${[
+        ["Connection", connection ? [presentation?.summary.connection, connection.peer_name].filter(Boolean).join(" · ") || undefined : undefined],
+        ["Signal", observations.video_channel ? presentation?.summary.signal || undefined : undefined],
+        ["HDCP", observations.video_channel ? presentation?.summary.observed_hdcp || undefined : undefined],
+        ["Remembered devices", observations.bluetooth_pairing?.value > 0 ? observations.bluetooth_pairing.value : undefined],
+      ]} />
       ${
       observations.bluetooth_pairing?.value > 0 &&
-      html`<p>Remembered devices: ${observations.bluetooth_pairing.value}</p>
-        <label
+      state.writable &&
+      html`<label
           ><input
             type="checkbox"
             checked=${confirm}
@@ -200,7 +213,7 @@ export function DeviceControls({ device }) {
         >
         <${AsyncButton}
           variant="danger"
-          disabled=${!state.writable || !confirm || !fresh(observations.bluetooth_pairing)}
+          disabled=${!confirm}
           onRun=${async () => {
           const result = await api.deviceControls(
             deviceRequestName(device),
@@ -223,12 +236,11 @@ export function DeviceControls({ device }) {
     .map(
       ([category, title]) =>
         html`<${Setting}
-          key=${`${device.server_name}:${category}:${observations[category].observed_at_unix}`}
+          key=${`${device.server_name}:${category}`}
           device=${device}
           category=${category}
-          observation=${observations[category]}
           editor=${presentation.editors[category]}
           title=${title}
         />`,
-    )}`;
+    )}</div>`;
 }

@@ -460,7 +460,7 @@ class TestBonjourReconcile:
 
         assert bonjour_http_server.tcp_server is None
         assert bonjour_http_server._events_registered is False
-        assert bonjour_http_server.application.dispatcher.off.call_count == 10
+        assert bonjour_http_server.application.dispatcher.off.call_count == 11
 
 
 class TestBonjourRecovery:

@@ -84,4 +84,42 @@
   .state-inline .status-dot {
     margin-top: 0;
   }
+
+  .sparkline {
+    display: block;
+    width: 160px;
+    height: 32px;
+  }
+
+  .status-problems {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .status-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .clock-frequency {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 24px;
+  }
+
+  .receive-latency-table td,
+  .receive-latency-table th {
+    white-space: nowrap;
+  }
+
+  @media (max-width: 900px) {
+    .receive-latency-table tbody td,
+    .receive-latency-table tbody td::before {
+      text-align: left;
+    }
+  }
 }

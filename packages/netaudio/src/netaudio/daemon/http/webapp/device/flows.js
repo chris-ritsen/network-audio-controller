@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { AsyncButton, Notice, Panel } from "../components.js";
+import { AsyncButton, Panel } from "../components.js";
 import * as format from "../format.js";
 import { html, useEffect, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
@@ -152,7 +152,7 @@ export function flowEvidenceRows(result) {
 }
 
 function socketLabel(socket) {
-  if (!socket) return "device allocated";
+  if (!socket) return "";
   return `${socket.address}:${socket.port}${socket.interface ? ` via ${socket.interface}` : ""}`;
 }
 
@@ -160,6 +160,10 @@ function channelLabel(specification) {
   return (specification.channel_slots || [])
     .map((entry) => `${entry.slot}:${entry.transmitter_channel}`)
     .join(", ");
+}
+
+function capitalized(value) {
+  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : "";
 }
 
 function receiverFlowEndpoints(flow) {
@@ -175,10 +179,8 @@ function receiverFlowEndpoints(flow) {
         ]
       : [];
   return endpoints
-    .map(
-      (endpoint) =>
-        `${endpoint.ipv4_address || "address unavailable"}:${endpoint.udp_port ?? "port unavailable"}`,
-    )
+    .filter((endpoint) => endpoint.ipv4_address && endpoint.udp_port != null)
+    .map((endpoint) => `${endpoint.ipv4_address}:${endpoint.udp_port}`)
     .join(", ");
 }
 
@@ -189,90 +191,78 @@ function receiverFlowChannels(flow) {
       .map((channels, index) => `${index + 1}:${channels.join(",") || "none"}`)
       .join("; ");
   }
-  return flow.receiver_mapping_descriptor_hexadecimal || "Not reported";
+  return "";
 }
 
 function externalIdentityLabel(flow) {
   const identity = flow.external_identity;
-  if (!identity) return "Native Dante";
-  return `${identity.source_ipv4 || "source unavailable"}/${identity.session_id ?? "session unavailable"}`;
+  if (!identity) return "";
+  return [identity.source_ipv4, identity.session_id].filter((value) => value != null).join("/");
 }
 
 export function ReceiverFlows({ device }) {
   const flows = Array.isArray(device.receiver_flows)
     ? device.receiver_flows
     : [];
+  if (!flows.length) return null;
+  const external = flows.some((flow) => flow.external_identity);
+  const typed = flows.some((flow) => flow.flow_type);
+  const mapped = flows.some((flow) => receiverFlowChannels(flow));
+  const addressed = flows.some((flow) => receiverFlowEndpoints(flow));
+  if (!typed && !mapped && !addressed && !external) return null;
   return html`<${Panel} title=${`Receiver flows (${flows.length})`}>
-    <p class="text-sm">
-      Inventory: ${device.receiver_flow_completeness || "unknown"}. ARC
-      effective state, SDP correlation, RTP reception, clock lock, persistence,
-      and decoded audio are separate observations.
-    </p>
-    ${
-      device.receiver_flow_completeness !== "complete"
-        ? html`<${Notice}
-            >Complete fresh receiver-flow inventory is unavailable.<//
-          >`
-        : null
-    }
-    ${
-      flows.length
-        ? html`<div class="table-wrapper">
-            <table class="data">
-              <thead>
-                <tr>
-                  <th>Flow</th>
-                  <th>Type / transport</th>
-                  <th>Slot:receiver channels</th>
-                  <th>Interface destinations</th>
-                  <th>External identity</th>
-                  <th>SDP</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${flows.map(
-                  (flow) =>
-                    html`<tr key=${flow.flow_number}>
-                      <td>${flow.flow_number ?? "unknown"}</td>
+    <div class="table-wrapper">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Flow</th>
+            ${typed ? html`<th>Type</th>` : null}
+            ${mapped ? html`<th>Slot:receiver channels</th>` : null}
+            ${addressed ? html`<th>Destination</th>` : null}
+            ${external ? html`<th>Source</th><th>SDP</th>` : null}
+          </tr>
+        </thead>
+        <tbody>
+          ${flows.map(
+            (flow) =>
+              html`<tr key=${flow.flow_number}>
+                <td>${flow.flow_number ?? ""}</td>
+                ${typed ? html`<td>${capitalized(flow.flow_type)}</td>` : null}
+                ${mapped ? html`<td>${receiverFlowChannels(flow)}</td>` : null}
+                ${addressed ? html`<td>${receiverFlowEndpoints(flow)}</td>` : null}
+                ${external
+                  ? html`<td>${externalIdentityLabel(flow)}</td>
                       <td>
-                        ${flow.flow_type || "unknown"} /
-                        ${flow.transport ?? "unknown"}
-                      </td>
-                      <td>${receiverFlowChannels(flow)}</td>
-                      <td>${receiverFlowEndpoints(flow) || "Not reported"}</td>
-                      <td>${externalIdentityLabel(flow)}</td>
-                      <td>
-                        ${
-                          flow.sdp_correlation?.matched === true
-                            ? "Matched"
-                            : flow.external_identity
-                              ? "Not matched"
-                              : "Not applicable"
-                        }
-                      </td>
-                    </tr>`,
-                )}
-              </tbody>
-            </table>
-          </div>`
-        : html`<${Notice}
-            >No active receiver flows in the complete inventory.<//
-          >`
-    }
+                        ${flow.sdp_correlation?.matched === true
+                          ? "Matched"
+                          : flow.external_identity
+                            ? "Not matched"
+                            : ""}
+                      </td>`
+                  : null}
+              </tr>`,
+          )}
+        </tbody>
+      </table>
+    </div>
   <//>`;
+}
+
+function flowTypeLabel(entry) {
+  return [entry.media_mode === "rtp_aes67" ? "AES67" : null, capitalized(entry.flow_type)]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function FlowRow({ entry, onDelete, requestName }) {
   const flowId = entry.identity?.global_flow_id;
   return html`<tr>
-    <td>${flowId ?? "unknown"}</td>
-    <td>${entry.media_mode || "unknown"} / ${entry.flow_type || "unknown"}</td>
-    <td>${entry.name || "Unnamed"}</td>
+    <td>${flowId ?? ""}</td>
+    <td>${flowTypeLabel(entry)}</td>
+    <td>${entry.name || ""}</td>
     <td>${channelLabel(entry)}</td>
     <td>${format.sampleRate(entry.sample_rate_hz)}</td>
-    <td>
-      ${entry.encoding_bits == null ? "Not reported" : `PCM ${entry.encoding_bits}`}
-    </td>
+    <td>${entry.encoding_bits == null ? "" : `PCM ${entry.encoding_bits}`}</td>
     <td>${socketLabel(entry.primary_destination)}</td>
     <td>
       ${
@@ -288,6 +278,10 @@ function FlowRow({ entry, onDelete, requestName }) {
       }
     </td>
   </tr>`;
+}
+
+function FlowField({ children, label }) {
+  return html`<label class="flow-field"><span>${label}</span>${children}</label>`;
 }
 
 export function TransmitFlows({ device }) {
@@ -317,15 +311,15 @@ export function TransmitFlows({ device }) {
   const refresh = async () => {
     try {
       setInventory(await api.getTransmitFlows(requestName));
-      setError("");
     } catch (failure) {
-      setError(failure.message);
+      console.error(failure);
     }
   };
   useEffect(() => {
     setInventory(null);
     setPlan(null);
     setResult(null);
+    setError("");
     void refresh();
   }, [requestName]);
   const specification = () =>
@@ -366,29 +360,27 @@ export function TransmitFlows({ device }) {
     await refresh();
   };
   const flowEntries = inventory?.flows || [];
+  if (!authoring && !flowEntries.length) return null;
   const supportsFlowOptions = authoring?.supports_flow_options === true;
+  const edit = (setter) => (event) => {
+    setter(event.target.value);
+    setPlan(null);
+  };
   return html`<${Panel} title=${`Transmit flows (${flowEntries.length})`}>
-    <p class="text-sm">
-      Fresh readback uses the canonical flow schema and retains raw fields.
-      Control-plane confirmation does not confirm RTP reception, clock lock, or
-      decoded audio.
-    </p>
-    ${error ? html`<${Notice}>${error}<//>` : null}
-    ${inventory === null && !error ? html`<${Notice}>Reading transmitter flows…<//>` : null}
     ${
-      inventory
+      flowEntries.length
         ? html`<div class="table-wrapper">
             <table class="data">
               <thead>
                 <tr>
                   <th>Flow</th>
-                  <th>Mode</th>
+                  <th>Type</th>
                   <th>Name</th>
                   <th>Slot:channel</th>
                   <th>Sample rate</th>
                   <th>Encoding</th>
                   <th>Destination</th>
-                  <th>Action</th>
+                  <th><span class="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -398,189 +390,94 @@ export function TransmitFlows({ device }) {
           </div>`
         : null
     }
-    ${inventory && !flowEntries.length ? html`<${Notice}>No active transmitter flows.<//>` : null}
-    <form
-      class="flex flex-col gap-3"
-      onSubmit=${(event) => {
-        event.preventDefault();
-        void preview();
-      }}
-    >
-      <h3 class="font-semibold">Plan multicast transmit flow</h3>
-      <div class="flex flex-wrap gap-3">
-        <label
-          >Channels<input
-            aria-label="Transmit flow channels"
-            value=${channels}
-            onInput=${(event) => {
-              setChannels(event.target.value);
-              setPlan(null);
+    ${
+      authoring
+        ? html`<form
+            class="flow-form"
+            onSubmit=${(event) => {
+              event.preventDefault();
+              void preview();
             }}
-            placeholder="1,2"
-        /></label>
-        <label
-          >${{ media_local_flow_id: "Media-local flow identifier", global_flow_id: "Global flow identifier" }[authoring?.identity_field] || "Flow identifier"}<input
-            type="number"
-            min="1"
-            max=${authoring?.identifier_max}
-            aria-label="Transmit flow identifier"
-            value=${flowId}
-            onInput=${(event) => {
-              setFlowId(event.target.value);
-              setPlan(null);
-            }}
-        /></label>
-        ${
-          authoring?.media_modes.length > 1
-            ? html`<label
-                >Mode<select
-                  aria-label="Transmit flow media mode"
-                  value=${mediaMode}
-                  onChange=${(event) => {
-                    setMediaMode(event.target.value);
-                    setPlan(null);
-                  }}
-                >
-                  ${authoring.media_modes.map((mode) => html`<option value=${mode}
-                    disabled=${mode === "rtp_aes67" && (device.aes67_configuration_supported !== true || device.aes67_current !== true)}
-                    >${mode === "native_dante" ? "Native Dante" : "RTP/AES67"}</option>`)}
-                </select></label
-              >`
-            : null
-        }
-        ${
-          supportsFlowOptions
-            ? html`<label
-                >Flow name<input
-                  aria-label="Transmit flow name"
-                  value=${flowName}
-                  onInput=${(event) => {
-                    setFlowName(event.target.value);
-                    setPlan(null);
-                  }}
-              /></label>`
-            : null
-        }
-        ${
-          supportsFlowOptions
-            ? html`<label
-                >Frames per packet<input
+          >
+            <h3 class="flow-form-title">New multicast flow</h3>
+            <div class="flow-form-fields">
+              <${FlowField} label="Channels">
+                <input aria-label="Transmit flow channels" value=${channels} onInput=${edit(setChannels)} />
+              <//>
+              <${FlowField} label=${{ media_local_flow_id: "Media-local flow identifier", global_flow_id: "Global flow identifier" }[authoring.identity_field] || "Flow identifier"}>
+                <input
                   type="number"
                   min="1"
-                  max="65535"
-                  aria-label="Transmit flow frames per packet"
-                  value=${framesPerPacket}
-                  onInput=${(event) => {
-                    setFramesPerPacket(event.target.value);
-                    setPlan(null);
-                  }}
-              /></label>`
-            : null
-        }
-      </div>
-      ${
-        supportsFlowOptions && mediaMode === "rtp_aes67"
-          ? html`<div class="flex flex-wrap gap-3">
-              <label
-                >Primary IPv4<input
-                  aria-label="Primary RTP destination address"
-                  value=${primaryAddress}
-                  onInput=${(event) => {
-                    setPrimaryAddress(event.target.value);
-                    setPlan(null);
-                  }} /></label
-              ><label
-                >Primary UDP port<input
-                  type="number"
-                  min="1"
-                  max="65535"
-                  aria-label="Primary RTP destination port"
-                  value=${primaryPort}
-                  onInput=${(event) => {
-                    setPrimaryPort(event.target.value);
-                    setPlan(null);
-                  }} /></label
-              ><label
-                >Secondary IPv4<input
-                  aria-label="Secondary RTP destination address"
-                  value=${secondaryAddress}
-                  onInput=${(event) => {
-                    setSecondaryAddress(event.target.value);
-                    setPlan(null);
-                  }} /></label
-              ><label
-                >Secondary UDP port<input
-                  type="number"
-                  min="1"
-                  max="65535"
-                  aria-label="Secondary RTP destination port"
-                  value=${secondaryPort}
-                  onInput=${(event) => {
-                    setSecondaryPort(event.target.value);
-                    setPlan(null);
-                  }}
-              /></label>
-            </div>`
-          : null
-      }
-      ${
-        supportsFlowOptions
-          ? html`<p class="text-sm">
-              The media-local identifier is requested; the device allocates the
-              global flow identifier. Sample rate and encoding are checked as
-              fresh device-state preconditions and are not authored by this
-              request.
-            </p>`
-          : null
-      }
-      <div>
-        <button
-          class="btn btn-sm"
-          type="submit"
-          disabled=${authoring == null || !channels.trim()}
-        >
-          Validate and plan
-        </button>
-      </div>
-      ${
-        plan
-          ? html`<div
-              role="status"
-              class=${plan.supported ? "notice" : "alert alert-error"}
-            >
-              ${plan.supported ? `Ready: ${plan.serializer_cohort}` : `Unavailable: ${plan.reasons.join("; ")}`}
-            </div>`
-          : null
-      }
-      ${
-        plan?.supported
-          ? html`<div>
-              <${AsyncButton}
-                variant="primary"
-                description=${`create the planned transmit flow on ${requestName}`}
-                onRun=${create}
-                >Create and verify<//
-              >
-            </div>`
-          : null
-      }
-      ${
-        result
-          ? html`<div role="status" class="text-sm">
-              <p>${result.state}: ${result.message}</p>
-              <dl>
-                ${flowEvidenceRows(result).map(
-                  ([label, value]) => html`
-                    <div>
-                      <dt class="font-semibold inline">${label}:</dt>
-                      <dd class="inline">${value}</dd>
-                    </div>
-                  `,
-                )}
-              </dl>
-            </div>`
-          : null
-      }
-    </form>
+                  max=${authoring.identifier_max}
+                  aria-label="Transmit flow identifier"
+                  value=${flowId}
+                  onInput=${edit(setFlowId)}
+                />
+              <//>
+              ${
+                authoring.media_modes.length > 1
+                  ? html`<${FlowField} label="Mode">
+                      <select aria-label="Transmit flow media mode" value=${mediaMode} onChange=${edit(setMediaMode)}>
+                        ${authoring.media_modes.map((mode) => html`<option value=${mode}
+                          disabled=${mode === "rtp_aes67" && (device.aes67_configuration_supported !== true || device.aes67_current !== true)}
+                          >${mode === "native_dante" ? "Native Dante" : "RTP/AES67"}</option>`)}
+                      </select>
+                    <//>`
+                  : null
+              }
+              ${
+                supportsFlowOptions
+                  ? html`<${FlowField} label="Flow name">
+                        <input aria-label="Transmit flow name" value=${flowName} onInput=${edit(setFlowName)} />
+                      <//>
+                      <${FlowField} label="Frames per packet">
+                        <input
+                          type="number"
+                          min="1"
+                          max="65535"
+                          aria-label="Transmit flow frames per packet"
+                          value=${framesPerPacket}
+                          onInput=${edit(setFramesPerPacket)}
+                        />
+                      <//>`
+                  : null
+              }
+              ${
+                supportsFlowOptions && mediaMode === "rtp_aes67"
+                  ? html`<${FlowField} label="Primary IPv4">
+                        <input aria-label="Primary RTP destination address" value=${primaryAddress} onInput=${edit(setPrimaryAddress)} />
+                      <//>
+                      <${FlowField} label="Primary UDP port">
+                        <input type="number" min="1" max="65535" aria-label="Primary RTP destination port" value=${primaryPort} onInput=${edit(setPrimaryPort)} />
+                      <//>
+                      <${FlowField} label="Secondary IPv4">
+                        <input aria-label="Secondary RTP destination address" value=${secondaryAddress} onInput=${edit(setSecondaryAddress)} />
+                      <//>
+                      <${FlowField} label="Secondary UDP port">
+                        <input type="number" min="1" max="65535" aria-label="Secondary RTP destination port" value=${secondaryPort} onInput=${edit(setSecondaryPort)} />
+                      <//>`
+                  : null
+              }
+            </div>
+            <div class="flow-form-actions">
+              <button class="btn btn-sm" type="submit">Plan</button>
+              ${
+                plan?.supported
+                  ? html`<${AsyncButton}
+                      variant="primary"
+                      description=${`create the planned transmit flow on ${requestName}`}
+                      onRun=${create}
+                      >Create<//
+                    >`
+                  : null
+              }
+            </div>
+            ${error ? html`<p role="alert" class="text-error">${error}</p>` : null}
+            ${plan && !plan.supported ? html`<p role="alert" class="text-error">${plan.reasons.join("; ")}</p>` : null}
+            ${plan?.supported ? html`<p role="status">Ready to create.</p>` : null}
+            ${result ? html`<p role="status">${result.message || capitalized(result.state)}</p>` : null}
+          </form>`
+        : html`${result ? html`<p role="status">${result.message || capitalized(result.state)}</p>` : null}`
+    }
   <//>`;
 }
