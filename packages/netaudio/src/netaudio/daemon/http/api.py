@@ -61,6 +61,7 @@ from netaudio.monitoring import (
     MonitoringEventKind,
     MutationAuditRecorder,
 )
+from netaudio.monitoring.level_history import LevelHistory
 
 logger = logging.getLogger("netaudio")
 
@@ -203,8 +204,10 @@ class DaemonHTTPServer(
         tls: TLSSettings | None = None,
         mcp_token: str | None = None,
         host_audio=None,
+        level_history=None,
     ):
         self.application = application
+        self.level_history = level_history or LevelHistory()
         self.diagnostics: DanteHeartbeatService | None = None
         self.mcp_token = mcp_token if mcp_token is not None else ensure_mcp_token()
         self.oauth_store = OAuthStore()
@@ -323,6 +326,7 @@ class DaemonHTTPServer(
             "/event-journal/operations": self._handle_append_operation_event,
             "/host-audio/levels": self._handle_host_audio_levels,
             "/host-audio/meter": self._handle_host_audio_meter,
+            "/host-audio/history": self._handle_host_audio_history,
             "/host-audio/jack/connect": self._handle_jack_connect,
             "/host-audio/jack/disconnect": self._handle_jack_disconnect,
             "/host-audio/pulse/volume": self._handle_pulse_volume,

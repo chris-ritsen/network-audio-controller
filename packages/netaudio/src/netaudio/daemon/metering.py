@@ -4,6 +4,7 @@ import asyncio
 import logging
 import socket
 import time
+from collections.abc import Callable
 
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.common.app_config import settings as app_settings
@@ -43,6 +44,14 @@ class MeteringManager:
         self._failed_starts: dict[str, float] = {}
         self._started: dict[str, tuple[str, str, str, bytes, float]] = {}
         self._stream_locks: dict[str, asyncio.Lock] = {}
+        self._listeners: list[Callable[[str, dict], None]] = []
+
+    def add_listener(self, listener: Callable[[str, dict], None]) -> None:
+        self._listeners.append(listener)
+
+    def _notify(self, server_name: str, sample: dict) -> None:
+        for listener in self._listeners:
+            listener(server_name, sample)
 
     @staticmethod
     def _probe_port(port: int) -> bool:
@@ -468,6 +477,7 @@ class MeteringManager:
         self._detailed_levels[server_name] = sample
         self._latest_levels[server_name] = sample
         device.detailed_metering_supported = True
+        self._notify(server_name, sample)
 
         if self._persistent_refs.get(server_name):
             self._dirty_devices.add(server_name)
@@ -558,6 +568,7 @@ class MeteringManager:
 
         now = sample["timestamp"]
         self._signal_presence_levels[server_name] = sample
+        self._notify(server_name, sample)
         selected = self._selected_sample(server_name, now)
         if selected is not sample:
             return

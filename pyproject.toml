@@ -22,6 +22,7 @@ dependencies = [
     "pywin32>=306; sys_platform == 'win32'",
     "jack-client>=0.5.4",
     "pulsectl-asyncio>=1.2.0; sys_platform == 'linux'",
+    "numpy>=1.26 ; sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]

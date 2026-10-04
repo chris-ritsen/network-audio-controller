@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +29,8 @@ from netaudio.daemon.http.mcp_protocol import (
     is_modern_request,
     validate_modern_request,
 )
+from netaudio.daemon.http.host_audio import HISTORY_FLUSH_SECONDS
+from netaudio.daemon.http.mcp_signal_history import PERIOD_PROPERTIES, signal_history_view, signal_period
 from netaudio.daemon.http.mcp_schema import (
     CHANNEL_ARGUMENT,
     CONFIRMATION_DESCRIPTION,
@@ -103,17 +106,18 @@ MCP_INSTRUCTIONS = (
     "get_routing for the patch, find_channels to locate a channel by its label, and get_device for focused "
     "details. Use discover_tools to find other operations and their exact schemas, then invoke_tool to run them: "
     "get_device_diagnostics for per-flow latency and late packets, get_signal_levels for whether audio is "
-    "present, trace_signal to follow audio from any point through Shure wireless, Dante, this computer's sound "
+    "present (with over_last_seconds or listen_seconds for sound that comes and goes, such as speech, since one "
+    "sample can miss it), trace_signal to follow audio from any point through Shure wireless, Dante, this computer's sound "
     "cards, JACK and PulseAudio with levels at each step, get_host_audio for this computer's JACK and PulseAudio, "
     "get_wireless_devices for Shure mics, inspect_device_controls for a device's own panel (AVIO "
     "Bluetooth pairing and name, analog levels, Dante AV video), and save_preset/apply_preset to keep and restore "
     "setups by name. Reads are compact by default; detail=debug exposes raw evidence. Channels accept unique labels or "
     "numbers. Call a write without confirmed to see exactly what it would change; nothing changes until the "
     "user agrees and you call it again with confirmed=true, and the result reads the device back. Use "
-    "apply_to_devices to make one change on several devices. A device that is off the network is normal unless it "
-    "is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it are not "
-    "failures, and it is worth mentioning only when the question is about it. forget_device removes devices that "
-    "no longer matter. Operations with status planned are designed but not built; calling one explains what blocks it."
+    "apply_to_devices to make one change on several devices. A device that is off the network is not a problem, "
+    "even when it is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it "
+    "are not failures, and neither is worth mentioning unless the user asks about that device or about what is "
+    "off. forget_device removes devices that no longer matter. Operations with status planned are designed but not built; calling one explains what blocks it."
 )
 
 
@@ -244,8 +248,9 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
         path="/shure/devices",
         description=(
             "Shure wireless receivers and transmitters the server tracks: each channel's name, whether a transmitter "
-            "is being received, frequency, levels, and for receivers with one matching Dante device, the Dante "
-            "output it appears on and what that feeds."
+            "is being received, frequency, level, and for receivers with one matching Dante device, the Dante "
+            "output it appears on and what that feeds. Settings use the names and values set_wireless_value "
+            "takes; AD4D levels are dBFS, while the P10T reports its input meter in its own units."
         ),
         input_schema=object_schema({}, []),
         method="GET",
@@ -653,9 +658,9 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
         name="get_network_overview",
         path="/devices",
         description=(
-            "One compact snapshot of known devices, clock leaders, problems and Dante Domain Manager state. A device "
-            "that is off the network is listed only with when it was last seen; that is not a problem unless the "
-            "device is enrolled in Dante Domain Manager. Use focused tools for channels, routes or forensic detail."
+            "One compact snapshot of the devices on the network, clock leaders, problems and Dante Domain Manager "
+            "state. Devices that are off the network are not problems and are left out; list_devices shows them with "
+            "when they were last seen. Use focused tools for channels, routes or forensic detail."
         ),
         input_schema=object_schema({}, []),
         method="GET",
@@ -1298,9 +1303,10 @@ RESOURCES: tuple[McpResource, ...] = (
         tool_name="get_issues",
         tool_description=(
             "Problems detected on the network, grouped by kind and device, worst first. A failing route group names "
-            "the transmitting device behind each channel and whether that device is offline or never seen, and a "
-            "group on an offline device is marked as its last report. Defaults to open issues; set state to resolved "
-            "or all for history. Filter by device and page with limit; debug lists every issue separately."
+            "the transmitting device behind each channel. Devices that are off the network and routes waiting for "
+            "them are not problems and are left out; get_routing with status waiting lists those routes, and "
+            "naming an off device here shows its last report. Defaults to open issues; set state to resolved or all "
+            "for history. Filter by device and page with limit; debug lists every issue separately."
         ),
         tool_properties={
             "detail": {"type": "string", "enum": ["compact", "debug"], "default": "compact"},
@@ -1321,7 +1327,9 @@ RESOURCES: tuple[McpResource, ...] = (
             "dBFS level and how many are silent. With a device: the rx and tx channels with signal and their level, "
             "and the silent ones by name or number range. Devices with detailed metering are sampled on request. "
             "points measures named places anywhere in the chain instead: JACK ports, PulseAudio inputs, outputs "
-            "and applications, Shure channels or Dante channels. Debug includes every channel and the raw meter codes."
+            "and applications, Shure channels or Dante channels. Debug includes every channel and the raw meter codes. "
+            "over_last_seconds, ending_at or listen_seconds report the recorded levels over a period instead of one "
+            "sample, which is what to use for sound that comes and goes."
         ),
         tool_properties={
             "device": device_property(),
@@ -1335,6 +1343,7 @@ RESOURCES: tuple[McpResource, ...] = (
                 ),
             },
             "detail": {"type": "string", "enum": ["compact", "debug"], "default": "compact"},
+            **PERIOD_PROPERTIES,
         },
     ),
     McpResource(
@@ -1564,7 +1573,25 @@ DISCOVERY_HINTS = {
         "streams",
         "jitter",
     },
-    "get_signal_levels": {"audio", "sound", "silent", "silence", "hear", "coming", "through", "signal"},
+    "get_signal_levels": {
+        "audio",
+        "sound",
+        "silent",
+        "silence",
+        "hear",
+        "coming",
+        "through",
+        "signal",
+        "history",
+        "recorded",
+        "last",
+        "minute",
+        "hour",
+        "night",
+        "period",
+        "talking",
+        "loudest",
+    },
     "apply_preset": {"preset", "restore", "back"},
     "save_preset": {"preset", "save", "keep"},
     "list_presets": {"preset", "saved"},
@@ -2488,6 +2515,13 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
                     request = _channel_request(tool.name, request, record)
         except (KeyError, TypeError, ValueError) as exception:
             return _tool_result({"error": str(exception)}, is_error=True)
+        if tool.name == "get_signal_levels":
+            try:
+                period = signal_period(request, time.time())
+            except ValueError as exception:
+                return _tool_result({"error": str(exception)}, is_error=True)
+            if period is not None:
+                return _tool_result(await self._signal_history(request, records, period), is_error=False)
         if tool.name == "get_device_diagnostics" and not request.get("device"):
             return await self._network_diagnostics(records, writer)
         if tool.name == "get_device_diagnostics" and request.get("detail") != "debug":
@@ -3280,6 +3314,18 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
             },
             is_error=bool(results) and succeeded == 0,
         )
+
+    async def _signal_history(self, request: dict, records: dict, period: tuple[float, float]) -> dict:
+        selected = _record_for_selector(records, request["device"]) if request.get("device") else None
+        if period[1] > time.time():
+            await self._request_detailed_metering(request.get("device"))
+            await asyncio.sleep(period[1] - time.time() + HISTORY_FLUSH_SECONDS)
+        devices = (
+            [selected]
+            if selected is not None
+            else [record for record in records.values() if isinstance(record, dict) and record.get("online")]
+        )
+        return compact(signal_history_view(self.level_history, devices, period, full=selected is not None))
 
     async def _request_detailed_metering(self, selector: str | None) -> None:
         if not self.metering:

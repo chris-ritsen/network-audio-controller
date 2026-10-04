@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from netaudio.dante.device_serializer import DEVICE_SCALAR_FIELDS
+from netaudio.daemon.http.shure import described_value
 from netaudio.dante.metering import normalize_metering_value
+from netaudio.host_audio.trace import shure_level_text
 
 DEVICE_SECTIONS = ("availability", "channels", "flows", "full", "network", "subscriptions", "summary")
 DEVICE_SUMMARY_FIELDS = (
@@ -126,10 +128,6 @@ def is_off(device: Any) -> bool:
     return isinstance(device, dict) and device.get("online") is False
 
 
-def is_enrolled(device: Any) -> bool:
-    return isinstance(device, dict) and device.get("management_state") == "managed"
-
-
 def last_seen_text(device: Any) -> str | None:
     if not is_off(device):
         return None
@@ -152,7 +150,7 @@ def waiting_text(source: str, records: dict[str, dict]) -> str | None:
     record = records.get(source)
     if record is None:
         return f"waiting for {source}, which has not been seen since the server started"
-    if is_off(record) and not is_enrolled(record):
+    if is_off(record):
         return f"waiting for {source}, {last_seen_text(record)}"
     return None
 
@@ -276,7 +274,7 @@ def clock_status_view(payload: Any, arguments: dict) -> Any:
     identities = {device["ptpv1_device_uuid"]: device["name"] for device in devices if device.get("ptpv1_device_uuid")}
     domains: dict[str, dict] = {}
     for device in sorted(devices, key=lambda device: device["name"]):
-        if is_off(device) and not is_enrolled(device):
+        if is_off(device):
             continue
         clock = clock_view(device)
         leader_identity = device.get("ptpv1_master_uuid")
@@ -570,8 +568,7 @@ def device_view(
     seen = last_seen_text(device)
     if seen:
         view = {
-            "off_the_network": f"{seen}; everything below is how it was then"
-            + ("; it is enrolled in Dante Domain Manager, so its domain expects it" if is_enrolled(device) else ""),
+            "off_the_network": f"{seen}; everything below is how it was then",
             **view,
         }
     return compact(view)
@@ -1091,7 +1088,7 @@ def routing_view(payload: Any, arguments: dict) -> Any:
         receiver = device.get("name") or server_name
         if arguments.get("device") not in (None, receiver, server_name):
             continue
-        if arguments.get("device") is None and is_off(device) and not is_enrolled(device):
+        if arguments.get("device") is None and is_off(device):
             continue
         channels = device.get("channels") if isinstance(device.get("channels"), dict) else {}
         rx_names = _channel_names(channels.get("receivers"))
@@ -1236,7 +1233,7 @@ def device_list_view(devices: dict, ddm_known: bool) -> dict:
             continue
         summary = device_summary(device, ddm_known, devices)
         problems = summary.get("subscription_problems") or []
-        if is_off(device) and not is_enrolled(device):
+        if is_off(device):
             entries.append(
                 (
                     summary.get("name") or server_name,
@@ -1244,7 +1241,7 @@ def device_list_view(devices: dict, ddm_known: bool) -> dict:
                     compact(
                         {
                             "product": summary.get("product") or summary.get("model"),
-                            "last_seen": summary.get("last_seen"),
+                            "last_seen": summary.get("last_seen") or "unknown",
                         }
                     ),
                 )
@@ -1259,7 +1256,6 @@ def device_list_view(devices: dict, ddm_known: bool) -> dict:
                         "product": summary.get("product") or summary.get("model"),
                         "ipv4": summary.get("ipv4"),
                         "online": summary.get("online"),
-                        "last_seen": summary.get("last_seen"),
                         "management": summary.get("management"),
                         "domain": device.get("ddm_domain_name") if summary.get("management") == "managed" else None,
                         "sample_rate_hz": summary.get("sample_rate_hz"),
@@ -1271,7 +1267,6 @@ def device_list_view(devices: dict, ddm_known: bool) -> dict:
                         ),
                         "routes": summary.get("subscription_count") or None,
                         "route_problems": problems or None,
-                        "routes_waiting": summary.get("routes_waiting"),
                         "locked": True if summary.get("is_locked") is True else None,
                     }
                 ),
@@ -1284,14 +1279,14 @@ def device_list_view(devices: dict, ddm_known: bool) -> dict:
 def ddm_domains_summary(devices: dict) -> list[dict] | None:
     domains: dict[str, dict] = {}
     for device in devices.values():
-        if not isinstance(device, dict) or device.get("management_state") != "managed":
+        if not isinstance(device, dict) or device.get("management_state") != "managed" or is_off(device):
             continue
         name = device.get("ddm_domain_name") or device.get("ddm_domain_id")
         if not name:
             continue
         domain = domains.setdefault(name, {"name": name, "server": device.get("ddm_server_profile"), "devices": []})
         label = device.get("name") or device.get("server_name")
-        domain["devices"].append(label if device.get("online") else f"{label} (offline)")
+        domain["devices"].append(label)
     return [compact({**domain, "devices": sorted(domain["devices"])}) for domain in domains.values()] or None
 
 
@@ -1333,21 +1328,7 @@ def _route_source(record: dict | None, identity: Any) -> str | None:
     return None
 
 
-def _enrolled_off_group(name: str, record: dict) -> dict:
-    domain = record.get("ddm_domain_name") or record.get("ddm_domain_id")
-    where = f"Dante Domain Manager domain {domain}" if domain else "Dante Domain Manager"
-    return {
-        "kind": "enrolled_device_off",
-        "severity": "error",
-        "device": name,
-        "summary": f"enrolled in {where} but off the network ({last_seen_text(record)})",
-        "issue_count": 1,
-    }
-
-
-def issue_groups(
-    issues: Any, devices: dict, state: str = "open", device: str | None = None
-) -> tuple[list[dict], list[str]]:
+def issue_groups(issues: Any, devices: dict, state: str = "open", device: str | None = None) -> list[dict]:
     raw_issues = issues.get("issues") if isinstance(issues, dict) else None
     if isinstance(raw_issues, dict):
         raw_issues = list(raw_issues.values())
@@ -1361,7 +1342,7 @@ def issue_groups(
         scope = issue.get("scope") if isinstance(issue.get("scope"), dict) else {}
         name = scope.get("device_name") or scope.get("server_name")
         record = records.get(name)
-        if is_off(record) and not is_enrolled(record):
+        if is_off(record) and not device:
             continue
         identity = (issue.get("kind"), issue.get("severity"), name, issue.get("summary"), issue.get("state"))
         group = groups.setdefault(
@@ -1380,7 +1361,7 @@ def issue_groups(
                 "flows": set(),
                 "interfaces": set(),
                 "sources": {},
-                "waiting": {},
+                "waiting": set(),
             },
         )
         group["issue_count"] += 1
@@ -1399,21 +1380,18 @@ def issue_groups(
                 group[target].add(scope[field])
         source = _route_source(record, scope.get("channel_identity"))
         if source:
-            wait = waiting_text(source, records) if issue.get("state") == "open" else None
-            target = group["waiting"] if wait else group["sources"]
-            target.setdefault(wait or source, set()).add(scope["channel_identity"])
+            if issue.get("state") == "open" and waiting_text(source, records):
+                group["waiting"].add(scope["channel_identity"])
+            else:
+                group["sources"].setdefault(source, set()).add(scope["channel_identity"])
     problems = []
-    waiting_lines = []
     for group in groups.values():
         waiting = group.pop("waiting")
         sources = group.pop("sources")
-        waiting_channels = set().union(*waiting.values()) if waiting else set()
-        for wait, identities in sorted(waiting.items()):
-            waiting_lines.append(f"{group['device']} {_identities_text(identities)}: {wait}")
-        remaining = group["channels"] - waiting_channels
+        remaining = group["channels"] - waiting
         if waiting and not remaining:
             continue
-        group["issue_count"] -= len(waiting_channels)
+        group["issue_count"] -= len(waiting)
         problems.append(
             compact(
                 {
@@ -1433,14 +1411,6 @@ def issue_groups(
                 }
             )
         )
-    if state in ("open", "all"):
-        for server_name, record in sorted(devices.items()):
-            name = record.get("name") or server_name if isinstance(record, dict) else None
-            if not name or not (is_off(record) and is_enrolled(record)):
-                continue
-            if device and not _matches_device({"device_name": name, "server_name": record.get("server_name")}, device):
-                continue
-            problems.append(_enrolled_off_group(name, record))
     problems.sort(
         key=lambda group: (
             SEVERITY_ORDER.get(group.get("severity"), 4),
@@ -1449,7 +1419,7 @@ def issue_groups(
             str(group.get("device")),
         )
     )
-    return problems, sorted(waiting_lines)
+    return problems
 
 
 def issue_groups_view(payload: Any, arguments: dict, devices: dict) -> Any:
@@ -1457,14 +1427,13 @@ def issue_groups_view(payload: Any, arguments: dict, devices: dict) -> Any:
         return issues_view(payload, arguments)
     limit = arguments.get("limit", 50)
     offset = arguments.get("offset", 0)
-    problems, waiting = issue_groups(payload, devices, arguments.get("state", "open"), arguments.get("device"))
+    problems = issue_groups(payload, devices, arguments.get("state", "open"), arguments.get("device"))
     selected = problems[offset : offset + limit]
     return compact(
         {
             "problems": selected,
             "problem_count": sum(group["issue_count"] for group in problems),
             "next_offset": offset + len(selected) if offset + len(selected) < len(problems) else None,
-            "routes_waiting_for_devices_that_are_off": waiting or None,
             "detail": "detail=debug lists each issue separately with its identifier",
         }
     )
@@ -1476,25 +1445,15 @@ def network_overview_view(devices: dict, issues: dict, ddm: dict, journal: Any =
     for server_name, device in sorted(devices.items()):
         if not isinstance(device, dict):
             continue
-        summary = device_summary(device, ddm_known, devices)
-        if is_off(device) and not is_enrolled(device):
-            summaries.append(
-                compact(
-                    {
-                        "name": summary.get("name") or server_name,
-                        "product": summary.get("product") or summary.get("model"),
-                        "last_seen": summary.get("last_seen"),
-                    }
-                )
-            )
+        if is_off(device):
             continue
+        summary = device_summary(device, ddm_known, devices)
         summaries.append(
             compact(
                 {
                     "name": summary.get("name") or server_name,
                     "product": summary.get("product") or summary.get("model"),
                     "online": summary.get("online"),
-                    "last_seen": summary.get("last_seen"),
                     "management": summary.get("management"),
                     "ipv4": summary.get("ipv4"),
                     "sample_rate_hz": summary.get("sample_rate_hz"),
@@ -1505,7 +1464,7 @@ def network_overview_view(devices: dict, issues: dict, ddm: dict, journal: Any =
             )
         )
     clocks = clock_status_view(devices, {})["domains"]
-    problems, _ = issue_groups(issues, devices)
+    problems = issue_groups(issues, devices)
     return compact(
         {
             "as_of": utc_now(),
@@ -1692,6 +1651,38 @@ def _dante_match(device_type: Any, records: dict) -> dict | None:
     return matches[0] if len(matches) == 1 else None
 
 
+WIRELESS_SETTING_NAMES = {
+    "audio_gain": "gain",
+    "audio_mute": "mute",
+    "audio_in_level": "input_level",
+    "audio_in_line_level": "line_level",
+    "rf_tx_level": "rf_power",
+    "audio_tx_mode": "transmit_mode",
+}
+WIRELESS_METER_FIELDS = frozenset({"audio_level_rms", "audio_level_peak", "audio_in_level_l", "audio_in_level_r"})
+
+
+def _wireless_channel(device_type: Any, channel: dict) -> dict:
+    entry: dict[str, Any] = {"name": channel.get("name")}
+    if "active" in channel:
+        entry["transmitter"] = (
+            "receiving a transmitter" if channel["active"] else "no transmitter signal (antenna status XX)"
+        )
+    if isinstance(channel.get("frequency"), (int, float)):
+        entry["frequency_mhz"] = channel["frequency"] / 1000
+    if channel.get("active") is not False:
+        entry["level"] = shure_level_text(channel)
+    for key, value in channel.items():
+        if key in {"name", "active", "frequency"} or key in WIRELESS_METER_FIELDS:
+            continue
+        if key == "signal_quality" and channel.get("active") is False:
+            continue
+        if key == "audio_gain" and device_type == "ad4d":
+            value = described_value("ad4d", "AUDIO_GAIN", value)
+        entry[WIRELESS_SETTING_NAMES.get(key, key)] = value
+    return entry
+
+
 def wireless_view(payload: Any, records: dict) -> Any:
     if not isinstance(payload, dict):
         return payload
@@ -1712,14 +1703,7 @@ def wireless_view(payload: Any, records: dict) -> Any:
         for number, channel in sorted((device.get("channels") or {}).items(), key=lambda item: int(item[0])):
             if not isinstance(channel, dict):
                 continue
-            entry: dict[str, Any] = {"number": int(number), "name": channel.get("name")}
-            if "active" in channel:
-                entry["transmitter"] = (
-                    "receiving a transmitter" if channel["active"] else "no transmitter signal (antenna status XX)"
-                )
-            if isinstance(channel.get("frequency"), (int, float)):
-                entry["frequency_mhz"] = channel["frequency"] / 1000
-            entry.update({key: value for key, value in channel.items() if key not in {"name", "active", "frequency"}})
+            entry = {"number": int(number), **_wireless_channel(device.get("device_type"), channel)}
             label = outputs.get(int(number))
             if dante is not None and label is not None:
                 entry["dante_output"] = f"{dante.get('name')}:{label}"

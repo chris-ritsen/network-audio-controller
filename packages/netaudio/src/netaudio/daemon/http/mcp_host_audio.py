@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
 
 from netaudio.daemon.http.host_audio import SUMMARY_PEER_TIMEOUT_SECONDS
 from netaudio.daemon.http.host_audio_control import card_change, jack_change, pulse_change
 from netaudio.daemon.http.mcp_preview import NEXT_STEP
 from netaudio.daemon.http.mcp_schema import object_schema
+from netaudio.daemon.http.mcp_signal_history import signal_period
 from netaudio.daemon.http.mcp_views import compact
 from netaudio.host_audio.alsa import is_dante_interface
 from netaudio.host_audio.links import bridge_channel, hardware_channel
@@ -433,7 +435,6 @@ def wireless_lines(devices: dict) -> list[str]:
     lines = []
     for device in sorted(devices.values(), key=lambda item: str(item.get("name"))):
         if not device.get("online"):
-            lines.append(f"{device.get('name')}: offline")
             continue
         channels = []
         for number, channel in sorted((device.get("channels") or {}).items(), key=lambda item: int(item[0])):
@@ -463,7 +464,6 @@ def wireless_conditions(devices: dict) -> list[str]:
     for device in devices.values():
         name = device.get("name")
         if not device.get("online"):
-            conditions.append(f"{name} (Shure) is offline")
             continue
         for number, channel in (device.get("channels") or {}).items():
             label = f"{name} ch{number} {channel.get('name') or ''}".rstrip()
@@ -582,7 +582,9 @@ class McpHostAudioTools:
             return compact(payload), status >= 400
         if name == "get_signal_levels":
             points = arguments["points"]
-            status, payload = await self.host_audio_point_levels([points] if isinstance(points, str) else points)
+            status, payload = await self.host_audio_point_levels(
+                [points] if isinstance(points, str) else points, period=signal_period(arguments, time.time())
+            )
             return compact(payload), status >= 400
         if name == "get_host_audio":
             status, snapshot = await self.host_audio_snapshot(arguments.get("host"))

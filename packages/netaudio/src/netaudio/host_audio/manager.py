@@ -11,10 +11,12 @@ from netaudio.host_audio import alsa
 from netaudio.host_audio.component import AudioComponent
 from netaudio.host_audio.jack_graph import JackGraph, server_name
 from netaudio.host_audio.jack_meter import JackMeter
+from netaudio.host_audio.jack_recorder import JackRecorder
 from netaudio.host_audio.links import bridge_clients, card_links
 from netaudio.host_audio.peers import HostAudioPeers
 from netaudio.host_audio.pulse import PulseGraph
 from netaudio.host_audio.watch import DirectoryWatch
+from netaudio.monitoring.level_history import LevelHistory, jack_values
 
 logger = logging.getLogger("netaudio")
 
@@ -24,10 +26,14 @@ CONNECT_RETRY_SECONDS = 0.5
 
 
 class HostAudioManager:
-    def __init__(self) -> None:
+    def __init__(self, level_history: LevelHistory | None = None, record_jack_levels: bool = False) -> None:
         self.jack = JackGraph(self._changed)
         self.pulse = PulseGraph(self._changed)
         self.meter = JackMeter()
+        self.level_history = level_history or LevelHistory()
+        self.record_jack_levels = record_jack_levels
+        self.recorder = JackRecorder(self._record_levels, lambda: self.jack.available)
+        self._recording = False
         self.peers = HostAudioPeers()
         self.host = socket.gethostname().removesuffix(".local")
         self._watch = DirectoryWatch(self._created)
@@ -38,7 +44,12 @@ class HostAudioManager:
     def add_listener(self, listener: Callable[[str], None]) -> None:
         self._listeners.append(listener)
 
+    def _record_levels(self, second: int, levels: dict) -> None:
+        self.level_history.record("jack", second, jack_values(levels), levels.keys())
+
     def _changed(self, component: str) -> None:
+        if component == "jack" and self._recording and self.jack.available:
+            self.recorder.start(self.jack.connected_at)
         for listener in self._listeners:
             listener(component)
 
@@ -49,10 +60,22 @@ class HostAudioManager:
                 self._watch.watch(self._runtime_directory)
                 self._watch.watch(self._runtime_directory / "pulse")
         await asyncio.gather(self.jack.start(), self.pulse.start())
+        if self.record_jack_levels:
+            self._recording = True
+            self.recorder.start(self.jack.connected_at)
         logger.info(
-            "Host audio: JACK %s, PulseAudio %s",
+            "Host audio: JACK %s, PulseAudio %s, JACK level recording %s",
             "connected" if self.jack.available else self.jack.reason,
             "connected" if self.pulse.available else self.pulse.reason,
+            "on" if self.record_jack_levels else "off",
+        )
+
+    def jack_history_note(self) -> str | None:
+        if self.record_jack_levels:
+            return None
+        return (
+            f"JACK levels are not recorded on {self.host}. "
+            "Set record_jack_levels = true under [daemon] in its netaudio config to keep a level history"
         )
 
     def start_peers(self, zeroconf) -> None:
@@ -66,6 +89,8 @@ class HostAudioManager:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        self._recording = False
+        self.recorder.stop()
         await asyncio.gather(self.jack.stop(), self.pulse.stop())
         self.meter.stop()
         await self.jack.shutdown_executor()

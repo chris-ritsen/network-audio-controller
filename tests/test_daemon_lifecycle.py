@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from netaudio.daemon.server import NetaudioDaemon
+from netaudio.monitoring.level_history import LevelHistory
 
 
 async def _pending_until_cancelled(cancelled):
@@ -65,7 +66,7 @@ def test_shure_correlation_cache_reloads_replacements_and_deletions(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
+async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks(tmp_path):
     daemon = object.__new__(NetaudioDaemon)
     daemon._startup_task = None
     daemon._stop_event = asyncio.Event()
@@ -93,6 +94,8 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
     daemon.metering = _component(stop=AsyncMock())
+    daemon.level_history = LevelHistory()
+    daemon.level_history_path = tmp_path / "level_history.sqlite"
     daemon._redis = _component(aclose=AsyncMock())
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = _component(close=MagicMock())
@@ -134,7 +137,7 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
 
 
 @pytest.mark.asyncio
-async def test_component_failure_does_not_skip_remaining_shutdown():
+async def test_component_failure_does_not_skip_remaining_shutdown(tmp_path):
     daemon = object.__new__(NetaudioDaemon)
     daemon._startup_task = None
     daemon._stop_event = asyncio.Event()
@@ -152,6 +155,8 @@ async def test_component_failure_does_not_skip_remaining_shutdown():
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
     daemon.metering = _component(stop=AsyncMock())
+    daemon.level_history = LevelHistory()
+    daemon.level_history_path = tmp_path / "level_history.sqlite"
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = None
@@ -168,7 +173,7 @@ async def test_component_failure_does_not_skip_remaining_shutdown():
 
 
 @pytest.mark.asyncio
-async def test_partial_start_failure_unwinds_started_components():
+async def test_partial_start_failure_unwinds_started_components(tmp_path):
     daemon = object.__new__(NetaudioDaemon)
     daemon._stop_event = asyncio.Event()
     daemon._start_lock = asyncio.Lock()
@@ -187,6 +192,8 @@ async def test_partial_start_failure_unwinds_started_components():
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
     daemon.metering = _component(stop=AsyncMock())
+    daemon.level_history = LevelHistory()
+    daemon.level_history_path = tmp_path / "level_history.sqlite"
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = None
@@ -227,7 +234,7 @@ async def test_partial_start_failure_unwinds_started_components():
 
 
 @pytest.mark.asyncio
-async def test_concurrent_start_callers_share_one_initialization_and_exit_together():
+async def test_concurrent_start_callers_share_one_initialization_and_exit_together(tmp_path):
     daemon = object.__new__(NetaudioDaemon)
     daemon._stop_event = asyncio.Event()
     daemon._start_lock = asyncio.Lock()
@@ -246,6 +253,8 @@ async def test_concurrent_start_callers_share_one_initialization_and_exit_togeth
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
     daemon.metering = _component(stop=AsyncMock())
+    daemon.level_history = LevelHistory()
+    daemon.level_history_path = tmp_path / "level_history.sqlite"
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = None

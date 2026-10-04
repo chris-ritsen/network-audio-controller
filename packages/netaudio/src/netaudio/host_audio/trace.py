@@ -13,6 +13,7 @@ MAXIMUM_LINES = 80
 SIGNAL_FLOOR_DBFS = -80.0
 SHURE_LEVEL_OFFSET = 120
 ARROWS = {"downstream": "→", "upstream": "←"}
+LABEL_KIND = re.compile(r"\s*\([^()]*\)$")
 
 
 def _natural(value: str) -> list:
@@ -55,6 +56,8 @@ class SignalGraph:
         self.names: dict[str, list[tuple[int, str]]] = {}
 
     def add(self, node: Node, names: dict[str, int] | None = None) -> Node:
+        if node.identity not in self.nodes:
+            names = {node.label: 0, LABEL_KIND.sub("", node.label): 0, **(names or {})}
         self.nodes.setdefault(node.identity, node)
         for name, priority in (names or {}).items():
             if name:
@@ -463,6 +466,18 @@ def _dante_level(reading: dict | None) -> tuple[str, str]:
     return "unknown", str(state or "unknown")
 
 
+def shure_level_text(channel: dict) -> str | None:
+    rms = channel.get("audio_level_rms")
+    peak = channel.get("audio_level_peak")
+    if isinstance(rms, int):
+        peak_text = f", peak {peak - SHURE_LEVEL_OFFSET} dBFS" if isinstance(peak, int) else ""
+        return f"RMS {rms - SHURE_LEVEL_OFFSET} dBFS{peak_text}"
+    left, right = channel.get("audio_in_level_l"), channel.get("audio_in_level_r")
+    if isinstance(left, int) or isinstance(right, int):
+        return f"input meter left {left}, right {right} in the P10T's own units, not dBFS; larger is louder"
+    return None
+
+
 def _wireless_level(details: dict) -> tuple[str, str]:
     channel = details.get("channel") or {}
     state = details.get("state")
@@ -471,15 +486,10 @@ def _wireless_level(details: dict) -> tuple[str, str]:
     if state in {"muted", "RF muted"}:
         return "silent", state
     rms = channel.get("audio_level_rms")
-    peak = channel.get("audio_level_peak")
+    text = shure_level_text(channel)
     if isinstance(rms, int):
-        rms_dbfs = rms - SHURE_LEVEL_OFFSET
-        peak_text = f", peak {peak - SHURE_LEVEL_OFFSET} dBFS" if isinstance(peak, int) else ""
-        return ("signal" if rms_dbfs >= SIGNAL_FLOOR_DBFS else "silent"), f"RMS {rms_dbfs} dBFS{peak_text}"
-    levels = [channel.get(key) for key in ("audio_in_level_l", "audio_in_level_r")]
-    if any(isinstance(level, int) for level in levels):
-        return "unknown", f"input level {levels[0]}/{levels[1]} (device units)"
-    return "unknown", state or "on"
+        return ("signal" if rms - SHURE_LEVEL_OFFSET >= SIGNAL_FLOOR_DBFS else "silent"), text
+    return "unknown", text or state or "on"
 
 
 def node_level(

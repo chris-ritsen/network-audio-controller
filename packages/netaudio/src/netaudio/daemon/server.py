@@ -32,6 +32,12 @@ from netaudio.dante.application import DanteApplication
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from netaudio.host_audio.manager import HostAudioManager
+from netaudio.monitoring.level_history import LevelHistory, dante_values, shure_value
+from netaudio.monitoring.level_history_store import (
+    default_level_history_path,
+    load_level_history,
+    save_level_history,
+)
 from netaudio.shure.manager import ShureManager
 
 
@@ -89,6 +95,13 @@ def _stale_device_minutes_from_config(daemon_config: dict) -> float:
     if raw_value < 0:
         raise ValueError(f"daemon.stale_device_minutes must not be negative, got {raw_value!r}")
     return float(raw_value)
+
+
+def _record_jack_levels_from_config(daemon_config: dict) -> bool:
+    raw_value = daemon_config.get("record_jack_levels", False)
+    if not isinstance(raw_value, bool):
+        raise ValueError(f"daemon.record_jack_levels must be true or false, got {raw_value!r}")
+    return raw_value
 
 
 def _probe_device(device_ip: str, arc_port: int) -> bool:
@@ -178,11 +191,18 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._startup_waiters = 0
         self._stop_lock = DeferredAsyncioLock()
         self._stop_complete = False
+        self.level_history = LevelHistory()
+        self.level_history_path = default_level_history_path()
         self.metering = MeteringManager(self.application)
+        self.metering.add_listener(self._record_dante_levels)
         self.managed_signals = ManagedSignalReceiver(self.application, self.metering)
         self.managed_inventory = ManagedInventoryRegistry(managed_configuration)
         self.shure = ShureManager(self.application.dispatcher) if ShureManager else None
-        self.host_audio = HostAudioManager() if daemon_config.get("host_audio", True) is not False else None
+        self.host_audio = (
+            HostAudioManager(self.level_history, record_jack_levels=_record_jack_levels_from_config(daemon_config))
+            if daemon_config.get("host_audio", True) is not False
+            else None
+        )
         self.http_api = DaemonHTTPServer(
             self.application,
             self.state,
@@ -197,6 +217,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             event_journal=self.event_journal,
             tls=daemon_tls_settings(),
             host_audio=self.host_audio,
+            level_history=self.level_history,
         )
         self.managed_inventory.set_callback(self._on_managed_inventory_changed)
         self.heartbeat: DanteHeartbeatService | None = None
@@ -483,7 +504,16 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         logger.info(f"Shure device removed: {event.device_name}")
         await self._delete_shure_from_redis(event.device_name)
 
+    def _record_dante_levels(self, server_name: str, sample: dict) -> None:
+        values = dante_values(sample)
+        self.level_history.record(f"dante:{server_name}", int(sample["wall_time"]), values, values.keys())
+
     async def _on_shure_meters(self, event: DanteEvent):
+        value = shure_value(str(event.data.get("key")), event.data.get("value"))
+        if value is not None:
+            self.level_history.record(
+                f"shure:{event.device_name}", int(time.time()), {str(event.data.get("channel")): value}
+            )
         if not self._redis:
             return
         pending = event.device_name in self._pending_shure_meters
@@ -632,6 +662,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
     async def _start_once(self):
         self.http_api.discovery_started_monotonic = time.monotonic()
+        load_level_history(self.level_history, self.level_history_path)
 
         try:
             await self.http_api.start()
@@ -800,6 +831,11 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 await self.metering.stop()
             except (OSError, RuntimeError) as exception:
                 logger.warning(f"Metering stop error: {exception}", exc_info=True)
+
+        try:
+            save_level_history(self.level_history, self.level_history_path)
+        except (OSError, sqlite3.Error) as exception:
+            logger.warning(f"Could not save signal level history: {exception}", exc_info=True)
 
         if self._redis:
             try:

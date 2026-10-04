@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from typing import Any
 
 from netaudio.common.config_loader import load_config_document
 from netaudio.daemon.http.mcp_views import _dante_match, utc_now
 from netaudio.host_audio.alsa import is_dante_interface
 from netaudio.host_audio.peers import PeerError
+from netaudio.monitoring.level_history import history_text, iso_second
 from netaudio.host_audio.trace import (
     HostScope,
     SignalGraph,
@@ -27,6 +29,8 @@ METERING_TIMEOUT_SECONDS = 4.0
 PEER_TIMEOUT_SECONDS = 3.0
 SUMMARY_PEER_TIMEOUT_SECONDS = 1.5
 FIND_LIMIT = 24
+HISTORY_FLUSH_SECONDS = 1.5
+MAXIMUM_HISTORY_KEYS = 64
 NEIGHBOUR_LIMIT = 4
 POINT_FORMS = (
     "a Shure channel (AD4D-A ch1), a Dante channel (lx-dante rx 1), a JACK port or alias, "
@@ -59,6 +63,7 @@ class DaemonHostAudioHandlers:
     host_audio: Any
     shure: Any
     metering: Any
+    level_history: Any
 
     def _wireless_links(self, records: dict, wireless: dict) -> dict[str, str]:
         try:
@@ -202,6 +207,97 @@ class DaemonHostAudioHandlers:
                 levels[identity] = level
         return levels, notes
 
+    def _history_targets(
+        self, graph: SignalGraph, identity: str, snapshots: dict[str, dict], records: dict
+    ) -> tuple[str, list[tuple[str, str]], str | None]:
+        local = self.host_audio.host
+        node = graph.nodes[identity]
+        if node.kind in {"dante_rx", "dante_tx"}:
+            record = next(
+                (
+                    record
+                    for record in records.values()
+                    if isinstance(record, dict) and record.get("name") == node.details.get("device")
+                ),
+                None,
+            )
+            channel = node.details.get("channel")
+            if record is None or not record.get("server_name") or channel is None:
+                return local, [], None
+            return local, [(f"dante:{record['server_name']}", f"{node.details['direction']}:{channel}")], None
+        if node.kind == "wireless":
+            if (node.details.get("device") or {}).get("device_type") != "ad4d":
+                return local, [], "its input meter is not recorded because its units are not known"
+            prefix, number = identity.rsplit(":", 1)
+            return local, [(f"shure:{prefix.removeprefix('wireless:')}", number)], None
+        measured, note = identity, None
+        if node.kind in {"pulse_playback", "pulse_recording"}:
+            edges = graph.downstream if node.kind == "pulse_playback" else graph.upstream
+            device = next(
+                (
+                    other
+                    for other, _ in edges.get(identity, ())
+                    if other in graph.nodes and graph.nodes[other].kind in {"pulse_sink", "pulse_source"}
+                ),
+                None,
+            )
+            if device is None:
+                return local, [], None
+            measured, note = device, f"measured at {graph.nodes[device].label}"
+        for host, ports in jack_meter_targets(graph, [measured], snapshots).items():
+            return host, [("jack", source) for sources in ports.values() for source in sources], note
+        return local, [], note
+
+    def _level_summary(self, keys: list[tuple[str, str]], start: float, end: float) -> dict:
+        summary = self.level_history.summary(keys, start, end)
+        note = self.host_audio.jack_history_note() if self.host_audio is not None else None
+        if note and any(source == "jack" for source, _ in keys):
+            summary["not_recording"] = note
+        return summary
+
+    async def _history(
+        self,
+        graph: SignalGraph,
+        identities: list[str],
+        snapshots: dict[str, dict],
+        records: dict,
+        period: tuple[float, float],
+    ) -> tuple[dict[str, dict], dict[str, str], list[str]]:
+        start, end = period
+        requests: dict[str, dict[str, list[tuple[str, str]]]] = {}
+        notes: dict[str, str] = {}
+        for identity in identities:
+            host, keys, note = self._history_targets(graph, identity, snapshots, records)
+            if note:
+                notes[identity] = note
+            if keys:
+                requests.setdefault(host, {})[identity] = keys[:MAXIMUM_HISTORY_KEYS]
+        summaries: dict[str, dict] = {}
+        problems: list[str] = []
+        for host, targets in requests.items():
+            if host == self.host_audio.host:
+                for identity, keys in targets.items():
+                    summaries[identity] = self._level_summary(keys, start, end)
+                continue
+            try:
+                status, payload = await self.host_audio.peers.request(
+                    host,
+                    "POST",
+                    "/host-audio/history",
+                    {"targets": targets, "start": start, "end": end},
+                    timeout=PEER_TIMEOUT_SECONDS,
+                )
+            except PeerError as exception:
+                problems.append(str(exception))
+                continue
+            if status == 404:
+                problems.append(f"the netaudio server on {host} is too old to keep level history")
+            elif status >= 400 or not isinstance(payload, dict):
+                problems.append(f"the netaudio server on {host} did not return level history (HTTP {status})")
+            else:
+                summaries.update({identity: summary for identity, summary in payload.items() if identity in targets})
+        return summaries, notes, problems
+
     @staticmethod
     def _unlinked_cards(graph: SignalGraph, identities: list[str], snapshots: dict[str, dict]) -> list[str]:
         found = set()
@@ -335,14 +431,16 @@ class DaemonHostAudioHandlers:
             payload["signal_stops"] = list(dict.fromkeys(stops)) or "no step where signal stops"
             payload["measured_at"] = utc_now()
         notes.extend(self._unlinked_cards(graph, identities, snapshots))
-        notes.extend(peer_notes)
         notes.extend(self._availability_notes(snapshots))
         if notes:
             payload["notes"] = notes
         return 200, payload
 
     async def host_audio_point_levels(
-        self, points: list[str], seconds: float = DEFAULT_METER_SECONDS
+        self,
+        points: list[str],
+        seconds: float = DEFAULT_METER_SECONDS,
+        period: tuple[float, float] | None = None,
     ) -> tuple[int, dict]:
         if self.host_audio is None:
             return 503, {"error": "host audio support is not running"}
@@ -360,8 +458,13 @@ class DaemonHostAudioHandlers:
                     else f"not found; accepts {POINT_FORMS}"
                 )
         identities = list(dict.fromkeys(identity for starts in resolved.values() for identity in starts))
+        if period is not None:
+            return await self._point_history(
+                graph, resolved, errors, identities, snapshots, records, period, peer_notes
+            )
         measured, notes = await self._levels(graph, identities, snapshots, records, seconds)
-        notes.extend(peer_notes)
+        if errors:
+            notes.extend(peer_notes)
         payload: dict[str, Any] = {
             point: [
                 graph.nodes[identity].label + (f": {measured[identity][1]}" if identity in measured else ": no level")
@@ -373,6 +476,46 @@ class DaemonHostAudioHandlers:
         payload["measured_at"] = utc_now()
         if notes:
             payload["notes"] = notes
+        return (200 if resolved else 404), payload
+
+    async def _point_history(
+        self,
+        graph: SignalGraph,
+        resolved: dict[str, list[str]],
+        errors: dict[str, str],
+        identities: list[str],
+        snapshots: dict[str, dict],
+        records: dict,
+        period: tuple[float, float],
+        peer_notes: list[str],
+    ) -> tuple[int, dict]:
+        waiting = period[1] - time.time()
+        if waiting > 0:
+            devices = {
+                graph.nodes[identity].details["device"]
+                for identity in identities
+                if graph.nodes[identity].kind in {"dante_rx", "dante_tx"}
+                and graph.nodes[identity].details.get("online")
+            }
+            for device in sorted(devices):
+                await self._request_detailed_metering(device)
+            await asyncio.sleep(waiting + HISTORY_FLUSH_SECONDS)
+        summaries, notes, problems = await self._history(graph, identities, snapshots, records, period)
+        payload: dict[str, Any] = {"period": f"{iso_second(period[0])} to {iso_second(period[1])}"}
+        for point, starts in resolved.items():
+            lines = []
+            for identity in starts:
+                label = graph.nodes[identity].label
+                if identity in summaries:
+                    if identity in notes:
+                        label += f" ({notes[identity]})"
+                    lines.append(f"{label}: {history_text(summaries[identity])}")
+                else:
+                    lines.append(f"{label}: {notes.get(identity) or 'no level history is kept for this point'}")
+            payload[point] = lines
+        payload.update(errors)
+        if problems or (errors and peer_notes):
+            payload["notes"] = problems + (peer_notes if errors else [])
         return (200 if resolved else 404), payload
 
     async def host_audio_snapshot(self, host: str | None = None) -> tuple[int, dict]:
@@ -424,6 +567,36 @@ class DaemonHostAudioHandlers:
             return
         status, payload = await self.host_audio_point_levels(points, float(seconds))
         await self._send_json(writer, payload, status)
+
+    async def _handle_host_audio_history(self, writer, params: dict) -> None:
+        targets = params.get("targets")
+        start, end = params.get("start"), params.get("end")
+        valid = (
+            isinstance(targets, dict)
+            and len(targets) <= MAXIMUM_METERED_PORTS
+            and all(
+                isinstance(keys, list)
+                and len(keys) <= MAXIMUM_HISTORY_KEYS
+                and all(
+                    isinstance(key, list) and len(key) == 2 and all(isinstance(part, str) for part in key)
+                    for key in keys
+                )
+                for keys in targets.values()
+            )
+            and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (start, end))
+        )
+        if not valid or end <= start:
+            await self._send_json(
+                writer, {"error": "targets must map names to [source, point] keys, with a start before end"}, 400
+            )
+            return
+        await self._send_json(
+            writer,
+            {
+                name: self._level_summary([(key[0], key[1]) for key in keys], float(start), float(end))
+                for name, keys in targets.items()
+            },
+        )
 
     async def _handle_host_audio_meter(self, writer, params: dict) -> None:
         if self.host_audio is None:
