@@ -1,3 +1,4 @@
+import { startColorScheme } from "./color-scheme.js";
 import { Icon } from "./icons.js";
 import "./ui-preferences.js";
 import { inventoryFilters, saveRoutingFilters } from "./device-filters.js";
@@ -206,6 +207,7 @@ function bindShortcuts() {
   });
 }
 
+startColorScheme();
 startRouter();
 bindShortcuts();
 onNavigate(() => {

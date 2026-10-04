@@ -6,6 +6,15 @@
     <meta name="color-scheme" content="light dark" />
     <title>netaudio</title>
     <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" sizes="any" />
+    <script>
+      (() => {
+        let appearance = "system";
+        try { appearance = localStorage.getItem("netaudio.appearance") || "system"; } catch {}
+        const scheme = appearance === "light" || appearance === "dark" ? appearance : matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        document.documentElement.dataset.theme = scheme;
+        document.documentElement.style.colorScheme = scheme;
+      })();
+    </script>
     <link rel="stylesheet" href="/app.css" />
     <script type="importmap">
       {
