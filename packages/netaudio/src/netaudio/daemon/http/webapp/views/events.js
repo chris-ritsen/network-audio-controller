@@ -248,6 +248,7 @@ function EventsView({ location }) {
 }
 
 export const eventsView = {
+  filters: false,
   component: EventsView,
   id: "events",
   label: "Events",

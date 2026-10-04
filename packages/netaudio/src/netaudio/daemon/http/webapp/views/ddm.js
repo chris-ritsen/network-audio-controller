@@ -32,15 +32,15 @@ function DomainsPanel({ domains }) {
               rows=${domains.map(
                 (domain) => html`
                   <tr key=${domain.id || domain.name}>
-                    <td>${domain.name || ""}</td>
-                    <td>${domain.ddm_context || ""}</td>
-                    <td>${domain.ddm_server_profile || ""}</td>
-                    <td>${word(domain.status?.summary)}</td>
-                    <td>${word(domain.status?.clocking)}</td>
-                    <td>${word(domain.status?.connectivity)}</td>
-                    <td>${word(domain.status?.latency)}</td>
-                    <td>${word(domain.status?.subscriptions)}</td>
-                    <td class="numeric">${(domain.devices || []).length}</td>
+                    <td data-label="Name">${domain.name || ""}</td>
+                    <td data-label="Context">${domain.ddm_context || ""}</td>
+                    <td data-label="Server profile">${domain.ddm_server_profile || ""}</td>
+                    <td data-label="Summary">${word(domain.status?.summary)}</td>
+                    <td data-label="Clocking">${word(domain.status?.clocking)}</td>
+                    <td data-label="Connectivity">${word(domain.status?.connectivity)}</td>
+                    <td data-label="Latency">${word(domain.status?.latency)}</td>
+                    <td data-label="Subscriptions">${word(domain.status?.subscriptions)}</td>
+                    <td class="numeric" data-label="Devices">${(domain.devices || []).length}</td>
                   </tr>
                 `,
               )}
@@ -83,7 +83,7 @@ const MANAGED_COLUMNS = [
   { cell: (device) => word(device.ddm_enrolment_state), id: "enrollment", label: "Enrollment" },
   { cell: (device) => word(device.ddm_connection_state), id: "connection", label: "Connection" },
   { cell: (device) => word(device.ddm_status?.summary), id: "status", label: "Status" },
-  { cell: (device) => html`<${EnrollmentControl} key=${device.server_name} device=${device} />`, id: "actions", label: "Actions" },
+  { cell: (device) => html`<${EnrollmentControl} key=${device.server_name} device=${device} />`, id: "actions", label: "Actions", sortable: false },
   { cell: (device) => (device.ddm_last_sync ? format.timestamp(device.ddm_last_sync) : ""), id: "last-sync", label: "Last sync", defaultHidden: true },
   { cell: (device) => device.ipv4 || "", id: "address", label: "Address", defaultHidden: true },
 ];

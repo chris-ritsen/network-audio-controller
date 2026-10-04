@@ -44,4 +44,4 @@ function SettingsView() {
     <//></div>`;
 }
 
-export const settingsView = { component: SettingsView, id: "settings", label: "Settings" };
+export const settingsView = { component: SettingsView, filters: false, id: "settings", label: "Settings" };

@@ -2,6 +2,7 @@ import { html, useEffect, useState } from "../lib/preact.js";
 import { Fields, Notice, Panel } from "../components.js";
 
 const MINIMUM_FREQUENCY_OBSERVATIONS = 10;
+const REFRESH_MILLISECONDS = 5000;
 
 function finite(value) {
   return value != null && Number.isFinite(Number(value));
@@ -16,17 +17,15 @@ function partsPerMillion(value) {
 }
 
 function Sparkline({ series, label }) {
-  const samples = (series?.history || []).filter(
-    (sample) => sample.display_epoch === series.display_epoch && finite(sample.value),
-  );
+  const samples = (series?.points || []).filter(([, value]) => finite(value));
   if (samples.length < 2) return null;
-  const values = samples.map((sample) => Number(sample.value));
+  const values = samples.map(([, value]) => Number(value));
   const low = Math.min(...values);
   const span = Math.max(Math.max(...values) - low, Math.abs(low) * 1e-6, 1e-9);
-  const begin = samples[0].observed_monotonic;
-  const duration = Math.max(samples.at(-1).observed_monotonic - begin, 1e-9);
+  const begin = samples[0][0];
+  const duration = Math.max(samples.at(-1)[0] - begin, 1e-9);
   const points = samples
-    .map((sample) => `${(((sample.observed_monotonic - begin) / duration) * 158 + 1).toFixed(1)},${(31 - ((Number(sample.value) - low) / span) * 30).toFixed(1)}`)
+    .map(([time, value]) => `${(((time - begin) / duration) * 158 + 1).toFixed(1)},${(31 - ((Number(value) - low) / span) * 30).toFixed(1)}`)
     .join(" ");
   return html`<svg class="sparkline" width="160" height="32" viewBox="0 0 160 32" role="img" aria-label=${label}>
     <polyline fill="none" stroke="currentColor" stroke-width="1.5" points=${points} />
@@ -147,18 +146,26 @@ export function DiagnosticsSection({ device }) {
   const [error, setError] = useState(null);
   const endpoint = `/diagnostics/${encodeURIComponent(device.server_name)}`;
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    let timer = 0;
     async function refresh() {
       try {
-        const response = await fetch(endpoint);
+        const response = await fetch(`${endpoint}?history=points`, { signal: controller.signal });
         const body = await response.json();
         if (!response.ok) throw new Error(body.error);
-        if (!cancelled) { setData(body); setError(null); }
-      } catch (failure) { if (!cancelled) setError(failure.message); }
+        setData(body);
+        setError(null);
+      } catch (failure) {
+        if (controller.signal.aborted) return;
+        setError(failure.message);
+      }
+      if (!controller.signal.aborted) timer = setTimeout(refresh, REFRESH_MILLISECONDS);
     }
     refresh();
-    const timer = setInterval(refresh, 5000);
-    return () => { cancelled = true; clearInterval(timer); };
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
   }, [endpoint]);
   const run = (path, body) => post(path, body).then(setData, (failure) => setError(failure.message));
   return html`
@@ -166,11 +173,11 @@ export function DiagnosticsSection({ device }) {
     <${ReceiveLatency}
       data=${data}
       endpoint=${endpoint}
-      onReset=${() => run("/diagnostics/reset", { device: device.server_name })}
+      onReset=${() => run("/diagnostics/reset", { device: device.server_name, history: "points" })}
     />
     <${ClockFrequency}
       data=${data}
-      onWarnings=${(enabled) => run("/diagnostics/policy", { device: device.server_name, clock_variation_warnings: enabled })}
+      onWarnings=${(enabled) => run("/diagnostics/policy", { device: device.server_name, clock_variation_warnings: enabled, history: "points" })}
     />
   `;
 }

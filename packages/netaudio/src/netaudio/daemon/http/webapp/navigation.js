@@ -1,3 +1,6 @@
+import { computed } from "./lib/preact.js";
+import { visibleShureDevices } from "./store.js";
+
 export const NAVIGATION = [
   { id: "routing", label: "Routing", icon: "routing", path: "/routing", group: "Network" },
   { id: "devices", label: "Device Info", icon: "devices", path: "/devices", group: "Network" },
@@ -10,3 +13,7 @@ export const NAVIGATION = [
   { id: "shure", label: "Shure", icon: "shure", path: "/shure", group: "Tools" },
   { id: "settings", label: "Settings", icon: "settings", path: "/settings", group: "Tools" },
 ];
+
+export const visibleNavigation = computed(() =>
+  NAVIGATION.filter((view) => view.id !== "shure" || Object.keys(visibleShureDevices.value).length > 0),
+);

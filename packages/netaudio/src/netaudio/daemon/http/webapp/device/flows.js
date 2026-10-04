@@ -226,13 +226,13 @@ export function ReceiverFlows({ device }) {
           ${flows.map(
             (flow) =>
               html`<tr key=${flow.flow_number}>
-                <td>${flow.flow_number ?? ""}</td>
-                ${typed ? html`<td>${capitalized(flow.flow_type)}</td>` : null}
-                ${mapped ? html`<td>${receiverFlowChannels(flow)}</td>` : null}
-                ${addressed ? html`<td>${receiverFlowEndpoints(flow)}</td>` : null}
+                <td data-label="Flow">${flow.flow_number ?? ""}</td>
+                ${typed ? html`<td data-label="Type">${capitalized(flow.flow_type)}</td>` : null}
+                ${mapped ? html`<td data-label="Slot:receiver channels">${receiverFlowChannels(flow)}</td>` : null}
+                ${addressed ? html`<td data-label="Destination">${receiverFlowEndpoints(flow)}</td>` : null}
                 ${external
-                  ? html`<td>${externalIdentityLabel(flow)}</td>
-                      <td>
+                  ? html`<td data-label="Source">${externalIdentityLabel(flow)}</td>
+                      <td data-label="SDP">
                         ${flow.sdp_correlation?.matched === true
                           ? "Matched"
                           : flow.external_identity
@@ -257,14 +257,14 @@ function flowTypeLabel(entry) {
 function FlowRow({ entry, onDelete, requestName }) {
   const flowId = entry.identity?.global_flow_id;
   return html`<tr>
-    <td>${flowId ?? ""}</td>
-    <td>${flowTypeLabel(entry)}</td>
-    <td>${entry.name || ""}</td>
-    <td>${channelLabel(entry)}</td>
-    <td>${format.sampleRate(entry.sample_rate_hz)}</td>
-    <td>${entry.encoding_bits == null ? "" : `PCM ${entry.encoding_bits}`}</td>
-    <td>${socketLabel(entry.primary_destination)}</td>
-    <td>
+    <td data-label="Flow">${flowId ?? ""}</td>
+    <td data-label="Type">${flowTypeLabel(entry)}</td>
+    <td data-label="Name">${entry.name || ""}</td>
+    <td data-label="Slot:channel">${channelLabel(entry)}</td>
+    <td data-label="Sample rate">${format.sampleRate(entry.sample_rate_hz)}</td>
+    <td data-label="Encoding">${entry.encoding_bits == null ? "" : `PCM ${entry.encoding_bits}`}</td>
+    <td data-label="Destination">${socketLabel(entry.primary_destination)}</td>
+    <td data-label="">
       ${
         flowId == null
           ? null

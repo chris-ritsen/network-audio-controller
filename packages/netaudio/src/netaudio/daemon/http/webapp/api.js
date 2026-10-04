@@ -95,31 +95,6 @@ export const api = {
   savePreset: (body) => post("/presets/save", body),
   previewPreset: (body) => post("/presets/preview", body),
   loadPreset: (body) => post("/presets/load", body),
-  setReceiveFlowPerformance: (device, latencyMicroseconds, framesPerPacket) =>
-    post("/set-receive-flow-performance", {
-      device,
-      latency_microseconds: latencyMicroseconds,
-      frames_per_packet: framesPerPacket,
-    }),
-  setTransmitFlowPerformance: (device, latencyMicroseconds, framesPerPacket) =>
-    post("/set-transmit-flow-performance", {
-      device,
-      latency_microseconds: latencyMicroseconds,
-      frames_per_packet: framesPerPacket,
-    }),
-  setUnicastPerformance: (device, latencyMicroseconds, framesPerPacket) =>
-    post("/set-unicast-performance", {
-      device,
-      latency_microseconds: latencyMicroseconds,
-      frames_per_packet: framesPerPacket,
-    }),
-  setReceiveFlowDefaultSlots: (device, defaultSlots) =>
-    post("/set-receive-flow-default-slots", {
-      device,
-      default_slots: defaultSlots,
-    }),
-  storeCurrentConfiguration: (device) =>
-    post("/store-current-configuration", { device }),
   getDevices: (context) =>
     get(`/devices${context ? `?context=${encodeURIComponent(context)}` : ""}`),
   getDevice: (name, context) =>

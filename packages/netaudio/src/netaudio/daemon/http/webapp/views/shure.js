@@ -459,27 +459,27 @@ function ShureView({ location }) {
   if (identifier) {
     const device = deviceByIdentifier(identifier);
     if (!device) {
-      return html`<${Notice}>No Shure device named ${identifier} has been discovered.<//>`;
+      return html`<${Notice}>${identifier} is not on the network.<//>`;
     }
     return html`<${DeviceView} device=${device} />`;
   }
   const all = format.sortedShureDevices(visibleShureDevices.value);
+  if (!all.length) return null;
   return html`<div class="flex flex-col gap-4">
     <${Panel} title=${`Shure devices (${all.length})`}>
-      ${all.length === 0
-        ? html`<${Notice}>No Shure devices found.<//>`
-        : html`<${ConfigurableTable}
-            tableId="shure-receivers"
-            columns=${DEVICE_COLUMNS}
-            rows=${all}
-            rowKey=${(device) => device.mac}
-            rowHref=${(device) => `/shure/${encodeURIComponent(device.name || device.mac)}`}
-          />`}
+      <${ConfigurableTable}
+        tableId="shure-receivers"
+        columns=${DEVICE_COLUMNS}
+        rows=${all}
+        rowKey=${(device) => device.mac}
+        rowHref=${(device) => `/shure/${encodeURIComponent(device.name || device.mac)}`}
+      />
     <//>
   </div>`;
 }
 
 export const shureView = {
+  filters: false,
   component: ShureView,
   id: "shure",
   label: "Shure",

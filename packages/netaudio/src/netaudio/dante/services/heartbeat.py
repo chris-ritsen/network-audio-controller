@@ -110,6 +110,51 @@ def receiver_without_history(receiver: dict) -> dict:
     return {**receiver, "paths": paths}
 
 
+def series_points(series):
+    if not isinstance(series, dict):
+        return series
+    epoch = series.get("display_epoch")
+    points = [
+        [round(sample["observed_monotonic"], 1), sample["value"]]
+        for sample in series.get("history") or []
+        if isinstance(sample, dict)
+        and sample.get("display_epoch") == epoch
+        and sample.get("value") is not None
+        and sample.get("observed_monotonic") is not None
+    ]
+    trimmed = {key: value for key, value in series.items() if key != "history"}
+    if any(value for _, value in points):
+        trimmed["points"] = points
+    return trimmed
+
+
+def diagnostics_with_points(snapshot: dict) -> dict:
+    result = dict(snapshot)
+    receiver = snapshot.get("receiver")
+    if isinstance(receiver, dict):
+        paths = []
+        for path in receiver.get("paths", []):
+            trimmed = dict(path)
+            if isinstance(trimmed.get("late_packets"), dict):
+                trimmed["late_packets"] = {
+                    key: value for key, value in trimmed["late_packets"].items() if key != "history"
+                }
+            trimmed["latency"] = series_points(trimmed.get("latency"))
+            paths.append(trimmed)
+        result["receiver"] = {**receiver, "paths": paths}
+    clock = snapshot.get("clock")
+    if isinstance(clock, dict):
+        result["clock"] = {
+            **clock,
+            **{
+                source: series_points(clock[source])
+                for source in ("conmon", "heartbeat")
+                if isinstance(clock.get(source), dict)
+            },
+        }
+    return result
+
+
 class DanteHeartbeatService(DanteMulticastService):
     def __init__(
         self,

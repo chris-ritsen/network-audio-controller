@@ -7,7 +7,6 @@ import { html, useRef, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
 import {
   operationWritable,
-  performanceOperationWritable,
 } from "./availability.js";
 import { isEnrolled } from "./managed.js";
 
@@ -20,6 +19,7 @@ function RenameControl({ device, requestName }) {
         ref=${input}
         type="text"
         size="28"
+        aria-label="Device name"
         defaultValue=${device.name}
       />
       <${AsyncButton}
@@ -236,8 +236,8 @@ const PORT_CLOCK_FIELDS = [
   ["peer_delay_interval", "Peer-delay interval (log seconds)", -128, 127],
 ];
 
-function OnOffSelect({ reference, onChange }) {
-  return html`<select ref=${reference} onChange=${onChange}>
+function OnOffSelect({ reference, onChange, label }) {
+  return html`<select ref=${reference} aria-label=${label} onChange=${onChange}>
     <option value="keep">Keep current setting</option>
     <option value="true">On</option>
     <option value="false">Off</option>
@@ -314,9 +314,9 @@ function ClockingControls({ device, requestName }) {
   };
   return html`
     <${Panel} title="Clocking">
-      ${preferredAllowed ? html`<${FieldRow} label="Preferred leader"><${OnOffSelect} reference=${preferred} /><//>` : null}
+      ${preferredAllowed ? html`<${FieldRow} label="Preferred leader"><${OnOffSelect} reference=${preferred} label="Preferred leader" /><//>` : null}
       ${sourceAllowed ? html`<${FieldRow} label="Clock source">
-        <select ref=${source}>
+        <select ref=${source} aria-label="Clock source">
           <option value="keep">Keep current setting</option>
           ${sourceChoices.map((choice) => html`<option value=${choice.code}>${format.stateLabel(choice.label)}</option>`)}
         </select>
@@ -325,23 +325,24 @@ function ClockingControls({ device, requestName }) {
         <input ref=${subdomain} aria-label="Clock subdomain" defaultValue=${device.clock_subdomain_presentation?.text ?? ""} />
       <//>` : null}
       ${unicastAllowed ? html`<${FieldRow} label=${perPort ? "PTPv1 unicast delay requests" : "Unicast delay requests"}>
-        <${OnOffSelect} reference=${unicast} />
+        <${OnOffSelect} reference=${unicast} label=${perPort ? "PTPv1 unicast delay requests" : "Unicast delay requests"} />
       <//>` : null}
       ${extendedFields.length || ports.length ? html`<details><summary>Advanced clock settings</summary>
         ${extendedFields.map(([name, label, maximum]) => html`<${FieldRow} label=${label}>
           ${maximum == null
-            ? html`<${OnOffSelect} onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "keep" ? null : event.target.value === "true" })} />`
-            : html`<input type="number" min="0" max=${maximum} step="1" defaultValue=${device.clock_status[name]}
+            ? html`<${OnOffSelect} label=${label} onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "keep" ? null : event.target.value === "true" })} />`
+            : html`<input type="number" aria-label=${label} min="0" max=${maximum} step="1" defaultValue=${device.clock_status[name]}
                 onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "" ? null : Number(event.target.value) })} />`}
         <//>`)}
         ${ports.map((port) => html`
           <fieldset><legend>Port ${port.port_id}</legend>
             ${PORT_CLOCK_FIELDS.filter(([name]) => port[name] != null).map(([name, label, minimum, maximum]) => html`
-              <${FieldRow} label=${label}><input type="number" min=${minimum} max=${maximum} step="1" defaultValue=${port[name]}
+              <${FieldRow} label=${label}><input type="number" aria-label=${`Port ${port.port_id} ${label}`} min=${minimum} max=${maximum} step="1" defaultValue=${port[name]}
                 onChange=${(event) => setPortChanges({ ...portChanges, [port.port_id]: {
                   ...portChanges[port.port_id], [name]: event.target.value === "" ? null : Number(event.target.value),
                 } })} /><//>`)}
             ${port.follower_only != null ? html`<${FieldRow} label="Follower only"><${OnOffSelect}
+              label=${`Port ${port.port_id} follower only`}
               onChange=${(event) => setPortChanges({ ...portChanges, [port.port_id]: {
                 ...portChanges[port.port_id], follower_only: event.target.value === "keep" ? null : event.target.value === "true",
               } })} /><//>` : null}
@@ -358,139 +359,6 @@ function ClockingControls({ device, requestName }) {
   `;
 }
 
-function PerformancePairControl({
-  device,
-  requestName,
-  operation,
-  label,
-  run,
-}) {
-  const latency = useRef(null);
-  const frames = useRef(null);
-  if (!performanceOperationWritable(device, operation)) return null;
-  return html`<${FieldRow} label=${label}>
-    <label class="inline-field"
-      >Latency
-      <input
-        ref=${latency}
-        aria-label=${`${label} latency in milliseconds`}
-        type="number"
-        min="0"
-        max="4294.967"
-        step="any"
-        required
-      />
-      ms</label
-    >
-    <label class="inline-field"
-      >Frames per packet
-      <input
-        ref=${frames}
-        aria-label=${`${label} frames per packet`}
-        type="number"
-        min="0"
-        max="65535"
-        step="1"
-        required
-    /></label>
-    <${AsyncButton}
-      variant="primary"
-      small
-      description=${`set ${label.toLowerCase()} on ${device.name || "device"}`}
-      onRun=${() => {
-        if (
-          !latency.current.checkValidity() ||
-          !frames.current.checkValidity()
-        ) {
-          throw new Error("Enter a latency in ms and a frames-per-packet count");
-        }
-        return run(
-          requestName,
-          Math.round(Number(latency.current.value) * 1000),
-          Number(frames.current.value),
-        );
-      }}
-      >Apply<//
-    >
-  <//>`;
-}
-
-const PERFORMANCE_OPERATIONS = [
-  "receive_flow_performance",
-  "transmit_flow_performance",
-  "unicast_performance",
-  "receive_flow_default_slots",
-  "store_current_configuration",
-];
-
-function PerformanceControls({ device, requestName }) {
-  const slots = useRef(null);
-  if (!PERFORMANCE_OPERATIONS.some((operation) => performanceOperationWritable(device, operation))) {
-    return null;
-  }
-  return html`<${Panel}
-    title="Flow performance"
-    headerActions=${
-      performanceOperationWritable(device, "store_current_configuration")
-        ? html`<${AsyncButton}
-            small
-            description=${`request configuration storage on ${device.name || "device"}`}
-            onRun=${() => api.storeCurrentConfiguration(requestName)}
-            >Store current configuration<//
-          >`
-        : null
-    }
-  >
-    <${PerformancePairControl}
-      device=${device}
-      requestName=${requestName}
-      operation="receive_flow_performance"
-      label="Receive flow"
-      run=${api.setReceiveFlowPerformance}
-    />
-    <${PerformancePairControl}
-      device=${device}
-      requestName=${requestName}
-      operation="transmit_flow_performance"
-      label="Transmit flow"
-      run=${api.setTransmitFlowPerformance}
-    />
-    <${PerformancePairControl}
-      device=${device}
-      requestName=${requestName}
-      operation="unicast_performance"
-      label="Unicast"
-      run=${api.setUnicastPerformance}
-    />
-    ${performanceOperationWritable(device, "receive_flow_default_slots")
-      ? html`<${FieldRow} label="Receive default slots">
-          <input
-            ref=${slots}
-            aria-label="Receive flow default slots"
-            type="number"
-            min="0"
-            max="65535"
-            step="1"
-            required
-          />
-          <${AsyncButton}
-            variant="primary"
-            small
-            description=${`set receive-flow default slots on ${device.name || "device"}`}
-            onRun=${() => {
-              if (!slots.current.checkValidity())
-                throw new Error("Enter default slots from 0 through 65535");
-              return api.setReceiveFlowDefaultSlots(
-                requestName,
-                Number(slots.current.value),
-              );
-            }}
-            >Apply<//
-          >
-        <//>`
-      : null}
-  <//>`;
-}
 
 export function DeviceConfigSection({ device }) {
   const requestName = deviceRequestName(device);
@@ -531,7 +399,6 @@ export function DeviceConfigSection({ device }) {
         <${LatencyControl} device=${device} />
         <${PullupControl} device=${device} requestName=${requestName} />
       <//>
-      <${PerformanceControls} device=${device} requestName=${requestName} />
       <${ClockingControls} device=${device} requestName=${requestName} />
       <${DeviceControls} device=${device} />
     </div>

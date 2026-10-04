@@ -202,6 +202,7 @@ function receiveColumns(device, requestName, onRoute) {
       `,
       id: "subscribe",
       label: "Subscribe",
+      sortable: false,
     },
     {
       cell: (row) =>

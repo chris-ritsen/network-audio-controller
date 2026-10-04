@@ -5168,6 +5168,11 @@ textarea:focus-visible {
   color: var(--text);
   opacity: 1;
 }
+.btn:disabled,
+.btn[disabled],
+.btn.btn-disabled {
+  color: var(--text);
+}
 @layer components {
   .metric-row {
     display: flex;
@@ -5428,7 +5433,14 @@ textarea:focus-visible {
     font-size: 12px;
     font-weight: 600;
     text-align: left;
-    white-space: nowrap;
+    white-space: normal;
+  }
+  table.data th > button {
+    text-align: inherit;
+  }
+  table.data th > button > svg {
+    width: 14px;
+    height: 14px;
   }
   table.data td {
     padding: 8px 11px;

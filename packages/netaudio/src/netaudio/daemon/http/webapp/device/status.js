@@ -116,12 +116,6 @@ function portEntries(clock, fresh) {
   });
 }
 
-function transmitterPresent(name) {
-  return Object.values(scopedDevices.value || {}).some(
-    (candidate) => candidate.online !== false && (candidate.name === name || candidate.server_name === name),
-  );
-}
-
 function subscriptionProblems(problems) {
   if (!problems.length) return undefined;
   return html`<ul class="status-problems">
@@ -134,7 +128,7 @@ function subscriptionProblems(problems) {
 export function StatusSection({ device }) {
   const subscriptions = (device.subscriptions || []).filter((entry) => entry.tx_device);
   const problems = subscriptions.filter(
-    (entry) => entry.status && entry.status.severity !== "ok" && transmitterPresent(entry.tx_device),
+    (entry) => entry.status && entry.status.severity !== "ok",
   );
   const clock = device.clock_status || {};
   const fresh = format.clockStatusFresh(device);

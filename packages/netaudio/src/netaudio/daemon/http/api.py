@@ -1144,6 +1144,7 @@ class DaemonHTTPServer(
                     unquote(route[len("/diagnostics/") :]),
                     include_clock=query.get("clock", [""])[-1] != "0",
                     receiver_history=query.get("receiver_history", [""])[-1] != "0",
+                    history_points=query.get("history", [""])[-1] == "points",
                 )
             elif route == "/issues":
                 await self._handle_get_issues(writer, query)
@@ -1339,6 +1340,9 @@ class DaemonHTTPServer(
                         task.cancel()
                     if pending:
                         await asyncio.wait(pending, timeout=SSE_CLOSE_TIMEOUT_SECONDS)
+                    for task in (read_task, closed_task):
+                        if task.done() and not task.cancelled() and task.exception() is not None:
+                            logger.debug(f"SSE connection ended with {task.exception()}")
                 if closed_task in done or not read_task.result():
                     break
         except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as exception:

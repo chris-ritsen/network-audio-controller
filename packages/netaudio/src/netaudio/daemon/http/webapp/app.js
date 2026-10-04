@@ -11,7 +11,7 @@ import { connect, contextDevices, deviceByName } from "./store.js";
 import { deviceLabel } from "./format.js";
 import { ddmView } from "./views/ddm.js";
 import { DEVICE_TABS, devicesView, clockStatusView, networkStatusView } from "./views/devices.js";
-import { NAVIGATION } from "./navigation.js";
+import { visibleNavigation } from "./navigation.js";
 import { eventsView } from "./views/events.js";
 import { routingView } from "./views/routing.js";
 import { subscriptionsView } from "./views/subscriptions.js";
@@ -112,7 +112,7 @@ function NavigationItems() {
     <${Icon} name=${view.icon} /><span>${view.label}</span>
   </a>`;
   return html`<nav aria-label="Main navigation">
-    ${NAVIGATION.filter((view) => view.group === "Tools").map(entry)}
+    ${visibleNavigation.value.filter((view) => view.group === "Tools").map(entry)}
   </nav>`;
 }
 
@@ -138,11 +138,11 @@ function Sidebar() {
   `;
 }
 
-function NetworkNavigation({ filtersOpen, compact }) {
+function NetworkNavigation({ filtersAvailable, filtersOpen, compact }) {
   const panel = compact ? "top-panel" : "sidebar";
   const pointerSelection = useRef(false);
   return html`<nav class="network-navigation" aria-label="Network views">
-    <select class="select mobile-view-selector" aria-label="View" value=${NAVIGATION.find((view) => view.id === location.value.view)?.path || "/devices"}
+    <select class="select mobile-view-selector" aria-label="View" value=${visibleNavigation.value.find((view) => view.id === location.value.view)?.path || "/devices"}
       onPointerDown=${() => { pointerSelection.current = true; }}
       onKeyDown=${() => { pointerSelection.current = false; }}
       onChange=${(event) => {
@@ -152,16 +152,16 @@ function NetworkNavigation({ filtersOpen, compact }) {
           pointerSelection.current = false;
         }
       }}>
-      ${NAVIGATION.map((view) => html`<option value=${view.path}>${view.label}</option>`)}
+      ${visibleNavigation.value.map((view) => html`<option value=${view.path}>${view.label}</option>`)}
     </select>
-    <button type="button" class="header-icon-button filter-panel-toggle"
+    ${filtersAvailable ? html`<button type="button" class="header-icon-button filter-panel-toggle"
       aria-label=${filtersOpen ? "Hide filters" : "Show filters"}
       title=${filtersOpen ? "Hide filters" : "Show filters"}
       aria-expanded=${filtersOpen} aria-controls="inventory-filters"
       onClick=${() => saveRoutingFilters({ ...inventoryFilters.value, panelOpen: !filtersOpen })}>
       <${Icon} name=${`${panel}-${filtersOpen ? "close" : "open"}`} />
-    </button>
-    ${NAVIGATION.filter((view) => view.group === "Network").map((view) => html`<a href=${view.path}
+    </button>` : null}
+    ${visibleNavigation.value.filter((view) => view.group === "Network").map((view) => html`<a href=${view.path}
       aria-current=${location.value.view === view.id ? "page" : null}>${view.label}</a>`)}
   </nav>`;
 }
@@ -186,10 +186,11 @@ function App() {
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  const filtersOpen = inventoryFilters.value.panelOpen ?? !compact;
+  const filtersAvailable = viewById(location.value.view).filters !== false;
+  const filtersOpen = filtersAvailable && (inventoryFilters.value.panelOpen ?? !compact);
   return html`
     <${TopBar} />
-    <${NetworkNavigation} filtersOpen=${filtersOpen} compact=${compact} />
+    <${NetworkNavigation} filtersAvailable=${filtersAvailable} filtersOpen=${filtersOpen} compact=${compact} />
     <${Sidebar} />
     <${Content} filtersOpen=${filtersOpen} />
     <${CommandPalette} />

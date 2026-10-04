@@ -11,6 +11,7 @@ from netaudio.core.binding import STATUS_TIMEOUT, NetaudioCoreError
 from netaudio.dante.flows import FlowValidationError
 from netaudio.dante.discovery import discovery_destination
 from netaudio.dante.lock import validate_pin
+from netaudio.dante.services.heartbeat import diagnostics_with_points
 from netaudio.dante.application import CapabilityProbeTimeout
 from netaudio.dante.arc_protocol import ArcProtocolError, require_arc_protocol_for_device
 from netaudio.dante.channel import channels_by_number
@@ -44,7 +45,15 @@ FORGET_SELECTIONS = frozenset({"emulated", "offline"})
 
 class DaemonDeviceHandlers:
     async def _handle_diagnostics(
-        self, writer, name, *, include_clock=True, receiver_history=True, reset=False, warning_enabled=None
+        self,
+        writer,
+        name,
+        *,
+        include_clock=True,
+        receiver_history=True,
+        history_points=False,
+        reset=False,
+        warning_enabled=None,
     ):
         device = self._find_device(name)
         if device is None:
@@ -53,26 +62,28 @@ class DaemonDeviceHandlers:
         if self.diagnostics is None:
             await self._send_json(writer, {"error": "Diagnostics are not available"}, 503)
             return
-        await self._send_json(
-            writer,
-            self.diagnostics.diagnostics_snapshot(
-                device,
-                include_clock=include_clock,
-                receiver_history=receiver_history,
-                reset=reset,
-                warning_enabled=warning_enabled,
-            ),
+        snapshot = self.diagnostics.diagnostics_snapshot(
+            device,
+            include_clock=include_clock,
+            receiver_history=receiver_history or history_points,
+            reset=reset,
+            warning_enabled=warning_enabled,
         )
+        await self._send_json(writer, diagnostics_with_points(snapshot) if history_points else snapshot)
 
     async def _handle_reset_diagnostics(self, writer, data):
-        await self._handle_diagnostics(writer, data.get("device", ""), reset=True)
+        await self._handle_diagnostics(
+            writer, data.get("device", ""), history_points=data.get("history") == "points", reset=True
+        )
 
     async def _handle_diagnostics_policy(self, writer, data):
         enabled = data.get("clock_variation_warnings")
         if type(enabled) is not bool:
             await self._send_json(writer, {"error": "clock_variation_warnings must be a boolean"}, 400)
             return
-        await self._handle_diagnostics(writer, data.get("device", ""), warning_enabled=enabled)
+        await self._handle_diagnostics(
+            writer, data.get("device", ""), history_points=data.get("history") == "points", warning_enabled=enabled
+        )
 
     async def _send_self_connection_capability_error(self, writer, error):
         unavailable = isinstance(error, SelfConnectionCapabilityUnavailableError)

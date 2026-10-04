@@ -1,12 +1,11 @@
 import * as format from "./format.js";
 import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
 import { navigate } from "./router.js";
-import { NAVIGATION } from "./navigation.js";
+import { visibleNavigation } from "./navigation.js";
 import { scopedDevices as devices, visibleShureDevices as shureDevices } from "./store.js";
 
 const paletteOpen = signal(false);
 
-const VIEW_ENTRIES = NAVIGATION.map(({ label, path }) => ({ kind: "view", label, path }));
 
 export function openPalette() {
   paletteOpen.value = true;
@@ -21,7 +20,7 @@ export function closePalette() {
 }
 
 function buildEntries() {
-  const entries = [...VIEW_ENTRIES];
+  const entries = visibleNavigation.value.map(({ label, path }) => ({ kind: "view", label, path }));
   for (const device of format.sortedDevices(devices.value)) {
     const name = format.deviceLabel(device);
     entries.push({

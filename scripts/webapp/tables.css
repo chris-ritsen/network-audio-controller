@@ -47,7 +47,16 @@
     font-size: 12px;
     font-weight: 600;
     text-align: left;
-    white-space: nowrap;
+    white-space: normal;
+  }
+
+  table.data th > button {
+    text-align: inherit;
+  }
+
+  table.data th > button > svg {
+    width: 14px;
+    height: 14px;
   }
 
   table.data td {

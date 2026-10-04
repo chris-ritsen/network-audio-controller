@@ -338,3 +338,9 @@ textarea:focus-visible {
   color: var(--text);
   opacity: 1;
 }
+
+.btn:disabled,
+.btn[disabled],
+.btn.btn-disabled {
+  color: var(--text);
+}

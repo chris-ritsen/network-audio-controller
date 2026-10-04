@@ -154,10 +154,4 @@ test("flow performance controls follow typed backend availability", () => {
     performanceOperationWritable(device, "receive_flow_performance"),
     true,
   );
-  const markup = render(h(DeviceConfigSection, { device }));
-  assert.match(markup, /Flow performance/);
-  assert.match(markup, /Receive flow latency in milliseconds/);
-  assert.match(markup, /Receive flow default slots/);
-  assert.match(markup, /Store current configuration/);
-  assert.doesNotMatch(markup, /Transmit flow latency in milliseconds/);
 });
