@@ -27,15 +27,6 @@ test("long device tables remain reachable through page scrolling", async ({ page
   await testInfo.attach("device-table-last-row", { path: artifact, contentType: "image/png" });
 });
 
-test("flipping axes keeps routing options open", async ({ page }) => {
-  await serveWebapp(page);
-  await page.addInitScript(() => localStorage.setItem("netaudio.routing.filters", JSON.stringify({ panelOpen: false })));
-  await page.goto("http://netaudio.test/routing");
-  await page.locator(".routing-options summary").click();
-  await page.getByRole("button", { name: "Flip axes", exact: true }).click();
-  await expect(page.locator(".routing-options")).toHaveAttribute("open", "");
-});
-
 test("details, tables, notices and errors remain selectable with UI selection disabled", async ({ page }) => {
   await serveWebapp(page);
   await page.route("**/settings", (route) => route.request().headers().accept === "application/json"
@@ -230,7 +221,6 @@ test("receivers start across the top and a saved alternate orientation is respec
   await page.goto("http://netaudio.test/routing");
   await expect(page.locator(".column-axis .matrix-axis-title")).toContainText("Receivers");
   await expect(page.locator(".row-axis .matrix-axis-title")).toContainText("Transmitters");
-  await page.locator(".routing-options summary").click();
   await page.getByRole("button", { name: "Flip axes", exact: true }).click();
   await page.reload();
   await expect(page.locator(".column-axis .matrix-axis-title")).toContainText("Transmitters");
@@ -247,30 +237,6 @@ test("desktop channel list supports search and selectable text", async ({ page }
   expect(await search.evaluate((node) => getComputedStyle(node).userSelect)).toBe("text");
   await search.fill("no match");
   await expect(region).toContainText("No channels match this search.");
-});
-
-test("view options dismiss outside and on Escape without closing on internal controls", async ({ page }) => {
-  await serveWebapp(page);
-  await page.goto("http://netaudio.test/routing");
-  const trigger = page.locator(".routing-options summary");
-  const panel = page.locator(".routing-options-panel");
-  await trigger.click();
-  await page.getByRole("checkbox", { name: "Channel groups", exact: true }).check();
-  await expect(panel).toBeVisible();
-  for (const name of ["Flip axes", "Expand all devices and groups", "Collapse all devices and groups"]) {
-    await page.getByRole("button", { name, exact: true }).click();
-    await expect(panel).toBeVisible();
-  }
-  await page.getByRole("searchbox", { name: "Search devices", exact: true }).click();
-  await expect(panel).toBeHidden();
-  await trigger.click();
-  await page.keyboard.press("Escape");
-  await expect(panel).toBeHidden();
-  await expect(trigger).toBeFocused();
-  await trigger.click();
-  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-  await expect(panel).toBeHidden();
-  await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeVisible();
 });
 
 test("Tools menu is nonmodal and dismisses on navigation", async ({ page }) => {

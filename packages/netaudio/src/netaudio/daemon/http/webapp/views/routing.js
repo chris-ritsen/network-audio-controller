@@ -3,12 +3,11 @@ import * as format from "../format.js";
 import { html, useEffect, useLayoutEffect, useState } from "../lib/preact.js";
 import { RoutingControls } from "../routing-controls.js";
 import { Icon } from "../icons.js";
-import { buildMatrixModel, expanded, ExpansionButtons, initializeExpansion, RoutingMatrix, setAllExpanded } from "../matrix.js";
+import { buildMatrixModel, expanded, initializeExpansion, RoutingMatrix, setAllExpanded } from "../matrix.js";
 import { channelGroups, enableChannelGroups, groupChannels, setGroupsExpanded } from "../channel-groups.js";
 import { devicePath, navigate } from "../router.js";
 import { contextDevices, contextExternalFlows, deviceRequestName, pendingSubscriptions, scopedDevices as devices } from "../store.js";
 import { inventoryFilters, saveRoutingFilters } from "../device-filters.js";
-import { useDropdownDismissal } from "../dropdown.js";
 
 function RoutingView() {
   const all = format.sortedDevices(contextDevices.value);
@@ -19,7 +18,6 @@ function RoutingView() {
   const receiverFilter = filters.receiverSearch || "";
   const transmitterFilter = filters.transmitterSearch || "";
   const updateFilters = saveRoutingFilters;
-  const optionsMenu = useDropdownDismissal();
   const [gridLocked, setGridLocked] = useState(() => {
     try { return window.localStorage.getItem("netaudio.matrix.locked") === "true"; }
     catch { return false; }
@@ -80,27 +78,11 @@ function RoutingView() {
               setGridLocked(!gridLocked);
               try { window.localStorage.setItem("netaudio.matrix.locked", String(!gridLocked)); } catch {}
             }}><${Icon} name=${gridLocked ? "lock" : "unlock"} /> ${gridLocked ? "Grid locked" : "Lock grid"}</button>
-          <details class="routing-options" ref=${optionsMenu}><summary class="btn btn-sm">View options</summary><div class="routing-options-panel">
-          <button class="btn btn-sm" type="button" aria-pressed=${flipped} onClick=${() => {
+          <button class="btn btn-sm" type="button" aria-pressed=${!flipped} onClick=${() => {
             setFlipped(!flipped);
             try { window.localStorage.setItem("netaudio.matrix.flipped", String(!flipped)); } catch {}
           }}><${Icon} name="flip" /> Flip axes</button>
-          <span class="inline-flex items-center gap-2">Devices
-            <${ExpansionButtons} label="devices and groups" onExpand=${() => {
-              expandDevices("receivers", true); expandDevices("transmitters", true);
-            }} onCollapse=${() => {
-              expandDevices("receivers", false); expandDevices("transmitters", false);
-            }} />
-          </span>
-          <span class="inline-flex items-center gap-2">
-            <label class="inline-field whitespace-nowrap"><input type="checkbox" checked=${groups.enabled} onChange=${(event) => enableChannelGroups(event.target.checked)} />Channel groups</label>
-            ${groups.enabled ? html`<${ExpansionButtons} label="channel groups" onExpand=${() => {
-              expandGroups("receivers", true); expandGroups("transmitters", true);
-            }} onCollapse=${() => {
-              expandGroups("receivers", false); expandGroups("transmitters", false);
-            }} />` : null}
-          </span>
-          </div></details>
+          <button class="btn btn-sm" type="button" aria-pressed=${groups.enabled} onClick=${() => enableChannelGroups(!groups.enabled)}><${Icon} name="groups" /> Channel groups</button>
           ` : null}
         </div>
       </div>

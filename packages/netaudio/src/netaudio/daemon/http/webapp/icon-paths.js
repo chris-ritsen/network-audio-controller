@@ -26,6 +26,7 @@ export const iconPaths = {
   "top-panel-close": "\n  <rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" />\n  <path d=\"M3 9h18\" />\n  <path d=\"m9 16 3-3 3 3\" />\n",
   "sort": "\n  <path d=\"m21 16-4 4-4-4\" />\n  <path d=\"M17 20V4\" />\n  <path d=\"m3 8 4-4 4 4\" />\n  <path d=\"M7 4v16\" />\n",
   "flip": "\n  <path d=\"m3 16 4 4 4-4\" />\n  <path d=\"M7 20V4\" />\n  <path d=\"m21 8-4-4-4 4\" />\n  <path d=\"M17 4v16\" />\n",
+  "groups": "\n  <path d=\"M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z\" />\n  <path d=\"M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12\" />\n  <path d=\"M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17\" />\n",
   "lock": "\n  <rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\" />\n  <path d=\"M7 11V7a5 5 0 0 1 10 0v4\" />\n",
   "unlock": "\n  <rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\" />\n  <path d=\"M7 11V7a5 5 0 0 1 9.9-1\" />\n",
   "sort-up": "\n  <path d=\"m5 12 7-7 7 7\" />\n  <path d=\"M12 19V5\" />\n",

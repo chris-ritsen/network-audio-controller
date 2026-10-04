@@ -28,6 +28,7 @@ const names = {
   "top-panel-close": "panel-top-close",
   sort: "arrow-up-down",
   flip: "arrow-down-up",
+  groups: "layers",
   lock: "lock",
   unlock: "lock-open",
   "sort-up": "arrow-up",

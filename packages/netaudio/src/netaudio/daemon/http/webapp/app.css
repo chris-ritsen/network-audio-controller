@@ -4331,9 +4331,6 @@
   .break-words {
     overflow-wrap: break-word;
   }
-  .whitespace-nowrap {
-    white-space: nowrap;
-  }
   @layer daisyui.l1.l2 {
     .alert-error {
       color: var(--color-error-content);
@@ -6850,25 +6847,6 @@ textarea:focus-visible {
     color: var(--text);
     font-size: 11px;
   }
-  .routing-options {
-    position: relative;
-  }
-  .routing-options-panel {
-    position: absolute;
-    left: 0;
-    top: calc(100% + 6px);
-    z-index: 8;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 14px;
-    padding: 16px;
-    min-width: 260px;
-    background: var(--panel);
-    border: 1px solid var(--line-strong);
-    border-radius: 6px;
-    box-shadow: 0 10px 30px #0006;
-  }
   .matrix-viewport {
     position: absolute;
     inset: 0;
@@ -6886,6 +6864,12 @@ textarea:focus-visible {
   .matrix-spacer {
     pointer-events: none;
   }
+}
+.content-header .toolbar .btn[aria-pressed="true"] {
+  background: var(--color-base-300);
+  border-color: var(--text);
+}
+@layer components {
   .app-workspace > .routing-filter-container {
     border-radius: 0;
     border: 0;
