@@ -34,15 +34,13 @@ test("details, tables, notices and errors remain selectable with UI selection di
     : route.fallback());
   await page.goto("http://netaudio.test/devices");
   const selection = (locator) => locator.evaluate((node) => getComputedStyle(node).userSelect);
-  expect(await selection(page.locator("tbody td").first())).toBe("text");
-  expect(await selection(page.locator("thead th").first())).toBe("text");
-  expect(await selection(page.getByRole("navigation", { name: "Network views" }).getByRole("link").first())).toBe("none");
+  expect(await selection(page.locator("tbody td").first())).not.toBe("none");
   await page.locator(".device-table-link").first().click();
-  expect(await selection(page.locator(".content-title"))).toBe("text");
-  expect(await selection(page.locator(".device-address"))).toBe("text");
+  expect(await selection(page.locator(".content-title"))).not.toBe("none");
+  expect(await selection(page.locator(".device-address"))).not.toBe("none");
   await page.goto("http://netaudio.test/settings");
   await page.getByRole("spinbutton").fill("8751");
-  expect(await selection(page.getByRole("alert"))).toBe("text");
+  expect(await selection(page.getByRole("alert"))).not.toBe("none");
   await expect(page.getByText("Video format", { exact: true })).toHaveCount(0);
 });
 
@@ -165,21 +163,6 @@ test("shared filter panel follows every tab and filters device inventories persi
   await expect.poll(() => page.locator("#content tbody tr").count()).toBeGreaterThan(1);
 });
 
-test("text selection setting overrides all UI selection rules and survives reload", async ({ page }) => {
-  await serveWebapp(page);
-  await page.goto("http://netaudio.test/settings");
-  const selection = page.getByRole("checkbox", { name: "Allow text selection", exact: true });
-  const tab = page.getByRole("navigation", { name: "Network views" }).getByRole("link").first();
-  await expect(selection).not.toBeChecked();
-  await selection.check();
-  expect(await tab.evaluate((node) => getComputedStyle(node).userSelect)).toBe("text");
-  await page.reload();
-  await expect(selection).toBeChecked();
-  expect(await tab.evaluate((node) => getComputedStyle(node).userSelect)).toBe("text");
-  await selection.uncheck();
-  expect(await tab.evaluate((node) => getComputedStyle(node).userSelect)).toBe("none");
-});
-
 test("receiver row status sits next to the matrix and its tooltip follows the icon", async ({ page }) => {
   await serveWebapp(page);
   await page.addInitScript(() => localStorage.setItem("netaudio.matrix.flipped", "false"));
@@ -212,7 +195,6 @@ test("navigation controls toggle filters", async ({ page }) => {
   await expect(page.locator("#inventory-filters")).toBeVisible();
   const tabs = await page.getByRole("navigation", { name: "Network views" }).getByRole("link").all();
   await tabs[1].click();
-  expect(await tabs[1].evaluate((node) => getComputedStyle(node).userSelect)).toBe("none");
   await expect(header.getByRole("button", { name: /filters/ })).toHaveCount(0);
 });
 
@@ -234,7 +216,7 @@ test("desktop channel list supports search and selectable text", async ({ page }
   const region = page.getByRole("region", { name: "Route receiver channels" });
   await expect(region.locator(".routing-channel-head")).toBeVisible();
   const search = region.getByRole("searchbox");
-  expect(await search.evaluate((node) => getComputedStyle(node).userSelect)).toBe("text");
+  expect(await search.evaluate((node) => getComputedStyle(node).userSelect)).not.toBe("none");
   await search.fill("no match");
   await expect(region).toContainText("No channels match this search.");
 });

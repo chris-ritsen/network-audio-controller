@@ -137,7 +137,6 @@
 
   table.data th.draggable {
     cursor: grab;
-    user-select: none;
   }
 
   table.data th.drop-target {

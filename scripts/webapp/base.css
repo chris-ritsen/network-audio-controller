@@ -110,25 +110,3 @@
     }
   }
 }
-
-@layer utilities {
-  :root:not([data-allow-text-selection="true"]) * {
-    -webkit-user-select: none;
-    user-select: none;
-  }
-  :root[data-allow-text-selection="true"] *,
-  :root .selectable-content,
-  :root .selectable-content *,
-  :root .table-wrapper,
-  :root .table-wrapper *,
-  :root .notice,
-  :root .notice *,
-  :root [role="alert"],
-  :root [role="alert"] *,
-  :root:not([data-allow-text-selection="true"]) input,
-  :root:not([data-allow-text-selection="true"]) textarea,
-  :root:not([data-allow-text-selection="true"]) [contenteditable="true"] {
-    -webkit-user-select: text;
-    user-select: text;
-  }
-}

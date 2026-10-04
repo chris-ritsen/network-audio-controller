@@ -4,7 +4,6 @@ import { Panel } from "../components.js";
 import { Icon } from "../icons.js";
 import { html, useEffect, useState } from "../lib/preact.js";
 import { backendSettings } from "../store.js";
-import { allowTextSelection, setAllowTextSelection } from "../ui-preferences.js";
 
 function SettingsView() {
   const settings = backendSettings.value;
@@ -20,9 +19,8 @@ function SettingsView() {
   }, []);
   const changed = settings && Number(port) !== settings.monitoring_port;
   return html`<div class="flex flex-col gap-6 w-full max-w-lg">
-    <${Panel} title="Interface">
-      <div class="flex flex-col items-start gap-2 mb-4">
-        <span>Appearance</span>
+    <${Panel} title="Appearance">
+      <div>
         <div class="join" role="group" aria-label="Appearance">
           ${APPEARANCES.map(
             ([id, label]) => html`<button
@@ -37,8 +35,6 @@ function SettingsView() {
           )}
         </div>
       </div>
-      <label class="inline-flex items-center gap-2"><input type="checkbox" checked=${allowTextSelection.value}
-        onChange=${(event) => setAllowTextSelection(event.target.checked)} />Allow text selection</label>
     <//>
     <${Panel} title="Metering">
       <form class="flex flex-col items-start gap-4" onSubmit=${async (event) => {
