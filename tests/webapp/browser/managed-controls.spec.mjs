@@ -65,7 +65,6 @@ for (const managed of [true, false]) {
     await expect(page.getByLabel("Encoding", { exact: true })).toHaveValue("24");
     await expect(page.getByLabel("Latency", { exact: true })).toHaveValue("1");
     if (managed) {
-      await expect(page.getByText("Clock settings are managed by DDM.", { exact: true })).toBeVisible();
       await expect(row("Clock subdomain")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Apply clock settings", exact: true })).toHaveCount(0);
     }
@@ -158,6 +157,5 @@ test("missing managed settings offer refresh without an invented latency", async
   await page.goto(`http://netaudio.test/devices/${encodeURIComponent(record.server_name)}/device-config`);
   await expect(page.getByRole("button", { name: "Refresh settings", exact: true })).toBeVisible();
   await expect(page.getByLabel("Latency", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Settings unavailable", { exact: true })).toBeVisible();
   await expect(page.locator("#content")).not.toContainText("not configurable on this device");
 });

@@ -48,7 +48,7 @@ test("opening previews only; apply requires confirmation and shows verification"
   const apply = page.getByRole("button", { name: "Apply to 1 device", exact: true });
   await expect(apply).toBeDisabled();
   expect(writes.map((write) => write.path)).toEqual(["/presets/preview"]);
-  await page.getByLabel("I have reviewed", { exact: false }).check();
+  await page.getByLabel("Apply these settings to the selected devices", { exact: true }).check();
   await apply.click();
   await expect(page.getByText("Preset applied and verified", { exact: true })).toBeVisible();
   expect(writes[1].body).toEqual({ xml, digest: preview.digest, confirmed: true, confirm_destructive: false, store_current_configuration: false, targets: { [device.name]: id }, excluded: [] });
@@ -61,19 +61,19 @@ test("missing entries must be explicitly skipped; partial results are honest", a
   data.devices.push({ name: "Missing", settings: [], preserved: [], targets: [] });
   const writes = await setup(page, { data, result: { complete: false, report: { operations: [{ device_name: device.name, state: "acknowledged", message: "Change requested; readback unavailable" }], needs_reboot: [device.name] } } });
   await open(page);
-  await expect(page.getByLabel("I have reviewed", { exact: false })).toBeDisabled();
+  await expect(page.getByLabel("Apply these settings to the selected devices", { exact: true })).toBeDisabled();
   await page.getByRole("checkbox", { name: "Missing", exact: true }).uncheck();
-  await page.getByLabel("I have reviewed", { exact: false }).check();
+  await page.getByLabel("Apply these settings to the selected devices", { exact: true }).check();
   await page.getByRole("button", { name: "Apply to 1 device", exact: true }).click();
   await expect(page.getByText("Preset not fully applied or verified", { exact: true })).toBeVisible();
   expect(writes[1].body.excluded).toEqual(["Missing"]);
-  await expect(page.getByText("Reboot pending:", { exact: false })).toBeVisible();
+  await expect(page.getByText("Needs a reboot:", { exact: false })).toBeVisible();
 });
 
 test("a context change clears the review and confirmation", async ({ page }) => {
   const writes = await setup(page);
   await open(page);
-  await page.getByLabel("I have reviewed", { exact: false }).check();
+  await page.getByLabel("Apply these settings to the selected devices", { exact: true }).check();
   await page.evaluate(async () => { const store = await import("/store.js"); store.selectContext("local"); });
   await expect(page.getByRole("heading", { name: "Show", exact: true })).toHaveCount(0);
   expect(writes).toHaveLength(1);

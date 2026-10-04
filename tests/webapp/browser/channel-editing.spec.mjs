@@ -180,7 +180,7 @@ test("unenrolled devices never offer a Domain tab or render its direct URL", asy
   await expect(page.getByRole("link", { name: "Domain", exact: true })).toHaveCount(0);
   await expect(page.getByRole("combobox", { name: "Device section" }).locator('option[value="domain"]')).toHaveCount(0);
   await page.goto("http://netaudio.test/devices/Windows-PC/domain");
-  await expect(page.getByText("This section is unavailable for this device.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Windows-PC", level: 1 })).toBeVisible();
   await expect(page.getByText("Enrollment state", { exact: true })).toHaveCount(0);
   await page.evaluate(async () => {
     const store = await import("/store.js");

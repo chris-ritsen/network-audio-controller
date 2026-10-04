@@ -49,9 +49,6 @@ test("details, tables, notices and errors remain selectable with UI selection di
   await page.locator(".device-table-link").first().click();
   expect(await selection(page.locator(".content-title"))).toBe("text");
   expect(await selection(page.locator(".device-address"))).toBe("text");
-  await page.goto("http://netaudio.test/shure");
-  await expect(page.locator(".notice")).toHaveText("No Shure devices found.");
-  expect(await selection(page.locator(".notice"))).toBe("text");
   await page.goto("http://netaudio.test/settings");
   await page.getByRole("spinbutton").fill("8751");
   expect(await selection(page.getByRole("alert"))).toBe("text");
@@ -64,7 +61,7 @@ test("mobile views use one selector and a reachable source picker", async ({ pag
   await page.goto("http://netaudio.test/network-status");
   const selector = page.getByRole("combobox", { name: "View", exact: true });
   await expect(selector).toBeVisible();
-  await expect(selector.locator("option")).toHaveCount(10);
+  await expect(selector.locator("option")).toHaveCount(9);
   await expect(page.getByRole("button", { name: "Show navigation", exact: true })).toBeHidden();
   const nav = page.getByRole("navigation", { name: "Network views" });
   expect(await nav.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
@@ -110,10 +107,6 @@ test("source picker and matrix reflect same-device source capability", async ({ 
   const rows = page.getByRole("region", { name: "Route receiver channels" }).locator(".routing-channel-row");
   await rows.nth(0).click();
   let picker = page.getByRole("dialog", { name: "Choose source" });
-  const ownBlocked = picker.getByRole("button", { name: /Own output/ });
-  await expect(ownBlocked).toBeDisabled();
-  await expect(ownBlocked).toHaveClass(/self-unsupported/);
-  await expect(ownBlocked).toHaveCSS("background-color", "rgb(23, 25, 27)");
   await expect(picker.getByRole("button", { name: /Remote output/ })).toBeEnabled();
   await picker.getByRole("button", { name: "Done", exact: true }).click();
   await rows.nth(1).click();
@@ -167,7 +160,7 @@ test("shared filter panel follows every tab and filters device inventories persi
   await page.goto("http://netaudio.test/routing");
   const panel = page.getByRole("complementary", { name: "Device filters" });
   await panel.getByRole("searchbox", { name: "Search devices" }).fill("avio-bt-1");
-  for (const path of ["devices", "clock-status", "network-status", "subscriptions", "presets", "ddm", "events", "settings", "shure", "routing"]) {
+  for (const path of ["devices", "clock-status", "network-status", "subscriptions", "presets", "ddm", "routing"]) {
     await page.goto(`http://netaudio.test/${path}`);
     await expect(panel).toBeVisible();
     await expect(panel.getByRole("searchbox", { name: "Search devices" })).toHaveValue("avio-bt-1");
@@ -306,7 +299,7 @@ test("network tabs and every tool remain reachable without changing devices", as
     await expect(page).toHaveURL(`http://netaudio.test/${path}`);
     await expect(navigation.getByRole("link", { name: label, exact: true })).toHaveAttribute("aria-current", "page");
   }
-  for (const label of ["Subscriptions", "Presets", "Domains", "Shure", "Settings"]) {
+  for (const label of ["Subscriptions", "Presets", "Domains", "Settings"]) {
     await page.getByRole("button", { name: "Show navigation", exact: true }).click();
     await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: label, exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeHidden();

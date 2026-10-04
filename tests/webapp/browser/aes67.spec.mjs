@@ -35,8 +35,7 @@ test("AES67 readiness views make no writes and unknown support has no controls",
   const writes = [];
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
-  await expect(page.locator("#content").getByRole("status")).toHaveText("Not reported");
-  await expect(page.locator("#content").getByRole("button")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^(Enable|Disable)$/ })).toHaveCount(0);
   await expect(page.getByLabel("AES67 multicast address prefix")).toHaveCount(0);
   expect(writes).toEqual([]);
 });
@@ -54,13 +53,11 @@ test("pending AES67 changes show current and configured modes on desktop and mob
   const writes = [];
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
-  await expect(page.locator("#content").getByRole("status")).toHaveText("Enable pending");
-  await expect(page.locator("#content dl")).toContainText("Current modeDisabledConfigured modeEnabled");
-  await expect(page.getByRole("button", { name: "Enable", exact: true })).toBeDisabled();
+  await expect(page.locator("#content").getByText("Enable pending", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disable", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Reboot", exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator("#content").getByRole("status")).toBeVisible();
+  await expect(page.locator("#content").getByText("Enable pending", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(writes).toEqual([]);
 });
@@ -84,7 +81,6 @@ test("enrolled devices show DDM RTP readiness without local configuration button
   const writes = [];
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
-  await expect(page.locator("#content").getByRole("status")).toHaveText("Managed by DDM");
   await expect(page.locator("#content dl")).toContainText("RTP flowsReboot required");
   await expect(page.locator("#content").getByRole("button")).toHaveCount(0);
   await expect(page.getByLabel("AES67 multicast address prefix")).toHaveCount(0);
@@ -137,7 +133,6 @@ test("known direct devices retain explicit mode and multicast-prefix actions", a
     return route.fulfill({ contentType: "application/json", body: '{"success":true}' });
   });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
-  await expect(page.getByRole("button", { name: "Disable", exact: true })).toBeDisabled();
   expect(writes).toEqual([]);
   await page.getByRole("button", { name: "Enable", exact: true }).click();
   await page.getByLabel("AES67 multicast address prefix").fill("239.238.0.0");

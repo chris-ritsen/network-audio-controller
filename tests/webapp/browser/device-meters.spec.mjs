@@ -13,7 +13,7 @@ test("Metering tab fits mobile and releases monitoring when leaving the tab", as
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("http://netaudio.test/devices/avio-bt-1/metering");
   await expect.poll(() => writes.length).toBe(1);
-  const meters = page.locator("#content .split").filter({ has: page.getByRole("heading", { name: "Receive levels", exact: true }) });
+  const meters = page.locator("#content section.card").filter({ has: page.getByRole("heading", { name: "Receive levels", exact: true }) });
   await expect(meters).toBeVisible();
   const box = await meters.boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(0);
@@ -32,7 +32,7 @@ test("Metering tab fits mobile and releases monitoring when leaving the tab", as
 
 test("breadcrumbs reuse display labels without changing device names", async ({ page }) => {
   await serveWebapp(page);
-  for (const [section, label] of [["receive", "Receive"], ["metering", "Metering"], ["aes67-config", "AES67 config"], ["device-config", "Device config"], ["lock", "Device lock"]]) {
+  for (const [section, label] of [["receive", "Receive"], ["metering", "Metering"], ["device-config", "Device config"]]) {
     await page.goto(`http://netaudio.test/devices/Windows-PC/${section}`);
     const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
     await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText(label);

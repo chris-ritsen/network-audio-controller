@@ -1,3 +1,4 @@
+import { operationWritable } from "../device/availability.js";
 import { Notice, Panel } from "../components.js";
 import { ReceiveSection, TransmitSection } from "../device/channels.js";
 import { Aes67Section } from "../device/aes67.js";
@@ -450,9 +451,10 @@ const TAB_AVAILABILITY = {
   transmit: (device) => channelCount(device, "tx") > 0 || flowCount(device.transmitter_flows) > 0,
   metering: (device) => channelCount(device, "rx") > 0 || channelCount(device, "tx") > 0,
   "aes67-config": (device) =>
-    isEnrolled(device)
+    operationWritable(device, "aes67") ||
+    (isEnrolled(device)
       ? device.ddm_capabilities?.rtp_audio_supported === true
-      : device.aes67_configuration_supported === true,
+      : device.aes67_configuration_supported === true),
   lock: (device) =>
     device.device_locking_supported === true ||
     device.operation_availability?.locking?.supported === true,

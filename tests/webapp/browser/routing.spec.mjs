@@ -258,7 +258,7 @@ test("tools menu scrolls when its navigation exceeds the available height", asyn
   await expect(sidebar).toBeVisible();
   const navigation = page.getByRole("navigation", { name: "Main navigation" });
   await expect(navigation.getByRole("link", { name: "Device Info", exact: true })).toHaveCount(0);
-  await expect(navigation.getByRole("link", { name: "Shure", exact: true })).toHaveText("Shure");
+  await expect(navigation.getByRole("link", { name: "Settings", exact: true })).toHaveText("Settings");
   expect(await sidebar.evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
   expect(await sidebar.locator("nav").evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
   await page.setViewportSize({ width: 1440, height: 200 });
@@ -421,9 +421,9 @@ test("routing has no offline dismissal or floating notifications", async ({ page
   await expect(page.getByRole("button", { name: "Dismiss offline", exact: true })).toHaveCount(0);
   await expect(page.locator(".topbar .connection-pill")).toHaveCount(0);
   await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-  const shureLink = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Shure", exact: true });
-  await expect(shureLink.getByText("Shure", { exact: true })).toBeVisible();
-  await expect(shureLink.locator("svg")).toHaveAttribute("width", "20");
+  const settingsLink = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Settings", exact: true });
+  await expect(settingsLink.getByText("Settings", { exact: true })).toBeVisible();
+  await expect(settingsLink.locator("svg")).toHaveAttribute("width", "20");
 });
 
 test("saved devices survive connection loss but an empty snapshot replaces them", async ({ page }) => {
@@ -507,9 +507,9 @@ test("network settings load once without a refresh button and stay a compact for
     netmask: "255.255.255.0", configured: { mode: "dynamic" } }],
     interface_configuration_modes: { primary: ["dhcp", "static"] },
     redundancy: {
-      current: "switched",
-      configured: "switched",
-      supported: ["switched", "redundant"],
+      advertised_support: true,
+      configured_mode: "switched",
+      available_modes: [{ mode: "switched" }, { mode: "redundant" }],
     },
     operation_availability: {
       static_ipv4: {

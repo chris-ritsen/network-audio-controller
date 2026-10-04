@@ -19,6 +19,7 @@ test("managed AVIO metering displays incoming signal levels without requesting d
   } });
   const meteringRequests = [];
   page.on("request", (request) => { if (request.url().includes("/metering/start")) meteringRequests.push(request.url()); });
+  await page.addInitScript(() => window.localStorage.setItem("netaudio.meter-layout", "bars"));
   await page.goto(`http://netaudio.test/devices/${encodeURIComponent(device.server_name)}/metering`);
   await expect(page.locator(".meter-bank canvas")).toHaveCount(1);
   await expect.poll(() => page.locator(".meter-bank canvas").evaluate((canvas) => canvas.width)).toBeGreaterThan(0);

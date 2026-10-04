@@ -37,7 +37,7 @@ test("metering settings fit the viewport and save only an edited port", async ({
   expect(saveBox.y).toBeGreaterThan(fieldBox.y + fieldBox.height);
   expect(fieldBox.width).toBeLessThanOrEqual(160);
   await port.fill("8751");
-  await expect(page.getByRole("alert")).toContainText("Dante Controller's default metering port");
+  await expect(page.getByRole("alert")).toContainText("Dante Controller meters on UDP 8751");
   expect(writes).toEqual([]);
   await port.fill("8760");
   await expect(page.getByRole("alert")).toHaveCount(0);
