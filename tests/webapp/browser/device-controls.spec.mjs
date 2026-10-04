@@ -21,8 +21,8 @@ test("standalone flow pages, device controls and diagnostic fields are absent", 
 test("network views have focused defaults while every inventory column remains available", async ({ page }) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/devices");
-  const navigation = page.getByRole("navigation", { name: "Network views" });
-  for (const name of ["Routing", "Device Info", "Clock Status", "Network Status"]) {
+  const navigation = page.getByRole("navigation", { name: "Views" });
+  for (const name of ["Routing", "Device Info", "Clock", "Network"]) {
     await expect(navigation.getByRole("link", { name, exact: true })).toBeVisible();
   }
   await page.getByRole("button", { name: /^Columns/ }).click();
@@ -36,10 +36,10 @@ test("network views have focused defaults while every inventory column remains a
     await expect(page.getByRole("columnheader", { name: label, exact: true })).toBeVisible();
   }
   await page.keyboard.press("Escape");
-  await navigation.getByRole("link", { name: "Clock Status", exact: true }).click();
+  await navigation.getByRole("link", { name: "Clock", exact: true }).click();
   await expect(page.getByRole("columnheader", { name: "Clock role", exact: true })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Primary address", exact: true })).toHaveCount(0);
-  await navigation.getByRole("link", { name: "Network Status", exact: true }).click();
+  await navigation.getByRole("link", { name: "Network", exact: true }).click();
   await expect(page.getByRole("columnheader", { name: "Primary address", exact: true })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Clock role", exact: true })).toHaveCount(0);
 });
@@ -132,7 +132,6 @@ test("receivers show subscription icons on desktop and collapsed mobile cards", 
   await expect(rows.nth(0).locator(".receiver-subscription:visible")).toHaveText("");
   await expect(rows.nth(0).locator(".receiver-subscription:visible")).toHaveAttribute("title", /Subscription successful$/);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeHidden();
   await expect(rows.nth(0).getByRole("button")).toHaveAttribute("aria-expanded", "false");
   await expect(rows.nth(0).getByRole("img", { name: "Subscribed", exact: true })).toBeVisible();
   await expect(rows.nth(3).getByRole("img", { name: "Subscribed", exact: true })).toBeVisible();
@@ -144,7 +143,7 @@ test("receivers show subscription icons on desktop and collapsed mobile cards", 
 test("header controls are labeled and desktop sorting never shows the mobile direction control", async ({ page }) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/devices");
-  for (const label of ["Show navigation", "Search"]) {
+  for (const label of ["Hide filters", "Search"]) {
     const control = page.getByRole("button", { name: label, exact: true });
     await expect(control).toBeVisible();
     expect(await control.innerText()).toBe("");

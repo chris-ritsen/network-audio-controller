@@ -4,14 +4,13 @@ import "./ui-preferences.js";
 import { inventoryFilters, saveRoutingFilters } from "./device-filters.js";
 import { DeviceFilterPanel } from "./filter-panel.js";
 import { ContextSelector } from "./ddm-connections.js";
-import { html, render, signal, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
+import { html, render, useEffect, useRef, useState } from "./lib/preact.js";
 import { CommandPalette, openPalette } from "./palette.js";
-import { devicePath, location, navigate, onNavigate, startRouter } from "./router.js";
+import { location, navigate, startRouter } from "./router.js";
 import { matchesCommandKey } from "./shortcuts.js";
-import { connect, contextDevices, deviceByName } from "./store.js";
-import { deviceLabel } from "./format.js";
+import { connect, contextDevices } from "./store.js";
 import { ddmView } from "./views/ddm.js";
-import { DEVICE_TABS, devicesView, clockStatusView, networkStatusView } from "./views/devices.js";
+import { devicesView, clockStatusView, networkStatusView } from "./views/devices.js";
 import { visibleNavigation } from "./navigation.js";
 import { eventsView } from "./views/events.js";
 import { routingView } from "./views/routing.js";
@@ -33,51 +32,38 @@ const VIEWS = [
   settingsView,
 ];
 
-const sidebarOpen = signal(false);
-
 function viewById(identifier) {
   return VIEWS.find((view) => view.id === identifier) || routingView;
 }
 
-function Breadcrumb() {
-  const current = location.value;
-  const view = viewById(current.view);
-  const deviceName = current.parameters.device;
-  if (!deviceName) return null;
-  const section = current.parameters.section;
-  const sectionLabel = section === "domain" ? "Domain" : DEVICE_TABS.find((tab) => tab.id === section)?.label;
-  return html`
-    <nav class="breadcrumb" aria-label="Breadcrumb">
-      <a class="link link-hover" href=${`/${view.id}`}>${view.label}</a>
-      ${deviceName
-        ? html`<span class="breadcrumb-separator">/</span>
-            <a class="link link-hover" href=${devicePath(view.id, deviceName)}>${deviceLabel(deviceByName(deviceName) || { name: deviceName })}</a>`
-        : null}
-      ${sectionLabel
-        ? html`<span class="breadcrumb-separator">/</span>
-            <span aria-current="page">${sectionLabel}</span>`
-        : null}
-    </nav>
-  `;
+function ViewTabs() {
+  return html`<nav class="view-tabs" aria-label="Views">
+    ${visibleNavigation.value.map((view) => html`<a key=${view.id} href=${view.path}
+      aria-current=${location.value.view === view.id ? "page" : null}>${view.tab || view.label}</a>`)}
+  </nav>`;
 }
 
-function TopBar() {
+function ViewPicker() {
+  const pointerSelection = useRef(false);
+  return html`<select class="select view-picker" aria-label="View" value=${visibleNavigation.value.find((view) => view.id === location.value.view)?.path || "/devices"}
+    onPointerDown=${() => { pointerSelection.current = true; }}
+    onKeyDown=${() => { pointerSelection.current = false; }}
+    onChange=${(event) => {
+      navigate(event.currentTarget.value);
+      if (pointerSelection.current) {
+        event.currentTarget.blur();
+        pointerSelection.current = false;
+      }
+    }}>
+    ${visibleNavigation.value.map((view) => html`<option value=${view.path}>${view.label}</option>`)}
+  </select>`;
+}
+
+function TopBar({ compact, filtersAvailable, filtersOpen }) {
+  const panel = compact ? "top-panel" : "sidebar";
   return html`
     <header class="topbar">
-      <button
-        type="button"
-        class="app-menu-trigger"
-        aria-label=${sidebarOpen.value ? "Hide navigation" : "Show navigation"}
-        aria-controls="application-navigation"
-        aria-expanded=${sidebarOpen.value}
-        onClick=${() => {
-          sidebarOpen.value = !sidebarOpen.value;
-        }}
-      >
-        <${Icon} name="menu" />
-      </button>
-      <div class="topbar-heading">
-      <a class="brand" href="/routing">
+      <a class="brand" href="/routing" aria-label="netaudio">
         <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
           <rect width="64" height="64" rx="13" fill="#ff2323" />
           <g fill="#000000">
@@ -87,13 +73,18 @@ function TopBar() {
             <rect x="46" y="16" width="8" height="36" rx="3" />
           </g>
         </svg>
-        <span class="brand-name">netaudio</span>
+        ${compact ? null : html`<span class="brand-name" aria-hidden="true">netaudio</span>`}
       </a>
-      <${Breadcrumb} />
-      </div>
-      <div class="topbar-spacer"></div>
-      <${ContextSelector} />
+      ${compact ? html`<${ViewPicker} />` : html`<${ViewTabs} />`}
+      ${compact ? null : html`<${ContextSelector} />`}
       <div class="topbar-controls">
+        ${filtersAvailable ? html`<button type="button" class="header-icon-button filter-panel-toggle"
+          aria-label=${filtersOpen ? "Hide filters" : "Show filters"}
+          title=${filtersOpen ? "Hide filters" : "Show filters"}
+          aria-expanded=${filtersOpen} aria-controls="inventory-filters"
+          onClick=${() => saveRoutingFilters({ ...inventoryFilters.value, panelOpen: !filtersOpen })}>
+          <${Icon} name=${`${panel}-${filtersOpen ? "close" : "open"}`} />
+        </button>` : null}
         <button type="button" class="header-icon-button" aria-label="Search" title="Search" onClick=${openPalette}>
           <${Icon} name="search" />
         </button>
@@ -102,76 +93,12 @@ function TopBar() {
   `;
 }
 
-function NavigationItems() {
-  const current = location.value;
-  const entry = (view) => html`<a
-    key=${view.id}
-    class=${`app-menu-link${current.view === view.id ? " active" : ""}`}
-    aria-current=${current.view === view.id ? "page" : null}
-    aria-label=${view.label}
-    href=${view.path} onClick=${() => { sidebarOpen.value = false; }}>
-    <${Icon} name=${view.icon} /><span>${view.label}</span>
-  </a>`;
-  return html`<nav aria-label="Main navigation">
-    ${visibleNavigation.value.filter((view) => view.group === "Tools").map(entry)}
-  </nav>`;
-}
-
-function Sidebar() {
-  const dialog = useRef(null);
-  useLayoutEffect(() => {
-    if (sidebarOpen.value && !dialog.current.matches(":popover-open")) {
-      const button = document.querySelector(".app-menu-trigger").getBoundingClientRect();
-      dialog.current.style.left = `${button.left}px`;
-      dialog.current.style.top = `${button.bottom + 4}px`;
-      dialog.current.showPopover();
-      dialog.current.querySelector("a")?.focus();
-    } else if (!sidebarOpen.value && dialog.current.matches(":popover-open")) dialog.current.hidePopover();
-  }, [sidebarOpen.value]);
-  return html`
-    <div id="application-navigation" class="app-menu" role="dialog" popover="auto" aria-label="Application navigation" ref=${dialog}
-      onToggle=${(event) => { sidebarOpen.value = event.newState === "open"; }}
-      onKeyDown=${(event) => { if (event.key === "Escape") {
-        event.preventDefault(); sidebarOpen.value = false; document.querySelector(".app-menu-trigger")?.focus();
-      } }}>
-      <${NavigationItems} />
-    </div>
-  `;
-}
-
-function NetworkNavigation({ filtersAvailable, filtersOpen, compact }) {
-  const panel = compact ? "top-panel" : "sidebar";
-  const pointerSelection = useRef(false);
-  return html`<nav class="network-navigation" aria-label="Network views">
-    <select class="select mobile-view-selector" aria-label="View" value=${visibleNavigation.value.find((view) => view.id === location.value.view)?.path || "/devices"}
-      onPointerDown=${() => { pointerSelection.current = true; }}
-      onKeyDown=${() => { pointerSelection.current = false; }}
-      onChange=${(event) => {
-        navigate(event.currentTarget.value);
-        if (pointerSelection.current) {
-          event.currentTarget.blur();
-          pointerSelection.current = false;
-        }
-      }}>
-      ${visibleNavigation.value.map((view) => html`<option value=${view.path}>${view.label}</option>`)}
-    </select>
-    ${filtersAvailable ? html`<button type="button" class="header-icon-button filter-panel-toggle"
-      aria-label=${filtersOpen ? "Hide filters" : "Show filters"}
-      title=${filtersOpen ? "Hide filters" : "Show filters"}
-      aria-expanded=${filtersOpen} aria-controls="inventory-filters"
-      onClick=${() => saveRoutingFilters({ ...inventoryFilters.value, panelOpen: !filtersOpen })}>
-      <${Icon} name=${`${panel}-${filtersOpen ? "close" : "open"}`} />
-    </button>` : null}
-    ${visibleNavigation.value.filter((view) => view.group === "Network").map((view) => html`<a href=${view.path}
-      aria-current=${location.value.view === view.id ? "page" : null}>${view.label}</a>`)}
-  </nav>`;
-}
-
-function Content({ filtersOpen }) {
+function Content({ compact, filtersOpen }) {
   const current = location.value;
   const view = viewById(current.view);
   return html`<div class=${`app-workspace${filtersOpen ? " with-filters" : ""}`}>
     ${filtersOpen ? html`<div id="inventory-filters" class="routing-filter-container">
+      ${compact ? html`<${ContextSelector} />` : null}
       <${DeviceFilterPanel} all=${Object.values(contextDevices.value)} filters=${inventoryFilters.value} onChange=${saveRoutingFilters} />
     </div>` : null}
     <main class=${`content${current.parameters.device ? " selectable-content" : ""}`} id="content">
@@ -190,10 +117,8 @@ function App() {
   const filtersAvailable = viewById(location.value.view).filters !== false;
   const filtersOpen = filtersAvailable && (inventoryFilters.value.panelOpen ?? !compact);
   return html`
-    <${TopBar} />
-    <${NetworkNavigation} filtersAvailable=${filtersAvailable} filtersOpen=${filtersOpen} compact=${compact} />
-    <${Sidebar} />
-    <${Content} filtersOpen=${filtersOpen} />
+    <${TopBar} compact=${compact} filtersAvailable=${filtersAvailable} filtersOpen=${filtersOpen} />
+    <${Content} compact=${compact} filtersOpen=${filtersOpen} />
     <${CommandPalette} />
   `;
 }
@@ -210,9 +135,6 @@ function bindShortcuts() {
 startColorScheme();
 startRouter();
 bindShortcuts();
-onNavigate(() => {
-  sidebarOpen.value = false;
-});
 render(html`<${App} />`, document.getElementById("root"));
 connect();
 

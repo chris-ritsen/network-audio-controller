@@ -30,7 +30,7 @@
     --radius-small: 4px;
     --raised: #2b2f32;
     --text: #ffffff;
-    --topbar-height: 40px;
+    --topbar-height: 44px;
     --warn: #ffc400;
   }
 
@@ -106,7 +106,7 @@
 
   @media (max-width: 900px) {
     :root {
-      --topbar-height: 104px;
+      --topbar-height: 52px;
     }
   }
 }

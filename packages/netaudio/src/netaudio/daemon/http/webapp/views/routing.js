@@ -72,12 +72,14 @@ function RoutingView() {
         <div class="toolbar">
           ${!compact ? html`<${Button} onClick=${() => updateFilters({ ...filters, listMode: !listMode })}>${listMode ? "Show grid" : "Channel list"}<//>` : null}
           ${!showList ? html`
-          <button class="btn btn-sm" type="button" aria-label="Lock grid" aria-pressed=${gridLocked}
-            title=${gridLocked ? "Unlock to change connections" : "Prevent connection changes while browsing the grid"}
+          <button class="btn btn-sm" type="button" aria-pressed=${gridLocked}
             onClick=${() => {
               setGridLocked(!gridLocked);
               try { window.localStorage.setItem("netaudio.matrix.locked", String(!gridLocked)); } catch {}
-            }}><${Icon} name=${gridLocked ? "lock" : "unlock"} /> ${gridLocked ? "Grid locked" : "Lock grid"}</button>
+            }}><${Icon} name=${gridLocked ? "unlock" : "lock"} /><span class="steady-label">
+              <span aria-hidden=${gridLocked ? "true" : null}>Lock</span>
+              <span aria-hidden=${gridLocked ? null : "true"}>Unlock</span>
+            </span></button>
           <button class="btn btn-sm" type="button" aria-pressed=${!flipped} onClick=${() => {
             setFlipped(!flipped);
             try { window.localStorage.setItem("netaudio.matrix.flipped", String(!flipped)); } catch {}

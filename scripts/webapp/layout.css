@@ -1,9 +1,9 @@
 @layer components {
   #root {
     display: grid;
-    grid-template-areas: "topbar" "workspace" "content";
+    grid-template-areas: "topbar" "content";
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: var(--topbar-height) 34px minmax(0, 1fr);
+    grid-template-rows: var(--topbar-height) minmax(0, 1fr);
     height: 100%;
   }
 
@@ -65,12 +65,6 @@
     }
     .content {
       padding-bottom: max(24px, env(safe-area-inset-bottom));
-    }
-
-    #root {
-      grid-template-areas: "topbar" "workspace" "content";
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: var(--topbar-height) auto minmax(0, 1fr);
     }
 
     .content {

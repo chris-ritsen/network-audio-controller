@@ -348,3 +348,15 @@
   background: var(--color-base-300);
   border-color: var(--text);
 }
+
+.steady-label {
+  display: inline-grid;
+}
+
+.steady-label > span {
+  grid-area: 1 / 1;
+}
+
+.steady-label > [aria-hidden="true"] {
+  visibility: hidden;
+}

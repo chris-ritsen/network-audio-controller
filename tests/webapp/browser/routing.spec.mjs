@@ -57,7 +57,7 @@ test("grid lock blocks adds and clears, survives reload, and leaves navigation u
   const writes = [];
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(new URL(request.url()).pathname); });
   await page.goto("http://netaudio.test/routing");
-  const lock = page.getByRole("button", { name: "Lock grid", exact: true });
+  const lock = page.getByRole("button", { name: /^(Lock|Unlock)$/ });
   await lock.click();
   await expect(lock).toHaveAttribute("aria-pressed", "true");
   await page.reload();
@@ -122,7 +122,7 @@ test("routing reserves space for cells and moves subscription details to a separ
   await page.goto("http://netaudio.test/routing");
   await page.getByRole("button", { name: "Expand all receiver devices and groups", exact: true }).click();
   await page.getByRole("button", { name: "Expand all transmitter devices and groups", exact: true }).click();
-  await expect(page.getByRole("navigation", { name: "Network views" }).getByRole("link").first()).toHaveText("Routing");
+  await expect(page.getByRole("navigation", { name: "Views" }).getByRole("link").first()).toHaveText("Routing");
   await expect(page.locator(".matrix-canvas")).toBeVisible();
   await expect(page.getByRole("heading", { name: /^Subscriptions \(/ })).toHaveCount(0);
   const geometry = await page.locator(".matrix-stage").evaluate((node) => {
@@ -132,8 +132,7 @@ test("routing reserves space for cells and moves subscription details to a separ
   expect(geometry.gutter).toBeLessThanOrEqual(340);
   expect(geometry.header).toBeLessThanOrEqual(280);
   expect(geometry.height - geometry.header).toBeGreaterThan(350);
-  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Subscriptions", exact: true }).click();
+  await page.getByRole("navigation", { name: "Views" }).getByRole("link", { name: "Subscriptions", exact: true }).click();
   await expect(page).toHaveURL("http://netaudio.test/subscriptions");
   await expect(page.getByRole("heading", { name: /^Subscriptions \(/ })).toBeVisible();
   await expect(page.locator(".matrix-canvas")).toHaveCount(0);
@@ -192,25 +191,6 @@ for (const width of [1200, 390]) {
   });
 }
 
-test("breadcrumbs share the wordmark text baseline", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("http://netaudio.test/devices/avio-bt-1/receive");
-  await expect(page.locator(".breadcrumb a").first()).toBeVisible();
-  const baselines = await page.locator(".brand-name, .breadcrumb a").evaluateAll((nodes) => nodes.map((node) => {
-    const marker = document.createElement("span");
-    marker.style.display = "inline-block";
-    marker.style.width = "0";
-    marker.style.height = "0";
-    marker.style.verticalAlign = "baseline";
-    node.append(marker);
-    const baseline = marker.getBoundingClientRect().bottom;
-    marker.remove();
-    return baseline;
-  }));
-  expect(baselines.length).toBeGreaterThan(1);
-  for (const baseline of baselines) expect(Math.abs(baseline - baselines[0])).toBeLessThan(1);
-});
-
 test("search is compact on mobile and dismisses only when clicked outside", async ({ page }) => {
   await page.goto("http://netaudio.test/routing");
   for (const width of [1440, 390]) {
@@ -247,64 +227,6 @@ test("routing filter search has a visible gap below its label", async ({ page })
     });
     expect(gap).toBeGreaterThanOrEqual(5);
   }
-});
-
-test("tools menu scrolls when its navigation exceeds the available height", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("http://netaudio.test/routing");
-  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-  const sidebar = page.getByRole("dialog", { name: "Application navigation" });
-  await expect(sidebar).toBeVisible();
-  const navigation = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(navigation.getByRole("link", { name: "Device Info", exact: true })).toHaveCount(0);
-  await expect(navigation.getByRole("link", { name: "Settings", exact: true })).toHaveText("Settings");
-  expect(await sidebar.evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
-  expect(await sidebar.locator("nav").evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
-  await page.setViewportSize({ width: 1440, height: 200 });
-  expect(await sidebar.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
-  await sidebar.evaluate((node) => { node.scrollTop = node.scrollHeight; });
-  expect(await sidebar.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
-  const lastLink = sidebar.getByRole("link").last();
-  const panelBox = await sidebar.boundingBox();
-  const linkBox = await lastLink.boundingBox();
-  expect(linkBox.y + linkBox.height).toBeLessThanOrEqual(panelBox.y + panelBox.height);
-});
-
-test("tools menu labels fit without truncation", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("http://netaudio.test/routing");
-  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-  const nav = page.getByRole("navigation", { name: "Main navigation" });
-  const measure = () => nav.locator("a").evaluateAll((links) => links.map((link) => {
-    const style = getComputedStyle(link);
-    return {
-      width: link.getBoundingClientRect().width,
-      needed: [...link.children].reduce((total, child) => total + child.getBoundingClientRect().width, 0)
-        + parseFloat(style.columnGap) + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
-        + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth),
-    };
-  }));
-  const before = await measure();
-  for (const link of before) expect(link.width).toBeGreaterThanOrEqual(link.needed);
-});
-
-test("tools menu closes on Escape and reload without moving the workspace", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("http://netaudio.test/routing");
-  const collapsed = await page.locator("#content").boundingBox();
-  await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeHidden();
-  await expect(page.getByRole("button", { name: "Show navigation", exact: true })).toHaveAttribute("aria-expanded", "false");
-  expect((await page.locator("#content").boundingBox()).x).toBe(collapsed.x);
-  expect((await page.locator("#content").boundingBox()).width).toBe(collapsed.width);
-  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeVisible();
-  expect(await page.locator("#content").boundingBox()).toEqual(collapsed);
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("button", { name: "Show navigation", exact: true })).toBeFocused();
-  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-  await page.reload();
-  await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeHidden();
-  expect(await page.locator("#content").boundingBox()).toEqual(collapsed);
 });
 
 test("each axis expands and collapses all devices and their groups together and persists", async ({ page }) => {
@@ -356,7 +278,7 @@ test("table headers sort by click and keyboard; device names are real navigable 
   expect((await status.boundingBox()).width).toBeLessThanOrEqual(280);
   expect(await status.evaluate((node) => getComputedStyle(node).whiteSpace)).toBe("normal");
   await expect(page.getByRole("button", { name: "Subscribe…", exact: true })).toHaveCount(0);
-  await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Device Info" }).click();
+  await page.getByRole("navigation", { name: "Views" }).getByRole("link", { name: "Device Info" }).click();
   await expect(page).toHaveURL(/\/devices$/);
 });
 
@@ -366,10 +288,6 @@ test("routing has no offline dismissal or floating notifications", async ({ page
   await expect(page.getByText("Review offline devices", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Dismiss offline", exact: true })).toHaveCount(0);
   await expect(page.locator(".topbar .connection-pill")).toHaveCount(0);
-  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-  const settingsLink = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Settings", exact: true });
-  await expect(settingsLink.getByText("Settings", { exact: true })).toBeVisible();
-  await expect(settingsLink.locator("svg")).toHaveAttribute("width", "20");
 });
 
 test("saved devices survive connection loss but an empty snapshot replaces them", async ({ page }) => {
@@ -547,18 +465,6 @@ test("tools menu leaves routing intact and axis preferences survive reload", asy
   await expect(flip).toHaveAttribute("aria-pressed", "true");
   await flip.click();
   await expect(flip).toHaveAttribute("aria-pressed", "false");
-  const before = await page.locator("#content").boundingBox();
-  await page.getByRole("button", { name: "Show navigation" }).click();
-  const sidebar = page.getByRole("dialog", { name: "Application navigation" });
-  await expect(sidebar.locator(".device-list, details")).toHaveCount(0);
-  for (const link of await sidebar.getByRole("link").all()) {
-    await expect(link).toBeVisible();
-    await expect(link.locator("svg")).toBeVisible();
-  }
-  await page.keyboard.press("Escape");
-  await expect(sidebar).toBeHidden();
-  const after = await page.locator("#content").boundingBox();
-  expect(after).toEqual(before);
   await page.screenshot({ path: "test-results/desktop-routing.png" });
 });
 

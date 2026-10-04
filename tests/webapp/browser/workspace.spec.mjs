@@ -51,9 +51,8 @@ test("mobile views use one selector and a reachable source picker", async ({ pag
   const selector = page.getByRole("combobox", { name: "View", exact: true });
   await expect(selector).toBeVisible();
   await expect(selector.locator("option")).toHaveCount(9);
-  await expect(page.getByRole("button", { name: "Show navigation", exact: true })).toBeHidden();
-  const nav = page.getByRole("navigation", { name: "Network views" });
-  expect(await nav.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  const header = page.locator(".topbar");
+  expect(await header.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
   await page.locator(".mobile-card-toggle").first().click();
   const field = page.locator('td[data-label="Primary address"]').first();
   await field.hover();
@@ -183,18 +182,14 @@ test("navigation controls toggle filters", async ({ page }) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/routing");
   const header = page.locator(".topbar");
-  const menu = header.getByRole("button", { name: "Show navigation", exact: true });
-  await expect(menu).toHaveText("");
-  const navigation = page.getByRole("navigation", { name: "Network views" });
-  const hide = navigation.getByRole("button", { name: "Hide filters", exact: true });
+  const hide = header.getByRole("button", { name: "Hide filters", exact: true });
   await expect(hide).toHaveText("");
   await expect(hide).toHaveAttribute("aria-expanded", "true");
   await hide.click();
   await expect(page.locator("#inventory-filters")).toHaveCount(0);
-  await navigation.getByRole("button", { name: "Show filters", exact: true }).click();
+  await header.getByRole("button", { name: "Show filters", exact: true }).click();
   await expect(page.locator("#inventory-filters")).toBeVisible();
-  const tabs = await page.getByRole("navigation", { name: "Network views" }).getByRole("link").all();
-  await tabs[1].click();
+  await page.getByRole("navigation", { name: "Views" }).getByRole("link", { name: "Settings", exact: true }).click();
   await expect(header.getByRole("button", { name: /filters/ })).toHaveCount(0);
 });
 
@@ -221,36 +216,16 @@ test("desktop channel list supports search and selectable text", async ({ page }
   await expect(region).toContainText("No channels match this search.");
 });
 
-test("Tools menu is nonmodal and dismisses on navigation", async ({ page }) => {
-  await serveWebapp(page);
-  await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.goto("http://netaudio.test/routing");
-  const trigger = page.getByRole("button", { name: "Show navigation", exact: true });
-  await trigger.click();
-  const menu = page.getByRole("dialog", { name: "Application navigation" });
-  await expect(menu).toBeVisible();
-  await expect(menu.getByRole("link", { name: "Routing", exact: true })).toHaveCount(0);
-  expect(await page.evaluate(() => document.querySelectorAll(":modal").length)).toBe(0);
-  await page.getByRole("navigation", { name: "Network views" }).getByRole("link", { name: "Network Status", exact: true }).click();
-  await expect(page).toHaveURL("http://netaudio.test/network-status");
-  await expect(menu).toBeHidden();
-});
-
 test("network tabs and every tool remain reachable without changing devices", async ({ page }) => {
   await serveWebapp(page);
   const writes = [];
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
   await page.goto("http://netaudio.test/routing");
-  const navigation = page.getByRole("navigation", { name: "Network views" });
-  for (const [label, path] of [["Device Info", "devices"], ["Clock Status", "clock-status"], ["Network Status", "network-status"], ["Events", "events"], ["Routing", "routing"]]) {
+  const navigation = page.getByRole("navigation", { name: "Views" });
+  for (const [label, path] of [["Device Info", "devices"], ["Clock", "clock-status"], ["Network", "network-status"], ["Events", "events"], ["Subscriptions", "subscriptions"], ["Presets", "presets"], ["Domains", "ddm"], ["Settings", "settings"], ["Routing", "routing"]]) {
     await navigation.getByRole("link", { name: label, exact: true }).click();
     await expect(page).toHaveURL(`http://netaudio.test/${path}`);
     await expect(navigation.getByRole("link", { name: label, exact: true })).toHaveAttribute("aria-current", "page");
-  }
-  for (const label of ["Subscriptions", "Presets", "Domains", "Settings"]) {
-    await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-    await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: label, exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeHidden();
   }
   expect(writes).toEqual([]);
 });
@@ -262,7 +237,6 @@ test("switching devices preserves the section and shows the display name", async
   await page.getByRole("combobox", { name: "Switch device", exact: true }).selectOption(target.server_name);
   await expect(page).toHaveURL(new RegExp(`/devices/${target.server_name.replaceAll('.', '\\.')}\/status$`));
   await expect(page.locator(".device-heading h1")).toHaveText("avio-bt-1");
-  await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText("avio-bt-1");
   await expect(page.getByRole("navigation", { name: "Device sections" }).getByRole("link", { name: "Status", exact: true })).toHaveAttribute("aria-current", "page");
 });
 

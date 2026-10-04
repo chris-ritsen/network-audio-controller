@@ -30,12 +30,3 @@ test("Metering tab fits mobile and releases monitoring when leaving the tab", as
   })).toEqual([false, false]);
 });
 
-test("breadcrumbs reuse display labels without changing device names", async ({ page }) => {
-  await serveWebapp(page);
-  for (const [section, label] of [["receive", "Receive"], ["metering", "Metering"], ["device-config", "Device config"]]) {
-    await page.goto(`http://netaudio.test/devices/Windows-PC/${section}`);
-    const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
-    await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText(label);
-    await expect(breadcrumb.getByRole("link", { name: "Windows-PC", exact: true })).toBeVisible();
-  }
-});
