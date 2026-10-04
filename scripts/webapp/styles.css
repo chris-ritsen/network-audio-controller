@@ -9,6 +9,8 @@
 @import "./tables.css";
 @import "./channels.css";
 @import "./metering.css";
+@import "./channel-strips.css";
+@import "./shure.css";
 @import "./events.css";
 @import "./dialogs.css";
 @import "./devices.css";

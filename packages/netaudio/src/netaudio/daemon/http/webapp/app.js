@@ -44,7 +44,7 @@ function Breadcrumb() {
   const deviceName = current.parameters.device;
   if (!deviceName) return null;
   const section = current.parameters.section;
-  const sectionLabel = section === "domain" ? "Domain" : DEVICE_TABS.find((tab) => tab.id === section)?.label || "Unknown section";
+  const sectionLabel = section === "domain" ? "Domain" : DEVICE_TABS.find((tab) => tab.id === section)?.label;
   return html`
     <nav class="breadcrumb" aria-label="Breadcrumb">
       <a class="link link-hover" href=${`/${view.id}`}>${view.label}</a>
@@ -52,7 +52,7 @@ function Breadcrumb() {
         ? html`<span class="breadcrumb-separator">/</span>
             <a class="link link-hover" href=${devicePath(view.id, deviceName)}>${deviceLabel(deviceByName(deviceName) || { name: deviceName })}</a>`
         : null}
-      ${current.parameters.section
+      ${sectionLabel
         ? html`<span class="breadcrumb-separator">/</span>
             <span aria-current="page">${sectionLabel}</span>`
         : null}

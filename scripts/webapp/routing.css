@@ -18,7 +18,7 @@
     flex-direction: column;
     gap: 4px;
     min-width: 0;
-    color: var(--muted);
+    color: var(--text);
     font-size: 12px;
   }
   .routing-channel-toolbar input,
@@ -43,7 +43,7 @@
   .routing-channel-head {
     background: var(--panel);
     border: 1px solid var(--line-strong);
-    color: var(--muted);
+    color: var(--text);
     font-size: 12px;
   }
   .routing-channel-rows {
@@ -71,7 +71,6 @@
     outline-offset: -2px;
   }
   .routing-channel-row:disabled {
-    opacity: 0.6;
     cursor: default;
   }
   .routing-channel-row > * {
@@ -83,7 +82,7 @@
   }
   .routing-channel-number,
   .routing-channel-device {
-    color: var(--muted);
+    color: var(--text);
   }
   .routing-channel-row svg {
     width: 16px;
@@ -319,7 +318,7 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    color: var(--muted);
+    color: var(--text);
     font-size: 11px;
   }
   .routing-options {

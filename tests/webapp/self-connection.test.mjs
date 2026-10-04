@@ -36,7 +36,7 @@ test("canonical identity does not use display-name equality", () => {
   assert.equal(sameCanonicalDevice(original, sameName), false);
 });
 
-test("source picker disables only same-device sources for a blocked receiver channel", () => {
+test("source picker leaves out same-device sources for a blocked receiver channel", () => {
   const target = receiver(false);
   const remote = {
     name: "Remote source",
@@ -53,8 +53,7 @@ test("source picker disables only same-device sources for a blocked receiver cha
     }),
   );
 
-  assert.match(markup, /disabled[^>]*source-picker-entry self-unsupported/);
-  assert.match(markup, /Not supported/);
+  assert.doesNotMatch(markup, /Own output/);
   assert.match(markup, /Remote output/);
   assert.equal(
     selfConnectionTargetState(target, target.channels.receivers[1], remote)
@@ -71,9 +70,6 @@ test("source picker disables only same-device sources for a blocked receiver cha
       sourceDevices: [target],
     }),
   );
-  assert.doesNotMatch(
-    supported,
-    /self-unsupported|self-unavailable|Not supported/,
-  );
+  assert.match(supported, /Own output/);
   assert.doesNotMatch(supported, /disabled/);
 });

@@ -1,9 +1,8 @@
 import { api } from "../api.js";
-import { AsyncButton, Panel } from "../components.js";
-import * as format from "../format.js";
-import { html, useLayoutEffect, useState } from "../lib/preact.js";
+import { AsyncButton, Fields, Panel } from "../components.js";
+import { html, useEffect, useLayoutEffect, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
-import { operationAvailability, operationReasonText } from "./availability.js";
+import { operationAvailability } from "./availability.js";
 
 export function LockSection({ device }) {
   const requestName = deviceRequestName(device);
@@ -24,6 +23,10 @@ export function LockSection({ device }) {
     setObservation(result);
     return result;
   };
+  useEffect(() => {
+    if (canRefresh && !known) refresh().catch((error) => console.error(error));
+  }, [requestName]);
+  if (!known && !writable) return null;
 
   return html`
     <div class="w-full max-w-lg"><${Panel}
@@ -37,19 +40,17 @@ export function LockSection({ device }) {
       <//>` : null}
     >
       <div class="flex flex-col items-start gap-4">
-        <div class="text-sm" role="status">${locked === true ? "Locked" : locked === false ? "Unlocked" : "Lock state unavailable"}</div>
-        ${!writable ? html`<p class="text-sm opacity-70">Lock changes are unavailable. ${operationReasonText(availabilityDevice, "locking")}</p>` : null}
-        ${canRefresh && !known ? html`<p class="text-sm">Refresh to check the device before changing its lock.</p>` : null}
-        ${writable ? html`
+        ${known ? html`<${Fields} entries=${[["State", locked ? "Locked" : "Unlocked"]]} />` : null}
+        ${writable && known ? html`
           <label class="flex flex-col gap-2">Device PIN
             <input class="w-32" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off"
-              value=${pin} onInput=${(event) => setPin(event.target.value)} placeholder="4 digits" />
+              value=${pin} onInput=${(event) => setPin(event.target.value)} />
           </label>
           <${AsyncButton}
             small
-            disabled=${!known || !/^\d{4}$/.test(pin)}
             description=${`${locked ? "unlock" : "lock"} ${requestName}`}
             onRun=${async () => {
+              if (!/^\d{4}$/.test(pin)) throw new Error("Enter the 4-digit device PIN");
               const result = locked ? await api.unlock(requestName, pin) : await api.lock(requestName, pin);
               setPin("");
               await refresh();
@@ -59,7 +60,6 @@ export function LockSection({ device }) {
             ${locked ? "Unlock" : "Lock"}
           <//>
         ` : null}
-        ${observation?.observed_at ? html`<div class="text-xs opacity-70">Last checked ${format.timestamp(observation.observed_at)}</div>` : null}
       </div>
     <//></div>
   `;

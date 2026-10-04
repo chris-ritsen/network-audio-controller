@@ -32,7 +32,6 @@
     align-items: center;
     gap: 8px;
     font-size: 12px;
-    color: var(--muted);
   }
   .device-switcher select {
     max-width: 240px;
@@ -63,7 +62,6 @@
 
   .device-address > span {
     font-family: var(--font-ui);
-    opacity: 0.65;
     margin-right: 6px;
   }
 
@@ -116,6 +114,15 @@
 }
 
 @layer utilities {
+  .tabs.device-tabs > .tab {
+    color: var(--text);
+  }
+
+  .tabs.device-tabs > .tab[aria-current="page"] {
+    font-weight: 700;
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
   @media (max-width: 900px) {
     .tabs.device-tabs {
       display: none;

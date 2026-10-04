@@ -6,9 +6,7 @@ import { WEBAPP } from "./setup.mjs";
 const { h } = await import("preact");
 const { render } = await import("preact-render-to-string");
 const {
-  operationReasonText,
   operationWritable,
-  performanceOperationReasonText,
   performanceOperationWritable,
 } = await import(`${WEBAPP}device/availability.js`);
 const { DeviceConfigSection } = await import(`${WEBAPP}device/config.js`);
@@ -22,7 +20,7 @@ const available = (writable, reasons = []) => ({
   reasons,
 });
 
-test("availability helpers preserve backend restrictions as readable text", () => {
+test("availability helpers report restricted operations as not writable", () => {
   const device = {
     operation_availability: {
       sample_rate: available(false, [
@@ -33,17 +31,10 @@ test("availability helpers preserve backend restrictions as readable text", () =
     },
   };
   assert.equal(operationWritable(device, "sample_rate"), false);
-  assert.equal(
-    operationReasonText(device, "sample_rate"),
-    "The device reports that this setting is fixed. The device is locked. Permission for this managed operation was denied.",
-  );
-  assert.equal(
-    operationReasonText({}, "sample_rate"),
-    "Operation availability was not reported.",
-  );
+  assert.equal(operationWritable({}, "sample_rate"), false);
 });
 
-test("device configuration shows state and reasons without rejected actions", () => {
+test("device configuration shows state without rejected actions", () => {
   const device = {
     name: "Adapter",
     server_name: "adapter.local.",
@@ -62,12 +53,8 @@ test("device configuration shows state and reasons without rejected actions", ()
   };
   const markup = render(h(DeviceConfigSection, { device }));
   assert.match(markup, /48 kHz/);
-  assert.match(markup, />24</);
+  assert.match(markup, /PCM 24/);
   assert.match(markup, />None</);
-  assert.match(
-    markup,
-    /device is locked|setting is fixed|host has disabled|Identify unavailable/,
-  );
   assert.doesNotMatch(
     markup,
     /aria-label="Sample rate"|aria-label="Encoding"|set sample rate pull-up|>Identify</,
@@ -98,7 +85,6 @@ test("codec and lock controls appear only when their operations are writable", (
     }),
   );
   assert.match(deniedGain, /\+18 dB/);
-  assert.match(deniedGain, /device is locked/);
   assert.doesNotMatch(deniedGain, />Set</);
 
   const writableGain = render(
@@ -123,7 +109,6 @@ test("codec and lock controls appear only when their operations are writable", (
     }),
   );
   assert.match(lockMarkup, /Unlocked/);
-  assert.match(lockMarkup, /unavailable through managed control/);
   assert.doesNotMatch(lockMarkup, /Device PIN|>Lock</);
 });
 
@@ -144,8 +129,6 @@ test("direct receiver rename controls fail closed when capability is prohibited 
     }),
   );
 
-  assert.match(markup, /This receiver reports that renaming is prohibited/);
-  assert.match(markup, /Receiver rename capability is unavailable/);
   assert.doesNotMatch(markup, /contenteditable="true"/);
   assert.doesNotMatch(markup, /role="button"[^>]+aria-label="Edit receive channel/);
 });
@@ -171,15 +154,10 @@ test("flow performance controls follow typed backend availability", () => {
     performanceOperationWritable(device, "receive_flow_performance"),
     true,
   );
-  assert.match(
-    performanceOperationReasonText(device, "unicast_performance"),
-    /software version was not reported/,
-  );
   const markup = render(h(DeviceConfigSection, { device }));
   assert.match(markup, /Flow performance/);
-  assert.match(markup, /Receive flow latency in microseconds/);
+  assert.match(markup, /Receive flow latency in milliseconds/);
   assert.match(markup, /Receive flow default slots/);
   assert.match(markup, /Store current configuration/);
-  assert.match(markup, /does not advertise the required properties/);
-  assert.doesNotMatch(markup, /Transmit flow latency in microseconds/);
+  assert.doesNotMatch(markup, /Transmit flow latency in milliseconds/);
 });

@@ -41,15 +41,12 @@
     background: var(--raised);
   }
   .source-picker-entry:disabled {
-    opacity: 0.5;
-    cursor: default;
+    cursor: progress;
   }
-  .source-picker-entry.self-unsupported,
-  .source-picker-entry.self-unavailable {
-    background: var(--black);
-    color: var(--muted);
-    opacity: 1;
-    cursor: not-allowed;
+  .source-picker-current {
+    flex-shrink: 0;
+    color: var(--good);
+    font-weight: 600;
   }
   @media (max-width: 900px) {
     .source-picker .source-picker-box {

@@ -1,7 +1,4 @@
-import {
-  operationReasonText,
-  operationWritable,
-} from "./device/availability.js";
+import { operationWritable } from "./device/availability.js";
 
 const reportedBoolean = (value) => (typeof value === "boolean" ? value : null);
 
@@ -18,7 +15,6 @@ export function aes67Status(device) {
     managed,
     pending: false,
     canConfigure: operationWritable(device, "aes67"),
-    unavailableReason: operationReasonText(device, "aes67"),
   };
   if (managed) {
     const capabilities = device.ddm_capabilities;

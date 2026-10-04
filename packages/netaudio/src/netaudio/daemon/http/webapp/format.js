@@ -1,11 +1,11 @@
-export const ABSENT = "—";
+export const ABSENT = "";
 
 export function text(value) {
   if (value === null || value === undefined || value === "") {
     return ABSENT;
   }
   if (typeof value === "boolean") {
-    return value ? "yes" : "no";
+    return value ? "Yes" : "No";
   }
   if (Array.isArray(value)) {
     return value.length ? value.map((entry) => text(entry)).join(", ") : ABSENT;
@@ -96,7 +96,7 @@ export function subscriptionStatusText(subscription) {
       resolving: "Finding source channel",
       unresolved: "Source channel not found",
       error: "Subscription failed",
-    }[status.state] || "Subscription status unavailable"
+    }[status.state] || ABSENT
   );
 }
 
@@ -176,9 +176,7 @@ export function clockLeaderName(device, inventory) {
       return false;
     return normalize(candidate.ptpv1_device_uuid) === identity;
   });
-  return matches.length === 1
-    ? deviceLabel(matches[0])
-    : text(device.ptpv1_master_uuid);
+  return matches.length === 1 ? deviceLabel(matches[0]) : ABSENT;
 }
 
 export function meterFraction(value, source) {
@@ -294,7 +292,7 @@ export function preferredLeader(value) {
   if (value === null || value === undefined) {
     return ABSENT;
   }
-  return value ? "enabled" : "disabled";
+  return value ? "Enabled" : "Disabled";
 }
 
 export function clockStatusFresh(device, now = Date.now()) {

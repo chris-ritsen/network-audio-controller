@@ -1,11 +1,11 @@
 import { api } from "../api.js";
-import {AsyncButton, Button, Notice, Panel, Value} from "../components.js";
+import { AsyncButton, Button, Panel, Value } from "../components.js";
 import * as format from "../format.js";
 import { html, useEffect, useLayoutEffect, useRef, useState } from "../lib/preact.js";
 import { RoutePicker } from "../route-picker.js";
 import { deviceRequestName } from "../store.js";
 import { ConfigurableTable } from "../table.js";
-import { operationReasonText, operationWritable } from "./availability.js";
+import { operationWritable } from "./availability.js";
 import { SubscriptionStatus } from "./receiver-status.js";
 import { ReceiverFlows, TransmitFlows } from "./flows.js";
 
@@ -30,9 +30,6 @@ function NameCell({ channel, channelNumber, channelType, requestName, managed })
   const draft = useRef("");
   const label = `${channelType === "rx" ? "Receive" : "Transmit"} channel ${channelNumber} name`;
   const renameAllowed = channelType !== "rx" || managed || channel.can_rename === true;
-  const renameReason = channel.can_rename === false
-    ? "This receiver reports that renaming is prohibited."
-    : "Receiver rename capability is unavailable.";
   useEffect(() => setName(channel.name || ""), [channel.name]);
   useLayoutEffect(() => {
     if (editing) {
@@ -110,7 +107,7 @@ function NameCell({ channel, channelNumber, channelType, requestName, managed })
         aria-label=${editing ? label : `Edit ${label.toLowerCase()}`}
         aria-placeholder="Default channel name"
         aria-disabled=${pending || !renameAllowed}
-        title=${editing ? null : renameAllowed ? "Click to edit" : renameReason}
+        title=${editing || !renameAllowed ? null : "Click to edit"}
         onClick=${open}
         onKeyDown=${(event) => {
           if (event.isComposing || pending) return;
@@ -145,12 +142,7 @@ function GainCell({ channel, channelNumber, channelType, device, requestName }) 
     return html`<span>${html`<${Value} value=${channel.gain_level_label} />`}</span>`;
   }
   if (!operationWritable(device, "codec_control")) {
-    return html`<span
-      ><${Value} value=${channel.gain_level_label} />
-      <span class="text-sm opacity-70"
-        >${operationReasonText(device, "codec_control")}</span
-      ></span
-    >`;
+    return html`<${Value} value=${channel.gain_level_label} />`;
   }
   return html`
     <span class="cell-actions">
@@ -283,9 +275,6 @@ export function ReceiveSection({ device }) {
   const rows = receiveRows(device);
   return html`
     <div class="flex flex-col gap-4">
-      ${device.receiver_flow_completeness === "partial"
-        ? html`<${Notice}>Receiver flow inventory is incomplete.<//>`
-        : null}
       ${routing
         ? html`<${RoutePicker}
             receiver=${device}
@@ -295,7 +284,7 @@ export function ReceiveSection({ device }) {
             onClose=${() => setRouting(null)}
           />`
         : null}
-      <${Panel}
+      ${rows.length ? html`<${Panel}
         title=${`Receivers (${rows.length})`}
         headerActions=${rows.length
           ? html`<${AsyncButton}
@@ -308,9 +297,7 @@ export function ReceiveSection({ device }) {
             <//>`
           : null}
       >
-        ${rows.length === 0
-          ? html`<${Notice}>This device reports no Dante receivers.<//>`
-          : html`<${ConfigurableTable}
+        <${ConfigurableTable}
               tableId="device-receive-channels"
               mobileSummary=${(row) => ({
                 title: html`<span class="receiver-summary-line">
@@ -322,8 +309,8 @@ export function ReceiveSection({ device }) {
               columns=${receiveColumns(device, requestName, setRouting).filter((column) => column.id !== "gain" || (gainChannelType(device) === "rx" && device.gain_level_choices?.length))}
               rows=${rows}
               rowKey=${(row) => row.number}
-            />`}
-      <//>
+            />
+      <//>` : null}
       <${ReceiverFlows} device=${device} />
     </div>
   `;
@@ -334,17 +321,15 @@ export function TransmitSection({ device }) {
   const rows = transmitRows(device);
   return html`
     <div class="flex flex-col gap-4">
-    <${Panel} title=${`Transmitters (${rows.length})`}>
-      ${rows.length === 0
-        ? html`<${Notice}>This device reports no Dante transmitters.<//>`
-        : html`<${ConfigurableTable}
+    ${rows.length ? html`<${Panel} title=${`Transmitters (${rows.length})`}>
+      <${ConfigurableTable}
             tableId="device-transmit-channels"
             mobileSummary=${(row) => ({ title: html`<span class="receiver-summary-line"><span>${row.number}. ${row.channel.name || "Unnamed channel"}</span></span>` })}
             columns=${transmitColumns(device, requestName).filter((column) => column.id !== "gain" || (gainChannelType(device) === "tx" && device.gain_level_choices?.length))}
             rows=${rows}
             rowKey=${(row) => row.number}
-          />`}
-    <//>
+          />
+    <//>` : null}
     <${TransmitFlows} device=${device} />
     </div>
   `;

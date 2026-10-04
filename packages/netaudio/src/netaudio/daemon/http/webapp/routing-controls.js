@@ -1,7 +1,8 @@
-import { html, useState } from "./lib/preact.js";
+import { html } from "./lib/preact.js";
 import * as format from "./format.js";
 import { Icon } from "./icons.js";
 import { RoutePicker } from "./route-picker.js";
+import { location, setQueryParameters } from "./router.js";
 import {
   deviceRequestName,
   pendingKey,
@@ -21,13 +22,15 @@ export function receiverChannels(device) {
 
 export function RoutingControls({ all }) {
   const receivers = all.filter((device) => receiverChannels(device).length);
-  const [selected, setSelected] = useState("");
-  const [filter, setFilter] = useState("");
-  const [editing, setEditing] = useState(null);
+  const query = location.value.query;
+  const selected = query.receiver || "";
+  const filter = query.find || "";
+  const editing = /^\d+$/.test(query.channel || "") ? Number(query.channel) : null;
+  const setEditing = (number) => setQueryParameters({ channel: number }, { replace: number === null });
   const receiver =
-    receivers.find((device) => deviceRequestName(device) === selected) ||
+    receivers.find((device) => deviceRequestName(device) === selected || format.deviceLabel(device) === selected) ||
     receivers[0];
-  if (!receiver) return html`<p>No receiving devices found.</p>`;
+  if (!receiver) return html`<p>No receiving devices.</p>`;
   const channels = receiverChannels(receiver);
   const visible = channels.filter((channel) =>
     `${channel.number} ${channel.name}`
@@ -45,15 +48,14 @@ export function RoutingControls({ all }) {
       <select
         value=${deviceRequestName(receiver)}
         onChange=${(event) => {
-        setSelected(event.target.value);
-        setEditing(null);
-        setFilter("");
+        const device = receivers.find((entry) => deviceRequestName(entry) === event.target.value);
+        setQueryParameters({ channel: null, find: null, receiver: device ? format.deviceLabel(device) : event.target.value }, { replace: false });
       }}
       >
         ${receivers.map(
           (device) =>
             html`<option value=${deviceRequestName(device)}>
-              ${format.deviceLabel(device)}${device.online ? "" : " · Offline"}
+              ${format.deviceLabel(device)}${device.online ? "" : " (offline)"}
             </option>`,
         )}
       </select>
@@ -64,11 +66,11 @@ export function RoutingControls({ all }) {
         aria-label="Find a receiving channel"
         placeholder="Find a channel"
         value=${filter}
-        onInput=${(event) => setFilter(event.target.value)}
+        onInput=${(event) => setQueryParameters({ find: event.target.value })}
       />
     </label>
     </div>
-    ${!receiver.online ? html`<p role="status">Receiver offline. Routing is unavailable.</p>` : null}
+    ${!receiver.online ? html`<p role="status">Offline</p>` : null}
     <div class="routing-channel-head" aria-hidden="true"><span>#</span><span>Receiving channel</span><span>Source channel</span><span>Transmitting device</span><span></span><span></span></div>
     <div class="routing-channel-rows">
       ${visible.map((channel) => {
@@ -99,7 +101,7 @@ export function RoutingControls({ all }) {
             <span class="routing-channel-source"
               >${pending ? "Applying…" : routed ? subscription.tx_channel : "Choose source"}</span
             >
-            <span class="routing-channel-device">${routed ? subscription.tx_device : "—"}</span>
+            <span class="routing-channel-device">${routed ? subscription.tx_device : ""}</span>
           <span
             class=${`routing-channel-status state-${tone}`}
             title=${routed ? format.subscriptionStatusText(subscription) : "Not routed"}

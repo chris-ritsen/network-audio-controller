@@ -74,7 +74,7 @@ test("failure and warning descriptions retain their meaning without enum prefixe
     subscriptionStatusText({
       status: { label: "UNKNOWN_ENUM", detail: "Status 0xabcd" },
     }),
-    "Subscription status unavailable",
+    "",
   );
   assert.equal(
     subscriptionStatusText({

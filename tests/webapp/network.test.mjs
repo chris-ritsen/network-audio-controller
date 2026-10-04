@@ -81,12 +81,11 @@ test("network panel separates primary and secondary active/configured values", (
     operation_availability: writableNetwork,
   };
   const markup = render(h(NetworkSection, { device }));
-  for (const value of ["Primary", "Secondary", "192.0.2.34", "192.0.2.244", "198.51.100.62", "Switched", "Redundant", "Configured address"]) {
+  for (const value of ["Primary", "Secondary", "192.0.2.34", "192.0.2.244", "198.51.100.62", "Switched", "Redundant", "Address after reboot"]) {
     assert.ok(markup.includes(value), value);
   }
-  assert.match(markup, /Network changes are unavailable for this interface/);
-  assert.match(markup, /Pending network change — reboot required/);
-  assert.match(markup, /Pending redundancy change — reboot required/);
+  assert.match(markup, /Reboot to apply the new network settings/);
+  assert.match(markup, /Reboot to apply the new redundancy mode/);
   assert.match(markup, />Save primary settings/);
   assert.doesNotMatch(markup, /Save redundancy mode/);
   assert.match(markup, /<select aria-label="Dante Redundancy"/);
@@ -147,12 +146,11 @@ test("supported secondary configuration submits distinct DNS and gateway fields"
 
 test("unknown network state has no refresh or guessed write controls", () => {
   const markup = render(h(NetworkSection, { device: { server_name: "unknown.local.", interfaces: [] } }));
-  assert.match(markup, /Network settings are unavailable/);
   assert.doesNotMatch(markup, /Refresh/);
   assert.doesNotMatch(markup, /Save primary settings|Save redundancy mode/);
 });
 
-test("readable network state keeps backend denial reasons and hides writes", () => {
+test("readable network state hides writes", () => {
   const device = {
     server_name: "locked.local.",
     interfaces: [
@@ -180,25 +178,23 @@ test("readable network state keeps backend denial reasons and hides writes", () 
     },
   };
   const markup = render(h(NetworkSection, { device }));
-  assert.match(markup, /Active mode<\/dt><dd>DHCP/);
-  assert.match(markup, /setting is read-only/);
-  assert.match(markup, /device is locked/);
+  assert.match(markup, /Mode<\/dt><dd>DHCP/);
   assert.doesNotMatch(
     markup,
     /Save primary settings|aria-label="Dante Redundancy"/,
   );
 });
 
-for (const [name, support, reasons, expected] of [
-  ["unsupported", false, ["unsupported"], /operation is unsupported/],
-  ["capability unknown", null, ["capability_unknown"], /Capability support was not reported/],
-  ["state unavailable", true, ["state_unavailable"], /state is unavailable/],
-  ["read-only", true, ["read_only"], /setting is read-only/],
-  ["locked", true, ["device_locked"], /device is locked/],
-  ["managed permission denied", true, ["managed_permission_denied"], /Permission.*denied/],
-  ["mode not advertised", true, ["requested_mode_not_advertised"], /mode was not advertised/],
+for (const [name, support, reasons] of [
+  ["unsupported", false, ["unsupported"]],
+  ["capability unknown", null, ["capability_unknown"]],
+  ["state unavailable", true, ["state_unavailable"]],
+  ["read-only", true, ["read_only"]],
+  ["locked", true, ["device_locked"]],
+  ["managed permission denied", true, ["managed_permission_denied"]],
+  ["mode not advertised", true, ["requested_mode_not_advertised"]],
 ]) {
-  test(`redundancy UI distinguishes ${name}`, () => {
+  test(`redundancy UI offers no change when ${name}`, () => {
     const status = {
       ...redundancyState(),
       advertised_support: support,
@@ -218,7 +214,6 @@ for (const [name, support, reasons, expected] of [
       },
       interfaces: [],
     } }));
-    assert.match(markup, expected);
     assert.doesNotMatch(markup, /aria-label="Dante Redundancy"/);
   });
 }

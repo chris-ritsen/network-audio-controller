@@ -13,9 +13,16 @@
     --line-strong: #50575d;
     --panel: #202326;
     --raised: #2b2f32;
-    --muted: #b3bcc4;
+    --muted: #ffffff;
     --text: #ffffff;
     --warn: #ffc400;
+    --meter-nominal: #2fe36a;
+    --meter-high: #ffc400;
+    --meter-critical: #ff2323;
+    --meter-nominal-unlit: #0d2a16;
+    --meter-high-unlit: #2e2504;
+    --meter-critical-unlit: #350909;
+    --meter-well: #000000;
     --font-data:
       "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
     --font-ui:

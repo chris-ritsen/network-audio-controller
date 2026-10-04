@@ -46,13 +46,6 @@
     min-width: 0;
   }
 
-  .routing-filter-help {
-    font-size: 12px;
-    line-height: 1.5;
-    opacity: 0.65;
-    margin: 10px 0;
-  }
-
   .routing-filter-panel details {
     border-top: 1px solid var(--line);
     padding: 12px 0;
@@ -115,7 +108,6 @@
   .routing-filter-count {
     margin-left: auto;
     padding-left: 8px;
-    opacity: 0.65;
     font-variant-numeric: tabular-nums;
   }
 

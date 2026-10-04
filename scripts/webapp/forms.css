@@ -33,6 +33,75 @@
     font-size: 12px;
   }
 
+  label.inline-field input {
+    width: 7rem;
+  }
+
+  label.inline-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .flow-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 12px;
+  }
+
+  .flow-form-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .flow-form-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 16px;
+  }
+
+  label.flow-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  label.flow-field input,
+  label.flow-field select {
+    width: 12rem;
+    font-weight: 400;
+  }
+
+  .flow-form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .device-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    color: var(--text);
+    opacity: 1;
+    cursor: not-allowed;
+  }
+
+  .btn:disabled,
+  .btn[disabled] {
+    color: var(--text);
+    cursor: not-allowed;
+  }
+
   .fields {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
@@ -132,23 +201,9 @@
     }
 
     .fields {
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
     }
 
-    .fields dt {
-      padding-bottom: 0;
-      border-bottom: none;
-    }
-
-    .fields dd {
-      padding-top: 2px;
-      border-top: none;
-    }
-
-    .fields dd + dt {
-      border-top: 1px solid var(--line);
-      margin-top: 4px;
-    }
   }
 
   .fields.nested {
@@ -259,4 +314,27 @@
       font-weight: 500;
     }
   }
+}
+
+:focus-visible,
+.btn:focus-visible,
+.tab:focus-visible {
+  outline: 1px solid var(--text);
+  outline-offset: 1px;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--text);
+  box-shadow: none;
+}
+
+.tabs > .tab {
+  color: var(--text);
+  opacity: 1;
 }

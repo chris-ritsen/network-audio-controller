@@ -189,7 +189,7 @@ test("browser keeps acknowledgement, device, effective-state, and persistence ev
   );
 });
 
-test("receiver flow inventory renders endpoints, identity, correlation, and completeness", () => {
+test("receiver flow inventory renders endpoints, identity and correlation", () => {
   const markup = render(
     h(ReceiverFlows, {
       device: {
@@ -216,7 +216,6 @@ test("receiver flow inventory renders endpoints, identity, correlation, and comp
     }),
   );
 
-  assert.match(markup, /Inventory: complete/);
   assert.match(markup, /1:7; 2:none/);
   assert.match(markup, /239\.69\.1\.10:5004/);
   assert.match(markup, /239\.69\.1\.11:5006/);

@@ -4,7 +4,6 @@ import { WEBAPP } from "./setup.mjs";
 
 const { aes67Status } = await import(`${WEBAPP}aes67.js`);
 const { Aes67Section } = await import(`${WEBAPP}device/aes67.js`);
-const { StatusSection } = await import(`${WEBAPP}device/status.js`);
 const { DEVICE_FILTERS } = await import(`${WEBAPP}device-filters.js`);
 const { h } = await import("preact");
 const { render } = await import("preact-render-to-string");
@@ -46,6 +45,16 @@ const section = (state) =>
     h(Aes67Section, { device: { ...device, ...withAvailability(state) } }),
   );
 
+const sectionStates = new Map([
+  ["Configured enabled", "Enabled"],
+  ["Configured disabled", "Disabled"],
+  ["Enabled", "Enabled"],
+  ["Disabled", "Disabled"],
+  ["Enable pending", "Enable pending"],
+  ["Disable pending", "Disable pending"],
+  ["Managed by DDM", "Enabled"],
+]);
+
 for (const [state, label] of [
   [{}, "Not reported"],
   [
@@ -74,14 +83,15 @@ for (const [state, label] of [
     "Managed by DDM",
   ],
 ]) {
-  test(`AES67 readiness ${JSON.stringify(state)} is ${label} across views`, () => {
+  test(`AES67 readiness ${JSON.stringify(state)} is ${label}`, () => {
     assert.equal(aes67Status(withAvailability(state)).label, label);
     assert.deepEqual(
       DEVICE_FILTERS.find(({ id }) => id === "aes67").values(state),
       [label],
     );
-    assert.ok(section(state).includes(label));
-    assert.ok(render(h(StatusSection, { device: { ...device, ...state } })).includes(label));
+    const shown = sectionStates.get(label);
+    if (shown) assert.match(section(state), new RegExp(`AES67</dt><dd>${shown}<`));
+    else assert.doesNotMatch(section(state), /AES67<\/dt>/);
   });
 }
 
@@ -115,8 +125,7 @@ test("pending mode keeps current and configured states distinct without inferrin
     aes67_current: false,
     aes67_configured: true,
   });
-  assert.match(markup, /Current mode<\/dt><dd>Disabled/);
-  assert.match(markup, /Configured mode<\/dt><dd>Enabled/);
+  assert.match(markup, /Enable pending/);
   assert.doesNotMatch(markup, /reboot/i);
 });
 
@@ -151,16 +160,17 @@ test("an enrolled device exposes AES67 actions only when managed permission is e
 });
 
 for (const [capabilities, label] of [
-  [{}, "Not reported"],
-  [{ rtp_audio_supported: true }, "Support reported"],
+  [{}, null],
+  [{ rtp_audio_supported: true }, "Available"],
   [{ rtp_audio_supported: true, rtp_audio_support_suppressed: false }, "Available"],
-  [{ rtp_audio_supported: false, rtp_audio_support_suppressed: false }, "Unavailable"],
+  [{ rtp_audio_supported: false, rtp_audio_support_suppressed: false }, null],
   [{ rtp_audio_supported: true, rtp_audio_support_suppressed: true }, "Reboot required"],
   [{ rtp_audio_supported: false, rtp_audio_support_suppressed: true }, "Reboot required"],
 ]) {
   test(`DDM RTP readiness ${JSON.stringify(capabilities)} is ${label}`, () => {
     const markup = section({ ...managed, ddm_capabilities: capabilities });
-    assert.match(markup, new RegExp(`RTP flows</dt><dd>${label}`));
+    if (label) assert.match(markup, new RegExp(`RTP flows</dt><dd>${label}`));
+    else assert.doesNotMatch(markup, /RTP flows/);
     assert.doesNotMatch(markup, /<button|<input|rtp_audio_|AES67 is enabled|does not support AES67/);
   });
 }

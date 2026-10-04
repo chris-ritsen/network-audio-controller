@@ -73,20 +73,30 @@ export function navigate(path, { replace = false } = {}) {
   publish();
 }
 
-export function setQueryParameter(name, value) {
+export function setQueryParameters(values, { replace = true } = {}) {
   const parameters = new URLSearchParams(window.location.search);
-  if (value === null || value === undefined || value === "") {
-    parameters.delete(name);
-  } else {
-    parameters.set(name, String(value));
+  for (const [name, value] of Object.entries(values)) {
+    if (value === null || value === undefined || value === "") {
+      parameters.delete(name);
+    } else {
+      parameters.set(name, String(value));
+    }
   }
   const serialized = parameters.toString();
-  window.history.replaceState(
-    {},
-    "",
-    serialized ? `${window.location.pathname}?${serialized}` : window.location.pathname,
-  );
+  const target = serialized ? `${window.location.pathname}?${serialized}` : window.location.pathname;
+  if (target === `${window.location.pathname}${window.location.search}`) {
+    return;
+  }
+  if (replace) {
+    window.history.replaceState({}, "", target);
+  } else {
+    window.history.pushState({}, "", target);
+  }
   publish();
+}
+
+export function setQueryParameter(name, value) {
+  setQueryParameters({ [name]: value });
 }
 
 function publish() {

@@ -37,7 +37,7 @@
     font-size: 13px;
   }
   .breadcrumb-separator {
-    color: var(--muted);
+    color: var(--text);
   }
   .topbar-spacer {
     flex: 1;
@@ -89,7 +89,7 @@
     padding: 0 12px;
     border-bottom: 3px solid transparent;
     font-size: 14px;
-    color: var(--muted);
+    color: var(--text);
     white-space: nowrap;
   }
   .filter-panel-toggle {
@@ -140,7 +140,7 @@
   }
   .app-menu-group h2 {
     font-size: 12px;
-    color: var(--muted);
+    color: var(--text);
     padding: 8px;
   }
   .app-menu-link {
@@ -155,7 +155,7 @@
     background: var(--raised);
   }
   .nav-count {
-    color: var(--muted);
+    color: var(--text);
     font-size: 12px;
     white-space: nowrap;
   }

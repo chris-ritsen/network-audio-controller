@@ -36,7 +36,14 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const entries = useMemo(() => transmitterEntries(sourceDevices || format.sortedDevices(devices.value)), [sourceDevices, devices.value]);
+  const requestName = deviceRequestName(receiver);
+  const receiveChannel = receiver.channels?.receivers?.[receiveChannelNumber];
+  const entries = useMemo(
+    () => transmitterEntries(sourceDevices || format.sortedDevices(devices.value)).filter(
+      (entry) => entry.online && selfConnectionTargetState(receiver, receiveChannel, entry.device).allowed,
+    ),
+    [sourceDevices, devices.value, receiver, receiveChannel],
+  );
   const needle = query.trim().toLowerCase();
   const results = entries.filter(
     (entry) => !needle || `${entry.channelName} ${entry.deviceLabel}`.toLowerCase().includes(needle),
@@ -51,9 +58,6 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
       }
     }
   }, []);
-
-  const requestName = deviceRequestName(receiver);
-  const receiveChannel = receiver.channels?.receivers?.[receiveChannelNumber];
 
   const apply = async (entry) => {
     const target = selfConnectionTargetState(receiver, receiveChannel, entry.device);
@@ -145,26 +149,22 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
       />
       <div class="source-picker-results">
         ${results.length === 0
-          ? html`<div class="palette-empty">No transmit channel matches this filter.</div>`
+          ? html`<div class="palette-empty">No matching transmit channels.</div>`
           : results.map((entry, index) => {
-              const target = selfConnectionTargetState(receiver, receiveChannel, entry.device);
               const active =
                 subscription &&
                 subscription.tx_channel === entry.channelName &&
                 subscription.tx_device === entry.deviceLabel;
               return html`
-                <button type="button" disabled=${busy || !entry.online || !receiver.online || !target.allowed}
+                <button type="button" disabled=${busy || !receiver.online}
                   key=${`${entry.deviceLabel}/${entry.channelName}`}
-                  class=${`source-picker-entry${active ? " current" : ""}${target.allowed ? "" : ` self-${target.state}`}`}
-                  title=${target.allowed ? undefined : target.reason}
+                  class=${`source-picker-entry${active ? " current" : ""}`}
+                  aria-current=${active ? "true" : null}
                   onPointerEnter=${() => setHighlighted(index)}
                   onClick=${() => apply(entry)}
                 >
                   <span class="flex-1 min-w-0 break-words"><strong class="block">${entry.channelName}</strong><span class="block font-normal">${entry.deviceLabel}</span></span>
-                  ${active ? html`<span class="badge badge-success badge-outline">Current</span>`
-                    : !entry.online ? html`<span class="badge">Offline</span>`
-                    : !target.allowed ? html`<span class="badge">${target.state === "unsupported" ? "Not supported" : "Unavailable"}</span>`
-                    : null}
+                  ${active ? html`<span class="source-picker-current">Current</span>` : null}
                 </button>
               `;
             })}
