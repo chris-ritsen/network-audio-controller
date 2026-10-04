@@ -313,17 +313,13 @@ function readTheme() {
 
 function rowLabelText(row) {
   if (row.kind === "group") return row.name;
-  if (row.kind === "device") {
-    return `${row.label}  (${row.channelCount})`;
-  }
+  if (row.kind === "device") return row.label;
   return row.name;
 }
 
 function columnLabelText(column) {
   if (column.kind === "group") return column.name;
-  if (column.kind === "device") {
-    return `${column.label}  (${column.channelCount})`;
-  }
+  if (column.kind === "device") return column.label;
   return column.name;
 }
 
