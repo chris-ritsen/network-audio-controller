@@ -33,9 +33,6 @@
     gap: 8px;
     font-size: 12px;
   }
-  .device-switcher select {
-    max-width: 240px;
-  }
   @media (max-width: 600px) {
     .device-heading {
       align-items: flex-start;

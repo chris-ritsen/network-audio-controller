@@ -1,5 +1,4 @@
 [
-  "(level strings +24 dBu, +18 dBu, +4 dBu, 0 dBu, 0 dBV, -10 dBV pass through untranslated)",
   "A device may only be selected once.",
   "A flow has been configured but does not have sufficient information to establish an audio connection",
   "A redundancy mode is required",
@@ -394,7 +393,6 @@
   "flow deletion was acknowledged and verified by fresh readback",
   "flow facts changed; validate the request again",
   "flow protocol is unknown",
-  "free text written by the DDM server; not defined in the repository",
   "frequency takes MHz, such as 511.125, or kHz, such as 511125",
   "fresh readback confirms deletion; acknowledgement was not received",
   "fresh readback of the correlated flow contradicts the request",
@@ -415,9 +413,6 @@
   "name contains unsupported characters",
   "name must be a string",
   "network settings take interface, mode, address, subnet mask and gateway",
-  "plus any device-supplied choice label",
-  "plus browser fetch and JSON parse messages",
-  "plus free DDM statusMessage text with an Error:/Warning:/Info: prefix stripped",
   "request outcome remains unknown after bounded fresh readback; no retry was sent",
   "request was acknowledged and correlated fresh readback was found, but some requested fields were not exposed",
   "request was acknowledged but bounded fresh readback did not confirm the effective flow",

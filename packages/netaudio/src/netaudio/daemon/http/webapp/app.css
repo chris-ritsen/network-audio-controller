@@ -4681,9 +4681,8 @@
     background: var(--raised);
   }
   .context-selector {
-    width: 208px;
-    min-width: 208px;
-    max-width: 208px;
+    width: auto;
+    min-width: 0;
     flex-shrink: 0;
   }
   .topbar-controls {
@@ -6303,9 +6302,6 @@ textarea:focus-visible {
     gap: 8px;
     font-size: 12px;
   }
-  .device-switcher select {
-    max-width: 240px;
-  }
   @media (max-width: 600px) {
     .device-heading {
       align-items: flex-start;
@@ -6748,6 +6744,7 @@ textarea:focus-visible {
   }
   .routing-filter-heading {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 8px;

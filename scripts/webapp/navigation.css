@@ -67,9 +67,8 @@
     background: var(--raised);
   }
   .context-selector {
-    width: 208px;
-    min-width: 208px;
-    max-width: 208px;
+    width: auto;
+    min-width: 0;
     flex-shrink: 0;
   }
   .topbar-controls {
