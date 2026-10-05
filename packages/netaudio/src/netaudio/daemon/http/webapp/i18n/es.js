@@ -602,7 +602,7 @@ export default {
   "Dante platform model": "Modelo de plataforma Dante",
   "Last seen": "Visto por última vez",
   "Clock role": "Rol de reloj",
-  "Clock leader": "Líder de reloj",
+  "Clock leader": "Reloj líder",
   "Clock sync": "Sincronización de reloj",
   "Primary mode": "Modo primario",
   "Secondary address": "Dirección secundaria",
