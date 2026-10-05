@@ -4,17 +4,18 @@ import { Icon } from "./icons.js";
 import { NewDomainDialog } from "./new-domain.js";
 import { html, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
 import { connectionProfiles, managedDomains, selectContext, selectedContext } from "./store.js";
+import { t } from "./i18n.js";
 
 export function ContextSelector() {
   const contexts = connectionProfiles.value?.contexts || [];
   const servers = connectionProfiles.value?.servers || [];
   const domains = managedDomains.value;
   const options = [
-    { value: "all", label: "All devices" }, { value: "local", label: "Unmanaged" },
-    ...servers.map((server) => ({ value: `server:${server.name}`, label: `${server.name} · All domains` })),
-    ...contexts.map((context) => ({ value: context.name, label: `${context.server} · ${context.domain_name || "Domain"}` })),
+    { value: "all", label: t("All devices") }, { value: "local", label: t("Unmanaged") },
+    ...servers.map((server) => ({ value: `server:${server.name}`, label: t("{server} · All domains", { server: server.name }) })),
+    ...contexts.map((context) => ({ value: context.name, label: `${context.server} · ${context.domain_name || t("Domain")}` })),
     ...domains.filter((domain) => !contexts.some((context) => context.server === domain.ddm_server_profile && context.domain_id === domain.id))
-      .map((domain) => ({ value: `domain:${JSON.stringify([domain.ddm_server_profile, domain.id])}`, label: `${domain.ddm_server_profile} · ${domain.name || "Domain"}` })),
+      .map((domain) => ({ value: `domain:${JSON.stringify([domain.ddm_server_profile, domain.id])}`, label: `${domain.ddm_server_profile} · ${domain.name || t("Domain")}` })),
   ];
   const current = selectedContext.value;
   const selected = options.find((option) => option.value === current);
@@ -28,7 +29,7 @@ export function ContextSelector() {
     try { window.localStorage.setItem("netaudio.context-label", JSON.stringify(selected)); } catch {}
   }, [current, selected?.label]);
   if (!selected) options.push({ value: current, label: rememberedLabel });
-  return html`<select aria-label="Server and domain" class="context-selector" value=${current}
+  return html`<select aria-label=${t("Server and domain")} class="context-selector" value=${current}
     onChange=${(event) => {
       const option = options.find((item) => item.value === event.target.value);
       try { window.localStorage.setItem("netaudio.context-label", JSON.stringify(option)); } catch {}
@@ -98,37 +99,37 @@ export function DdmConnections() {
     finally { setBusy(false); }
   };
   const selected = config?.contexts.find((context) => context.name === selectedContext.value);
-  return html`<${Panel} title="Connection">
+  return html`<${Panel} title=${t("Connection")}>
     <form class="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 w-full max-w-2xl" onSubmit=${login}>
       <div class="flex flex-col gap-4 min-w-0">
-        <label class="flex flex-col gap-2">Server
-        <select class="w-full" aria-label="DDM server" disabled=${busy} value=${server} onChange=${(event) => {
+        <label class="flex flex-col gap-2">${t("Server")}
+        <select class="w-full" aria-label=${t("DDM server")} disabled=${busy} value=${server} onChange=${(event) => {
           setServer(event.target.value); setMethod(profiles.find((entry) => entry.name === event.target.value)?.configured ? "saved" : "password"); setError("");
-        }}>${profiles.map((entry) => html`<option value=${entry.name}>${entry.name}</option>`)}<option value="new">Add server</option></select>
+        }}>${profiles.map((entry) => html`<option value=${entry.name}>${entry.name}</option>`)}<option value="new">${t("Add server")}</option></select>
       </label>
-      ${profile ? html`<label class="flex flex-col gap-2">Address<input class="w-full" readonly value=${profile.url} title=${profile.url} /></label>` : html`
-        <label class="flex flex-col gap-2">Profile name<input class="w-full" required ref=${name} placeholder="Studio" /></label>
-        <label class="flex flex-col gap-2">Server URL<input class="w-full" required type="url" ref=${url} placeholder="https://ddm.example/graphql" /></label>`}
-      ${domains.length ? html`<label class="flex flex-col gap-2">Domain
-        <select class="w-full" aria-label="DDM domain" disabled=${busy} value=${selected?.server === server ? selected.domain_id : ""} onChange=${(event) => chooseDomain(event.target.value)}>
-          <option value="">Choose domain</option>${domains.map((domain) => html`<option value=${domain.id}>${domain.name || "Unnamed domain"}</option>`)}
+      ${profile ? html`<label class="flex flex-col gap-2">${t("Address")}<input class="w-full" readonly value=${profile.url} title=${profile.url} /></label>` : html`
+        <label class="flex flex-col gap-2">${t("Profile name")}<input class="w-full" required ref=${name} placeholder=${t("Studio")} /></label>
+        <label class="flex flex-col gap-2">${t("Server URL")}<input class="w-full" required type="url" ref=${url} placeholder="https://ddm.example/graphql" /></label>`}
+      ${domains.length ? html`<label class="flex flex-col gap-2">${t("Domain")}
+        <select class="w-full" aria-label=${t("DDM domain")} disabled=${busy} value=${selected?.server === server ? selected.domain_id : ""} onChange=${(event) => chooseDomain(event.target.value)}>
+          <option value="">${t("Choose domain")}</option>${domains.map((domain) => html`<option value=${domain.id}>${domain.name || t("Unnamed domain")}</option>`)}
         </select></label>` : null}
-      ${profile?.configured ? html`<button class="btn btn-sm self-start" type="button" disabled=${busy} onClick=${() => setCreatingDomain(true)}><${Icon} name="plus" />New domain</button>` : null}
+      ${profile?.configured ? html`<button class="btn btn-sm self-start" type="button" disabled=${busy} onClick=${() => setCreatingDomain(true)}><${Icon} name="plus" />${t("New domain")}</button>` : null}
       </div>
       <div class="flex flex-col gap-4 min-w-0">
-      <label class="flex flex-col gap-2">Authentication<select class="w-full" aria-label="Authentication" value=${method} disabled=${busy} onChange=${(event) => setMethod(event.target.value)}>
-        ${profile?.configured ? html`<option value="saved">Saved credentials</option>` : null}
-        <option value="password">Username and password</option><option value="api_key">API key</option>
+      <label class="flex flex-col gap-2">${t("Authentication")}<select class="w-full" aria-label=${t("Authentication")} value=${method} disabled=${busy} onChange=${(event) => setMethod(event.target.value)}>
+        ${profile?.configured ? html`<option value="saved">${t("Saved credentials")}</option>` : null}
+        <option value="password">${t("Username and password")}</option><option value="api_key">${t("API key")}</option>
       </select></label>
-      ${method === "password" ? html`<label class="flex flex-col gap-2">Username<input class="w-full" ref=${username} required autocomplete="username" /></label>` : null}
-      ${method !== "saved" ? html`<label class="flex flex-col gap-2">${method === "api_key" ? "API key" : "Password"}<input class="w-full" key=${method} ref=${secret} required type="password" autocomplete=${method === "password" ? "current-password" : "off"} /></label>` : null}
+      ${method === "password" ? html`<label class="flex flex-col gap-2">${t("Username")}<input class="w-full" ref=${username} required autocomplete="username" /></label>` : null}
+      ${method !== "saved" ? html`<label class="flex flex-col gap-2">${method === "api_key" ? t("API key") : t("Password")}<input class="w-full" key=${method} ref=${secret} required type="password" autocomplete=${method === "password" ? "current-password" : "off"} /></label>` : null}
       <div class="flex flex-wrap gap-2 pt-1">
-      <button class="btn btn-sm btn-primary" type="submit" disabled=${busy}><${Icon} name="plug" />${busy ? "Connecting…" : "Connect"}</button>
-      ${profile?.configured ? html`<button class="btn btn-sm" type="button" disabled=${busy} onClick=${logout}><${Icon} name="unplug" />Log out</button>` : null}
+      <button class="btn btn-sm btn-primary" type="submit" disabled=${busy}><${Icon} name="plug" />${busy ? t("Connecting…") : t("Connect")}</button>
+      ${profile?.configured ? html`<button class="btn btn-sm" type="button" disabled=${busy} onClick=${logout}><${Icon} name="unplug" />${t("Log out")}</button>` : null}
       </div>
       </div>
     </form>
-    ${error ? html`<div class="alert alert-error mt-3" role="alert">${error}</div>` : null}
+    ${error ? html`<div class="alert alert-error mt-3" role="alert">${t(error)}</div>` : null}
     ${creatingDomain ? html`<${NewDomainDialog} server=${server} onClose=${() => setCreatingDomain(false)} />` : null}
   <//>`;
 }

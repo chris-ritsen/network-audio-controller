@@ -1,11 +1,12 @@
+import { t } from "./i18n.js";
 import { signal } from "./lib/preact.js";
 
 const APPEARANCE_KEY = "netaudio.appearance";
 const LIGHT_QUERY = "(prefers-color-scheme: light)";
 export const APPEARANCES = [
-  ["system", "System"],
-  ["light", "Light"],
-  ["dark", "Dark"],
+  ["system", t("System")],
+  ["light", t("Light")],
+  ["dark", t("Dark")],
 ];
 
 function storedAppearance() {

@@ -1,3 +1,5 @@
+import { t } from "./i18n.js";
+
 function normalizedMac(value) {
   if (typeof value !== "string") return null;
   let normalized = value.replaceAll(":", "").replaceAll("-", "").toLowerCase();
@@ -61,14 +63,14 @@ export function selfConnectionTargetState(
   if (receiverChannel?.can_subscribe_self === false) {
     return {
       allowed: false,
-      reason: "This input cannot connect to an output on the same device.",
+      reason: t("This input cannot connect to an output on the same device."),
       selfConnection: true,
       state: "unsupported",
     };
   }
   return {
     allowed: false,
-    reason: "This input cannot connect to an output on the same device.",
+    reason: t("This input cannot connect to an output on the same device."),
     selfConnection: true,
     state: "unavailable",
   };

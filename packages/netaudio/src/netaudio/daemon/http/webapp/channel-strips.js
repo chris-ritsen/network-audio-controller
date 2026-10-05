@@ -1,4 +1,5 @@
 import { METER_FLOOR_DBFS } from "./format.js";
+import { t } from "./i18n.js";
 import { html, useCallback, useEffect, useMemo, useRef, useState } from "./lib/preact.js";
 import { observeVisibility, useAnimationFrames } from "./meter-animation.js";
 import {
@@ -133,16 +134,16 @@ export function ChannelStripToggle({ pressed, pending, label, title, onToggle })
 function ChannelStrip({ strip, ticks, controls, onClearOver }) {
   const tracks = trackCount(strip);
   const labels = Array.isArray(strip.trackLabels) ? strip.trackLabels.slice(0, tracks) : [];
-  const title = `Channel ${strip.number}${strip.name ? ` ${strip.name}` : ""}`;
+  const title = strip.name ? t("Channel {number} {name}", { number: strip.number, name: strip.name }) : t("Channel {number}", { number: strip.number });
   return html`<div class="channel-strip" data-strip-key=${strip.key} role="group" aria-label=${title}>
     <button
       type="button"
       class="channel-strip-over"
-      title="Over. Click to clear"
-      aria-label=${`Clear the over indicator for channel ${strip.number}`}
+      title=${t("Over. Click to clear")}
+      aria-label=${t("Clear the over indicator for channel {number}", { number: strip.number })}
       onClick=${() => onClearOver(strip.key)}
     >
-      <span class="channel-strip-over-lamp">OVER</span>
+      <span class="channel-strip-over-lamp">${t("OVER")}</span>
       <span class="channel-strip-over-count"></span>
     </button>
     <div class="channel-strip-meter" data-tracks=${tracks} aria-hidden="true">

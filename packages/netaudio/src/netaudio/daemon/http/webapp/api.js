@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 import { inventoryReady, removeForgottenDevices } from "./store.js";
 
 export class ApiError extends Error {
@@ -25,7 +26,7 @@ async function request(method, path, body) {
     !inventoryReady.value
   ) {
     throw new ApiError(
-      "Waiting for live device inventory. Try again when connected.",
+      t("Waiting for live device inventory. Try again when connected."),
       409,
       null,
     );
@@ -43,7 +44,7 @@ async function request(method, path, body) {
       payload = JSON.parse(raw);
     } catch (error) {
       throw new ApiError(
-        `${method} ${path} returned invalid JSON: ${raw}`,
+        t("{method} {path} returned invalid JSON: {raw}", { method, path, raw }),
         response.status,
         raw,
       );
@@ -53,7 +54,7 @@ async function request(method, path, body) {
     const message =
       payload && payload.error
         ? payload.error
-        : `${method} ${path} failed with ${response.status}`;
+        : t("{method} {path} failed with {status}", { method, path, status: response.status });
     throw new ApiError(message, response.status, payload);
   }
   return payload;

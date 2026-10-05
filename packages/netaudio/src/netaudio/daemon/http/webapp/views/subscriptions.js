@@ -1,6 +1,7 @@
 import { api } from "../api.js";
 import { AsyncButton, Notice, Panel, Value } from "../components.js";
 import * as format from "../format.js";
+import { t } from "../i18n.js";
 import { html } from "../lib/preact.js";
 import { Icon } from "../icons.js";
 import { SubscriptionTransport } from "../device/receiver-status.js";
@@ -9,10 +10,10 @@ import { ConfigurableTable } from "../table.js";
 
 function subscriptionColumns() {
   return [
-    { cell: (row) => format.deviceLabel(row.device), id: "receiver", label: "Receiver" },
-    { cell: (row) => html`<${Value} value=${row.subscription.rx_channel} />`, id: "receive-channel", label: "Rx channel" },
-    { cell: (row) => html`<${Value} value=${row.subscription.tx_device} />`, id: "transmitter", label: "Transmitter" },
-    { cell: (row) => html`<${Value} value=${row.subscription.tx_channel} />`, id: "transmit-channel", label: "Tx channel" },
+    { cell: (row) => format.deviceLabel(row.device), id: "receiver", label: t("Receiver") },
+    { cell: (row) => html`<${Value} value=${row.subscription.rx_channel} />`, id: "receive-channel", label: t("Rx channel") },
+    { cell: (row) => html`<${Value} value=${row.subscription.tx_device} />`, id: "transmitter", label: t("Transmitter") },
+    { cell: (row) => html`<${Value} value=${row.subscription.tx_channel} />`, id: "transmit-channel", label: t("Tx channel") },
     {
       cell: (row) => {
         const status = row.subscription.status || null;
@@ -25,20 +26,20 @@ function subscriptionColumns() {
         </span>`;
       },
       id: "status",
-      label: "Status",
+      label: t("Status"),
     },
-    { cell: (row) => html`<${Value} value=${row.subscription.ddm_summary} />`, id: "managed", label: "Domain status", defaultHidden: true },
+    { cell: (row) => html`<${Value} value=${t(row.subscription.ddm_summary)} />`, id: "managed", label: t("Domain status"), defaultHidden: true },
     {
       cell: (row) =>
         row.receiveNumber === undefined
           ? format.ABSENT
           : html`<${AsyncButton}
               small
-              description=${`unsubscribe ${format.deviceLabel(row.device)} ${row.subscription.rx_channel}`}
+              description=${t("unsubscribe {device} {channel}", { device: format.deviceLabel(row.device), channel: row.subscription.rx_channel })}
               onRun=${() =>
                 api.unsubscribe({ rx_channel: row.receiveNumber, rx_device: deviceRequestName(row.device) })}
             >
-              Unsubscribe
+              ${t("Unsubscribe")}
             <//>`,
       id: "action",
       label: "",
@@ -62,9 +63,9 @@ function SubscriptionTable({ all }) {
     }
   }
   return html`
-    <${Panel} title=${`Subscriptions (${rows.length})`}>
+    <${Panel} title=${t("Subscriptions ({count})", { count: rows.length })}>
       ${rows.length === 0
-        ? html`<${Notice}>No Dante receiver is currently subscribed.<//>`
+        ? html`<${Notice}>${t("No Dante receiver is currently subscribed.")}<//>`
         : html`<${ConfigurableTable}
             tableId="subscriptions"
             columns=${subscriptionColumns()}
@@ -84,5 +85,5 @@ function SubscriptionsView() {
 export const subscriptionsView = {
   component: SubscriptionsView,
   id: "subscriptions",
-  label: "Subscriptions",
+  label: t("Subscriptions"),
 };

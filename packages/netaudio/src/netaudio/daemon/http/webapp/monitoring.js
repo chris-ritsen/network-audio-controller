@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { t } from "./i18n.js";
 import { html, useEffect, useState } from "./lib/preact.js";
 import { inventoryReady } from "./store.js";
 
@@ -24,7 +25,7 @@ export function DetailedMonitoring({ requestName, online }) {
       leave();
     };
   }, [requestName, online, ready, attempt]);
-  return error ? html`<div role="alert">Detailed monitoring could not start: ${error}
-    <button class="btn btn-sm" onClick=${() => setAttempt(attempt + 1)}>Retry monitoring</button>
+  return error ? html`<div role="alert">${t("Detailed monitoring could not start: {error}", { error: t(error) })}
+    <button class="btn btn-sm" onClick=${() => setAttempt(attempt + 1)}>${t("Retry monitoring")}</button>
   </div>` : null;
 }

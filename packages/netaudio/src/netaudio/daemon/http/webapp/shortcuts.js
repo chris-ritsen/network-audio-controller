@@ -1,3 +1,5 @@
+import { t } from "./i18n.js";
+
 const APPLE_PLATFORM = /mac|iphone|ipad|ipod/i;
 
 function platformName() {
@@ -10,7 +12,7 @@ function platformName() {
 
 export const usesCommandKey = APPLE_PLATFORM.test(platformName());
 
-export const commandKeyLabel = usesCommandKey ? "⌘" : "Ctrl";
+export const commandKeyLabel = usesCommandKey ? "⌘" : t("Ctrl");
 
 export function shortcutLabel(key) {
   return usesCommandKey ? `${commandKeyLabel}${key}` : `${commandKeyLabel}+${key}`;

@@ -1,3 +1,5 @@
+import { t } from "./i18n.js";
+
 export const ABSENT = "";
 
 export function text(value) {
@@ -5,7 +7,7 @@ export function text(value) {
     return ABSENT;
   }
   if (typeof value === "boolean") {
-    return value ? "Yes" : "No";
+    return value ? t("Yes") : t("No");
   }
   if (Array.isArray(value)) {
     return value.length ? value.map((entry) => text(entry)).join(", ") : ABSENT;
@@ -60,7 +62,7 @@ export function deviceLabel(device) {
 }
 
 export function channelLabel(channel, number) {
-  const name = channel && channel.name ? channel.name : `channel ${number}`;
+  const name = channel && channel.name ? channel.name : t("channel {number}", { number });
   return `${number}: ${name}`;
 }
 
@@ -83,19 +85,19 @@ export function subscriptionStatusText(subscription) {
     return ABSENT;
   }
   if (status.state === "connected" && statusTone(status.severity) === "good") {
-    return status.label || "Connected";
+    return status.label ? t(status.label) : t("Connected");
   }
-  if (status.state === "none") return "Not subscribed";
+  if (status.state === "none") return t("Not subscribed");
   const detail = typeof status.detail === "string" ? status.detail.trim() : "";
   if (detail && !/\b0x[\da-f]+\b|\b[\da-f]{16,}\b/i.test(detail)) {
-    return detail.replace(/^(Error|Warning):\s*/i, "");
+    return t(detail.replace(/^(Error|Warning):\s*/i, ""));
   }
   return (
     {
-      pending: "Subscription pending",
-      resolving: "Finding source channel",
-      unresolved: "Source channel not found",
-      error: "Subscription failed",
+      pending: t("Subscription pending"),
+      resolving: t("Finding source channel"),
+      unresolved: t("Source channel not found"),
+      error: t("Subscription failed"),
     }[status.state] || ABSENT
   );
 }
@@ -154,12 +156,12 @@ export function macAddress(device) {
 }
 
 export function stateLabel(value) {
-  if (value === "mute_or_floor") return "Muted or below meter floor";
-  if (value === "framing_marker") return "Signal unavailable";
+  if (value === "mute_or_floor") return t("Muted or below meter floor");
+  if (value === "framing_marker") return t("Signal unavailable");
   if (value === null || value === undefined || value === "") return ABSENT;
-  if (value === "OK") return "OK";
+  if (value === "OK") return t("OK");
   const words = String(value).replaceAll("_", " ").toLowerCase();
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  return t(words.charAt(0).toUpperCase() + words.slice(1));
 }
 
 export function clockLeaderName(device, inventory) {
@@ -292,7 +294,7 @@ export function preferredLeader(value) {
   if (value === null || value === undefined) {
     return ABSENT;
   }
-  return value ? "Enabled" : "Disabled";
+  return value ? t("Enabled") : t("Disabled");
 }
 
 export function clockStatusFresh(device, now = Date.now()) {

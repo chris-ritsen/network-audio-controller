@@ -17,22 +17,23 @@ import {
 } from "../shure-catalog.js";
 import { ON_AIR_SOURCES, slotRows } from "../shure-slots.js";
 import { shureDevices, shureLevelsFor, shureMeters, visibleShureDevices } from "../store.js";
+import { t } from "../i18n.js";
 
-const DEVICE_TYPE_LABELS = { ad4d: "Axient Digital receiver", p10t: "PSM 1000 transmitter" };
+const DEVICE_TYPE_LABELS = { ad4d: t("Axient Digital receiver"), p10t: t("PSM 1000 transmitter") };
 
 function modelOf(device) {
   return device.model || (device.device_type ? device.device_type.toUpperCase() : null);
 }
 
 const DEVICE_COLUMNS = [
-  { cell: (device) => device.name || "", id: "name", label: "Name" },
-  { cell: (device) => modelOf(device) || "", id: "model", label: "Model" },
-  { cell: (device) => DEVICE_TYPE_LABELS[device.device_type] || "", id: "type", label: "Type" },
-  { cell: (device) => device.ip || "", id: "address", label: "Address" },
-  { cell: (device) => device.mac || "", id: "mac", label: "MAC address", defaultHidden: true },
-  { cell: (device) => device.firmware_version || "", id: "firmware", label: "Firmware" },
-  { cell: (device) => device.rf_band || "", id: "rf-band", label: "RF band", defaultHidden: true },
-  { cell: (device) => (device.last_seen ? format.timestamp(device.last_seen) : ""), id: "last-seen", label: "Last seen", defaultHidden: true },
+  { cell: (device) => device.name || "", id: "name", label: t("Name") },
+  { cell: (device) => modelOf(device) || "", id: "model", label: t("Model") },
+  { cell: (device) => DEVICE_TYPE_LABELS[device.device_type] || "", id: "type", label: t("Type") },
+  { cell: (device) => device.ip || "", id: "address", label: t("Address") },
+  { cell: (device) => device.mac || "", id: "mac", label: t("MAC address"), defaultHidden: true },
+  { cell: (device) => device.firmware_version || "", id: "firmware", label: t("Firmware") },
+  { cell: (device) => device.rf_band || "", id: "rf-band", label: t("RF band"), defaultHidden: true },
+  { cell: (device) => (device.last_seen ? format.timestamp(device.last_seen) : ""), id: "last-seen", label: t("Last seen"), defaultHidden: true },
 ];
 
 function deviceByIdentifier(identifier) {
@@ -65,7 +66,7 @@ function useSetter(device) {
 }
 
 function errorText(error) {
-  return error && error.message ? error.message : String(error);
+  return t(error && error.message ? error.message : String(error));
 }
 
 function TextEditor({ field, value, run, initial }) {
@@ -74,7 +75,7 @@ function TextEditor({ field, value, run, initial }) {
   const shown = (field.decode || decode.text)(value);
   if (!editing) {
     return html`<span class="shure-value">${shown ?? ""}</span>
-      <button type="button" class="btn btn-xs" onClick=${() => { setDraft(initial ?? decode.text(value) ?? ""); setEditing(true); }}>Edit</button>`;
+      <button type="button" class="btn btn-xs" onClick=${() => { setDraft(initial ?? decode.text(value) ?? ""); setEditing(true); }}>${t("Edit")}</button>`;
   }
   const save = async (event) => {
     event.preventDefault();
@@ -90,8 +91,8 @@ function TextEditor({ field, value, run, initial }) {
       onInput=${(event) => setDraft(event.target.value)}
       autofocus
     />
-    <button type="submit" class="btn btn-xs btn-primary">Save</button>
-    <button type="button" class="btn btn-xs" onClick=${() => setEditing(false)}>Cancel</button>
+    <button type="submit" class="btn btn-xs btn-primary">${t("Save")}</button>
+    <button type="button" class="btn btn-xs" onClick=${() => setEditing(false)}>${t("Cancel")}</button>
   </form>`;
 }
 
@@ -135,7 +136,7 @@ function FieldEditor({ field, value, request }) {
       aria-pressed=${on ? "true" : "false"}
       disabled=${pending}
       onClick=${() => run(on ? "off" : "on")}
-    >${on ? "On" : "Off"}</button>`;
+    >${on ? t("On") : t("Off")}</button>`;
   } else {
     const initial = edit.kind === "frequency" ? (decode.frequency(value) || "").replace(" MHz", "") : edit.kind === "group" ? (decode.text(value) === "--,--" ? "" : decode.text(value)) : undefined;
     control = html`<${TextEditor} field=${field} value=${value} run=${run} initial=${initial} />`;
@@ -145,7 +146,7 @@ function FieldEditor({ field, value, request }) {
 
 function Leds({ value, colors }) {
   const lit = bits(value, colors.length);
-  return html`<span class="shure-leds" aria-label=${`LED bitmap ${value}`}>
+  return html`<span class="shure-leds" aria-label=${t("LED bitmap {bitmap}", { bitmap: value })}>
     ${colors.map((color, index) => html`<span key=${index} class="shure-led" style=${lit[index] ? `background:${color};box-shadow:0 0 4px ${color}` : ""}></span>`)}
   </span>`;
 }
@@ -172,7 +173,7 @@ function KindValue({ field, value }) {
     if (!text) return null;
     return html`<span class="shure-inline">${[...text].map((state, index) => html`<span key=${index} class="shure-antenna">
       <span class="shure-led" style=${ANTENNA_COLORS[state] ? `background:${ANTENNA_COLORS[state]};box-shadow:0 0 4px ${ANTENNA_COLORS[state]}` : ""}></span>
-      ${ANTENNA_LETTERS[index]} ${state === "B" ? "blue" : state === "R" ? "red" : "off"}
+      ${ANTENNA_LETTERS[index]} ${state === "B" ? t("blue") : state === "R" ? t("red") : t("off")}
     </span>`)}</span>`;
   }
   return html`<span>${(field.decode || decode.text)(value)}</span>`;
@@ -225,7 +226,7 @@ function slotCell(column, { values, onAir }) {
   const shown = (column.decode || decode.text)(values[column.key]);
   return {
     editable: Boolean(column.edit && active),
-    shown: column.key === "SLOT_STATUS" && onAir && shown ? `${shown}, on air` : shown,
+    shown: column.key === "SLOT_STATUS" && onAir && shown ? t("{status}, on air", { status: shown }) : shown,
   };
 }
 
@@ -238,13 +239,13 @@ function SlotTable({ properties, request }) {
       return cell.editable || cell.shown !== null;
     }),
   );
-  return html`<h3 class="shure-heading">Transmitter slots</h3>
+  return html`<h3 class="shure-heading">${t("Transmitter slots")}</h3>
   <div class="table-wrapper">
     <table class="data shure-slots">
-      <thead><tr><th>Slot</th>${columns.map((column) => html`<th key=${column.key}>${column.label}</th>`)}</tr></thead>
+      <thead><tr><th>${t("Slot")}</th>${columns.map((column) => html`<th key=${column.key}>${column.label}</th>`)}</tr></thead>
       <tbody>
         ${rows.map((row) => html`<tr key=${row.slot}>
-          <td data-label="Slot">${row.slot}</td>
+          <td data-label=${t("Slot")}>${row.slot}</td>
           ${columns.map((column) => {
             const cell = slotCell(column, row);
             return html`<td key=${column.key} data-label=${column.label}>
@@ -265,7 +266,7 @@ function parseNetwork(text) {
   return { mode, address: ip(address), mask: ip(mask), gateway: ip(gateway) === "0.0.0.0" ? "None" : ip(gateway), mac };
 }
 
-const INTERFACE_LABELS = { SC: "Shure control", D1: "Dante primary", D2: "Dante secondary" };
+const INTERFACE_LABELS = { SC: t("Shure control"), D1: t("Dante primary"), D2: t("Dante secondary") };
 
 function NetworkRow({ interfaceName, settings, set }) {
   const [editing, setEditing] = useState(false);
@@ -279,9 +280,9 @@ function NetworkRow({ interfaceName, settings, set }) {
   const save = async (event) => {
     event.preventDefault();
     const warning = interfaceName === "SC"
-      ? "The receiver will move to the new control address and netaudio will reconnect to it."
-      : "The receiver reboots to apply Dante network settings. Its audio stops until it is back.";
-    if (!window.confirm(`Change ${INTERFACE_LABELS[interfaceName]} network settings? ${warning}`)) return;
+      ? t("The receiver will move to the new control address and netaudio will reconnect to it.")
+      : t("The receiver reboots to apply Dante network settings. Its audio stops until it is back.");
+    if (!window.confirm(`${t("Change {interface} network settings?", { interface: INTERFACE_LABELS[interfaceName] })} ${warning}`)) return;
     setPending(true);
     setError("");
     try {
@@ -294,27 +295,27 @@ function NetworkRow({ interfaceName, settings, set }) {
     }
   };
   return html`<tr>
-    <td data-label="Interface">${INTERFACE_LABELS[interfaceName]}</td>
+    <td data-label=${t("Interface")}>${INTERFACE_LABELS[interfaceName]}</td>
     ${editing
       ? html`<td colspan="5">
           <form class="shure-edit" onSubmit=${save}>
-            <select class="select select-sm" value=${draft.mode} onChange=${(event) => setDraft({ ...draft, mode: event.target.value })} aria-label="Mode">
-              <option value="AUTO">Automatic</option>
-              <option value="MANUAL">Manual</option>
+            <select class="select select-sm" value=${draft.mode} onChange=${(event) => setDraft({ ...draft, mode: event.target.value })} aria-label=${t("Mode")}>
+              <option value="AUTO">${t("Automatic")}</option>
+              <option value="MANUAL">${t("Manual")}</option>
             </select>
             ${draft.mode === "MANUAL"
-              ? ["address", "subnet_mask", "gateway"].map((name) => html`<input key=${name} class="input input-sm" value=${draft[name]} aria-label=${name.replace("_", " ")} placeholder=${name.replace("_", " ")} onInput=${(event) => setDraft({ ...draft, [name]: event.target.value })} />`)
+              ? ["address", "subnet_mask", "gateway"].map((name) => html`<input key=${name} class="input input-sm" value=${draft[name]} aria-label=${t(name.replace("_", " "))} placeholder=${t(name.replace("_", " "))} onInput=${(event) => setDraft({ ...draft, [name]: event.target.value })} />`)
               : null}
-            <button type="submit" class="btn btn-xs btn-primary" disabled=${pending}>Apply</button>
-            <button type="button" class="btn btn-xs" onClick=${() => setEditing(false)}>Cancel</button>
+            <button type="submit" class="btn btn-xs btn-primary" disabled=${pending}>${t("Apply")}</button>
+            <button type="button" class="btn btn-xs" onClick=${() => setEditing(false)}>${t("Cancel")}</button>
             ${error ? html`<span class="text-error text-sm" role="alert">${error}</span>` : null}
           </form>
         </td>`
-      : html`<td data-label="Mode">${settings.mode === "AUTO" ? "Automatic" : settings.mode === "MANUAL" ? "Manual" : settings.mode}</td>
-          <td data-label="Address">${settings.address}</td>
-          <td data-label="Subnet mask">${settings.mask}</td>
-          <td data-label="Gateway">${settings.gateway}</td>
-          <td data-label="MAC address">${settings.mac} <button type="button" class="btn btn-xs" onClick=${begin}>Edit</button></td>`}
+      : html`<td data-label=${t("Mode")}>${settings.mode === "AUTO" ? t("Automatic") : settings.mode === "MANUAL" ? t("Manual") : settings.mode}</td>
+          <td data-label=${t("Address")}>${settings.address}</td>
+          <td data-label=${t("Subnet mask")}>${settings.mask}</td>
+          <td data-label=${t("Gateway")}>${settings.gateway === "None" ? t("None") : settings.gateway}</td>
+          <td data-label=${t("MAC address")}>${settings.mac} <button type="button" class="btn btn-xs" onClick=${begin}>${t("Edit")}</button></td>`}
   </tr>`;
 }
 
@@ -322,10 +323,10 @@ function NetworkPanel({ device, set }) {
   const network = (device.properties || {}).NET_SETTINGS || {};
   const interfaces = ["SC", "D1", "D2"].filter((name) => network[name]);
   if (!interfaces.length) return null;
-  return html`<${Panel} title="Network">
+  return html`<${Panel} title=${t("Network")}>
     <div class="table-wrapper">
       <table class="data">
-        <thead><tr><th>Interface</th><th>Mode</th><th>Address</th><th>Subnet mask</th><th>Gateway</th><th>MAC address</th></tr></thead>
+        <thead><tr><th>${t("Interface")}</th><th>${t("Mode")}</th><th>${t("Address")}</th><th>${t("Subnet mask")}</th><th>${t("Gateway")}</th><th>${t("MAC address")}</th></tr></thead>
         <tbody>${interfaces.map((name) => html`<${NetworkRow} key=${name} interfaceName=${name} settings=${parseNetwork(network[name])} set=${set} />`)}</tbody>
       </table>
     </div>
@@ -352,8 +353,8 @@ function MuteControl({ device, strip, set }) {
   return html`<${ChannelStripToggle}
     pressed=${muted}
     pending=${pending}
-    label=${p10t ? "RF mute" : "Mute"}
-    title=${(error ? `${error}. ` : "") + (p10t ? (muted ? "RF muted. Click to unmute" : "RF mute") : muted ? "Muted. Click to unmute" : "Mute")}
+    label=${p10t ? t("RF mute") : t("Mute")}
+    title=${(error ? `${error}. ` : "") + (p10t ? (muted ? t("RF muted. Click to unmute") : t("RF mute")) : muted ? t("Muted. Click to unmute") : t("Mute"))}
     onToggle=${toggle}
   />`;
 }
@@ -380,8 +381,8 @@ function LevelsPanel({ device, set }) {
     [device.mac],
   );
   if (!strips.length) return null;
-  return html`<${Panel} title="Levels">
-    <${ChannelStrips} strips=${strips} read=${read} label=${`${device.name} levels`} controls=${(strip) => html`<${MuteControl} device=${device} strip=${strip} set=${set} />`} />
+  return html`<${Panel} title=${t("Levels")}>
+    <${ChannelStrips} strips=${strips} read=${read} label=${t("{device} levels", { device: device.name })} controls=${(strip) => html`<${MuteControl} device=${device} strip=${strip} set=${set} />`} />
   <//>`;
 }
 
@@ -391,16 +392,16 @@ function Ad4dChannel({ device, number, set }) {
   const request = { set, channel: number };
   const name = decode.text(properties.CHAN_NAME);
   return html`<${Panel}
-    title=${`Channel ${number}${name ? ` · ${name}` : ""}`}
-    headerActions=${html`<${IdentifyButton} set=${set} channel=${number} label="Identify" />`}
+    title=${`${t("Channel {number}", { number })}${name ? ` · ${name}` : ""}`}
+    headerActions=${html`<${IdentifyButton} set=${set} channel=${number} label=${t("Identify")} />`}
   >
     <div class="shure-columns">
-      <section><h3 class="shure-heading">Audio</h3><${FieldList} fields=${AD4D_AUDIO_FIELDS} properties=${properties} request=${request} /></section>
-      <section><h3 class="shure-heading">RF</h3><${FieldList} fields=${AD4D_RF_FIELDS} properties=${properties} request=${request} /></section>
+      <section><h3 class="shure-heading">${t("Audio")}</h3><${FieldList} fields=${AD4D_AUDIO_FIELDS} properties=${properties} request=${request} /></section>
+      <section><h3 class="shure-heading">${t("RF")}</h3><${FieldList} fields=${AD4D_RF_FIELDS} properties=${properties} request=${request} /></section>
       ${!properties.TX_MODEL || properties.TX_MODEL === "UNKNOWN"
         ? null
         : html`<section>
-            <h3 class="shure-heading">Transmitter</h3>
+            <h3 class="shure-heading">${t("Transmitter")}</h3>
             <${FieldList} fields=${AD4D_TRANSMITTER_FIELDS} properties=${properties} />
           </section>`}
     </div>
@@ -411,13 +412,13 @@ function Ad4dChannel({ device, number, set }) {
 function P10tChannels({ device, set }) {
   const numbers = channelNumbers(device);
   const meters = shureMeters.value[device.mac] || {};
-  return html`<${Panel} title="Channels">
+  return html`<${Panel} title=${t("Channels")}>
     <div class="shure-columns">
       ${numbers.map((number) => {
         const properties = channelProperties(device, number, meters[number]);
         const name = decode.text(properties.CHAN_NAME);
         return html`<section key=${number}>
-          <h3 class="shure-heading">Channel ${number}${name ? ` · ${name}` : ""}</h3>
+          <h3 class="shure-heading">${t("Channel {number}", { number })}${name ? ` · ${name}` : ""}</h3>
           <${FieldList} fields=${P10T_CHANNEL_FIELDS} properties=${properties} request=${{ set, channel: number }} />
         </section>`;
       })}
@@ -438,11 +439,11 @@ function DeviceView({ device }) {
         <div class="content-subtitle">${address}</div>
       </div>
     </div>
-    ${device.online ? null : html`<${Notice}>Not reachable since ${format.timestamp(device.last_seen)}.<//>`}
+    ${device.online ? null : html`<${Notice}>${t("Not reachable since {time}.", { time: format.timestamp(device.last_seen) })}<//>`}
     <${LevelsPanel} device=${device} set=${set} />
-    <${Panel} title="Device" headerActions=${p10t ? null : html`<${IdentifyButton} set=${set} label="Identify" />`}>
+    <${Panel} title=${t("Device")} headerActions=${p10t ? null : html`<${IdentifyButton} set=${set} label=${t("Identify")} />`}>
       <${FieldList}
-        fields=${[...deviceFields, { key: "__address", label: "Address" }, { key: "__mac", label: "MAC address" }]}
+        fields=${[...deviceFields, { key: "__address", label: t("Address") }, { key: "__mac", label: t("MAC address") }]}
         properties=${{ ...properties, __address: device.ip, __mac: device.mac }}
         request=${{ set }}
       />
@@ -459,14 +460,14 @@ function ShureView({ location }) {
   if (identifier) {
     const device = deviceByIdentifier(identifier);
     if (!device) {
-      return html`<${Notice}>${identifier} is not on the network.<//>`;
+      return html`<${Notice}>${t("{device} is not on the network.", { device: identifier })}<//>`;
     }
     return html`<${DeviceView} device=${device} />`;
   }
   const all = format.sortedShureDevices(visibleShureDevices.value);
   if (!all.length) return null;
   return html`<div class="flex flex-col gap-4">
-    <${Panel} title=${`Shure devices (${all.length})`}>
+    <${Panel} title=${t("Shure devices ({count})", { count: all.length })}>
       <${ConfigurableTable}
         tableId="shure-receivers"
         columns=${DEVICE_COLUMNS}

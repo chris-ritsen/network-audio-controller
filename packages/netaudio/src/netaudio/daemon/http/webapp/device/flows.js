@@ -1,6 +1,7 @@
 import { api } from "../api.js";
 import { AsyncButton, Panel } from "../components.js";
 import * as format from "../format.js";
+import { t } from "../i18n.js";
 import { html, useEffect, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
 
@@ -15,7 +16,7 @@ function parseChannels(text) {
     )
   ) {
     throw new Error(
-      "Enter comma-separated positive transmitter channel numbers.",
+      t("Enter comma-separated positive transmitter channel numbers."),
     );
   }
   return values;
@@ -39,7 +40,7 @@ export function canonicalFlowRequest({
     ? channels
     : parseChannels(channels);
   if (!authoring)
-    throw new Error("Flow authoring capabilities are unavailable.");
+    throw new Error(t("Flow authoring capabilities are unavailable."));
 
   if (
     !Number.isInteger(Number(flowId)) ||
@@ -47,12 +48,12 @@ export function canonicalFlowRequest({
     Number(flowId) > authoring.identifier_max
   ) {
     throw new Error(
-      `Enter a flow identifier from 1 through ${authoring.identifier_max}.`,
+      t("Enter a flow identifier from 1 through {maximum}.", { maximum: authoring.identifier_max }),
     );
   }
   if (!authoring.media_modes.includes(mediaMode))
-    throw new Error("This audio mode is not available for flow creation.");
-  const socket = (address, port, label) => {
+    throw new Error(t("This audio mode is not available for flow creation."));
+  const socket = (address, port, message) => {
     if (!address && !port) return null;
     if (
       !address ||
@@ -60,24 +61,22 @@ export function canonicalFlowRequest({
       Number(port) < 1 ||
       Number(port) > 65535
     )
-      throw new Error(
-        `${label} needs an IPv4 address and UDP port from 1 through 65535.`,
-      );
+      throw new Error(message);
     return { address, port: Number(port), interface: null };
   };
   const primaryDestination = socket(
     primaryAddress.trim(),
     primaryPort,
-    "Primary destination",
+    t("Primary destination needs an IPv4 address and UDP port from 1 through 65535."),
   );
   const secondaryDestination = socket(
     secondaryAddress.trim(),
     secondaryPort,
-    "Secondary destination",
+    t("Secondary destination needs an IPv4 address and UDP port from 1 through 65535."),
   );
   const fpp = framesPerPacket === "" ? null : Number(framesPerPacket);
   if (fpp !== null && (!Number.isInteger(fpp) || fpp < 1 || fpp > 65535))
-    throw new Error("Frames per packet must be from 1 through 65535.");
+    throw new Error(t("Frames per packet must be from 1 through 65535."));
   return {
     schema_version: 1,
     media_mode: mediaMode,
@@ -117,43 +116,44 @@ export function canonicalFlowRequest({
 
 export function flowEvidenceRows(result) {
   const acknowledgement = result?.request_acknowledgement;
-  let acknowledgementLabel = "Not received";
+  let acknowledgementLabel = t("Not received");
   if (acknowledgement?.accepted === true) {
-    acknowledgementLabel = "Accepted";
+    acknowledgementLabel = t("Accepted");
   } else if (acknowledgement?.parseable === true) {
-    acknowledgementLabel = "Rejected";
+    acknowledgementLabel = t("Rejected");
   } else if (acknowledgement?.received === true) {
-    acknowledgementLabel = "Received but unparseable";
+    acknowledgementLabel = t("Received but unparseable");
   }
   const confirmationLabel = (value, unavailable) =>
     value === true
-      ? "Confirmed"
+      ? t("Confirmed")
       : value === false
-        ? "Contradicted"
+        ? t("Contradicted")
         : unavailable;
   return [
-    ["Request acknowledgement", acknowledgementLabel],
+    [t("Request acknowledgement"), acknowledgementLabel],
     [
-      "Device confirmation",
+      t("Device confirmation"),
       confirmationLabel(
         result?.device_confirmation,
-        "No separate signal from this ARC transport",
+        t("No separate signal from this ARC transport"),
       ),
     ],
     [
-      "Effective state",
-      confirmationLabel(result?.effective_state_confirmation, "Unverified"),
+      t("Effective state"),
+      confirmationLabel(result?.effective_state_confirmation, t("Unverified")),
     ],
     [
-      "Persistence",
-      confirmationLabel(result?.persistence_confirmation, "Not verified"),
+      t("Persistence"),
+      confirmationLabel(result?.persistence_confirmation, t("Not verified")),
     ],
   ];
 }
 
 function socketLabel(socket) {
   if (!socket) return "";
-  return `${socket.address}:${socket.port}${socket.interface ? ` via ${socket.interface}` : ""}`;
+  const endpoint = `${socket.address}:${socket.port}`;
+  return socket.interface ? t("{endpoint} via {interface}", { endpoint, interface: socket.interface }) : endpoint;
 }
 
 function channelLabel(specification) {
@@ -188,7 +188,7 @@ function receiverFlowChannels(flow) {
   const slots = flow.receiver_channel_numbers_by_flow_channel;
   if (Array.isArray(slots)) {
     return slots
-      .map((channels, index) => `${index + 1}:${channels.join(",") || "none"}`)
+      .map((channels, index) => `${index + 1}:${channels.join(",") || t("none")}`)
       .join("; ");
   }
   return "";
@@ -210,33 +210,33 @@ export function ReceiverFlows({ device }) {
   const mapped = flows.some((flow) => receiverFlowChannels(flow));
   const addressed = flows.some((flow) => receiverFlowEndpoints(flow));
   if (!typed && !mapped && !addressed && !external) return null;
-  return html`<${Panel} title=${`Receiver flows (${flows.length})`}>
+  return html`<${Panel} title=${t("Receiver flows ({count})", { count: flows.length })}>
     <div class="table-wrapper">
       <table class="data">
         <thead>
           <tr>
-            <th>Flow</th>
-            ${typed ? html`<th>Type</th>` : null}
-            ${mapped ? html`<th>Slot:receiver channels</th>` : null}
-            ${addressed ? html`<th>Destination</th>` : null}
-            ${external ? html`<th>Source</th><th>SDP</th>` : null}
+            <th>${t("Flow")}</th>
+            ${typed ? html`<th>${t("Type")}</th>` : null}
+            ${mapped ? html`<th>${t("Slot:receiver channels")}</th>` : null}
+            ${addressed ? html`<th>${t("Destination")}</th>` : null}
+            ${external ? html`<th>${t("Source")}</th><th>SDP</th>` : null}
           </tr>
         </thead>
         <tbody>
           ${flows.map(
             (flow) =>
               html`<tr key=${flow.flow_number}>
-                <td data-label="Flow">${flow.flow_number ?? ""}</td>
-                ${typed ? html`<td data-label="Type">${capitalized(flow.flow_type)}</td>` : null}
-                ${mapped ? html`<td data-label="Slot:receiver channels">${receiverFlowChannels(flow)}</td>` : null}
-                ${addressed ? html`<td data-label="Destination">${receiverFlowEndpoints(flow)}</td>` : null}
+                <td data-label=${t("Flow")}>${flow.flow_number ?? ""}</td>
+                ${typed ? html`<td data-label=${t("Type")}>${t(capitalized(flow.flow_type))}</td>` : null}
+                ${mapped ? html`<td data-label=${t("Slot:receiver channels")}>${receiverFlowChannels(flow)}</td>` : null}
+                ${addressed ? html`<td data-label=${t("Destination")}>${receiverFlowEndpoints(flow)}</td>` : null}
                 ${external
-                  ? html`<td data-label="Source">${externalIdentityLabel(flow)}</td>
+                  ? html`<td data-label=${t("Source")}>${externalIdentityLabel(flow)}</td>
                       <td data-label="SDP">
                         ${flow.sdp_correlation?.matched === true
-                          ? "Matched"
+                          ? t("Matched")
                           : flow.external_identity
-                            ? "Not matched"
+                            ? t("Not matched")
                             : ""}
                       </td>`
                   : null}
@@ -249,7 +249,7 @@ export function ReceiverFlows({ device }) {
 }
 
 function flowTypeLabel(entry) {
-  return [entry.media_mode === "rtp_aes67" ? "AES67" : null, capitalized(entry.flow_type)]
+  return [entry.media_mode === "rtp_aes67" ? "AES67" : null, t(capitalized(entry.flow_type))]
     .filter(Boolean)
     .join(" ");
 }
@@ -257,13 +257,13 @@ function flowTypeLabel(entry) {
 function FlowRow({ entry, onDelete, requestName }) {
   const flowId = entry.identity?.global_flow_id;
   return html`<tr>
-    <td data-label="Flow">${flowId ?? ""}</td>
-    <td data-label="Type">${flowTypeLabel(entry)}</td>
-    <td data-label="Name">${entry.name || ""}</td>
-    <td data-label="Slot:channel">${channelLabel(entry)}</td>
-    <td data-label="Sample rate">${format.sampleRate(entry.sample_rate_hz)}</td>
-    <td data-label="Encoding">${entry.encoding_bits == null ? "" : `PCM ${entry.encoding_bits}`}</td>
-    <td data-label="Destination">${socketLabel(entry.primary_destination)}</td>
+    <td data-label=${t("Flow")}>${flowId ?? ""}</td>
+    <td data-label=${t("Type")}>${flowTypeLabel(entry)}</td>
+    <td data-label=${t("Name")}>${entry.name || ""}</td>
+    <td data-label=${t("Slot:channel")}>${channelLabel(entry)}</td>
+    <td data-label=${t("Sample rate")}>${format.sampleRate(entry.sample_rate_hz)}</td>
+    <td data-label=${t("Encoding")}>${entry.encoding_bits == null ? "" : `PCM ${entry.encoding_bits}`}</td>
+    <td data-label=${t("Destination")}>${socketLabel(entry.primary_destination)}</td>
     <td data-label="">
       ${
         flowId == null
@@ -271,9 +271,9 @@ function FlowRow({ entry, onDelete, requestName }) {
           : html`<${AsyncButton}
               small
               variant="danger"
-              description=${`delete transmit flow ${flowId} on ${requestName}`}
+              description=${t("delete transmit flow {flow} on {device}", { flow: flowId, device: requestName })}
               onRun=${() => onDelete(flowId)}
-              >Delete<//
+              >${t("Delete")}<//
             >`
       }
     </td>
@@ -366,21 +366,21 @@ export function TransmitFlows({ device }) {
     setter(event.target.value);
     setPlan(null);
   };
-  return html`<${Panel} title=${`Transmit flows (${flowEntries.length})`}>
+  return html`<${Panel} title=${t("Transmit flows ({count})", { count: flowEntries.length })}>
     ${
       flowEntries.length
         ? html`<div class="table-wrapper">
             <table class="data">
               <thead>
                 <tr>
-                  <th>Flow</th>
-                  <th>Type</th>
-                  <th>Name</th>
-                  <th>Slot:channel</th>
-                  <th>Sample rate</th>
-                  <th>Encoding</th>
-                  <th>Destination</th>
-                  <th><span class="sr-only">Actions</span></th>
+                  <th>${t("Flow")}</th>
+                  <th>${t("Type")}</th>
+                  <th>${t("Name")}</th>
+                  <th>${t("Slot:channel")}</th>
+                  <th>${t("Sample rate")}</th>
+                  <th>${t("Encoding")}</th>
+                  <th>${t("Destination")}</th>
+                  <th><span class="sr-only">${t("Actions")}</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -399,43 +399,43 @@ export function TransmitFlows({ device }) {
               void preview();
             }}
           >
-            <h3 class="flow-form-title">New multicast flow</h3>
+            <h3 class="flow-form-title">${t("New multicast flow")}</h3>
             <div class="flow-form-fields">
-              <${FlowField} label="Channels">
-                <input aria-label="Transmit flow channels" value=${channels} onInput=${edit(setChannels)} />
+              <${FlowField} label=${t("Channels")}>
+                <input aria-label=${t("Transmit flow channels")} value=${channels} onInput=${edit(setChannels)} />
               <//>
-              <${FlowField} label=${{ media_local_flow_id: "Media-local flow identifier", global_flow_id: "Global flow identifier" }[authoring.identity_field] || "Flow identifier"}>
+              <${FlowField} label=${{ media_local_flow_id: t("Media-local flow identifier"), global_flow_id: t("Global flow identifier") }[authoring.identity_field] || t("Flow identifier")}>
                 <input
                   type="number"
                   min="1"
                   max=${authoring.identifier_max}
-                  aria-label="Transmit flow identifier"
+                  aria-label=${t("Transmit flow identifier")}
                   value=${flowId}
                   onInput=${edit(setFlowId)}
                 />
               <//>
               ${
                 authoring.media_modes.length > 1
-                  ? html`<${FlowField} label="Mode">
-                      <select aria-label="Transmit flow media mode" value=${mediaMode} onChange=${edit(setMediaMode)}>
+                  ? html`<${FlowField} label=${t("Mode")}>
+                      <select aria-label=${t("Transmit flow media mode")} value=${mediaMode} onChange=${edit(setMediaMode)}>
                         ${authoring.media_modes.map((mode) => html`<option value=${mode}
                           disabled=${mode === "rtp_aes67" && (device.aes67_configuration_supported !== true || device.aes67_current !== true)}
-                          >${mode === "native_dante" ? "Native Dante" : "RTP/AES67"}</option>`)}
+                          >${mode === "native_dante" ? t("Native Dante") : "RTP/AES67"}</option>`)}
                       </select>
                     <//>`
                   : null
               }
               ${
                 supportsFlowOptions
-                  ? html`<${FlowField} label="Flow name">
-                        <input aria-label="Transmit flow name" value=${flowName} onInput=${edit(setFlowName)} />
+                  ? html`<${FlowField} label=${t("Flow name")}>
+                        <input aria-label=${t("Transmit flow name")} value=${flowName} onInput=${edit(setFlowName)} />
                       <//>
-                      <${FlowField} label="Frames per packet">
+                      <${FlowField} label=${t("Frames per packet")}>
                         <input
                           type="number"
                           min="1"
                           max="65535"
-                          aria-label="Transmit flow frames per packet"
+                          aria-label=${t("Transmit flow frames per packet")}
                           value=${framesPerPacket}
                           onInput=${edit(setFramesPerPacket)}
                         />
@@ -444,40 +444,40 @@ export function TransmitFlows({ device }) {
               }
               ${
                 supportsFlowOptions && mediaMode === "rtp_aes67"
-                  ? html`<${FlowField} label="Primary IPv4">
-                        <input aria-label="Primary RTP destination address" value=${primaryAddress} onInput=${edit(setPrimaryAddress)} />
+                  ? html`<${FlowField} label=${t("Primary IPv4")}>
+                        <input aria-label=${t("Primary RTP destination address")} value=${primaryAddress} onInput=${edit(setPrimaryAddress)} />
                       <//>
-                      <${FlowField} label="Primary UDP port">
-                        <input type="number" min="1" max="65535" aria-label="Primary RTP destination port" value=${primaryPort} onInput=${edit(setPrimaryPort)} />
+                      <${FlowField} label=${t("Primary UDP port")}>
+                        <input type="number" min="1" max="65535" aria-label=${t("Primary RTP destination port")} value=${primaryPort} onInput=${edit(setPrimaryPort)} />
                       <//>
-                      <${FlowField} label="Secondary IPv4">
-                        <input aria-label="Secondary RTP destination address" value=${secondaryAddress} onInput=${edit(setSecondaryAddress)} />
+                      <${FlowField} label=${t("Secondary IPv4")}>
+                        <input aria-label=${t("Secondary RTP destination address")} value=${secondaryAddress} onInput=${edit(setSecondaryAddress)} />
                       <//>
-                      <${FlowField} label="Secondary UDP port">
-                        <input type="number" min="1" max="65535" aria-label="Secondary RTP destination port" value=${secondaryPort} onInput=${edit(setSecondaryPort)} />
+                      <${FlowField} label=${t("Secondary UDP port")}>
+                        <input type="number" min="1" max="65535" aria-label=${t("Secondary RTP destination port")} value=${secondaryPort} onInput=${edit(setSecondaryPort)} />
                       <//>`
                   : null
               }
             </div>
             <div class="flow-form-actions">
-              <button class="btn btn-sm" type="submit">Plan</button>
+              <button class="btn btn-sm" type="submit">${t("Plan")}</button>
               ${
                 plan?.supported
                   ? html`<${AsyncButton}
                       variant="primary"
-                      description=${`create the planned transmit flow on ${requestName}`}
+                      description=${t("create the planned transmit flow on {device}", { device: requestName })}
                       onRun=${create}
-                      >Create<//
+                      >${t("Create")}<//
                     >`
                   : null
               }
             </div>
-            ${error ? html`<p role="alert" class="text-error">${error}</p>` : null}
-            ${plan && !plan.supported ? html`<p role="alert" class="text-error">${plan.reasons.join("; ")}</p>` : null}
-            ${plan?.supported ? html`<p role="status">Ready to create.</p>` : null}
-            ${result ? html`<p role="status">${result.message || capitalized(result.state)}</p>` : null}
+            ${error ? html`<p role="alert" class="text-error">${t(error)}</p>` : null}
+            ${plan && !plan.supported ? html`<p role="alert" class="text-error">${plan.reasons.map((reason) => t(reason)).join("; ")}</p>` : null}
+            ${plan?.supported ? html`<p role="status">${t("Ready to create.")}</p>` : null}
+            ${result ? html`<p role="status">${t(result.message || capitalized(result.state))}</p>` : null}
           </form>`
-        : html`${result ? html`<p role="status">${result.message || capitalized(result.state)}</p>` : null}`
+        : html`${result ? html`<p role="status">${t(result.message || capitalized(result.state))}</p>` : null}`
     }
   <//>`;
 }

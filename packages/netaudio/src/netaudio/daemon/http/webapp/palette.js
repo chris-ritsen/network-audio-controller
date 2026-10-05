@@ -1,4 +1,5 @@
 import * as format from "./format.js";
+import { t } from "./i18n.js";
 import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
 import { navigate } from "./router.js";
 import { visibleNavigation } from "./navigation.js";
@@ -112,7 +113,7 @@ export function CommandPalette() {
   };
 
   return html`
-    <dialog class="palette" ref=${dialog} aria-label="Search" onClose=${closePalette} onCancel=${closePalette}
+    <dialog class="palette" ref=${dialog} aria-label=${t("Search")} onClose=${closePalette} onCancel=${closePalette}
       onClick=${(event) => {
         if (event.target !== event.currentTarget) return;
         const bounds = event.currentTarget.getBoundingClientRect();
@@ -121,7 +122,7 @@ export function CommandPalette() {
       <input
         ref=${input}
         type="text"
-        placeholder="Jump to a device, view, or Shure receiver"
+        placeholder=${t("Jump to a device, view, or Shure receiver")}
         value=${query}
         onInput=${(event) => {
           setQuery(event.target.value);
@@ -131,7 +132,7 @@ export function CommandPalette() {
       />
       <div class="palette-results">
         ${results.length === 0
-          ? html`<div class="palette-empty">No matches</div>`
+          ? html`<div class="palette-empty">${t("No matches")}</div>`
           : results.map(
               (entry, index) => html`
                 <div
@@ -145,7 +146,7 @@ export function CommandPalette() {
                     : html`<span class="status-dot${entry.online ? " online" : ""}"></span>`}
                   <span class="palette-item-name">${entry.label}</span>
                   ${entry.detail ? html`<span class="palette-item-detail">${entry.detail}</span>` : null}
-                  <span class="palette-item-kind">${entry.kind}</span>
+                  <span class="palette-item-kind">${t(entry.kind)}</span>
                 </div>
               `,
             )}

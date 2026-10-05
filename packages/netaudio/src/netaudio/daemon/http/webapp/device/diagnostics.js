@@ -1,5 +1,6 @@
 import { html, useEffect, useState } from "../lib/preact.js";
 import { Fields, Notice, Panel } from "../components.js";
+import { t } from "../i18n.js";
 
 const MINIMUM_FREQUENCY_OBSERVATIONS = 10;
 const REFRESH_MILLISECONDS = 5000;
@@ -42,39 +43,40 @@ function displayedPaths(data) {
 }
 
 function flowLabel(path) {
-  if (path.attribution_status !== "resolved") return "Unidentified flow";
-  const secondary = path.network_interface_index === 1 ? " · secondary" : "";
-  return `Flow ${path.audio_receiver_flow_id}${secondary}`;
+  if (path.attribution_status !== "resolved") return t("Unidentified flow");
+  return path.network_interface_index === 1
+    ? t("Flow {number} · secondary", { number: path.audio_receiver_flow_id })
+    : t("Flow {number}", { number: path.audio_receiver_flow_id });
 }
 
 function LatePackets({ series }) {
   const total = series?.current?.raw;
   if (!finite(total)) return "";
   const increase = Number(series.increase_since_baseline) || 0;
-  return html`<span>${Number(total).toLocaleString()}${increase > 0 ? html` <span class="state-warn">(+${increase.toLocaleString()} since reset)</span>` : ""}</span>`;
+  return html`<span>${Number(total).toLocaleString()}${increase > 0 ? html` <span class="state-warn">${t("(+{count} since reset)", { count: increase.toLocaleString() })}</span>` : ""}</span>`;
 }
 
 function ReceiveLatency({ data, endpoint, onReset }) {
   const paths = displayedPaths(data);
   if (!paths.length) return null;
   return html`<${Panel}
-    title="Receive latency"
+    title=${t("Receive latency")}
     headerActions=${html`
-      <a class="btn btn-xs" href=${endpoint} download="netaudio-diagnostics.json">Export</a>
-      <button type="button" class="btn btn-xs" onClick=${onReset}>Reset</button>
+      <a class="btn btn-xs" href=${endpoint} download="netaudio-diagnostics.json">${t("Export")}</a>
+      <button type="button" class="btn btn-xs" onClick=${onReset}>${t("Reset")}</button>
     `}
   >
     <div class="table-wrapper">
       <table class="data receive-latency-table">
         <thead>
           <tr>
-            <th>Flow</th>
-            <th class="numeric">Latency setting</th>
-            <th class="numeric">Now</th>
-            <th class="numeric">Peak</th>
-            <th class="numeric">Headroom</th>
-            <th class="numeric">Late packets</th>
-            <th>Last 5 minutes</th>
+            <th>${t("Flow")}</th>
+            <th class="numeric">${t("Latency setting")}</th>
+            <th class="numeric">${t("Now")}</th>
+            <th class="numeric">${t("Peak")}</th>
+            <th class="numeric">${t("Headroom")}</th>
+            <th class="numeric">${t("Late packets")}</th>
+            <th>${t("Last 5 minutes")}</th>
           </tr>
         </thead>
         <tbody>
@@ -85,13 +87,13 @@ function ReceiveLatency({ data, endpoint, onReset }) {
             const peak = latency.statistics?.maximum;
             const headroom = finite(budget) && finite(current) ? Number(budget) - Number(current) : null;
             return html`<tr key=${`${path.telemetry_index}:${path.network_interface_index}`}>
-              <td data-label="Flow">${flowLabel(path)}</td>
-              <td class="numeric" data-label="Latency setting">${milliseconds(budget)}</td>
-              <td class="numeric" data-label="Now">${milliseconds(current)}</td>
-              <td class="numeric" data-label="Peak">${milliseconds(peak)}</td>
-              <td class=${`numeric${headroom != null && headroom <= 0 ? " state-bad" : ""}`} data-label="Headroom">${milliseconds(headroom)}</td>
-              <td class="numeric" data-label="Late packets"><${LatePackets} series=${path.late_packets} /></td>
-              <td data-label="Last 5 minutes"><${Sparkline} series=${latency} label="Maximum latency over the last 5 minutes" /></td>
+              <td data-label=${t("Flow")}>${flowLabel(path)}</td>
+              <td class="numeric" data-label=${t("Latency setting")}>${milliseconds(budget)}</td>
+              <td class="numeric" data-label=${t("Now")}>${milliseconds(current)}</td>
+              <td class="numeric" data-label=${t("Peak")}>${milliseconds(peak)}</td>
+              <td class=${`numeric${headroom != null && headroom <= 0 ? " state-bad" : ""}`} data-label=${t("Headroom")}>${milliseconds(headroom)}</td>
+              <td class="numeric" data-label=${t("Late packets")}><${LatePackets} series=${path.late_packets} /></td>
+              <td data-label=${t("Last 5 minutes")}><${Sparkline} series=${latency} label=${t("Maximum latency over the last 5 minutes")} /></td>
             </tr>`;
           })}
         </tbody>
@@ -112,24 +114,24 @@ function ClockFrequency({ data, onWarnings }) {
   if (!series) return null;
   const stats = series.statistics || {};
   return html`<${Panel}
-    title="Clock frequency"
+    title=${t("Clock frequency")}
     headerActions=${html`<label class="status-toggle">
       <input
         type="checkbox"
         checked=${data.clock?.warning_enabled === true}
         onChange=${(event) => onWarnings(event.target.checked)}
       />
-      Warn on drift
+      ${t("Warn on drift")}
     </label>`}
   >
     <div class="clock-frequency">
       <${Fields}
         entries=${[
-          ["Offset now", partsPerMillion(series.current.value)],
-          ["Range", finite(stats.minimum) && finite(stats.maximum) ? `${partsPerMillion(stats.minimum)} to ${partsPerMillion(stats.maximum)}` : undefined],
+          [t("Offset now"), partsPerMillion(series.current.value)],
+          [t("Range"), finite(stats.minimum) && finite(stats.maximum) ? t("{minimum} to {maximum}", { minimum: partsPerMillion(stats.minimum), maximum: partsPerMillion(stats.maximum) }) : undefined],
         ]}
       />
-      <${Sparkline} series=${series} label="Clock frequency offset over the last 5 minutes" />
+      <${Sparkline} series=${series} label=${t("Clock frequency offset over the last 5 minutes")} />
     </div>
   <//>`;
 }
@@ -169,7 +171,7 @@ export function DiagnosticsSection({ device }) {
   }, [endpoint]);
   const run = (path, body) => post(path, body).then(setData, (failure) => setError(failure.message));
   return html`
-    ${error ? html`<${Notice}>${error}<//>` : null}
+    ${error ? html`<${Notice}>${t(error)}<//>` : null}
     <${ReceiveLatency}
       data=${data}
       endpoint=${endpoint}

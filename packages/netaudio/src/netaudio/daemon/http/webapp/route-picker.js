@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { Button } from "./components.js";
+import { t } from "./i18n.js";
 import { Icon } from "./icons.js";
 import * as format from "./format.js";
 import { html, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
@@ -65,7 +66,12 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
     setError("");
     setBusy(true);
     const result = await runAction(
-      `route ${entry.channelName}@${entry.deviceLabel} to ${format.deviceLabel(receiver)} channel ${receiveChannelNumber}`,
+      t("route {transmitterChannel}@{transmitterDevice} to {receiverDevice} channel {receiverChannel}", {
+        transmitterChannel: entry.channelName,
+        transmitterDevice: entry.deviceLabel,
+        receiverDevice: format.deviceLabel(receiver),
+        receiverChannel: receiveChannelNumber,
+      }),
       () =>
         api.subscribe({
           rx_channel: receiveChannelNumber,
@@ -83,7 +89,7 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
     if (busy || !receiver.online) return;
     setError("");
     setBusy(true);
-    const result = await runAction(`unsubscribe ${format.deviceLabel(receiver)} channel ${receiveChannelNumber}`, () =>
+    const result = await runAction(t("unsubscribe {device} channel {channel}", { device: format.deviceLabel(receiver), channel: receiveChannelNumber }), () =>
       api.unsubscribe({ rx_channel: receiveChannelNumber, rx_device: requestName }),
     );
     setBusy(false);
@@ -121,16 +127,16 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
       <div class="modal-box source-picker-box">
       <header class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 id="source-picker-title" class="text-lg font-semibold">Choose source</h2>
+          <h2 id="source-picker-title" class="text-lg font-semibold">${t("Choose source")}</h2>
           <div class="route-picker-subtitle">
-            ${format.deviceLabel(receiver)} · ${receiveChannelName || `Channel ${receiveChannelNumber}`}
+            ${format.deviceLabel(receiver)} · ${receiveChannelName || t("Channel {number}", { number: receiveChannelNumber })}
           </div>
         </div>
         <div class="toolbar">
           ${subscription?.tx_device && subscription?.tx_channel
-            ? html`<${Button} variant="danger" disabled=${busy || !receiver.online} onClick=${clear}>Disconnect<//>`
+            ? html`<${Button} variant="danger" disabled=${busy || !receiver.online} onClick=${clear}>${t("Disconnect")}<//>`
             : null}
-          <${Button} disabled=${busy} onClick=${onClose}>Done<//>
+          <${Button} disabled=${busy} onClick=${onClose}>${t("Done")}<//>
         </div>
       </header>
       ${error ? html`<div role="alert" class="alert alert-error"><${Icon} name="warning" /><span>${error}</span></div>` : null}
@@ -138,8 +144,8 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
         ref=${input}
         type="text"
         class="input input-bordered w-full min-h-11"
-        aria-label="Find a source device or channel"
-        placeholder="Filter transmit channels"
+        aria-label=${t("Find a source device or channel")}
+        placeholder=${t("Filter transmit channels")}
         value=${query}
         onInput=${(event) => {
           setQuery(event.target.value);
@@ -149,7 +155,7 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
       />
       <div class="source-picker-results">
         ${results.length === 0
-          ? html`<div class="palette-empty">No matching transmit channels.</div>`
+          ? html`<div class="palette-empty">${t("No matching transmit channels.")}</div>`
           : results.map((entry, index) => {
               const active =
                 subscription &&
@@ -164,7 +170,7 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
                   onClick=${() => apply(entry)}
                 >
                   <span class="flex-1 min-w-0 break-words"><strong class="block">${entry.channelName}</strong><span class="block font-normal">${entry.deviceLabel}</span></span>
-                  ${active ? html`<span class="source-picker-current">Current</span>` : null}
+                  ${active ? html`<span class="source-picker-current">${t("Current")}</span>` : null}
                 </button>
               `;
             })}

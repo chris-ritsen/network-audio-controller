@@ -43,7 +43,7 @@
         detail.textContent = "Check your connection and reload.";
         startup.hidden = false;
       }, 10000);
-      import("/app.js").then(() => {
+      import("/i18n.js").then((i18n) => i18n.loadLanguage()).then(() => import("/app.js")).then(() => {
         clearTimeout(timeout);
         startup.remove();
       }).catch((error) => {

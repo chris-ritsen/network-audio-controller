@@ -1,11 +1,12 @@
 import { Notice, Panel } from "../components.js";
 import { api } from "../api.js";
 import * as format from "../format.js";
+import { t } from "../i18n.js";
 import { html, useEffect, useState } from "../lib/preact.js";
 import { setQueryParameters } from "../router.js";
 import { events } from "../store.js";
 
-const SEVERITY_LABELS = { error: "Error", info: "Information", warning: "Warning" };
+const SEVERITY_LABELS = { error: t("Error"), info: t("Information"), warning: t("Warning") };
 
 const SEVERITY_RANK = { info: 0, warning: 1, error: 2 };
 
@@ -21,7 +22,7 @@ function danteEvents(entry) {
     description,
     device,
     key: `${entry.sequence}:${name}`,
-    name,
+    name: t(name),
     severity,
     timestamp: entry.timestamp,
   });
@@ -29,36 +30,36 @@ function danteEvents(entry) {
   if (entry.kind === "clock_status_changed") {
     const found = [];
     if (before.synchronization === "synchronized" && after.synchronization === "lost") {
-      found.push(event("Clock Sync Unlocked", "error", `${device} lost clock sync.`));
+      found.push(event("Clock Sync Unlocked", "error", t("{device} lost clock sync.", { device })));
     }
     if (before.synchronization === "lost" && after.synchronization === "synchronized") {
-      found.push(event("Clock Sync Locked", "error", `${device} regained clock sync.`));
+      found.push(event("Clock Sync Locked", "error", t("{device} regained clock sync.", { device })));
     }
     if (Number.isInteger(before.mute_flags) && Number.isInteger(after.mute_flags)) {
-      if (!before.mute_flags && after.mute_flags) found.push(event("Audio Mute", "error", `${device} was muted.`));
-      if (before.mute_flags && !after.mute_flags) found.push(event("Audio Unmute", "error", `${device} was unmuted.`));
+      if (!before.mute_flags && after.mute_flags) found.push(event("Audio Mute", "error", t("{device} was muted.", { device })));
+      if (before.mute_flags && !after.mute_flags) found.push(event("Audio Unmute", "error", t("{device} was unmuted.", { device })));
     }
     return found;
   }
   if (entry.kind === "clock_role_changed") {
     if (!isLeader(before) && isLeader(after)) {
-      return [event("Elevation to Clock Leader", "error", `${device} is now the clock leader.`)];
+      return [event("Elevation to Clock Leader", "error", t("{device} is now the clock leader.", { device }))];
     }
     if (isLeader(before) && !isLeader(after)) {
-      return [event("Demotion from Clock Leader", "info", `${device} is no longer the clock leader.`)];
+      return [event("Demotion from Clock Leader", "info", t("{device} is no longer the clock leader.", { device }))];
     }
     return [];
   }
   if (entry.kind === "setting_changed" && typeof before.is_locked === "boolean" && typeof after.is_locked === "boolean") {
     return after.is_locked
-      ? [event("Device Locked", "info", `${device} was locked.`)]
-      : [event("Device Unlocked", "info", `${device} was unlocked.`)];
+      ? [event("Device Locked", "info", t("{device} was locked.", { device }))]
+      : [event("Device Unlocked", "info", t("{device} was unlocked.", { device }))];
   }
   return [];
 }
 
 function SeverityIcon({ severity }) {
-  const label = SEVERITY_LABELS[severity] || "Unknown";
+  const label = SEVERITY_LABELS[severity] || t("Unknown");
   return html`
     <span
       class="event-severity-icon ${severity || "unknown"}"
@@ -90,7 +91,7 @@ function saveLog(entries) {
 
 function EventDetails({ event }) {
   return html`
-    <section class="event-detail-panel selectable-content" aria-label="Event details">
+    <section class="event-detail-panel selectable-content" aria-label=${t("Event details")}>
       <div class="event-detail-heading">
         <h3>${event.name}</h3>
         <${SeverityIcon} severity=${event.severity} />
@@ -148,7 +149,7 @@ function EventLog({ query }) {
   };
 
   const clear = async () => {
-    if (!window.confirm("Clear all events?")) return;
+    if (!window.confirm(t("Clear all events?"))) return;
     setClearing(true);
     try {
       await api.clearEventJournal();
@@ -163,16 +164,16 @@ function EventLog({ query }) {
   };
 
   return html`
-    <${Panel} title="Event log" wide>
-      ${error ? html`<${Notice}>${error}<//>` : null}
+    <${Panel} title=${t("Event log")} wide>
+      ${error ? html`<${Notice}>${t(error)}<//>` : null}
       <div class="table-wrapper event-log-table-wrapper">
-        <table class="data event-log-table" aria-label="Event log">
+        <table class="data event-log-table" aria-label=${t("Event log")}>
           <thead>
             <tr>
-              <th><span class="sr-only">Severity</span></th>
-              <th>Timestamp</th>
-              <th>Device Name</th>
-              <th>Event</th>
+              <th><span class="sr-only">${t("Severity")}</span></th>
+              <th>${t("Timestamp")}</th>
+              <th>${t("Device Name")}</th>
+              <th>${t("Event")}</th>
             </tr>
           </thead>
           <tbody>
@@ -190,12 +191,12 @@ function EventLog({ query }) {
                   toggle(event);
                 }}
               >
-                <td class="event-severity-cell" data-label="Severity">
+                <td class="event-severity-cell" data-label=${t("Severity")}>
                   <${SeverityIcon} severity=${event.severity} />
                 </td>
-                <td class="event-timestamp" data-label="Timestamp">${format.timestamp(event.timestamp)}</td>
-                <td class="event-device" data-label="Device Name">${event.device}</td>
-                <td class="event-message" data-label="Event">${event.name}</td>
+                <td class="event-timestamp" data-label=${t("Timestamp")}>${format.timestamp(event.timestamp)}</td>
+                <td class="event-device" data-label=${t("Device Name")}>${event.device}</td>
+                <td class="event-message" data-label=${t("Event")}>${event.name}</td>
               </tr>`;
             })}
           </tbody>
@@ -203,29 +204,29 @@ function EventLog({ query }) {
       </div>
       <div class="event-log-controls">
         <label class="event-severity-filter">
-          <span>Show</span>
+          <span>${t("Show")}</span>
           <select
-            aria-label="Minimum severity"
+            aria-label=${t("Minimum severity")}
             value=${minimumSeverity}
             onChange=${(event) =>
               setQueryParameters({ event: null, severity: event.target.value === "info" ? null : event.target.value })}
           >
-            <option value="info">All Events</option>
-            <option value="warning">Warnings and Errors</option>
-            <option value="error">Errors Only</option>
+            <option value="info">${t("All Events")}</option>
+            <option value="warning">${t("Warnings and Errors")}</option>
+            <option value="error">${t("Errors Only")}</option>
           </select>
         </label>
         <input
           type="search"
           class="event-log-search"
-          aria-label="Search event log"
-          placeholder="Search device or event"
+          aria-label=${t("Search event log")}
+          placeholder=${t("Search device or event")}
           value=${filter}
           onInput=${(event) => setQueryParameters({ event: null, search: event.target.value })}
         />
         <div class="event-log-actions">
           <button type="button" class="btn btn-sm" disabled=${!entries.length} onClick=${() => saveLog(entries)}>
-            Save
+            ${t("Save")}
           </button>
           <button
             type="button"
@@ -234,7 +235,7 @@ function EventLog({ query }) {
             aria-busy=${clearing ? "true" : null}
             onClick=${clear}
           >
-            ${clearing ? "Clearing…" : "Clear"}
+            ${clearing ? t("Clearing…") : t("Clear")}
           </button>
         </div>
       </div>
@@ -251,5 +252,5 @@ export const eventsView = {
   filters: false,
   component: EventsView,
   id: "events",
-  label: "Events",
+  label: t("Events"),
 };

@@ -1,17 +1,18 @@
 import { api } from "../api.js";
 import { Panel } from "../components.js";
 import * as format from "../format.js";
+import { t, tn } from "../i18n.js";
 import { Icon } from "../icons.js";
 import { html, useLayoutEffect, useRef, useState } from "../lib/preact.js";
 import { inventoryReady, scopedDevices, selectedContext } from "../store.js";
 
 function readable(message) {
   const text = String(
-    message || "Preset operation failed. Review the selection and try again.",
+    message || t("Preset operation failed. Review the selection and try again."),
   );
   return /\b0x[\da-f]+\b|\b[\da-f]{16,}\b/i.test(text)
-    ? "The device returned an unsupported response."
-    : text;
+    ? t("The device returned an unsupported response.")
+    : t(text);
 }
 
 function SavePreset() {
@@ -50,26 +51,26 @@ function SavePreset() {
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setMessage(`Downloaded ${result.filename}`);
+      setMessage(t("Downloaded {file}", { file: result.filename }));
     } catch (failure) {
       setError(readable(failure.message));
     } finally {
       setBusy(false);
     }
   }
-  return html`<${Panel} title="Save preset">
+  return html`<${Panel} title=${t("Save preset")}>
     <form class="flex flex-col gap-4" onSubmit=${save}>
       <label class="flex flex-col gap-2"
-        >Preset name<input
+        >${t("Preset name")}<input
           required
           maxlength="120"
           value=${name}
           disabled=${busy}
           onInput=${(event) => setName(event.target.value)}
-          placeholder="Show setup"
+          placeholder=${t("Show setup")}
       /></label>
       <fieldset disabled=${busy} class="flex flex-col gap-2">
-        <legend class="mb-2">Devices in this view</legend>
+        <legend class="mb-2">${t("Devices in this view")}</legend>
         ${
           devices.length
             ? devices.map(
@@ -82,22 +83,22 @@ function SavePreset() {
                       onChange=${(event) => setSelected(toggle(selected, id, event.target.checked))}
                     />
                     <span
-                      >${device.name}${device.ipv4 ? ` · ${device.ipv4}` : ""}${device.online ? "" : " · Offline"}</span
+                      >${device.name}${device.ipv4 ? ` · ${device.ipv4}` : ""}${device.online ? "" : ` · ${t("Offline")}`}</span
                     >
                   </label>`,
               )
-            : html`<p class="text-sm">No devices</p>`
+            : html`<p class="text-sm">${t("No devices")}</p>`
         }
       </fieldset>
       <fieldset disabled=${busy} class="flex flex-col gap-2">
-        <legend class="mb-2">Include</legend>
+        <legend class="mb-2">${t("Include")}</legend>
         ${[
-          ["routing", "Channel names, receiver routing and transmit flows"],
-          ["audio", "Clock, format, latency, pull-up and codec gain"],
-          ["network", "All interfaces and redundancy settings"],
+          ["routing", t("Channel names, receiver routing and transmit flows")],
+          ["audio", t("Clock, format, latency, pull-up and codec gain")],
+          ["network", t("All interfaces and redundancy settings")],
           [
             "device_controls",
-            "Bluetooth, video and serial settings (no pairing reset)",
+            t("Bluetooth, video and serial settings (no pairing reset)"),
           ],
         ].map(
           ([id, label]) =>
@@ -118,7 +119,7 @@ function SavePreset() {
         >
           <${Icon}
             name="download"
-          />${busy ? "Reading settings…" : "Download XML"}
+          />${busy ? t("Reading settings…") : t("Download XML")}
         </button>
       </div>
       ${message ? html`<p role="status" class="text-sm">${message}</p>` : null}
@@ -166,7 +167,7 @@ function LoadPreset() {
     setBusy(true);
     try {
       if (file.size > 4 * 1024 * 1024)
-        throw new Error("Preset files must be no larger than 4 MiB.");
+        throw new Error(t("Preset files must be no larger than 4 MiB."));
       const content = await file.text();
       if (token !== request.current) return;
       const data = await api.previewPreset({
@@ -231,10 +232,10 @@ function LoadPreset() {
       if (token === request.current) setBusy(false);
     }
   }
-  return html`<${Panel} title="Load preset">
+  return html`<${Panel} title=${t("Load preset")}>
     <div class="flex flex-col gap-4">
       <label class="flex flex-col gap-2"
-        >Preset XML file<input
+        >${t("Preset XML file")}<input
           type="file"
           accept=".xml,application/xml,text/xml"
           disabled=${busy}
@@ -263,31 +264,31 @@ function LoadPreset() {
                       ${
                   device.settings.length
                     ? html`<ul class="text-sm">
-                        ${device.settings.map((setting) => html`<li>${setting.label}: ${readable(setting.value)}</li>`)}
+                        ${device.settings.map((setting) => html`<li>${t("{setting}: {value}", { setting: t(setting.label), value: readable(setting.value) })}</li>`)}
                       </ul>`
                     : null
                 }
-                      ${device.preserved.length ? html`<p class="text-sm">Not applied: ${device.preserved.join(", ")}</p>` : null}
+                      ${device.preserved.length ? html`<p class="text-sm">${t("Not applied: {settings}", { settings: device.preserved.map((label) => t(label)).join(", ") })}</p>` : null}
                       ${
                   choices[index].include
                     ? html`<label class="flex flex-col gap-2 text-sm"
-                        >Target for ${device.name}
+                        >${t("Target for {device}", { device: device.name })}
                         <select
                           value=${choices[index].target}
                           onChange=${(event) => change(index, { target: event.target.value })}
                         >
                           <option value="">
-                            ${device.targets.some((target) => target.online) ? "Choose a device" : "No matching device online"}
+                            ${device.targets.some((target) => target.online) ? t("Choose a device") : t("No matching device online")}
                           </option>
-                          ${device.targets.map((target) => html`<option value=${target.id} disabled=${!target.online}>${target.name}${target.address ? ` · ${target.address}` : ""}${target.context ? ` · ${target.context}` : ""}${target.online ? "" : " · Offline"}</option>`)}
+                          ${device.targets.map((target) => html`<option value=${target.id} disabled=${!target.online}>${target.name}${target.address ? ` · ${target.address}` : ""}${target.context ? ` · ${target.context}` : ""}${target.online ? "" : ` · ${t("Offline")}`}</option>`)}
                         </select></label
                       >`
-                    : html`<p class="text-sm">Skipped</p>`
+                    : html`<p class="text-sm">${t("Skipped")}</p>`
                 }
                     </div>`,
                 )}
                 <details>
-                  <summary class="cursor-pointer">Advanced</summary>
+                  <summary class="cursor-pointer">${t("Advanced")}</summary>
                   <label class="flex items-start gap-2 mt-3 text-sm"
                     ><input
                       type="checkbox"
@@ -296,7 +297,7 @@ function LoadPreset() {
                         setDestructive(event.target.checked);
                         setConfirmed(false);
                       }}
-                    />Allow sample-rate changes that rebuild routing</label
+                    />${t("Allow sample-rate changes that rebuild routing")}</label
                   >
                   <label class="flex items-start gap-2 mt-3 text-sm"
                     ><input
@@ -306,7 +307,7 @@ function LoadPreset() {
                         setStoreCurrent(event.target.checked);
                         setConfirmed(false);
                       }}
-                    />Store the configuration on each device after applying</label
+                    />${t("Store the configuration on each device after applying")}</label
                   >
                 </details>
                 <label class="flex items-start gap-2"
@@ -315,7 +316,7 @@ function LoadPreset() {
                     checked=${confirmed}
                     disabled=${!valid || !inventoryReady.value}
                     onChange=${(event) => setConfirmed(event.target.checked)}
-                  />Apply these settings to the selected devices</label
+                  />${t("Apply these settings to the selected devices")}</label
                 >
               </fieldset>
               <div>
@@ -324,7 +325,7 @@ function LoadPreset() {
                   class="btn btn-primary btn-sm"
                   disabled=${busy || !valid || !confirmed || !inventoryReady.value}
                 >
-                  ${busy ? "Applying preset…" : `Apply to ${selected.length} device${selected.length === 1 ? "" : "s"}`}
+                  ${busy ? t("Applying preset…") : tn(selected.length, "Apply to {count} device", "Apply to {count} devices")}
                 </button>
               </div>
             </form>`
@@ -335,12 +336,12 @@ function LoadPreset() {
         result
           ? html`<div class="flex flex-col gap-2" role="status">
               <h3 class="font-semibold">
-                ${result.complete ? "Preset applied and verified" : "Preset not fully applied or verified"}
+                ${result.complete ? t("Preset applied and verified") : t("Preset not fully applied or verified")}
               </h3>
               <ul class="text-sm">
-                ${result.report.operations.map((operation) => html`<li><strong>${format.stateLabel(operation.state)}</strong> · ${operation.device_name}: ${readable(operation.message)}</li>`)}
+                ${result.report.operations.map((operation) => html`<li><strong>${format.stateLabel(operation.state)}</strong> · ${t("{device}: {message}", { device: operation.device_name, message: readable(operation.message) })}</li>`)}
               </ul>
-              ${result.report.needs_reboot.length ? html`<p class="text-sm">Needs a reboot: ${result.report.needs_reboot.join(", ")}</p>` : null}
+              ${result.report.needs_reboot.length ? html`<p class="text-sm">${t("Needs a reboot: {devices}", { devices: result.report.needs_reboot.join(", ") })}</p>` : null}
             </div>`
           : null
       }
@@ -350,7 +351,7 @@ function LoadPreset() {
 
 function PresetsView() {
   return html`<div class="flex flex-col gap-6 w-full max-w-3xl">
-    ${!inventoryReady.value ? html`<p class="text-sm" role="status">Loading devices…</p>` : null}
+    ${!inventoryReady.value ? html`<p class="text-sm" role="status">${t("Loading devices…")}</p>` : null}
     <${SavePreset} key=${`save:${selectedContext.value}`} />
     <${LoadPreset} key=${`load:${selectedContext.value}`} />
   </div>`;
@@ -359,5 +360,5 @@ function PresetsView() {
 export const presetsView = {
   component: PresetsView,
   id: "presets",
-  label: "Presets",
+  label: t("Presets"),
 };

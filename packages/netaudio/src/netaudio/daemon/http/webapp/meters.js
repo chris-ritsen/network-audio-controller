@@ -1,5 +1,6 @@
 import { prefersLight } from "./color-scheme.js";
 import * as format from "./format.js";
+import { t } from "./i18n.js";
 import { html, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
 import { observeVisibility, useAnimationFrames } from "./meter-animation.js";
 import {
@@ -28,20 +29,20 @@ const MONOSPACE = "ui-monospace, SFMono-Regular, Menlo, monospace";
 const LABEL_FONT = `11px ${MONOSPACE}`;
 const SCALE_FONT = `10px ${MONOSPACE}`;
 const LAMP_FONT = `bold 9px ${MONOSPACE}`;
-const LAMP_TEXT = "OVER";
+const LAMP_TEXT = t("OVER");
 const MINIMUM_BAR_WIDTH = 120;
 const ROW_HEIGHT = 20;
 const SCALE_HEIGHT = 18;
 const BAR_INSET = 5;
 const LAMP_INSET = 4;
 const PRESENCE_LABELS = {
-  below_threshold: "Quiet",
-  signal_present: "Signal",
-  clipping: "Clipping",
-  muted: "Muted",
-  mute_or_floor: "Muted or below meter floor",
-  framing_marker: "Signal unavailable",
-  unknown: "Unknown",
+  below_threshold: t("Quiet"),
+  signal_present: t("Signal"),
+  clipping: t("Clipping"),
+  muted: t("Muted"),
+  mute_or_floor: t("Muted or below meter floor"),
+  framing_marker: t("Signal unavailable"),
+  unknown: t("Unknown"),
 };
 const WIDEST_LEVEL = "-126.0 dBFS";
 const SCALE_TICKS = [...new Set(SCALE_TICK_SETS.flat())];
@@ -76,7 +77,7 @@ const LIGHT_COLORS = {
 
 function meterReadout(value, presence, source) {
   const level = format.meteringLabel(value, source);
-  const label = presence ? PRESENCE_LABELS[presence] || "Unknown" : "";
+  const label = presence ? PRESENCE_LABELS[presence] || t("Unknown") : "";
   if (label.toLowerCase() === level.toLowerCase()) return label;
   return label ? `${level}  ${label}` : level;
 }
@@ -178,12 +179,14 @@ export function MeterBank({ device, direction, serverName }) {
   }, []);
 
   const height = SCALE_HEIGHT + Math.max(ROW_HEIGHT, channelCount * ROW_HEIGHT);
-  const title = `${direction === "tx" ? "Transmit" : "Receive"} levels. Click an OVER lamp to clear its count.`;
+  const title = direction === "tx"
+    ? t("Transmit levels. Click an OVER lamp to clear its count.")
+    : t("Receive levels. Click an OVER lamp to clear its count.");
 
   return html`
     <div class="meter-bank" ref=${container}>
       ${channelCount === 0
-        ? html`<div class="notice">No ${direction === "tx" ? "transmit" : "receive"} levels received yet.</div>`
+        ? html`<div class="notice">${direction === "tx" ? t("No transmit levels received yet.") : t("No receive levels received yet.")}</div>`
         : html`<canvas
             ref=${canvas}
             role="img"

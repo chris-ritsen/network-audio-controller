@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { AsyncButton, FieldRow, Fields, Panel } from "../components.js";
+import { t } from "../i18n.js";
 import { html, useEffect, useRef, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
 
@@ -50,23 +51,23 @@ function Setting({ device, category, editor, title }) {
           );
         }}
       >
-        ${selected && !choices.has(selected.key) && html`<option value=${selected.key}>${selected.label}</option>`}
-        ${[...choices].map(([key, variant]) => html`<option value=${key}>${variant.fields[name].label}</option>`)}
+        ${selected && !choices.has(selected.key) && html`<option value=${selected.key}>${t(selected.label)}</option>`}
+        ${[...choices].map(([key, variant]) => html`<option value=${key}>${t(variant.fields[name].label)}</option>`)}
       </select>
     <//>`;
   };
   let inputs;
 
   if (category === "bluetooth_identification") {
-    inputs = html`${select("Name source", "name_source")}
-      <${FieldRow} label="Custom Bluetooth name">
+    inputs = html`${select(t("Name source"), "name_source")}
+      <${FieldRow} label=${t("Custom Bluetooth name")}>
         <input
-          aria-label="Custom Bluetooth name"
+          aria-label=${t("Custom Bluetooth name")}
           value=${value.custom_name}
           disabled=${!writable || value.name_source !== editor.custom_name_source}
           onInput=${(event) => update({ ...value, custom_name: event.target.value })}
         />
-        <span>${new TextEncoder().encode(value.custom_name || "").length}/${editor.custom_name_limit} bytes</span>
+        <span>${t("{used}/{limit} bytes", { used: new TextEncoder().encode(value.custom_name || "").length, limit: editor.custom_name_limit })}</span>
       <//>`;
   }
 
@@ -78,13 +79,13 @@ function Setting({ device, category, editor, title }) {
         disabled=${!writable}
         onChange=${(event) => update(event.target.checked)}
       />
-      Discoverable</label
+      ${t("Discoverable")}</label
     >`;
   }
 
   if (category === "serial") {
-    inputs = html`${select("Baud rate", "baud_rate")}${select("Data bits", "data_bits")}
-    ${select("Parity", "parity")}${select("Stop bits", "stop_bits")}`;
+    inputs = html`${select(t("Baud rate"), "baud_rate")}${select(t("Data bits"), "data_bits")}
+    ${select(t("Parity"), "parity")}${select(t("Stop bits"), "stop_bits")}`;
   }
 
   if (category === "bandwidth" && editor.bandwidth) {
@@ -96,11 +97,11 @@ function Setting({ device, category, editor, title }) {
           disabled=${!writable}
           onChange=${(event) => update(event.target.checked ? limits.enable : limits.disable)}
         />
-        Enable user bandwidth control</label
+        ${t("Enable user bandwidth control")}</label
       >
-      <${FieldRow} label="Target bandwidth">
+      <${FieldRow} label=${t("Target bandwidth")}>
         <input
-          aria-label="Target bandwidth"
+          aria-label=${t("Target bandwidth")}
           type="number"
           min=${limits.minimum}
           max=${limits.maximum}
@@ -112,16 +113,16 @@ function Setting({ device, category, editor, title }) {
       <//>`;
   }
 
-  if (category === "hdcp") inputs = select("HDCP mode", "mode");
-  if (category === "codec_format") inputs = select("Codec", "codec");
+  if (category === "hdcp") inputs = select(t("HDCP mode"), "mode");
+  if (category === "codec_format") inputs = select(t("Codec"), "codec");
 
   if (category === "video_format") {
     inputs = html`<${Fields} entries=${[
-        ["Configured", editor.details.configured || undefined],
-        ["Actual", editor.details.actual || undefined],
-        ["Direction", editor.details.direction || undefined],
+        [t("Configured"), editor.details.configured ? t(editor.details.configured) : undefined],
+        [t("Actual"), editor.details.actual ? t(editor.details.actual) : undefined],
+        [t("Direction"), editor.details.direction ? t(editor.details.direction) : undefined],
       ]} />
-      ${select("Resolution", "resolution")}${select("Bit depth", "bit_depth")}${select("Color space", "color_space")}`;
+      ${select(t("Resolution"), "resolution")}${select(t("Bit depth"), "bit_depth")}${select(t("Color space"), "color_space")}`;
   }
 
   if (device.device_controls?.writable !== true) return null;
@@ -141,7 +142,7 @@ function Setting({ device, category, editor, title }) {
         setPlan(result);
         return result;
       }}
-        >Preview<//
+        >${t("Preview")}<//
       >
       <${AsyncButton}
         small
@@ -152,10 +153,10 @@ function Setting({ device, category, editor, title }) {
           setPlan(null);
           return result;
         }}
-        >Apply<//
+        >${t("Apply")}<//
       >
     </div>
-    ${plan && html`<p role="status">${plan.action}${plan.reason ? ": " + plan.reason : ""}</p>`}
+    ${plan && html`<p role="status">${plan.reason ? t("{action}: {reason}", { action: t(plan.action), reason: t(plan.reason) }) : t(plan.action)}</p>`}
   <//>`;
 }
 
@@ -177,28 +178,28 @@ export function DeviceControls({ device }) {
   const presentation = state.presentation;
   const connection = observations.bluetooth_connection?.value;
   const labels = {
-    bluetooth_identification: "Bluetooth name",
-    bluetooth_discovery: "Bluetooth discovery",
-    video_format: "Video format",
-    codec_format: "Video codec",
-    bandwidth: "Encoder bandwidth",
+    bluetooth_identification: t("Bluetooth name"),
+    bluetooth_discovery: t("Bluetooth discovery"),
+    video_format: t("Video format"),
+    codec_format: t("Video codec"),
+    bandwidth: t("Encoder bandwidth"),
     hdcp: "HDCP",
-    serial: "Serial port",
+    serial: t("Serial port"),
   };
   return html`<div class="device-controls" onPointerEnter=${inspect} onPointerDown=${inspect} onFocusIn=${inspect}><${Panel}
-      title=${state.family === "bluetooth" ? "Bluetooth" : "Video and serial"}
+      title=${state.family === "bluetooth" ? "Bluetooth" : t("Video and serial")}
       headerActions=${state.readable ? html`<${AsyncButton}
       small
-      description=${`refresh device controls on ${device.name || "device"}`}
+      description=${device.name ? t("refresh device controls on {device}", { device: device.name }) : t("refresh device controls on device")}
       onRun=${() => api.deviceControls(deviceRequestName(device), "inspect")}
-      >Refresh<//
+      >${t("Refresh")}<//
     >` : null}
     >
       <${Fields} entries=${[
-        ["Connection", connection ? [presentation?.summary.connection, connection.peer_name].filter(Boolean).join(" · ") || undefined : undefined],
-        ["Signal", observations.video_channel ? presentation?.summary.signal || undefined : undefined],
-        ["HDCP", observations.video_channel ? presentation?.summary.observed_hdcp || undefined : undefined],
-        ["Remembered devices", observations.bluetooth_pairing?.value > 0 ? observations.bluetooth_pairing.value : undefined],
+        [t("Connection"), connection ? [presentation?.summary.connection && t(presentation.summary.connection), connection.peer_name].filter(Boolean).join(" · ") || undefined : undefined],
+        [t("Signal"), observations.video_channel && presentation?.summary.signal ? t(presentation.summary.signal) : undefined],
+        ["HDCP", observations.video_channel && presentation?.summary.observed_hdcp ? t(presentation.summary.observed_hdcp) : undefined],
+        [t("Remembered devices"), observations.bluetooth_pairing?.value > 0 ? observations.bluetooth_pairing.value : undefined],
       ]} />
       ${
       observations.bluetooth_pairing?.value > 0 &&
@@ -209,7 +210,7 @@ export function DeviceControls({ device }) {
             checked=${confirm}
             onChange=${(event) => setConfirm(event.target.checked)}
           />
-          Confirm forgetting all paired devices</label
+          ${t("Confirm forgetting all paired devices")}</label
         >
         <${AsyncButton}
           variant="danger"
@@ -225,7 +226,7 @@ export function DeviceControls({ device }) {
           setConfirm(false);
           return result;
         }}
-          >Clear pairing list<//
+          >${t("Clear pairing list")}<//
         >`
     }
     <//>

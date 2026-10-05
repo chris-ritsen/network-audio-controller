@@ -1,5 +1,6 @@
 import { Fragment, cloneElement, createContext, html, toChildArray, useCallback, useRef, useSignal, useState } from "./lib/preact.js";
 import { runAction } from "./actions.js";
+import { t } from "./i18n.js";
 
 export const PanelHeaderControls = createContext(null);
 
@@ -68,7 +69,7 @@ export function StatusDot({ online }) {
 export function OnlineState({ online }) {
   return html`<span class="state-inline">
     <span class="status-dot${online ? " online" : ""}" aria-hidden="true"></span>
-    ${online ? "Online" : "Offline"}
+    ${online ? t("Online") : t("Offline")}
   </span>`;
 }
 
@@ -162,7 +163,7 @@ export function Value({ value }) {
     return null;
   }
   if (typeof value === "boolean") {
-    return html`<span>${value ? "Yes" : "No"}</span>`;
+    return html`<span>${value ? t("Yes") : t("No")}</span>`;
   }
   if (typeof value !== "object") {
     return html`<span>${String(value)}</span>`;

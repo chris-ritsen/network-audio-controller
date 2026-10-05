@@ -1,5 +1,6 @@
 import { html, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
 import { PanelHeaderControls } from "./components.js";
+import { t } from "./i18n.js";
 import { Icon } from "./icons.js";
 import { sortRows } from "./table-sort.js";
 import { navigate } from "./router.js";
@@ -146,8 +147,8 @@ function ColumnMenu({ columns, layout }) {
           panel.current?.togglePopover();
           position();
         }}>
-        <span class="column-menu-desktop-label">Columns ${layout.visible.filter((column) => byId.has(column.id)).length}/${selectable.length}</span>
-        <span class="column-menu-mobile-label">Fields</span>
+        <span class="column-menu-desktop-label">${t("Columns {visible}/{total}", { visible: layout.visible.filter((column) => byId.has(column.id)).length, total: selectable.length })}</span>
+        <span class="column-menu-mobile-label">${t("Fields")}</span>
       </button>
             <div id=${menuId} ref=${panel} popover="auto" class="menu-panel column-menu" onToggle=${(event) => setOpen(event.newState === "open")}>
               ${selectable.map((column) => {
@@ -163,7 +164,7 @@ function ColumnMenu({ columns, layout }) {
                   </label>
                 `;
               })}
-              <button type="button" class="menu-item" onClick=${layout.reset}>Reset to defaults</button>
+              <button type="button" class="menu-item" onClick=${layout.reset}>${t("Reset to defaults")}</button>
             </div>
     </div>
   `;
@@ -188,15 +189,15 @@ export function ConfigurableTable({ columns, mobileSummary, rowHref, rowKey, row
       <div class=${`table-toolbar${!toolbar && !toolbarActions && headerControls ? " table-toolbar-mobile-only" : ""}`}>
         ${toolbar ? html`<div class="table-filter-controls">${toolbar}</div>` : null}
         <div class="table-display-controls">
-        <label class="mobile-table-sort"><span class="sr-only">Sort by</span>
-          <select aria-label="Sort by" value=${sort?.id || ""} onChange=${(event) => setSort(event.target.value ? { id: event.target.value, direction: sort?.direction || "ascending" } : null)}>
-            <option value="">Sort: default</option>
+        <label class="mobile-table-sort"><span class="sr-only">${t("Sort by")}</span>
+          <select aria-label=${t("Sort by")} value=${sort?.id || ""} onChange=${(event) => setSort(event.target.value ? { id: event.target.value, direction: sort?.direction || "ascending" } : null)}>
+            <option value="">${t("Sort: default")}</option>
             ${layout.visible.filter((column) => column.label && column.sortable !== false)
               .sort((first, second) => first.label.localeCompare(second.label, undefined, { numeric: true, sensitivity: "base" }))
               .map((column) => html`<option value=${column.id}>${column.label}</option>`)}
           </select>
         </label>
-        ${sort ? html`<button type="button" class="btn btn-sm mobile-table-order" aria-label=${sort.direction === "ascending" ? "Sort descending" : "Sort ascending"}
+        ${sort ? html`<button type="button" class="btn btn-sm mobile-table-order" aria-label=${sort.direction === "ascending" ? t("Sort descending") : t("Sort ascending")}
           onClick=${() => setSort({ ...sort, direction: sort.direction === "ascending" ? "descending" : "ascending" })}><${Icon} name=${sort.direction === "ascending" ? "sort-up" : "sort-down"} /></button>` : null}
         ${toolbarActions}
         ${headerControls ? null : html`<${ColumnMenu} columns=${columns} layout=${layout} />`}
@@ -214,7 +215,7 @@ export function ConfigurableTable({ columns, mobileSummary, rowHref, rowKey, row
                     aria-sort=${sort?.id === column.id ? sort.direction : null}
                     draggable=${true}
                     class=${`draggable${column.align === "right" ? " numeric" : ""}${column.id === "number" ? " channel-number" : ""}${dragTarget === column.id ? " drop-target" : ""}`}
-                    title="Drag to reorder"
+                    title=${t("Drag to reorder")}
                     onDragStart=${() => {
                       dragged.current = column.id;
                     }}

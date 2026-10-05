@@ -3,6 +3,7 @@ import { sampleRatePullupChoices } from "../core-metadata.js";
 import { api } from "../api.js";
 import { AsyncButton, FieldRow, Panel } from "../components.js";
 import * as format from "../format.js";
+import { t } from "../i18n.js";
 import { html, useRef, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
 import {
@@ -13,22 +14,22 @@ import { isEnrolled } from "./managed.js";
 function RenameControl({ device, requestName }) {
   const input = useRef(null);
   return html`
-    <${FieldRow} label="Device name">
+    <${FieldRow} label=${t("Device name")}>
       <input
         key=${`rename-${requestName}`}
         ref=${input}
         type="text"
         size="28"
-        aria-label="Device name"
+        aria-label=${t("Device name")}
         defaultValue=${device.name}
       />
       <${AsyncButton}
         variant="primary"
         small
-        description=${`rename ${device.name || "device"}`}
+        description=${device.name ? t("rename {device}", { device: device.name }) : t("rename device")}
         onRun=${() => api.renameDevice(requestName, input.current.value)}
       >
-        Apply
+        ${t("Apply")}
       <//>
     <//>
   `;
@@ -63,16 +64,16 @@ function SampleRateControl({ device, requestName }) {
   };
   if (!writable || !supported.length) {
     if (device.sample_rate_hz == null) return null;
-    return html`<${FieldRow} label="Sample rate">
+    return html`<${FieldRow} label=${t("Sample rate")}>
       <span>${format.sampleRate(device.sample_rate_hz)}</span>
     <//>`;
   }
   return html`
-    <${FieldRow} label="Sample rate">
+    <${FieldRow} label=${t("Sample rate")}>
       <select
         key=${`sample-rate-${requestName}`}
         ref=${select}
-        aria-label="Sample rate"
+        aria-label=${t("Sample rate")}
         onChange=${() => setPending(null)}
       >
         ${supported.map(
@@ -89,26 +90,25 @@ function SampleRateControl({ device, requestName }) {
       <${AsyncButton}
         variant="primary"
         small
-        description=${`set sample rate on ${device.name || "device"}`}
+        description=${device.name ? t("set sample rate on {device}", { device: device.name }) : t("set sample rate on device")}
         onRun=${apply}
       >
-        Apply
+        ${t("Apply")}
       <//>
       ${
         pending?.requestName === requestName
           ? html`
               <div class="flex flex-col gap-2" role="alert">
                 <span
-                  >Changing to ${format.sampleRate(pending.rate)} removes these
-                  transmitter channels from existing flows:</span
+                  >${t("Changing to {rate} removes these transmitter channels from existing flows:", { rate: format.sampleRate(pending.rate) })}</span
                 >
                 <ul>
-                  ${pending.losses.map((loss) => html`<li>Flow ${loss.flow_number}: channels ${loss.removed_channel_members.join(", ")}</li>`)}
+                  ${pending.losses.map((loss) => html`<li>${t("Flow {flow}: channels {channels}", { flow: loss.flow_number, channels: loss.removed_channel_members.join(", ") })}</li>`)}
                 </ul>
                 <${AsyncButton}
                   small
                   variant="danger"
-                  description=${`change sample rate and remove flow channels on ${device.name || "device"}`}
+                  description=${device.name ? t("change sample rate and remove flow channels on {device}", { device: device.name }) : t("change sample rate and remove flow channels on device")}
                   onRun=${async () => {
                     const result = await api.setSampleRate(
                       requestName,
@@ -118,14 +118,14 @@ function SampleRateControl({ device, requestName }) {
                     setPending(null);
                     return result;
                   }}
-                  >Change rate and remove channels<//
+                  >${t("Change rate and remove channels")}<//
                 >
                 <button
                   type="button"
                   class="btn btn-sm"
                   onClick=${() => setPending(null)}
                 >
-                  Cancel
+                  ${t("Cancel")}
                 <//>
               </div>
             `
@@ -141,16 +141,16 @@ function EncodingControl({ device, requestName }) {
   const writable = operationWritable(device, "encoding");
   if (!writable || !supported.length) {
     if (!device.encoding) return null;
-    return html`<${FieldRow} label="Encoding">
+    return html`<${FieldRow} label=${t("Encoding")}>
       <span>PCM ${device.encoding}</span>
     <//>`;
   }
   return html`
-    <${FieldRow} label="Encoding">
+    <${FieldRow} label=${t("Encoding")}>
       <select
         key=${`encoding-${requestName}`}
         ref=${select}
-        aria-label="Encoding"
+        aria-label=${t("Encoding")}
       >
         ${supported.map(
           (value) =>
@@ -166,10 +166,10 @@ function EncodingControl({ device, requestName }) {
       <${AsyncButton}
         variant="primary"
         small
-        description=${`set encoding on ${device.name || "device"}`}
+        description=${device.name ? t("set encoding on {device}", { device: device.name }) : t("set encoding on device")}
         onRun=${() => api.setEncoding(requestName, Number(select.current.value))}
       >
-        Apply
+        ${t("Apply")}
       <//>
     <//>
   `;
@@ -180,7 +180,7 @@ function PullupControl({ device, requestName }) {
   const labels = new Map(
     sampleRatePullupChoices.map(({ value, label }) => [
       value,
-      label.charAt(0).toUpperCase() + label.slice(1),
+      t(label.charAt(0).toUpperCase() + label.slice(1)),
     ]),
   );
   const supported = (
@@ -190,12 +190,12 @@ function PullupControl({ device, requestName }) {
   if (!writable || !supported.length) {
     const current = labels.get(Number(device.sample_rate_pullup_raw_value));
     if (!current) return null;
-    return html`<${FieldRow} label="Sample rate pull-up">
+    return html`<${FieldRow} label=${t("Sample rate pull-up")}>
       <span>${current}</span>
     <//>`;
   }
   return html`
-    <${FieldRow} label="Sample rate pull-up">
+    <${FieldRow} label=${t("Sample rate pull-up")}>
       <select key=${`pullup-${requestName}`} ref=${select}>
         ${supported.map(
           (value) =>
@@ -211,36 +211,36 @@ function PullupControl({ device, requestName }) {
       <${AsyncButton}
         variant="primary"
         small
-        description=${`set sample rate pull-up on ${device.name || "device"}`}
+        description=${device.name ? t("set sample rate pull-up on {device}", { device: device.name }) : t("set sample rate pull-up on device")}
         onRun=${() => api.setSampleRatePullup(requestName, Number(select.current.value))}
       >
-        Apply
+        ${t("Apply")}
       <//>
     <//>
   `;
 }
 
 const EXTENDED_CLOCK_FIELDS = [
-  ["follower_only", "Follower only", null],
-  ["ptpv2_domain", "PTPv2 domain", 255],
-  ["ptpv2_priority1", "PTPv2 priority 1", 255],
-  ["ptpv2_priority2", "PTPv2 priority 2", 255],
-  ["multicast_dscp", "Multicast DSCP", 63],
+  ["follower_only", t("Follower only"), null],
+  ["ptpv2_domain", t("PTPv2 domain"), 255],
+  ["ptpv2_priority1", t("PTPv2 priority 1"), 255],
+  ["ptpv2_priority2", t("PTPv2 priority 2"), 255],
+  ["multicast_dscp", t("Multicast DSCP"), 63],
 ];
 
 const PORT_CLOCK_FIELDS = [
-  ["ttl", "Multicast TTL", 0, 255],
-  ["sync_interval", "Sync interval (log seconds)", -128, 127],
-  ["announce_interval", "Announce interval (log seconds)", -128, 127],
-  ["delay_request_interval", "Delay-request interval (log seconds)", -128, 127],
-  ["peer_delay_interval", "Peer-delay interval (log seconds)", -128, 127],
+  ["ttl", t("Multicast TTL"), 0, 255],
+  ["sync_interval", t("Sync interval (log seconds)"), -128, 127],
+  ["announce_interval", t("Announce interval (log seconds)"), -128, 127],
+  ["delay_request_interval", t("Delay-request interval (log seconds)"), -128, 127],
+  ["peer_delay_interval", t("Peer-delay interval (log seconds)"), -128, 127],
 ];
 
 function OnOffSelect({ reference, onChange, label }) {
   return html`<select ref=${reference} aria-label=${label} onChange=${onChange}>
-    <option value="keep">Keep current setting</option>
-    <option value="true">On</option>
-    <option value="false">Off</option>
+    <option value="keep">${t("Keep current setting")}</option>
+    <option value="true">${t("On")}</option>
+    <option value="false">${t("Off")}</option>
   </select>`;
 }
 
@@ -255,19 +255,19 @@ function ClockingControls({ device, requestName }) {
   const fresh = format.clockStatusFresh(device);
   const managed = isEnrolled(device);
   if (managed) {
-    return html`<${Panel} title="Clocking">
-      <${FieldRow} label="Preferred leader">
+    return html`<${Panel} title=${t("Clocking")}>
+      <${FieldRow} label=${t("Preferred leader")}>
         <${AsyncButton}
           small
-          description=${`prefer ${device.name || "device"} as clock leader`}
+          description=${device.name ? t("prefer {device} as clock leader", { device: device.name }) : t("prefer device as clock leader")}
           onRun=${() => api.setPreferredLeader(requestName, true)}
-          >On<//
+          >${t("On")}<//
         >
         <${AsyncButton}
           small
-          description=${`clear the clock leader preference on ${device.name || "device"}`}
+          description=${device.name ? t("clear the clock leader preference on {device}", { device: device.name }) : t("clear the clock leader preference on device")}
           onRun=${() => api.setPreferredLeader(requestName, false)}
-          >Off<//
+          >${t("Off")}<//
         >
       <//>
     <//>`;
@@ -313,21 +313,21 @@ function ClockingControls({ device, requestName }) {
     return api.setClockConfiguration(requestName, changes);
   };
   return html`
-    <${Panel} title="Clocking">
-      ${preferredAllowed ? html`<${FieldRow} label="Preferred leader"><${OnOffSelect} reference=${preferred} label="Preferred leader" /><//>` : null}
-      ${sourceAllowed ? html`<${FieldRow} label="Clock source">
-        <select ref=${source} aria-label="Clock source">
-          <option value="keep">Keep current setting</option>
+    <${Panel} title=${t("Clocking")}>
+      ${preferredAllowed ? html`<${FieldRow} label=${t("Preferred leader")}><${OnOffSelect} reference=${preferred} label=${t("Preferred leader")} /><//>` : null}
+      ${sourceAllowed ? html`<${FieldRow} label=${t("Clock source")}>
+        <select ref=${source} aria-label=${t("Clock source")}>
+          <option value="keep">${t("Keep current setting")}</option>
           ${sourceChoices.map((choice) => html`<option value=${choice.code}>${format.stateLabel(choice.label)}</option>`)}
         </select>
       <//>` : null}
-      ${named ? html`<${FieldRow} label="Clock subdomain">
-        <input ref=${subdomain} aria-label="Clock subdomain" defaultValue=${device.clock_subdomain_presentation?.text ?? ""} />
+      ${named ? html`<${FieldRow} label=${t("Clock subdomain")}>
+        <input ref=${subdomain} aria-label=${t("Clock subdomain")} defaultValue=${device.clock_subdomain_presentation?.text ?? ""} />
       <//>` : null}
-      ${unicastAllowed ? html`<${FieldRow} label=${perPort ? "PTPv1 unicast delay requests" : "Unicast delay requests"}>
-        <${OnOffSelect} reference=${unicast} label=${perPort ? "PTPv1 unicast delay requests" : "Unicast delay requests"} />
+      ${unicastAllowed ? html`<${FieldRow} label=${perPort ? t("PTPv1 unicast delay requests") : t("Unicast delay requests")}>
+        <${OnOffSelect} reference=${unicast} label=${perPort ? t("PTPv1 unicast delay requests") : t("Unicast delay requests")} />
       <//>` : null}
-      ${extendedFields.length || ports.length ? html`<details><summary>Advanced clock settings</summary>
+      ${extendedFields.length || ports.length ? html`<details><summary>${t("Advanced clock settings")}</summary>
         ${extendedFields.map(([name, label, maximum]) => html`<${FieldRow} label=${label}>
           ${maximum == null
             ? html`<${OnOffSelect} label=${label} onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "keep" ? null : event.target.value === "true" })} />`
@@ -335,14 +335,14 @@ function ClockingControls({ device, requestName }) {
                 onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "" ? null : Number(event.target.value) })} />`}
         <//>`)}
         ${ports.map((port) => html`
-          <fieldset><legend>Port ${port.port_id}</legend>
+          <fieldset><legend>${t("Port {port}", { port: port.port_id })}</legend>
             ${PORT_CLOCK_FIELDS.filter(([name]) => port[name] != null).map(([name, label, minimum, maximum]) => html`
-              <${FieldRow} label=${label}><input type="number" aria-label=${`Port ${port.port_id} ${label}`} min=${minimum} max=${maximum} step="1" defaultValue=${port[name]}
+              <${FieldRow} label=${label}><input type="number" aria-label=${t("Port {port} {setting}", { port: port.port_id, setting: label })} min=${minimum} max=${maximum} step="1" defaultValue=${port[name]}
                 onChange=${(event) => setPortChanges({ ...portChanges, [port.port_id]: {
                   ...portChanges[port.port_id], [name]: event.target.value === "" ? null : Number(event.target.value),
                 } })} /><//>`)}
-            ${port.follower_only != null ? html`<${FieldRow} label="Follower only"><${OnOffSelect}
-              label=${`Port ${port.port_id} follower only`}
+            ${port.follower_only != null ? html`<${FieldRow} label=${t("Follower only")}><${OnOffSelect}
+              label=${t("Port {port} follower only", { port: port.port_id })}
               onChange=${(event) => setPortChanges({ ...portChanges, [port.port_id]: {
                 ...portChanges[port.port_id], follower_only: event.target.value === "keep" ? null : event.target.value === "true",
               } })} /><//>` : null}
@@ -351,9 +351,9 @@ function ClockingControls({ device, requestName }) {
       <${AsyncButton}
         variant="primary"
         small
-        description=${`apply clock settings on ${device.name || "device"}`}
+        description=${device.name ? t("apply clock settings on {device}", { device: device.name }) : t("apply clock settings on device")}
         onRun=${apply}
-        >Apply clock settings<//
+        >${t("Apply clock settings")}<//
       >
     <//>
   `;
@@ -366,30 +366,30 @@ export function DeviceConfigSection({ device }) {
   return html`
     <div class="flex flex-col gap-4">
       <${Panel}
-        title="Device config"
+        title=${t("Device config")}
         headerActions=${html`
           <${AsyncButton}
             small
-            description=${`refresh settings for ${device.name || "device"}`}
+            description=${device.name ? t("refresh settings for {device}", { device: device.name }) : t("refresh settings for device")}
             onRun=${() => api.refresh(requestName)}
-            >Refresh settings<//
+            >${t("Refresh settings")}<//
           >
           ${
             identifyWritable
               ? html`<${AsyncButton}
                   small
-                  description=${`identify ${device.name || "device"}`}
+                  description=${device.name ? t("identify {device}", { device: device.name }) : t("identify device")}
                   onRun=${() => api.identify(requestName)}
-                  >Identify<//
+                  >${t("Identify")}<//
                 >`
               : null
           }
           <${AsyncButton}
             small
             variant="danger"
-            description=${`reboot ${device.name || "device"}`}
+            description=${device.name ? t("reboot {device}", { device: device.name }) : t("reboot device")}
             onRun=${() => api.reboot(requestName)}
-            >Reboot<//
+            >${t("Reboot")}<//
           >
         `}
       >
@@ -433,13 +433,13 @@ function LatencyControl({ device }) {
   const current = device.configured_latency_ms ?? device.latency_ms;
   if (!choices.length && !hasRange) return null;
   return html`
-    <${FieldRow} label="Latency">
+    <${FieldRow} label=${t("Latency")}>
       ${
         choices.length
           ? html`<select
               key=${`latency-${requestName}`}
               ref=${control}
-              aria-label="Latency"
+              aria-label=${t("Latency")}
               onChange=${(event) => setCustom(event.currentTarget.value === "custom")}
             >
               ${choices.map(
@@ -452,7 +452,7 @@ function LatencyControl({ device }) {
                     ${value} ms
                   </option>`,
               )}
-              ${hasRange ? html`<option value="custom">Custom…</option>` : null}
+              ${hasRange ? html`<option value="custom">${t("Custom…")}</option>` : null}
             </select>`
           : null
       }
@@ -462,7 +462,7 @@ function LatencyControl({ device }) {
               <input
                 key=${`custom-latency-${requestName}`}
                 ref=${customInput}
-                aria-label="Custom latency in milliseconds"
+                aria-label=${t("Custom latency in milliseconds")}
                 type="number"
                 min=${minimum}
                 max=${maximum}
@@ -477,16 +477,16 @@ function LatencyControl({ device }) {
       <${AsyncButton}
         variant="primary"
         small
-        description=${`set latency on ${device.name || "device"}`}
+        description=${device.name ? t("set latency on {device}", { device: device.name }) : t("set latency on device")}
         onRun=${() => {
           const input =
             custom || !choices.length ? customInput.current : control.current;
           if (!input.checkValidity())
-            throw new Error(`Enter a latency from ${minimum} to ${maximum} ms`);
+            throw new Error(t("Enter a latency from {minimum} to {maximum} ms", { minimum, maximum }));
           return api.setLatency(requestName, Number(input.value));
         }}
       >
-        Apply
+        ${t("Apply")}
       <//>
     <//>
   `;

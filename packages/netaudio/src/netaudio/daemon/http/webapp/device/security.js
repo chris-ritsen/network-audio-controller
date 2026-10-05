@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { AsyncButton, Fields, Panel } from "../components.js";
+import { t } from "../i18n.js";
 import { html, useEffect, useLayoutEffect, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
 import { operationAvailability } from "./availability.js";
@@ -30,34 +31,34 @@ export function LockSection({ device }) {
 
   return html`
     <div class="w-full max-w-lg"><${Panel}
-      title="Device lock"
+      title=${t("Device lock")}
       headerActions=${canRefresh ? html`<${AsyncButton}
         small
-        description=${`refresh lock status on ${requestName}`}
+        description=${t("refresh lock status on {device}", { device: requestName })}
         onRun=${refresh}
       >
-        Refresh
+        ${t("Refresh")}
       <//>` : null}
     >
       <div class="flex flex-col items-start gap-4">
-        ${known ? html`<${Fields} entries=${[["State", locked ? "Locked" : "Unlocked"]]} />` : null}
+        ${known ? html`<${Fields} entries=${[[t("State"), locked ? t("Locked") : t("Unlocked")]]} />` : null}
         ${writable && known ? html`
-          <label class="flex flex-col gap-2">Device PIN
+          <label class="flex flex-col gap-2">${t("Device PIN")}
             <input class="w-32" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off"
               value=${pin} onInput=${(event) => setPin(event.target.value)} />
           </label>
           <${AsyncButton}
             small
-            description=${`${locked ? "unlock" : "lock"} ${requestName}`}
+            description=${locked ? t("unlock {device}", { device: requestName }) : t("lock {device}", { device: requestName })}
             onRun=${async () => {
-              if (!/^\d{4}$/.test(pin)) throw new Error("Enter the 4-digit device PIN");
+              if (!/^\d{4}$/.test(pin)) throw new Error(t("Enter the 4-digit device PIN"));
               const result = locked ? await api.unlock(requestName, pin) : await api.lock(requestName, pin);
               setPin("");
               await refresh();
               return result;
             }}
           >
-            ${locked ? "Unlock" : "Lock"}
+            ${locked ? t("Unlock") : t("Lock")}
           <//>
         ` : null}
       </div>

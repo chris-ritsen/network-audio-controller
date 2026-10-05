@@ -1,6 +1,7 @@
 import { ChannelStrips } from "../channel-strips.js";
 import { Notice, Panel } from "../components.js";
 import * as format from "../format.js";
+import { t } from "../i18n.js";
 import { html, useCallback, useMemo } from "../lib/preact.js";
 import { MeterBank } from "../meters.js";
 import { DetailedMonitoring } from "../monitoring.js";
@@ -10,10 +11,10 @@ import { deviceRequestName, meterValuesFor } from "../store.js";
 import { meterLayout, setMeterLayout } from "../ui-preferences.js";
 
 const STRIP_READOUTS = {
-  clipping: "Clip",
+  clipping: t("Clip"),
   muted: "-∞",
   mute_or_floor: "-∞",
-  below_threshold: "Low",
+  below_threshold: t("Low"),
 };
 
 function stripChannels(device, direction) {
@@ -46,15 +47,15 @@ function DeviceStrips({ device, direction }) {
     [device.server_name, direction],
   );
   if (!strips.length) return null;
-  return html`<${ChannelStrips} strips=${strips} read=${read} label=${`${direction === "tx" ? "Transmit" : "Receive"} levels`} />`;
+  return html`<${ChannelStrips} strips=${strips} read=${read} label=${direction === "tx" ? t("Transmit levels") : t("Receive levels")} />`;
 }
 
 function LayoutSwitch() {
   const current = meterLayout.value;
-  return html`<div class="join" role="group" aria-label="Meter layout">
+  return html`<div class="join" role="group" aria-label=${t("Meter layout")}>
     ${[
-      ["strips", "Strips"],
-      ["bars", "Bars"],
+      ["strips", t("Strips")],
+      ["bars", t("Bars")],
     ].map(
       ([id, label]) => html`<button
         key=${id}
@@ -70,11 +71,11 @@ function LayoutSwitch() {
 }
 
 export function DeviceMeters({ device }) {
-  if (!device.online) return html`<${Notice}>Monitoring is unavailable while this device is offline.<//>`;
+  if (!device.online) return html`<${Notice}>${t("Monitoring is unavailable while this device is offline.")}<//>`;
   const strips = meterLayout.value === "strips";
   const directions = [
-    ["rx", "Receive levels"],
-    ["tx", "Transmit levels"],
+    ["rx", t("Receive levels")],
+    ["tx", t("Transmit levels")],
   ].filter(([direction]) => stripChannels(device, direction).length);
   const bank = (direction) =>
     strips
@@ -83,7 +84,7 @@ export function DeviceMeters({ device }) {
   return html`<div class="flex flex-col gap-3">
     ${isEnrolled(device) ? null : html`<${DetailedMonitoring} requestName=${deviceRequestName(device)} online=${device.online} />`}
     <div class="flex items-center justify-end gap-2">
-      <span class="text-sm">Meters</span>
+      <span class="text-sm">${t("Meters")}</span>
       <${LayoutSwitch} />
     </div>
     <div class=${strips || directions.length < 2 ? "flex flex-col gap-3" : "split"}>

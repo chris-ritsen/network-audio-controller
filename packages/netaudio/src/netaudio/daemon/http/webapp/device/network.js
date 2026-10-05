@@ -1,20 +1,54 @@
 import { api } from "../api.js";
 import { AsyncButton, Fields, FieldRow, Panel } from "../components.js";
+import { t } from "../i18n.js";
 import { html, useEffect, useRef, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
 import { operationWritable } from "./availability.js";
 
 const modeLabel = (value) =>
   ({
-    switched: "Switched",
-    redundant: "Redundant",
-    split_redundant: "Split/Redundant",
+    switched: t("Switched"),
+    redundant: t("Redundant"),
+    split_redundant: t("Split/Redundant"),
     dynamic: "DHCP",
     dhcp: "DHCP",
-    static: "Static",
+    static: t("Static"),
   })[value];
 
 const usableAddress = (value) => (value && value !== "0.0.0.0" ? value : undefined);
+
+const INTERFACE_TEXT = {
+  primary: {
+    title: t("Primary"),
+    addressMode: t("Primary address mode"),
+    ipAddress: t("Primary IP address"),
+    subnetMask: t("Primary subnet mask"),
+    gateway: t("Primary gateway"),
+    dnsServer: t("Primary DNS server"),
+    description: t("save primary network settings"),
+    save: t("Save primary settings"),
+  },
+  secondary: {
+    title: t("Secondary"),
+    addressMode: t("Secondary address mode"),
+    ipAddress: t("Secondary IP address"),
+    subnetMask: t("Secondary subnet mask"),
+    gateway: t("Secondary gateway"),
+    dnsServer: t("Secondary DNS server"),
+    description: t("save secondary network settings"),
+    save: t("Save secondary settings"),
+  },
+  other: {
+    title: t("Network interface"),
+    addressMode: t("Network interface address mode"),
+    ipAddress: t("Network interface IP address"),
+    subnetMask: t("Network interface subnet mask"),
+    gateway: t("Network interface gateway"),
+    dnsServer: t("Network interface DNS server"),
+    description: t("save network interface network settings"),
+    save: t("Save network interface settings"),
+  },
+};
 
 function InterfaceCard({
   device,
@@ -26,13 +60,13 @@ function InterfaceCard({
 }) {
   const configured = entry.configured;
   const role = entry.interface;
-  const roleTitle =
+  const roleText =
     role === "primary"
-      ? "Primary"
+      ? INTERFACE_TEXT.primary
       : role === "secondary"
-        ? "Secondary"
-        : "Network interface";
-  const title = single ? "IPv4 address" : roleTitle;
+        ? INTERFACE_TEXT.secondary
+        : INTERFACE_TEXT.other;
+  const title = single ? t("IPv4 address") : roleText.title;
   const [mode, setMode] = useState(
     configured?.mode === "static" ? "static" : "dhcp",
   );
@@ -48,75 +82,75 @@ function InterfaceCard({
       <h3 class="section-label">${title}</h3>
       <${Fields}
         entries=${[
-        ["Mode", modeLabel(entry.mode)],
-        ["Address", usableAddress(entry.ip_address)],
-        ["Subnet mask", usableAddress(entry.netmask)],
-        ["Gateway", usableAddress(entry.gateway)],
-        ["DNS server", usableAddress(entry.dns_server)],
-        ["MAC address", entry.mac_address || undefined],
+        [t("Mode"), modeLabel(entry.mode)],
+        [t("Address"), usableAddress(entry.ip_address)],
+        [t("Subnet mask"), usableAddress(entry.netmask)],
+        [t("Gateway"), usableAddress(entry.gateway)],
+        [t("DNS server"), usableAddress(entry.dns_server)],
+        [t("MAC address"), entry.mac_address || undefined],
         ...(configured && !editable && configured.mode !== entry.mode
-          ? [["Mode after reboot", modeLabel(configured.mode)]]
+          ? [[t("Mode after reboot"), modeLabel(configured.mode)]]
           : []),
         ...(configured?.mode === "static" && !editable && configured.ip_address !== entry.ip_address
           ? [
-              ["Address after reboot", usableAddress(configured.ip_address)],
-              ["Subnet mask after reboot", usableAddress(configured.netmask)],
-              ["Gateway after reboot", usableAddress(configured.gateway)],
-              ["DNS server after reboot", usableAddress(configured.dns_server)],
+              [t("Address after reboot"), usableAddress(configured.ip_address)],
+              [t("Subnet mask after reboot"), usableAddress(configured.netmask)],
+              [t("Gateway after reboot"), usableAddress(configured.gateway)],
+              [t("DNS server after reboot"), usableAddress(configured.dns_server)],
             ]
           : []),
       ]}
       />
-      ${entry.reboot_required ? html`<p role="status">Reboot to apply the new network settings.</p>` : null}
+      ${entry.reboot_required ? html`<p role="status">${t("Reboot to apply the new network settings.")}</p>` : null}
       ${
         editable
           ? html`
-              <${FieldRow} label="Address mode">
+              <${FieldRow} label=${t("Address mode")}>
                 <select
                   disabled=${saving}
-                  aria-label=${roleTitle + " address mode"}
+                  aria-label=${roleText.addressMode}
                   value=${mode}
                   onChange=${(event) => setMode(event.currentTarget.value)}
                 >
-                  ${modes.map((value) => html`<option value=${value}>${value === "dhcp" ? "DHCP" : "Static"}</option>`)}
+                  ${modes.map((value) => html`<option value=${value}>${value === "dhcp" ? "DHCP" : t("Static")}</option>`)}
                 </select>
               <//>
               ${
           mode === "static"
             ? html`
-                <${FieldRow} label="IP address"
+                <${FieldRow} label=${t("IP address")}
                   ><input
                     disabled=${saving}
                     ref=${ip}
-                    aria-label=${roleTitle + " IP address"}
+                    aria-label=${roleText.ipAddress}
                     defaultValue=${configured.ip_address || entry.ip_address || ""}
                 /><//>
-                <${FieldRow} label="Subnet mask"
+                <${FieldRow} label=${t("Subnet mask")}
                   ><input
                     disabled=${saving}
                     ref=${mask}
-                    aria-label=${roleTitle + " subnet mask"}
+                    aria-label=${roleText.subnetMask}
                     defaultValue=${configured.netmask || entry.netmask || ""}
                 /><//>
-                <${FieldRow} label="Gateway"
+                <${FieldRow} label=${t("Gateway")}
                   ><input
                     disabled=${saving}
                     ref=${gateway}
-                    aria-label=${roleTitle + " gateway"}
+                    aria-label=${roleText.gateway}
                     defaultValue=${configured.gateway || ""}
                 /><//>
-                <${FieldRow} label="DNS server"
+                <${FieldRow} label=${t("DNS server")}
                   ><input
                     disabled=${saving}
                     ref=${dns}
-                    aria-label=${roleTitle + " DNS server"}
+                    aria-label=${roleText.dnsServer}
                     defaultValue=${configured.dns_server || ""}
                 /><//>
               `
             : null
         }
               <${AsyncButton}
-                description=${"save " + roleTitle.toLowerCase() + " network settings"}
+                description=${roleText.description}
                 onRun=${async () => {
             setSaving(true);
             try {
@@ -135,7 +169,7 @@ function InterfaceCard({
               setSaving(false);
             }
           }}
-                >Save ${roleTitle.toLowerCase()} settings<//
+                >${roleText.save}<//
               >
             `
           : null
@@ -180,31 +214,31 @@ function Redundancy({ device, status, requestName, onReadback }) {
   const configured = modeLabel(status.configured_mode_evidence?.mode);
   return html`
     <section class="network-section">
-      <h3 class="section-label">Dante Redundancy</h3>
+      <h3 class="section-label">${t("Dante Redundancy")}</h3>
       ${
         editable
           ? html`
-              <${FieldRow} label="Mode">
+              <${FieldRow} label=${t("Mode")}>
                 <select
-                  aria-label="Dante Redundancy"
+                  aria-label=${t("Dante Redundancy")}
                   value=${selection}
                   disabled=${busy}
                   onChange=${changeMode}
                 >
-                  ${knownModes.map((choice) => html`<option value=${choice.mode}>${choice.label}</option>`)}
+                  ${knownModes.map((choice) => html`<option value=${choice.mode}>${t(choice.label)}</option>`)}
                 </select>
               <//>
-              ${busy ? html`<p role="status">Applying redundancy mode…</p>` : null}
-              ${error ? html`<p role="alert">Could not change redundancy mode: ${error}</p>` : null}
+              ${busy ? html`<p role="status">${t("Applying redundancy mode…")}</p>` : null}
+              ${error ? html`<p role="alert">${t("Could not change redundancy mode: {error}", { error: t(error) })}</p>` : null}
             `
           : html`<${Fields}
               entries=${[
-                ["Mode", active],
-                ["Mode after reboot", configured && configured !== active ? configured : undefined],
+                [t("Mode"), active],
+                [t("Mode after reboot"), configured && configured !== active ? configured : undefined],
               ]}
             />`
       }
-      ${status.reboot_required ? html`<p role="status">Reboot to apply the new redundancy mode.</p>` : null}
+      ${status.reboot_required ? html`<p role="status">${t("Reboot to apply the new redundancy mode.")}</p>` : null}
     </section>
   `;
 }
@@ -241,8 +275,8 @@ export function NetworkSection({ device }) {
     : device;
   return html`
     <div class="network-config">
-      <${Panel} title="Network config">
-        ${speed ? html`<${Fields} entries=${[["Link speed", `${speed} Mbps`]]} />` : null}
+      <${Panel} title=${t("Network config")}>
+        ${speed ? html`<${Fields} entries=${[[t("Link speed"), `${speed} Mbps`]]} />` : null}
         ${
         interfaces.map(
               (entry) => html`

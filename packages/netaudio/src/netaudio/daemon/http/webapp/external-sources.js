@@ -1,6 +1,8 @@
+import { t } from "./i18n.js";
+
 export function externalSourceKey(flow) {
   if (typeof flow.session_id !== "string" || !/^\d+$/.test(flow.session_id)) {
-    throw new Error("External source is unavailable.");
+    throw new Error(t("External source is unavailable."));
   }
   return `${flow.source_ipv4}/${flow.session_id}`;
 }
@@ -27,7 +29,7 @@ export function externalSourcesWithAssignments(discovered, devices) {
             previous?.channel_count || 0,
             identity.flow_slot,
           ),
-          flow_name: "External assignment",
+          flow_name: t("External assignment"),
           routable: false,
           routability_errors: ["Source announcement unavailable"],
           retained_assignment: true,
@@ -53,13 +55,13 @@ export function externalColumns(flows, filter = "") {
     if (!audio) continue;
     const count = hasSlots ? flow.channel_count : 0;
     const sourceKey = externalSourceKey(flow);
-    const label = `${flow.flow_name || "External audio"} · ${flow.source_ipv4}`;
+    const label = `${flow.flow_name || t("External audio")} · ${flow.source_ipv4}`;
     if (filter && !label.toLowerCase().includes(filter.toLowerCase())) continue;
     const channels = Array.from({ length: count }, (_, index) => ({
       number: index + 1,
-      name: `Channel ${index + 1}`,
+      name: t("Channel {number}", { number: index + 1 }),
     }));
-    const reason = (flow.routability_errors || []).join("; ");
+    const reason = (flow.routability_errors || []).map((error) => t(error)).join("; ");
     const common = {
       sourceKind: "external",
       sourceKey,
@@ -96,12 +98,12 @@ export function externalSubscriptionRequest(
   const flow = column.flow;
   if (!flow.routable) {
     throw new Error(
-      (flow.routability_errors || []).join("; ") ||
-        "Not routable",
+      (flow.routability_errors || []).map((error) => t(error)).join("; ") ||
+        t("Not routable"),
     );
   }
   if (Date.parse(flow.expires_at) <= Date.now())
-    throw new Error("This source has expired.");
+    throw new Error(t("This source has expired."));
   externalSourceKey(flow);
   return {
     rx_device: receiver,
@@ -142,8 +144,8 @@ export function externalCellState(row, column, pending) {
     return {
       kind: "self-unavailable",
       reason:
-        (flow.routability_errors || []).join("; ") ||
-        "Not routable",
+        (flow.routability_errors || []).map((error) => t(error)).join("; ") ||
+        t("Not routable"),
     };
   }
   return { kind: "empty" };

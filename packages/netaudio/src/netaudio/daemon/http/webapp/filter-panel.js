@@ -1,12 +1,13 @@
 import { html } from "./lib/preact.js";
 import { deviceFilterOptions, toggleDeviceFilter } from "./device-filters.js";
+import { t } from "./i18n.js";
 
 export function DeviceFilterPanel({ all, filters, onChange }) {
-  return html`<aside class="routing-filter-panel" aria-label="Device filters">
-    <div class="routing-filter-heading"><h2>Device filters</h2>
-      <button type="button" class="btn btn-xs" onClick=${() => onChange({ ...filters, search: "", receiverSearch: "", transmitterSearch: "", values: {} })}>Clear all</button>
+  return html`<aside class="routing-filter-panel" aria-label=${t("Device filters")}>
+    <div class="routing-filter-heading"><h2>${t("Device filters")}</h2>
+      <button type="button" class="btn btn-xs" onClick=${() => onChange({ ...filters, search: "", receiverSearch: "", transmitterSearch: "", values: {} })}>${t("Clear all")}</button>
     </div>
-    <label class="routing-filter-search">Search devices
+    <label class="routing-filter-search">${t("Search devices")}
       <input type="search" value=${filters.search || ""}
         onInput=${(event) => onChange({ ...filters, search: event.target.value })} />
     </label>
@@ -24,7 +25,7 @@ export function DeviceFilterPanel({ all, filters, onChange }) {
         ${group.options.map(([value, count]) => html`<label key=${value}>
           <input type="checkbox" checked=${filters.values?.[group.id]?.includes(value) || false}
             onChange=${() => onChange(toggleDeviceFilter(filters, group.id, value))} />
-          <span>${value}</span><span class="routing-filter-count">${count}</span>
+          <span>${t(value)}</span><span class="routing-filter-count">${count}</span>
         </label>`)}
       </div>
     </details>`)}

@@ -1,10 +1,11 @@
 import { startColorScheme } from "./color-scheme.js";
+import { t } from "./i18n.js";
 import { Icon } from "./icons.js";
 import "./ui-preferences.js";
 import { inventoryFilters, saveRoutingFilters } from "./device-filters.js";
 import { DeviceFilterPanel } from "./filter-panel.js";
 import { ContextSelector } from "./ddm-connections.js";
-import { html, render, useEffect, useRef, useState } from "./lib/preact.js";
+import { html, render, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
 import { CommandPalette, openPalette } from "./palette.js";
 import { location, navigate, startRouter } from "./router.js";
 import { matchesCommandKey } from "./shortcuts.js";
@@ -37,15 +38,37 @@ function viewById(identifier) {
 }
 
 function ViewTabs() {
-  return html`<nav class="view-tabs" aria-label="Views">
+  return html`<nav class="view-tabs" aria-label=${t("Views")}>
     ${visibleNavigation.value.map((view) => html`<a key=${view.id} href=${view.path}
       aria-current=${location.value.view === view.id ? "page" : null}>${view.tab || view.label}</a>`)}
   </nav>`;
 }
 
+function ViewSwitcher() {
+  const slot = useRef(null);
+  const measure = useRef(null);
+  const [fits, setFits] = useState(true);
+  useLayoutEffect(() => {
+    const update = () => {
+      if (slot.current && measure.current) setFits(measure.current.scrollWidth <= slot.current.clientWidth);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(slot.current);
+    observer.observe(measure.current);
+    return () => observer.disconnect();
+  }, []);
+  return html`<div class="view-switcher" ref=${slot}>
+    <div class="view-tabs view-tabs-measure" ref=${measure} aria-hidden="true">
+      ${visibleNavigation.value.map((view) => html`<span key=${view.id}>${view.tab || view.label}</span>`)}
+    </div>
+    ${fits ? html`<${ViewTabs} />` : html`<${ViewPicker} />`}
+  </div>`;
+}
+
 function ViewPicker() {
   const pointerSelection = useRef(false);
-  return html`<select class="select view-picker" aria-label="View" value=${visibleNavigation.value.find((view) => view.id === location.value.view)?.path || "/devices"}
+  return html`<select class="select view-picker" aria-label=${t("View")} value=${visibleNavigation.value.find((view) => view.id === location.value.view)?.path || "/devices"}
     onPointerDown=${() => { pointerSelection.current = true; }}
     onKeyDown=${() => { pointerSelection.current = false; }}
     onChange=${(event) => {
@@ -75,17 +98,17 @@ function TopBar({ compact, filtersAvailable, filtersOpen }) {
         </svg>
         ${compact ? null : html`<span class="brand-name" aria-hidden="true">netaudio</span>`}
       </a>
-      ${compact ? html`<${ViewPicker} />` : html`<${ViewTabs} />`}
+      ${compact ? html`<${ViewPicker} />` : html`<${ViewSwitcher} />`}
       ${compact ? null : html`<${ContextSelector} />`}
       <div class="topbar-controls">
         ${filtersAvailable ? html`<button type="button" class="header-icon-button filter-panel-toggle"
-          aria-label=${filtersOpen ? "Hide filters" : "Show filters"}
-          title=${filtersOpen ? "Hide filters" : "Show filters"}
+          aria-label=${filtersOpen ? t("Hide filters") : t("Show filters")}
+          title=${filtersOpen ? t("Hide filters") : t("Show filters")}
           aria-expanded=${filtersOpen} aria-controls="inventory-filters"
           onClick=${() => saveRoutingFilters({ ...inventoryFilters.value, panelOpen: !filtersOpen })}>
           <${Icon} name=${`${panel}-${filtersOpen ? "close" : "open"}`} />
         </button>` : null}
-        <button type="button" class="header-icon-button" aria-label="Search" title="Search" onClick=${openPalette}>
+        <button type="button" class="header-icon-button" aria-label=${t("Search")} title=${t("Search")} onClick=${openPalette}>
           <${Icon} name="search" />
         </button>
       </div>

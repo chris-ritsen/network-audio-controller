@@ -2,6 +2,7 @@ import * as format from "./format.js";
 import { sampleRatePullupChoices } from "./core-metadata.js";
 import { aes67Status } from "./aes67.js";
 import { signal } from "./lib/preact.js";
+import { t } from "./i18n.js";
 
 const UNKNOWN = "Not reported";
 const text = (value) => typeof value === "string" && value.trim() ? value.trim() : UNKNOWN;
@@ -23,21 +24,21 @@ function multicastState(device) {
 }
 
 export const DEVICE_FILTERS = [
-  { id: "manufacturer", label: "Manufacturer", values: (device) => [text(device.manufacturer)] },
-  { id: "model", label: "Model", values: (device) => [text(format.deviceModelName(device))] },
-  { id: "domain", label: "Domain", values: (device) => [text(device.ddm_domain_name)] },
-  { id: "lock", label: "Device lock", values: (device) => [boolean(device.is_locked, "Locked", "Unlocked")] },
-  { id: "sample-rate", label: "Sample rate", values: (device) => [number(device.sample_rate_hz, format.sampleRate)] },
-  { id: "latency", label: "Latency", values: (device) => [number(device.latency_ms, format.latency)] },
-  { id: "subscription", label: "Subscription", values: subscriptionStates },
-  { id: "tx-multicast", label: "Tx multicast flows", values: (device) => [multicastState(device)] },
+  { id: "manufacturer", label: t("Manufacturer"), values: (device) => [text(device.manufacturer)] },
+  { id: "model", label: t("Model"), values: (device) => [text(format.deviceModelName(device))] },
+  { id: "domain", label: t("Domain"), values: (device) => [text(device.ddm_domain_name)] },
+  { id: "lock", label: t("Device lock"), values: (device) => [boolean(device.is_locked, "Locked", "Unlocked")] },
+  { id: "sample-rate", label: t("Sample rate"), values: (device) => [number(device.sample_rate_hz, format.sampleRate)] },
+  { id: "latency", label: t("Latency"), values: (device) => [number(device.latency_ms, format.latency)] },
+  { id: "subscription", label: t("Subscription"), values: subscriptionStates },
+  { id: "tx-multicast", label: t("Tx multicast flows"), values: (device) => [multicastState(device)] },
   { id: "aes67", label: "AES67", values: (device) => [aes67Status(device).label] },
-  { id: "sample-rate-pullup", label: "Sample rate pull-up", values: (device) => {
+  { id: "sample-rate-pullup", label: t("Sample rate pull-up"), values: (device) => {
     const raw = device.sample_rate_pullup_raw_value;
     const label = sampleRatePullupChoices.find((choice) => choice.value === raw)?.label;
     return [label ? label.charAt(0).toUpperCase() + label.slice(1) : UNKNOWN];
   } },
-  { id: "media", label: "Media type", values: (device) => {
+  { id: "media", label: t("Media type"), values: (device) => {
     const types = new Set();
     for (const channels of Object.values(device.channels || {})) {
       for (const channel of Object.values(channels || {})) {
@@ -47,7 +48,7 @@ export const DEVICE_FILTERS = [
     }
     return types.size ? [...types] : [UNKNOWN];
   } },
-  { id: "external-clock", label: "External clock", values: (device) => [boolean(device.ddm_clock_preferences?.external_word_clock, "Enabled", "Disabled")] },
+  { id: "external-clock", label: t("External clock"), values: (device) => [boolean(device.ddm_clock_preferences?.external_word_clock, "Enabled", "Disabled")] },
 ];
 
 const STORAGE_KEY = "netaudio.routing.filters";

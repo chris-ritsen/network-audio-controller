@@ -1,6 +1,7 @@
 import { Fields, Panel } from "../components.js";
 import { aes67Status } from "../aes67.js";
 import * as format from "../format.js";
+import { t } from "../i18n.js";
 import { html } from "../lib/preact.js";
 import { scopedDevices } from "../store.js";
 import { DiagnosticsSection } from "./diagnostics.js";
@@ -8,16 +9,16 @@ import { DiagnosticsSection } from "./diagnostics.js";
 const HIDDEN_WORDS = new Set(["", "unknown", "none", "unset", "unavailable", "null", "undefined", "—"]);
 
 const PORT_STATES = {
-  master: "Leader",
-  leader: "Leader",
-  slave: "Follower",
-  follower: "Follower",
-  listening: "Listening",
-  passive: "Passive",
-  initializing: "Starting",
-  faulty: "Faulty",
-  uncalibrated: "Calibrating",
-  pre_master: "Becoming leader",
+  master: t("Leader"),
+  leader: t("Leader"),
+  slave: t("Follower"),
+  follower: t("Follower"),
+  listening: t("Listening"),
+  passive: t("Passive"),
+  initializing: t("Starting"),
+  faulty: t("Faulty"),
+  uncalibrated: t("Calibrating"),
+  pre_master: t("Becoming leader"),
 };
 
 const AES67_STATES = new Set([
@@ -39,11 +40,11 @@ function words(value) {
   const text = shown(value);
   if (text === undefined) return undefined;
   const spaced = text.replaceAll("_", " ");
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  return t(spaced.charAt(0).toUpperCase() + spaced.slice(1));
 }
 
 function yesNo(value) {
-  return typeof value === "boolean" ? (value ? "Yes" : "No") : undefined;
+  return typeof value === "boolean" ? (value ? t("Yes") : t("No")) : undefined;
 }
 
 function count(value) {
@@ -81,7 +82,7 @@ function synchronization(device, clock, fresh) {
     : locked === false || locked === "UNLOCKED" ? false
     : null;
   if (synchronized === null) return undefined;
-  return synchronized ? "Synchronized" : html`<span class="state-bad">Not synchronized</span>`;
+  return synchronized ? t("Synchronized") : html`<span class="state-bad">${t("Not synchronized")}</span>`;
 }
 
 function frequencyOffset(clock, fresh) {
@@ -92,8 +93,8 @@ function frequencyOffset(clock, fresh) {
 
 function clockMute(clock, fresh) {
   if (!fresh || clock.mute_state !== "muted") return undefined;
-  const reasons = (clock.mute_reasons || []).filter(Boolean).join(", ");
-  return html`<span class="state-bad">${reasons ? `Muted: ${reasons}` : "Muted"}</span>`;
+  const reasons = (clock.mute_reasons || []).filter(Boolean).map((reason) => t(reason)).join(", ");
+  return html`<span class="state-bad">${reasons ? t("Muted: {reasons}", { reasons }) : t("Muted")}</span>`;
 }
 
 function portEntries(clock, fresh) {
@@ -104,13 +105,17 @@ function portEntries(clock, fresh) {
   const versions = ports.map((port) => port.ptp_version);
   return ports.map((port) => {
     const repeated = versions.filter((version) => version === port.ptp_version).length > 1;
-    const label = port.ptp_version == null ? `Clock port ${port.record_number}` : `PTPv${port.ptp_version}${repeated ? ` port ${port.record_number}` : ""}`;
-    const state = PORT_STATES[String(port.state || "").toLowerCase()] || words(port.state);
+    const label = port.ptp_version == null
+      ? t("Clock port {number}", { number: port.record_number })
+      : repeated
+        ? t("PTPv{version} port {number}", { version: port.ptp_version, number: port.record_number })
+        : `PTPv${port.ptp_version}`;
+    const state = PORT_STATES[String(port.state || "").toLowerCase().replaceAll("-", "_")] || words(port.state);
     const details = [
       state,
       words(port.transport_path),
-      port.network_interface_index === 1 ? "Secondary network" : undefined,
-      port.link_down === true ? "Link down" : undefined,
+      port.network_interface_index === 1 ? t("Secondary network") : undefined,
+      port.link_down === true ? t("Link down") : undefined,
     ].filter(Boolean);
     return [label, details.length ? details.join(" · ") : undefined];
   });
@@ -141,51 +146,51 @@ export function StatusSection({ device }) {
   return html`
     <div class="flex flex-col gap-4">
       <div class="split">
-        <${Panel} title="Device">
+        <${Panel} title=${t("Device")}>
           <${Fields}
             entries=${[
-              ["Model", model],
-              ["Manufacturer", shown(device.manufacturer)],
-              ["Dante platform", platform && platform !== model ? platform : undefined],
-              ["Product version", versionOf(device.friendly_product_version, device.product_version, device.ddm_product_version)],
+              [t("Model"), model],
+              [t("Manufacturer"), shown(device.manufacturer)],
+              [t("Dante platform"), platform && platform !== model ? platform : undefined],
+              [t("Product version"), versionOf(device.friendly_product_version, device.product_version, device.ddm_product_version)],
               [
-                device.platform_hardware_version ? "Dante firmware" : "Dante software",
+                device.platform_hardware_version ? t("Dante firmware") : t("Dante software"),
                 versionOf(device.platform_software_version, device.ddm_dante_version),
               ],
-              ["Hardware version", versionOf(device.platform_hardware_version, device.ddm_dante_hardware_version)],
-              ["IP address", shown(device.ipv4)],
-              ["MAC address", mac === format.ABSENT ? undefined : mac],
-              ["Lock", device.is_locked == null ? undefined : device.is_locked ? "Locked" : "Unlocked"],
-              ["Domain", device.ddm_enrolment_state === "ENROLLED" ? shown(device.ddm_domain_name) : undefined],
+              [t("Hardware version"), versionOf(device.platform_hardware_version, device.ddm_dante_hardware_version)],
+              [t("IP address"), shown(device.ipv4)],
+              [t("MAC address"), mac === format.ABSENT ? undefined : mac],
+              [t("Lock"), device.is_locked == null ? undefined : device.is_locked ? t("Locked") : t("Unlocked")],
+              [t("Domain"), device.ddm_enrolment_state === "ENROLLED" ? shown(device.ddm_domain_name) : undefined],
             ]}
           />
         <//>
-        <${Panel} title="Audio">
+        <${Panel} title=${t("Audio")}>
           <${Fields}
             entries=${[
-              ["Sample rate", device.sample_rate_hz ? format.sampleRate(device.sample_rate_hz) : undefined],
-              ["Encoding", device.encoding ? `PCM ${device.encoding}` : undefined],
-              ["Latency", device.latency_ms == null ? undefined : format.latency(device.latency_ms)],
-              ["Transmit channels", transmitters || undefined],
-              ["Receive channels", receivers || undefined],
-              ["Subscriptions", receivers ? subscriptions.length : undefined],
-              ["Subscription problems", subscriptionProblems(problems)],
-              ["AES67", AES67_STATES.has(aes67) ? aes67 : undefined],
+              [t("Sample rate"), device.sample_rate_hz ? format.sampleRate(device.sample_rate_hz) : undefined],
+              [t("Encoding"), device.encoding ? `PCM ${device.encoding}` : undefined],
+              [t("Latency"), device.latency_ms == null ? undefined : format.latency(device.latency_ms)],
+              [t("Transmit channels"), transmitters || undefined],
+              [t("Receive channels"), receivers || undefined],
+              [t("Subscriptions"), receivers ? subscriptions.length : undefined],
+              [t("Subscription problems"), subscriptionProblems(problems)],
+              ["AES67", AES67_STATES.has(aes67) ? t(aes67) : undefined],
             ]}
           />
         <//>
-        <${Panel} title="Clock">
+        <${Panel} title=${t("Clock")}>
           <${Fields}
             entries=${[
-              ["Sync", synchronization(device, clock, fresh)],
-              ["Muted", clockMute(clock, fresh)],
-              ["Role", words(device.clock_role)],
-              ["Leader", clockLeader(device, clock)],
-              ["Preferred leader", yesNo(device.preferred_leader)],
-              ["Source", words(device.clock_source)],
-              ["Subdomain", device.ddm_enrolment_state === "ENROLLED" ? undefined : shown(device.clock_subdomain_presentation?.label)],
-              ["Frequency offset", String(device.clock_role).toLowerCase() === "leader" ? undefined : frequencyOffset(clock, fresh)],
-              ["Word clock", words(fresh ? clock.word_clock_state : undefined)],
+              [t("Sync"), synchronization(device, clock, fresh)],
+              [t("Muted"), clockMute(clock, fresh)],
+              [t("Role"), words(device.clock_role)],
+              [t("Leader"), clockLeader(device, clock)],
+              [t("Preferred leader"), yesNo(device.preferred_leader)],
+              [t("Source"), words(device.clock_source)],
+              [t("Subdomain"), device.ddm_enrolment_state === "ENROLLED" ? undefined : shown(device.clock_subdomain_presentation?.label)],
+              [t("Frequency offset"), String(device.clock_role).toLowerCase() === "leader" ? undefined : frequencyOffset(clock, fresh)],
+              [t("Word clock"), words(fresh ? clock.word_clock_state : undefined)],
               ...portEntries(clock, fresh),
             ]}
           />

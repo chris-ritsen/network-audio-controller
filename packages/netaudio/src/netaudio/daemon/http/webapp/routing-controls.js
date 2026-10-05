@@ -1,5 +1,6 @@
 import { html } from "./lib/preact.js";
 import * as format from "./format.js";
+import { t } from "./i18n.js";
 import { Icon } from "./icons.js";
 import { RoutePicker } from "./route-picker.js";
 import { location, setQueryParameters } from "./router.js";
@@ -13,7 +14,7 @@ export function receiverChannels(device) {
   const channels = device.channels?.receivers || {};
   return format.sortedChannelNumbers(channels).map((number) => ({
     number,
-    name: channels[number].name || `Channel ${number}`,
+    name: channels[number].name || t("Channel {number}", { number }),
     subscription: (device.subscriptions || []).find(
       (item) => item.rx_channel_number === number,
     ),
@@ -30,7 +31,7 @@ export function RoutingControls({ all }) {
   const receiver =
     receivers.find((device) => deviceRequestName(device) === selected || format.deviceLabel(device) === selected) ||
     receivers[0];
-  if (!receiver) return html`<p>No receiving devices.</p>`;
+  if (!receiver) return html`<p>${t("No receiving devices.")}</p>`;
   const channels = receiverChannels(receiver);
   const visible = channels.filter((channel) =>
     `${channel.number} ${channel.name}`
@@ -39,11 +40,11 @@ export function RoutingControls({ all }) {
   );
   return html`<section
     class="routing-channel-list"
-    aria-label="Route receiver channels"
+    aria-label=${t("Route receiver channels")}
   >
     <div class="routing-channel-toolbar">
     <label
-      ><span>Receiving device</span
+      ><span>${t("Receiving device")}</span
       >
       <select
         value=${deviceRequestName(receiver)}
@@ -55,23 +56,23 @@ export function RoutingControls({ all }) {
         ${receivers.map(
           (device) =>
             html`<option value=${deviceRequestName(device)}>
-              ${format.deviceLabel(device)}${device.online ? "" : " (offline)"}
+              ${device.online ? format.deviceLabel(device) : t("{device} (offline)", { device: format.deviceLabel(device) })}
             </option>`,
         )}
       </select>
     </label>
-    <label><span>Find a channel</span>
+    <label><span>${t("Find a channel")}</span>
       <input
         type="search"
-        aria-label="Find a receiving channel"
-        placeholder="Find a channel"
+        aria-label=${t("Find a receiving channel")}
+        placeholder=${t("Find a channel")}
         value=${filter}
         onInput=${(event) => setQueryParameters({ find: event.target.value })}
       />
     </label>
     </div>
-    ${!receiver.online ? html`<p role="status">Offline</p>` : null}
-    <div class="routing-channel-head" aria-hidden="true"><span>#</span><span>Receiving channel</span><span>Source channel</span><span>Transmitting device</span><span></span><span></span></div>
+    ${!receiver.online ? html`<p role="status">${t("Offline")}</p>` : null}
+    <div class="routing-channel-head" aria-hidden="true"><span>#</span><span>${t("Receiving channel")}</span><span>${t("Source channel")}</span><span>${t("Transmitting device")}</span><span></span><span></span></div>
     <div class="routing-channel-rows">
       ${visible.map((channel) => {
         const subscription = channel.subscription;
@@ -92,26 +93,26 @@ export function RoutingControls({ all }) {
           key=${channel.number}
           disabled=${!receiver.online || Boolean(pending)}
           onClick=${() => setEditing(channel.number)}
-          aria-label=${`${channel.name}: ${routed ? `${subscription.tx_channel} from ${subscription.tx_device}` : "Choose source"}`}
+          aria-label=${`${channel.name}: ${routed ? t("{channel} from {device}", { channel: subscription.tx_channel, device: subscription.tx_device }) : t("Choose source")}`}
         >
           <span class="routing-channel-number"
             >${channel.number}</span
           >
           <strong class="routing-channel-name">${channel.name}</strong>
             <span class="routing-channel-source"
-              >${pending ? "Applying…" : routed ? subscription.tx_channel : "Choose source"}</span
+              >${pending ? t("Applying…") : routed ? subscription.tx_channel : t("Choose source")}</span
             >
             <span class="routing-channel-device">${routed ? subscription.tx_device : ""}</span>
           <span
             class=${`routing-channel-status state-${tone}`}
-            title=${routed ? format.subscriptionStatusText(subscription) : "Not routed"}
+            title=${routed ? format.subscriptionStatusText(subscription) : t("Not routed")}
           >
             <${Icon} name=${routed ? (good ? "check" : "warning") : "plus"} />
           </span>
           <span class="routing-channel-action"><${Icon} name="chevron" /></span>
         </button>`;
       })}
-      ${!visible.length ? html`<p>No channels match this search.</p>` : null}
+      ${!visible.length ? html`<p>${t("No channels match this search.")}</p>` : null}
     </div>
     ${
       editing !== null && channels.some((channel) => channel.number === editing)
