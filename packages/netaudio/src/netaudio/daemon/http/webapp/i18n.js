@@ -3,7 +3,9 @@ const LANGUAGE_KEY = "netaudio.language";
 export const LANGUAGES = [
   ["en", "English"],
   ["de", "Deutsch"],
+  ["es", "Español"],
   ["fr", "Français"],
+  ["it", "Italiano"],
   ["ja", "日本語"],
   ["ko", "한국어"],
   ["ms", "Bahasa Melayu"],
