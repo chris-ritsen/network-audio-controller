@@ -195,7 +195,16 @@ def formatted_value(device_type: str, key: str, value: Any) -> str:
             raise ValueError(f"{key.lower()} takes {', '.join(SLOT_CHOICES[key])}")
         return upper
     if key == "AUDIO_TX_MODE":
-        modes = {"mono": "1", "1": "1", "point_to_point": "2", "point to point": "2", "ptp": "2", "2": "2", "stereo": "3", "3": "3"}
+        modes = {
+            "mono": "1",
+            "1": "1",
+            "point_to_point": "2",
+            "point to point": "2",
+            "ptp": "2",
+            "2": "2",
+            "stereo": "3",
+            "3": "3",
+        }
         if text.casefold() not in modes:
             raise ValueError("transmit mode takes mono, point to point or stereo")
         return modes[text.casefold()]

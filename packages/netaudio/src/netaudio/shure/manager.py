@@ -76,6 +76,7 @@ def sample_reports(fields):
         group += 1
     return reports
 
+
 AD4D_DEVICE_KEYS = [
     "DEVICE_ID",
     "MODEL",
