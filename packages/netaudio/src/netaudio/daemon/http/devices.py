@@ -20,7 +20,7 @@ from netaudio.dante.network_configuration import (
     network_snapshot,
     probe_switch_configuration_if_reported,
 )
-from netaudio.dante.operation_availability import operation_availability
+from netaudio.dante.operation_availability import metering_availability, operation_availability
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyChangedButUnverifiedError,
@@ -991,7 +991,7 @@ class DaemonDeviceHandlers:
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
-        if getattr(device, "requires_managed_control", False):
+        if not metering_availability(device).writable:
             await self._send_json(
                 writer,
                 {

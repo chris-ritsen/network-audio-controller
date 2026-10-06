@@ -107,8 +107,25 @@ def operation_availability(device, operation: _requests.Operation, requested_val
     )
 
 
+def metering_availability(device) -> OperationAvailability:
+    if getattr(device, "requires_managed_control", False):
+        return OperationAvailability(
+            supported=False,
+            readable=False,
+            writable=False,
+            reasons=("managed_metering_not_implemented",),
+            write_permitted=False,
+            read_only=None,
+        )
+    return OperationAvailability(
+        supported=True, readable=True, writable=True, reasons=(), write_permitted=True, read_only=None
+    )
+
+
 def operation_availability_map(device) -> dict[str, dict]:
-    return {name: operation_availability(device, name).to_dict() for name in _CAPABILITY_FIELDS}
+    availability = {name: operation_availability(device, name).to_dict() for name in _CAPABILITY_FIELDS}
+    availability["metering"] = metering_availability(device).to_dict()
+    return availability
 
 
 def probe_supported(device, operation: _requests.Operation) -> bool:
