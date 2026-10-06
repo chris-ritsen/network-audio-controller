@@ -10,7 +10,7 @@ HERE = Path(__file__).resolve().parent
 CANDIDATES = HERE / "candidates"
 OUT = HERE / "gallery.html"
 SIZES = [16, 24, 32, 48, 96]
-TILE = "#ff2323"  # matches the current webapp favicon background
+TILES = [("dark", "#18181b", "#fff"), ("white", "#fff", "#111"), ("slate", "#334155", "#fff"), ("zinc", "#e4e4e7", "#111")]
 
 
 def load() -> list[tuple[str, str, str]]:
@@ -28,11 +28,16 @@ def cell(svg: str, size: int) -> str:
 
 def row(stem: str, label: str, svg: str) -> str:
     sizes = "".join(cell(svg, s) for s in SIZES)
+    tiles = "".join(
+        f'<span class="tile" style="background:{bg};color:{fg}">{cell(svg, 40)}</span>'
+        for _, bg, fg in TILES
+    )
     return f"""
 <section class="cand" id="{html.escape(stem)}">
   <h2>{html.escape(stem)} <small>{html.escape(label)}</small></h2>
-  <div class="strip light"><div class="sizes">{sizes}</div><span class="tile light" style="color:#111">{cell(svg, 40)}</span></div>
-  <div class="strip dark"><div class="sizes">{sizes}</div><span class="tile red" style="color:#000">{cell(svg, 40)}</span><span class="tile red" style="color:#fff">{cell(svg, 40)}</span></div>
+  <div class="strip light"><div class="sizes">{sizes}</div></div>
+  <div class="strip dark"><div class="sizes">{sizes}</div></div>
+  <div class="strip tiles">{tiles}</div>
   <details><summary>source</summary><pre>{html.escape(svg)}</pre></details>
 </section>"""
 
@@ -60,14 +65,14 @@ def main() -> None:
   .ic {{ display: inline-block; vertical-align: bottom; }}
   .ic svg {{ width: 100%; height: 100%; display: block; }}
   .tile {{ display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 12px; }}
-  .tile.light {{ background: #e4e4e7; }}
-  .tile.red {{ background: {TILE}; }}
+  .strip.tiles {{ background: #f4f4f5; border-top: 1px solid #ddd; }}
+  @media (prefers-color-scheme: dark) {{ .strip.tiles {{ background: #1f1f23; border-color: #333; }} }}
   details {{ padding: 8px 16px 12px; font-size: 12px; opacity: .8; }}
   pre {{ white-space: pre-wrap; margin: 6px 0 0; }}
 </style>
 <header>
   <h1>netaudio icon candidates</h1>
-  <p>{len(items)} candidates, each at {", ".join(f"{s}px" for s in SIZES)} on light and dark, plus app-tile variants on the current favicon red.
+  <p>{len(items)} candidates, each at {", ".join(f"{s}px" for s in SIZES)} on light and dark, plus app-tile variants on neutral backgrounds.
   All use <code>currentColor</code> so they take the surrounding text colour.</p>
 </header>
 <div class="grid">{body}</div>

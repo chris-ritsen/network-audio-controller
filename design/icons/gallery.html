@@ -18,14 +18,14 @@
   .ic { display: inline-block; vertical-align: bottom; }
   .ic svg { width: 100%; height: 100%; display: block; }
   .tile { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 12px; }
-  .tile.light { background: #e4e4e7; }
-  .tile.red { background: #ff2323; }
+  .strip.tiles { background: #f4f4f5; border-top: 1px solid #ddd; }
+  @media (prefers-color-scheme: dark) { .strip.tiles { background: #1f1f23; border-color: #333; } }
   details { padding: 8px 16px 12px; font-size: 12px; opacity: .8; }
   pre { white-space: pre-wrap; margin: 6px 0 0; }
 </style>
 <header>
   <h1>netaudio icon candidates</h1>
-  <p>17 candidates, each at 16px, 24px, 32px, 48px, 96px on light and dark, plus app-tile variants on the current favicon red.
+  <p>17 candidates, each at 16px, 24px, 32px, 48px, 96px on light and dark, plus app-tile variants on neutral backgrounds.
   All use <code>currentColor</code> so they take the surrounding text colour.</p>
 </header>
 <div class="grid">
@@ -81,17 +81,7 @@
     <circle cx="50" cy="50" r="6"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio crosspoint">
-  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
-    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48" opacity="0.35"/>
-  </g>
-  <g fill="currentColor">
-    <circle cx="14" cy="32" r="6"/>
-    <circle cx="32" cy="14" r="6"/>
-    <circle cx="50" cy="50" r="6"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio crosspoint">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48" opacity="0.35"/>
@@ -142,7 +132,8 @@
     <circle cx="50" cy="50" r="6"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio crosspoint">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio crosspoint">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48" opacity="0.35"/>
   </g>
@@ -152,7 +143,27 @@
     <circle cx="50" cy="50" r="6"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio crosspoint">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio crosspoint">
+  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
+    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48" opacity="0.35"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="14" cy="32" r="6"/>
+    <circle cx="32" cy="14" r="6"/>
+    <circle cx="50" cy="50" r="6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio crosspoint">
+  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
+    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48" opacity="0.35"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="14" cy="32" r="6"/>
+    <circle cx="32" cy="14" r="6"/>
+    <circle cx="50" cy="50" r="6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio crosspoint">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48" opacity="0.35"/>
   </g>
@@ -227,17 +238,7 @@
     <circle cx="32" cy="12" r="6"/><circle cx="12" cy="32" r="6"/><circle cx="52" cy="32" r="6"/><circle cx="32" cy="52" r="6"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio matrix">
-  <g fill="currentColor" opacity="0.28">
-    <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
-    <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
-    <circle cx="12" cy="52" r="5"/><circle cx="32" cy="52" r="5"/><circle cx="52" cy="52" r="5"/>
-  </g>
-  <g fill="currentColor">
-    <circle cx="32" cy="12" r="6"/><circle cx="12" cy="32" r="6"/><circle cx="52" cy="32" r="6"/><circle cx="32" cy="52" r="6"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio matrix">
   <g fill="currentColor" opacity="0.28">
     <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
@@ -288,7 +289,8 @@
     <circle cx="32" cy="12" r="6"/><circle cx="12" cy="32" r="6"/><circle cx="52" cy="32" r="6"/><circle cx="32" cy="52" r="6"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio matrix">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio matrix">
   <g fill="currentColor" opacity="0.28">
     <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
     <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
@@ -298,7 +300,27 @@
     <circle cx="32" cy="12" r="6"/><circle cx="12" cy="32" r="6"/><circle cx="52" cy="32" r="6"/><circle cx="32" cy="52" r="6"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio matrix">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio matrix">
+  <g fill="currentColor" opacity="0.28">
+    <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
+    <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
+    <circle cx="12" cy="52" r="5"/><circle cx="32" cy="52" r="5"/><circle cx="52" cy="52" r="5"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="32" cy="12" r="6"/><circle cx="12" cy="32" r="6"/><circle cx="52" cy="32" r="6"/><circle cx="32" cy="52" r="6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio matrix">
+  <g fill="currentColor" opacity="0.28">
+    <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
+    <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
+    <circle cx="12" cy="52" r="5"/><circle cx="32" cy="52" r="5"/><circle cx="52" cy="52" r="5"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="32" cy="12" r="6"/><circle cx="12" cy="32" r="6"/><circle cx="52" cy="32" r="6"/><circle cx="32" cy="52" r="6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio matrix">
   <g fill="currentColor" opacity="0.28">
     <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
     <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
@@ -373,17 +395,7 @@
     <circle cx="50" cy="50" r="7"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, full-strength grid">
-  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
-    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
-  </g>
-  <g fill="currentColor">
-    <circle cx="14" cy="32" r="7"/>
-    <circle cx="32" cy="14" r="7"/>
-    <circle cx="50" cy="50" r="7"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, full-strength grid">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
@@ -434,7 +446,8 @@
     <circle cx="50" cy="50" r="7"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, full-strength grid">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, full-strength grid">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
   </g>
@@ -444,7 +457,27 @@
     <circle cx="50" cy="50" r="7"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, full-strength grid">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, full-strength grid">
+  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
+    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="14" cy="32" r="7"/>
+    <circle cx="32" cy="14" r="7"/>
+    <circle cx="50" cy="50" r="7"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, full-strength grid">
+  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
+    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="14" cy="32" r="7"/>
+    <circle cx="32" cy="14" r="7"/>
+    <circle cx="50" cy="50" r="7"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, full-strength grid">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
   </g>
@@ -519,17 +552,7 @@
     <circle cx="50" cy="50" r="7"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, one-to-one diagonal">
-  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
-    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
-  </g>
-  <g fill="currentColor">
-    <circle cx="14" cy="14" r="7"/>
-    <circle cx="32" cy="32" r="7"/>
-    <circle cx="50" cy="50" r="7"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, one-to-one diagonal">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
@@ -580,7 +603,8 @@
     <circle cx="50" cy="50" r="7"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, one-to-one diagonal">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, one-to-one diagonal">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
   </g>
@@ -590,7 +614,27 @@
     <circle cx="50" cy="50" r="7"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, one-to-one diagonal">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, one-to-one diagonal">
+  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
+    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="14" cy="14" r="7"/>
+    <circle cx="32" cy="32" r="7"/>
+    <circle cx="50" cy="50" r="7"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, one-to-one diagonal">
+  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
+    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="14" cy="14" r="7"/>
+    <circle cx="32" cy="32" r="7"/>
+    <circle cx="50" cy="50" r="7"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, one-to-one diagonal">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
   </g>
@@ -645,13 +689,7 @@
   </g>
   <circle cx="24" cy="40" r="10" fill="currentColor"/>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="single crosspoint">
-  <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round">
-    <path d="M24 6v52M6 40h52"/>
-  </g>
-  <circle cx="24" cy="40" r="10" fill="currentColor"/>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="single crosspoint">
   <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round">
     <path d="M24 6v52M6 40h52"/>
@@ -682,13 +720,26 @@
   </g>
   <circle cx="24" cy="40" r="10" fill="currentColor"/>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="single crosspoint">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="single crosspoint">
   <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round">
     <path d="M24 6v52M6 40h52"/>
   </g>
   <circle cx="24" cy="40" r="10" fill="currentColor"/>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="single crosspoint">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="single crosspoint">
+  <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round">
+    <path d="M24 6v52M6 40h52"/>
+  </g>
+  <circle cx="24" cy="40" r="10" fill="currentColor"/>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="single crosspoint">
+  <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round">
+    <path d="M24 6v52M6 40h52"/>
+  </g>
+  <circle cx="24" cy="40" r="10" fill="currentColor"/>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="single crosspoint">
   <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round">
     <path d="M24 6v52M6 40h52"/>
   </g>
@@ -755,17 +806,7 @@
   </g>
   <circle cx="14" cy="32" r="8" fill="none" stroke="currentColor" stroke-width="5"/>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, ring on grid">
-  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
-    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
-  </g>
-  <g fill="currentColor">
-    <circle cx="32" cy="14" r="6"/>
-    <circle cx="50" cy="50" r="6"/>
-  </g>
-  <circle cx="14" cy="32" r="8" fill="none" stroke="currentColor" stroke-width="5"/>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, ring on grid">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
@@ -816,7 +857,8 @@
   </g>
   <circle cx="14" cy="32" r="8" fill="none" stroke="currentColor" stroke-width="5"/>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, ring on grid">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, ring on grid">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
   </g>
@@ -826,7 +868,27 @@
   </g>
   <circle cx="14" cy="32" r="8" fill="none" stroke="currentColor" stroke-width="5"/>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, ring on grid">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, ring on grid">
+  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
+    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="32" cy="14" r="6"/>
+    <circle cx="50" cy="50" r="6"/>
+  </g>
+  <circle cx="14" cy="32" r="8" fill="none" stroke="currentColor" stroke-width="5"/>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, ring on grid">
+  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
+    <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="32" cy="14" r="6"/>
+    <circle cx="50" cy="50" r="6"/>
+  </g>
+  <circle cx="14" cy="32" r="8" fill="none" stroke="currentColor" stroke-width="5"/>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="crosspoint, ring on grid">
   <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity="0.35">
     <path d="M14 8v48M32 8v48M50 8v48M8 14h48M8 32h48M8 50h48"/>
   </g>
@@ -921,21 +983,7 @@
     <circle cx="27" cy="27" r="5.5"/><circle cx="42" cy="42" r="5.5"/><circle cx="53" cy="53" r="5.5"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with transmitter and receiver headers">
-  <g fill="currentColor">
-    <rect x="6" y="6" width="52" height="10" rx="3"/>
-    <rect x="6" y="6" width="10" height="52" rx="3"/>
-  </g>
-  <g fill="currentColor" opacity="0.3">
-    <circle cx="27" cy="27" r="4.5"/><circle cx="42" cy="27" r="4.5"/><circle cx="53" cy="27" r="4.5"/>
-    <circle cx="27" cy="42" r="4.5"/><circle cx="42" cy="42" r="4.5"/><circle cx="53" cy="42" r="4.5"/>
-    <circle cx="27" cy="53" r="4.5"/><circle cx="42" cy="53" r="4.5"/><circle cx="53" cy="53" r="4.5"/>
-  </g>
-  <g fill="currentColor">
-    <circle cx="27" cy="27" r="5.5"/><circle cx="42" cy="42" r="5.5"/><circle cx="53" cy="53" r="5.5"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with transmitter and receiver headers">
   <g fill="currentColor">
     <rect x="6" y="6" width="52" height="10" rx="3"/>
@@ -1006,7 +1054,8 @@
     <circle cx="27" cy="27" r="5.5"/><circle cx="42" cy="42" r="5.5"/><circle cx="53" cy="53" r="5.5"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with transmitter and receiver headers">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with transmitter and receiver headers">
   <g fill="currentColor">
     <rect x="6" y="6" width="52" height="10" rx="3"/>
     <rect x="6" y="6" width="10" height="52" rx="3"/>
@@ -1020,7 +1069,35 @@
     <circle cx="27" cy="27" r="5.5"/><circle cx="42" cy="42" r="5.5"/><circle cx="53" cy="53" r="5.5"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with transmitter and receiver headers">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with transmitter and receiver headers">
+  <g fill="currentColor">
+    <rect x="6" y="6" width="52" height="10" rx="3"/>
+    <rect x="6" y="6" width="10" height="52" rx="3"/>
+  </g>
+  <g fill="currentColor" opacity="0.3">
+    <circle cx="27" cy="27" r="4.5"/><circle cx="42" cy="27" r="4.5"/><circle cx="53" cy="27" r="4.5"/>
+    <circle cx="27" cy="42" r="4.5"/><circle cx="42" cy="42" r="4.5"/><circle cx="53" cy="42" r="4.5"/>
+    <circle cx="27" cy="53" r="4.5"/><circle cx="42" cy="53" r="4.5"/><circle cx="53" cy="53" r="4.5"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="27" cy="27" r="5.5"/><circle cx="42" cy="42" r="5.5"/><circle cx="53" cy="53" r="5.5"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with transmitter and receiver headers">
+  <g fill="currentColor">
+    <rect x="6" y="6" width="52" height="10" rx="3"/>
+    <rect x="6" y="6" width="10" height="52" rx="3"/>
+  </g>
+  <g fill="currentColor" opacity="0.3">
+    <circle cx="27" cy="27" r="4.5"/><circle cx="42" cy="27" r="4.5"/><circle cx="53" cy="27" r="4.5"/>
+    <circle cx="27" cy="42" r="4.5"/><circle cx="42" cy="42" r="4.5"/><circle cx="53" cy="42" r="4.5"/>
+    <circle cx="27" cy="53" r="4.5"/><circle cx="42" cy="53" r="4.5"/><circle cx="53" cy="53" r="4.5"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="27" cy="27" r="5.5"/><circle cx="42" cy="42" r="5.5"/><circle cx="53" cy="53" r="5.5"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with transmitter and receiver headers">
   <g fill="currentColor">
     <rect x="6" y="6" width="52" height="10" rx="3"/>
     <rect x="6" y="6" width="10" height="52" rx="3"/>
@@ -1113,19 +1190,7 @@
     <circle cx="40" cy="18" r="6"/><circle cx="24" cy="34" r="6"/><circle cx="56" cy="34" r="6"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with corner axes">
-  <g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M10 6v48h48"/>
-  </g>
-  <g fill="currentColor" opacity="0.3">
-    <circle cx="24" cy="18" r="5"/><circle cx="40" cy="18" r="5"/><circle cx="56" cy="18" r="5"/>
-    <circle cx="24" cy="34" r="5"/><circle cx="40" cy="34" r="5"/><circle cx="56" cy="34" r="5"/>
-  </g>
-  <g fill="currentColor">
-    <circle cx="40" cy="18" r="6"/><circle cx="24" cy="34" r="6"/><circle cx="56" cy="34" r="6"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with corner axes">
   <g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M10 6v48h48"/>
@@ -1186,7 +1251,8 @@
     <circle cx="40" cy="18" r="6"/><circle cx="24" cy="34" r="6"/><circle cx="56" cy="34" r="6"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with corner axes">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with corner axes">
   <g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M10 6v48h48"/>
   </g>
@@ -1198,7 +1264,31 @@
     <circle cx="40" cy="18" r="6"/><circle cx="24" cy="34" r="6"/><circle cx="56" cy="34" r="6"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with corner axes">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with corner axes">
+  <g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 6v48h48"/>
+  </g>
+  <g fill="currentColor" opacity="0.3">
+    <circle cx="24" cy="18" r="5"/><circle cx="40" cy="18" r="5"/><circle cx="56" cy="18" r="5"/>
+    <circle cx="24" cy="34" r="5"/><circle cx="40" cy="34" r="5"/><circle cx="56" cy="34" r="5"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="40" cy="18" r="6"/><circle cx="24" cy="34" r="6"/><circle cx="56" cy="34" r="6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with corner axes">
+  <g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 6v48h48"/>
+  </g>
+  <g fill="currentColor" opacity="0.3">
+    <circle cx="24" cy="18" r="5"/><circle cx="40" cy="18" r="5"/><circle cx="56" cy="18" r="5"/>
+    <circle cx="24" cy="34" r="5"/><circle cx="40" cy="34" r="5"/><circle cx="56" cy="34" r="5"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="40" cy="18" r="6"/><circle cx="24" cy="34" r="6"/><circle cx="56" cy="34" r="6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix with corner axes">
   <g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M10 6v48h48"/>
   </g>
@@ -1287,19 +1377,7 @@
     <circle cx="39" cy="39" r="5"/><circle cx="25" cy="54" r="5"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 matrix dots">
-  <g fill="currentColor" opacity="0.28">
-    <circle cx="10" cy="10" r="4"/><circle cx="25" cy="10" r="4"/><circle cx="39" cy="10" r="4"/><circle cx="54" cy="10" r="4"/>
-    <circle cx="10" cy="25" r="4"/><circle cx="25" cy="25" r="4"/><circle cx="39" cy="25" r="4"/><circle cx="54" cy="25" r="4"/>
-    <circle cx="10" cy="39" r="4"/><circle cx="25" cy="39" r="4"/><circle cx="39" cy="39" r="4"/><circle cx="54" cy="39" r="4"/>
-    <circle cx="10" cy="54" r="4"/><circle cx="25" cy="54" r="4"/><circle cx="39" cy="54" r="4"/><circle cx="54" cy="54" r="4"/>
-  </g>
-  <g fill="currentColor">
-    <circle cx="25" cy="10" r="5"/><circle cx="10" cy="25" r="5"/><circle cx="54" cy="25" r="5"/>
-    <circle cx="39" cy="39" r="5"/><circle cx="25" cy="54" r="5"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 matrix dots">
   <g fill="currentColor" opacity="0.28">
     <circle cx="10" cy="10" r="4"/><circle cx="25" cy="10" r="4"/><circle cx="39" cy="10" r="4"/><circle cx="54" cy="10" r="4"/>
@@ -1360,7 +1438,8 @@
     <circle cx="39" cy="39" r="5"/><circle cx="25" cy="54" r="5"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 matrix dots">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 matrix dots">
   <g fill="currentColor" opacity="0.28">
     <circle cx="10" cy="10" r="4"/><circle cx="25" cy="10" r="4"/><circle cx="39" cy="10" r="4"/><circle cx="54" cy="10" r="4"/>
     <circle cx="10" cy="25" r="4"/><circle cx="25" cy="25" r="4"/><circle cx="39" cy="25" r="4"/><circle cx="54" cy="25" r="4"/>
@@ -1372,7 +1451,31 @@
     <circle cx="39" cy="39" r="5"/><circle cx="25" cy="54" r="5"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 matrix dots">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 matrix dots">
+  <g fill="currentColor" opacity="0.28">
+    <circle cx="10" cy="10" r="4"/><circle cx="25" cy="10" r="4"/><circle cx="39" cy="10" r="4"/><circle cx="54" cy="10" r="4"/>
+    <circle cx="10" cy="25" r="4"/><circle cx="25" cy="25" r="4"/><circle cx="39" cy="25" r="4"/><circle cx="54" cy="25" r="4"/>
+    <circle cx="10" cy="39" r="4"/><circle cx="25" cy="39" r="4"/><circle cx="39" cy="39" r="4"/><circle cx="54" cy="39" r="4"/>
+    <circle cx="10" cy="54" r="4"/><circle cx="25" cy="54" r="4"/><circle cx="39" cy="54" r="4"/><circle cx="54" cy="54" r="4"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="25" cy="10" r="5"/><circle cx="10" cy="25" r="5"/><circle cx="54" cy="25" r="5"/>
+    <circle cx="39" cy="39" r="5"/><circle cx="25" cy="54" r="5"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 matrix dots">
+  <g fill="currentColor" opacity="0.28">
+    <circle cx="10" cy="10" r="4"/><circle cx="25" cy="10" r="4"/><circle cx="39" cy="10" r="4"/><circle cx="54" cy="10" r="4"/>
+    <circle cx="10" cy="25" r="4"/><circle cx="25" cy="25" r="4"/><circle cx="39" cy="25" r="4"/><circle cx="54" cy="25" r="4"/>
+    <circle cx="10" cy="39" r="4"/><circle cx="25" cy="39" r="4"/><circle cx="39" cy="39" r="4"/><circle cx="54" cy="39" r="4"/>
+    <circle cx="10" cy="54" r="4"/><circle cx="25" cy="54" r="4"/><circle cx="39" cy="54" r="4"/><circle cx="54" cy="54" r="4"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="25" cy="10" r="5"/><circle cx="10" cy="25" r="5"/><circle cx="54" cy="25" r="5"/>
+    <circle cx="39" cy="39" r="5"/><circle cx="25" cy="54" r="5"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 matrix dots">
   <g fill="currentColor" opacity="0.28">
     <circle cx="10" cy="10" r="4"/><circle cx="25" cy="10" r="4"/><circle cx="39" cy="10" r="4"/><circle cx="54" cy="10" r="4"/>
     <circle cx="10" cy="25" r="4"/><circle cx="25" cy="25" r="4"/><circle cx="39" cy="25" r="4"/><circle cx="54" cy="25" r="4"/>
@@ -1461,19 +1564,7 @@
     <rect x="43" y="43" width="14" height="14" rx="3"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix of cells, some routed">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="currentColor">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix of cells, some routed">
   <g fill="none" stroke="currentColor" stroke-width="3">
     <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
@@ -1534,7 +1625,8 @@
     <rect x="43" y="43" width="14" height="14" rx="3"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix of cells, some routed">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix of cells, some routed">
   <g fill="none" stroke="currentColor" stroke-width="3">
     <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
     <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
@@ -1546,7 +1638,31 @@
     <rect x="43" y="43" width="14" height="14" rx="3"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix of cells, some routed">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix of cells, some routed">
+  <g fill="none" stroke="currentColor" stroke-width="3">
+    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
+    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
+    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
+  </g>
+  <g fill="currentColor">
+    <rect x="25" y="7" width="14" height="14" rx="3"/>
+    <rect x="7" y="25" width="14" height="14" rx="3"/>
+    <rect x="43" y="43" width="14" height="14" rx="3"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix of cells, some routed">
+  <g fill="none" stroke="currentColor" stroke-width="3">
+    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
+    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
+    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
+  </g>
+  <g fill="currentColor">
+    <rect x="25" y="7" width="14" height="14" rx="3"/>
+    <rect x="7" y="25" width="14" height="14" rx="3"/>
+    <rect x="43" y="43" width="14" height="14" rx="3"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix of cells, some routed">
   <g fill="none" stroke="currentColor" stroke-width="3">
     <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
     <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
@@ -1610,14 +1726,7 @@
     <circle cx="12" cy="52" r="2.5"/><circle cx="32" cy="52" r="8"/><circle cx="52" cy="52" r="2.5"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots, active larger, idle tiny">
-  <g fill="currentColor">
-    <circle cx="12" cy="12" r="2.5"/><circle cx="32" cy="12" r="8"/><circle cx="52" cy="12" r="2.5"/>
-    <circle cx="12" cy="32" r="8"/><circle cx="32" cy="32" r="2.5"/><circle cx="52" cy="32" r="8"/>
-    <circle cx="12" cy="52" r="2.5"/><circle cx="32" cy="52" r="8"/><circle cx="52" cy="52" r="2.5"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots, active larger, idle tiny">
   <g fill="currentColor">
     <circle cx="12" cy="12" r="2.5"/><circle cx="32" cy="12" r="8"/><circle cx="52" cy="12" r="2.5"/>
@@ -1653,14 +1762,29 @@
     <circle cx="12" cy="52" r="2.5"/><circle cx="32" cy="52" r="8"/><circle cx="52" cy="52" r="2.5"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots, active larger, idle tiny">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots, active larger, idle tiny">
   <g fill="currentColor">
     <circle cx="12" cy="12" r="2.5"/><circle cx="32" cy="12" r="8"/><circle cx="52" cy="12" r="2.5"/>
     <circle cx="12" cy="32" r="8"/><circle cx="32" cy="32" r="2.5"/><circle cx="52" cy="32" r="8"/>
     <circle cx="12" cy="52" r="2.5"/><circle cx="32" cy="52" r="8"/><circle cx="52" cy="52" r="2.5"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots, active larger, idle tiny">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots, active larger, idle tiny">
+  <g fill="currentColor">
+    <circle cx="12" cy="12" r="2.5"/><circle cx="32" cy="12" r="8"/><circle cx="52" cy="12" r="2.5"/>
+    <circle cx="12" cy="32" r="8"/><circle cx="32" cy="32" r="2.5"/><circle cx="52" cy="32" r="8"/>
+    <circle cx="12" cy="52" r="2.5"/><circle cx="32" cy="52" r="8"/><circle cx="52" cy="52" r="2.5"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots, active larger, idle tiny">
+  <g fill="currentColor">
+    <circle cx="12" cy="12" r="2.5"/><circle cx="32" cy="12" r="8"/><circle cx="52" cy="12" r="2.5"/>
+    <circle cx="12" cy="32" r="8"/><circle cx="32" cy="32" r="2.5"/><circle cx="52" cy="32" r="8"/>
+    <circle cx="12" cy="52" r="2.5"/><circle cx="32" cy="52" r="8"/><circle cx="52" cy="52" r="2.5"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots, active larger, idle tiny">
   <g fill="currentColor">
     <circle cx="12" cy="12" r="2.5"/><circle cx="32" cy="12" r="8"/><circle cx="52" cy="12" r="2.5"/>
     <circle cx="12" cy="32" r="8"/><circle cx="32" cy="32" r="2.5"/><circle cx="52" cy="32" r="8"/>
@@ -1734,18 +1858,7 @@
     <circle cx="12" cy="12" r="7"/><circle cx="52" cy="52" r="7"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots with a route traced through">
-  <g fill="currentColor" opacity="0.28">
-    <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
-    <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
-    <circle cx="12" cy="52" r="5"/><circle cx="32" cy="52" r="5"/><circle cx="52" cy="52" r="5"/>
-  </g>
-  <path d="M12 12v20h40v20" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <g fill="currentColor">
-    <circle cx="12" cy="12" r="7"/><circle cx="52" cy="52" r="7"/>
-  </g>
-</svg>
-</span></span></div>
+</span></div></div>
   <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots with a route traced through">
   <g fill="currentColor" opacity="0.28">
     <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
@@ -1801,7 +1914,8 @@
     <circle cx="12" cy="12" r="7"/><circle cx="52" cy="52" r="7"/>
   </g>
 </svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots with a route traced through">
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots with a route traced through">
   <g fill="currentColor" opacity="0.28">
     <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
     <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
@@ -1812,7 +1926,29 @@
     <circle cx="12" cy="12" r="7"/><circle cx="52" cy="52" r="7"/>
   </g>
 </svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots with a route traced through">
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots with a route traced through">
+  <g fill="currentColor" opacity="0.28">
+    <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
+    <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
+    <circle cx="12" cy="52" r="5"/><circle cx="32" cy="52" r="5"/><circle cx="52" cy="52" r="5"/>
+  </g>
+  <path d="M12 12v20h40v20" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="currentColor">
+    <circle cx="12" cy="12" r="7"/><circle cx="52" cy="52" r="7"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots with a route traced through">
+  <g fill="currentColor" opacity="0.28">
+    <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
+    <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
+    <circle cx="12" cy="52" r="5"/><circle cx="32" cy="52" r="5"/><circle cx="52" cy="52" r="5"/>
+  </g>
+  <path d="M12 12v20h40v20" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="currentColor">
+    <circle cx="12" cy="12" r="7"/><circle cx="52" cy="52" r="7"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots with a route traced through">
   <g fill="currentColor" opacity="0.28">
     <circle cx="12" cy="12" r="5"/><circle cx="32" cy="12" r="5"/><circle cx="52" cy="12" r="5"/>
     <circle cx="12" cy="32" r="5"/><circle cx="32" cy="32" r="5"/><circle cx="52" cy="32" r="5"/>
@@ -1837,417 +1973,1032 @@
 &lt;/svg&gt;
 </pre></details>
 </section>
-<section class="cand" id="23-cells-green-fill">
-  <h2>23-cells-green-fill <small>cells, routed ones green with white check</small></h2>
-  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
+<section class="cand" id="28-table-3x3">
+  <h2>28-table-3x3 <small>3x3 table, thin borders, routed cells green</small></h2>
+  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
   <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
   </g>
   <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
   <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
   </g>
   <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
   <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
   </g>
   <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
   <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
   </g>
   <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
   <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
   </g>
   <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
+</span></div></div>
+  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
   <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
   </g>
   <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
 </span></span></div>
-  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells, routed ones green with white check">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span></span></div>
-  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;cells, routed ones green with white check&quot;&gt;
-  &lt;g fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;3&quot;&gt;
-    &lt;rect x=&quot;7&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;43&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;25&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;43&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;7&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;25&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-  &lt;/g&gt;
+  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;3x3 table, thin borders, routed cells green&quot;&gt;
   &lt;g fill=&quot;#22c55e&quot;&gt;
-    &lt;rect x=&quot;25&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;7&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;43&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
+    &lt;rect x=&quot;24&quot; y=&quot;8&quot; width=&quot;16&quot; height=&quot;16&quot;/&gt;
+    &lt;rect x=&quot;8&quot; y=&quot;24&quot; width=&quot;16&quot; height=&quot;16&quot;/&gt;
+    &lt;rect x=&quot;40&quot; y=&quot;40&quot; width=&quot;16&quot; height=&quot;16&quot;/&gt;
+  &lt;/g&gt;
+  &lt;g fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.5&quot;&gt;
+    &lt;rect x=&quot;8&quot; y=&quot;8&quot; width=&quot;48&quot; height=&quot;48&quot;/&gt;
+    &lt;path d=&quot;M24 8v48M40 8v48M8 24h48M8 40h48&quot;/&gt;
   &lt;/g&gt;
   &lt;g fill=&quot;none&quot; stroke=&quot;#fff&quot; stroke-width=&quot;2.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;
-    &lt;path d=&quot;M28.5 14.5l2.5 2.5 4.5-5&quot;/&gt;
-    &lt;path d=&quot;M10.5 32.5l2.5 2.5 4.5-5&quot;/&gt;
-    &lt;path d=&quot;M46.5 50.5l2.5 2.5 4.5-5&quot;/&gt;
+    &lt;path d=&quot;M28 16.5l3 3 5-6&quot;/&gt;
+    &lt;path d=&quot;M12 32.5l3 3 5-6&quot;/&gt;
+    &lt;path d=&quot;M44 48.5l3 3 5-6&quot;/&gt;
   &lt;/g&gt;
 &lt;/svg&gt;
 </pre></details>
 </section>
-<section class="cand" id="24-cells-green-check">
-  <h2>24-cells-green-check <small>cells with green checkmarks, no fill</small></h2>
-  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
+<section class="cand" id="29-table-4x4">
+  <h2>29-table-4x4 <small>4x4 table, thin borders, routed cells green</small></h2>
+  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
   </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
   </g>
-</svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
   </g>
 </svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
   </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
   </g>
-</svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
   </g>
 </svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
   </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
   </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span></div></div>
+  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="20" y="8" width="12" height="12"/>
+    <rect x="8" y="20" width="12" height="12"/>
+    <rect x="44" y="20" width="12" height="12"/>
+    <rect x="32" y="32" width="12" height="12"/>
+    <rect x="20" y="44" width="12" height="12"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 14.5l2.5 2.5 4-5"/>
+    <path d="M11 26.5l2.5 2.5 4-5"/>
+    <path d="M47 26.5l2.5 2.5 4-5"/>
+    <path d="M35 38.5l2.5 2.5 4-5"/>
+    <path d="M23 50.5l2.5 2.5 4-5"/>
   </g>
 </svg>
 </span></span></div>
-  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
-  </g>
-</svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
-  </g>
-</svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="cells with green checkmarks, no fill">
-  <g fill="none" stroke="currentColor" stroke-width="3">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="25" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/><rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/><rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28 14.5l3 3 5-6"/>
-    <path d="M10 32.5l3 3 5-6"/>
-    <path d="M46 50.5l3 3 5-6"/>
-  </g>
-</svg>
-</span></span></div>
-  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;cells with green checkmarks, no fill&quot;&gt;
-  &lt;g fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;3&quot;&gt;
-    &lt;rect x=&quot;7&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;25&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;43&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;7&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;25&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;43&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;7&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;25&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;43&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
+  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;4x4 table, thin borders, routed cells green&quot;&gt;
+  &lt;g fill=&quot;#22c55e&quot;&gt;
+    &lt;rect x=&quot;20&quot; y=&quot;8&quot; width=&quot;12&quot; height=&quot;12&quot;/&gt;
+    &lt;rect x=&quot;8&quot; y=&quot;20&quot; width=&quot;12&quot; height=&quot;12&quot;/&gt;
+    &lt;rect x=&quot;44&quot; y=&quot;20&quot; width=&quot;12&quot; height=&quot;12&quot;/&gt;
+    &lt;rect x=&quot;32&quot; y=&quot;32&quot; width=&quot;12&quot; height=&quot;12&quot;/&gt;
+    &lt;rect x=&quot;20&quot; y=&quot;44&quot; width=&quot;12&quot; height=&quot;12&quot;/&gt;
   &lt;/g&gt;
-  &lt;g fill=&quot;none&quot; stroke=&quot;#22c55e&quot; stroke-width=&quot;3.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;
+  &lt;g fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.5&quot;&gt;
+    &lt;rect x=&quot;8&quot; y=&quot;8&quot; width=&quot;48&quot; height=&quot;48&quot;/&gt;
+    &lt;path d=&quot;M20 8v48M32 8v48M44 8v48M8 20h48M8 32h48M8 44h48&quot;/&gt;
+  &lt;/g&gt;
+  &lt;g fill=&quot;none&quot; stroke=&quot;#fff&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;
+    &lt;path d=&quot;M23 14.5l2.5 2.5 4-5&quot;/&gt;
+    &lt;path d=&quot;M11 26.5l2.5 2.5 4-5&quot;/&gt;
+    &lt;path d=&quot;M47 26.5l2.5 2.5 4-5&quot;/&gt;
+    &lt;path d=&quot;M35 38.5l2.5 2.5 4-5&quot;/&gt;
+    &lt;path d=&quot;M23 50.5l2.5 2.5 4-5&quot;/&gt;
+  &lt;/g&gt;
+&lt;/svg&gt;
+</pre></details>
+</section>
+<section class="cand" id="30-table-2x2">
+  <h2>30-table-2x2 <small>2x2 table, thin borders, routed cells green</small></h2>
+  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span></div></div>
+  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="32" y="8" width="24" height="24"/>
+    <rect x="8" y="32" width="24" height="24"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M32 8v48M8 32h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 20.5l4 4 8-9"/>
+    <path d="M14 44.5l4 4 8-9"/>
+  </g>
+</svg>
+</span></span></div>
+  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;2x2 table, thin borders, routed cells green&quot;&gt;
+  &lt;g fill=&quot;#22c55e&quot;&gt;
+    &lt;rect x=&quot;32&quot; y=&quot;8&quot; width=&quot;24&quot; height=&quot;24&quot;/&gt;
+    &lt;rect x=&quot;8&quot; y=&quot;32&quot; width=&quot;24&quot; height=&quot;24&quot;/&gt;
+  &lt;/g&gt;
+  &lt;g fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.5&quot;&gt;
+    &lt;rect x=&quot;8&quot; y=&quot;8&quot; width=&quot;48&quot; height=&quot;48&quot;/&gt;
+    &lt;path d=&quot;M32 8v48M8 32h48&quot;/&gt;
+  &lt;/g&gt;
+  &lt;g fill=&quot;none&quot; stroke=&quot;#fff&quot; stroke-width=&quot;3.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;
+    &lt;path d=&quot;M38 20.5l4 4 8-9&quot;/&gt;
+    &lt;path d=&quot;M14 44.5l4 4 8-9&quot;/&gt;
+  &lt;/g&gt;
+&lt;/svg&gt;
+</pre></details>
+</section>
+<section class="cand" id="31-cells-3x3-gap">
+  <h2>31-cells-3x3-gap <small>3x3 square cells with gaps, thin borders, routed cells green</small></h2>
+  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></div></div>
+  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 square cells with gaps, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="25" y="7" width="14" height="14"/>
+    <rect x="7" y="25" width="14" height="14"/>
+    <rect x="43" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="7" y="7" width="14" height="14"/><rect x="43" y="7" width="14" height="14"/>
+    <rect x="25" y="25" width="14" height="14"/><rect x="43" y="25" width="14" height="14"/>
+    <rect x="7" y="43" width="14" height="14"/><rect x="25" y="43" width="14" height="14"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 14.5l3 3 5-6"/>
+    <path d="M10 32.5l3 3 5-6"/>
+    <path d="M46 50.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span></div>
+  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;3x3 square cells with gaps, thin borders, routed cells green&quot;&gt;
+  &lt;g fill=&quot;#22c55e&quot;&gt;
+    &lt;rect x=&quot;25&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot;/&gt;
+    &lt;rect x=&quot;7&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot;/&gt;
+    &lt;rect x=&quot;43&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot;/&gt;
+  &lt;/g&gt;
+  &lt;g fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.5&quot;&gt;
+    &lt;rect x=&quot;7&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot;/&gt;&lt;rect x=&quot;43&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot;/&gt;
+    &lt;rect x=&quot;25&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot;/&gt;&lt;rect x=&quot;43&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot;/&gt;
+    &lt;rect x=&quot;7&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot;/&gt;&lt;rect x=&quot;25&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot;/&gt;
+  &lt;/g&gt;
+  &lt;g fill=&quot;none&quot; stroke=&quot;#fff&quot; stroke-width=&quot;2.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;
     &lt;path d=&quot;M28 14.5l3 3 5-6&quot;/&gt;
     &lt;path d=&quot;M10 32.5l3 3 5-6&quot;/&gt;
     &lt;path d=&quot;M46 50.5l3 3 5-6&quot;/&gt;
@@ -2255,594 +3006,234 @@
 &lt;/svg&gt;
 </pre></details>
 </section>
-<section class="cand" id="25-cells-2x2-green">
-  <h2>25-cells-2x2-green <small>2x2 cells, routed ones green with check</small></h2>
-  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
+<section class="cand" id="32-table-3x3-open">
+  <h2>32-table-3x3-open <small>3x3 grid, no outer border, routed cells green</small></h2>
+  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
   <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
   </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
   <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
   </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
   <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
   </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
   <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
   </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
   <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
   </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
+</span></div></div>
+  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
   <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
   </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></div></div>
+  <div class="strip tiles"><span class="tile" style="background:#18181b;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#fff;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#334155;color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
+</span></span><span class="tile" style="background:#e4e4e7;color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 grid, no outer border, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
   </g>
 </svg>
 </span></span></div>
-  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
-  </g>
-</svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
-  </g>
-</svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="2x2 cells, routed ones green with check">
-  <g fill="none" stroke="currentColor" stroke-width="4">
-    <rect x="6" y="6" width="23" height="23" rx="5"/>
-    <rect x="35" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="35" y="6" width="23" height="23" rx="5"/>
-    <rect x="6" y="35" width="23" height="23" rx="5"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M40.5 17.5l4.5 4.5 8-9"/>
-    <path d="M11.5 46.5l4.5 4.5 8-9"/>
-  </g>
-</svg>
-</span></span></div>
-  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;2x2 cells, routed ones green with check&quot;&gt;
-  &lt;g fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;4&quot;&gt;
-    &lt;rect x=&quot;6&quot; y=&quot;6&quot; width=&quot;23&quot; height=&quot;23&quot; rx=&quot;5&quot;/&gt;
-    &lt;rect x=&quot;35&quot; y=&quot;35&quot; width=&quot;23&quot; height=&quot;23&quot; rx=&quot;5&quot;/&gt;
-  &lt;/g&gt;
+  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;3x3 grid, no outer border, routed cells green&quot;&gt;
   &lt;g fill=&quot;#22c55e&quot;&gt;
-    &lt;rect x=&quot;35&quot; y=&quot;6&quot; width=&quot;23&quot; height=&quot;23&quot; rx=&quot;5&quot;/&gt;
-    &lt;rect x=&quot;6&quot; y=&quot;35&quot; width=&quot;23&quot; height=&quot;23&quot; rx=&quot;5&quot;/&gt;
+    &lt;rect x=&quot;24&quot; y=&quot;8&quot; width=&quot;16&quot; height=&quot;16&quot;/&gt;
+    &lt;rect x=&quot;8&quot; y=&quot;24&quot; width=&quot;16&quot; height=&quot;16&quot;/&gt;
+    &lt;rect x=&quot;40&quot; y=&quot;40&quot; width=&quot;16&quot; height=&quot;16&quot;/&gt;
   &lt;/g&gt;
-  &lt;g fill=&quot;none&quot; stroke=&quot;#fff&quot; stroke-width=&quot;4&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;
-    &lt;path d=&quot;M40.5 17.5l4.5 4.5 8-9&quot;/&gt;
-    &lt;path d=&quot;M11.5 46.5l4.5 4.5 8-9&quot;/&gt;
-  &lt;/g&gt;
-&lt;/svg&gt;
-</pre></details>
-</section>
-<section class="cand" id="26-grid-green-checks">
-  <h2>26-grid-green-checks <small>grid lines with green checks in routed cells</small></h2>
-  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span></span></div>
-  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="grid lines with green checks in routed cells">
-  <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-    <path d="M23 6v52M41 6v52M6 23h52M6 41h52"/>
-  </g>
-  <g fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M27 15l3.5 3.5 6.5-7"/>
-    <path d="M9 33l3.5 3.5 6.5-7"/>
-    <path d="M45 51l3.5 3.5 6.5-7"/>
-  </g>
-</svg>
-</span></span></div>
-  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;grid lines with green checks in routed cells&quot;&gt;
-  &lt;g fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;3&quot; stroke-linecap=&quot;round&quot;&gt;
-    &lt;path d=&quot;M23 6v52M41 6v52M6 23h52M6 41h52&quot;/&gt;
-  &lt;/g&gt;
-  &lt;g fill=&quot;none&quot; stroke=&quot;#22c55e&quot; stroke-width=&quot;4&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;
-    &lt;path d=&quot;M27 15l3.5 3.5 6.5-7&quot;/&gt;
-    &lt;path d=&quot;M9 33l3.5 3.5 6.5-7&quot;/&gt;
-    &lt;path d=&quot;M45 51l3.5 3.5 6.5-7&quot;/&gt;
-  &lt;/g&gt;
-&lt;/svg&gt;
-</pre></details>
-</section>
-<section class="cand" id="27-cells-green-all">
-  <h2>27-cells-green-all <small>green cells, routed ones solid with check, idle outlined</small></h2>
-  <div class="strip light"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span></div><span class="tile light" style="color:#111"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span></span></div>
-  <div class="strip dark"><div class="sizes"><span class="ic" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:48px;height:48px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span><span class="ic" style="width:96px;height:96px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span></div><span class="tile red" style="color:#000"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span></span><span class="tile red" style="color:#fff"><span class="ic" style="width:40px;height:40px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="green cells, routed ones solid with check, idle outlined">
-  <g fill="none" stroke="#22c55e" stroke-width="3" opacity="0.5">
-    <rect x="7" y="7" width="14" height="14" rx="3"/><rect x="43" y="7" width="14" height="14" rx="3"/>
-    <rect x="25" y="25" width="14" height="14" rx="3"/><rect x="43" y="25" width="14" height="14" rx="3"/>
-    <rect x="7" y="43" width="14" height="14" rx="3"/><rect x="25" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="#22c55e">
-    <rect x="25" y="7" width="14" height="14" rx="3"/>
-    <rect x="7" y="25" width="14" height="14" rx="3"/>
-    <rect x="43" y="43" width="14" height="14" rx="3"/>
-  </g>
-  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M28.5 14.5l2.5 2.5 4.5-5"/>
-    <path d="M10.5 32.5l2.5 2.5 4.5-5"/>
-    <path d="M46.5 50.5l2.5 2.5 4.5-5"/>
-  </g>
-</svg>
-</span></span></div>
-  <details><summary>source</summary><pre>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 64 64&quot; role=&quot;img&quot; aria-label=&quot;green cells, routed ones solid with check, idle outlined&quot;&gt;
-  &lt;g fill=&quot;none&quot; stroke=&quot;#22c55e&quot; stroke-width=&quot;3&quot; opacity=&quot;0.5&quot;&gt;
-    &lt;rect x=&quot;7&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;43&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;25&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;43&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;7&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;&lt;rect x=&quot;25&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-  &lt;/g&gt;
-  &lt;g fill=&quot;#22c55e&quot;&gt;
-    &lt;rect x=&quot;25&quot; y=&quot;7&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;7&quot; y=&quot;25&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
-    &lt;rect x=&quot;43&quot; y=&quot;43&quot; width=&quot;14&quot; height=&quot;14&quot; rx=&quot;3&quot;/&gt;
+  &lt;g fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.5&quot; stroke-linecap=&quot;round&quot;&gt;
+    &lt;path d=&quot;M24 8v48M40 8v48M8 24h48M8 40h48&quot;/&gt;
   &lt;/g&gt;
   &lt;g fill=&quot;none&quot; stroke=&quot;#fff&quot; stroke-width=&quot;2.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;
-    &lt;path d=&quot;M28.5 14.5l2.5 2.5 4.5-5&quot;/&gt;
-    &lt;path d=&quot;M10.5 32.5l2.5 2.5 4.5-5&quot;/&gt;
-    &lt;path d=&quot;M46.5 50.5l2.5 2.5 4.5-5&quot;/&gt;
+    &lt;path d=&quot;M28 16.5l3 3 5-6&quot;/&gt;
+    &lt;path d=&quot;M12 32.5l3 3 5-6&quot;/&gt;
+    &lt;path d=&quot;M44 48.5l3 3 5-6&quot;/&gt;
   &lt;/g&gt;
 &lt;/svg&gt;
 </pre></details>

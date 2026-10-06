@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="3x3 table, thin borders, routed cells green">
+  <g fill="#22c55e">
+    <rect x="24" y="8" width="16" height="16"/>
+    <rect x="8" y="24" width="16" height="16"/>
+    <rect x="40" y="40" width="16" height="16"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="8" width="48" height="48"/>
+    <path d="M24 8v48M40 8v48M8 24h48M8 40h48"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 16.5l3 3 5-6"/>
+    <path d="M12 32.5l3 3 5-6"/>
+    <path d="M44 48.5l3 3 5-6"/>
+  </g>
+</svg>
