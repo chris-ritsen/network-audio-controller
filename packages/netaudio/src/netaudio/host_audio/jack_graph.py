@@ -12,6 +12,7 @@ from netaudio.host_audio.component import AudioComponent, utc_now
 logger = logging.getLogger("netaudio")
 
 CLIENT_NAME = "netaudio"
+CLIENT_OPEN_TIMEOUT_SECONDS = 5
 METER_CLIENT_PREFIX = "netaudio-meter"
 PRETTY_NAME_PROPERTY = "http://jackaudio.org/metadata/pretty-name"
 XRUN_GROUP_SECONDS = 0.1
@@ -61,8 +62,12 @@ class JackGraph(AudioComponent):
             return "the JACK-Client Python package is not installed"
         except OSError:
             return "the JACK library (libjack) is not installed"
+        opening = asyncio.get_running_loop().run_in_executor(self._executor, self._open_client, jack)
         try:
-            self._client = await self._run(self._open_client, jack)
+            self._client = await asyncio.wait_for(asyncio.shield(opening), CLIENT_OPEN_TIMEOUT_SECONDS)
+        except TimeoutError:
+            opening.add_done_callback(self._close_abandoned_client)
+            return f"JACK did not answer within {CLIENT_OPEN_TIMEOUT_SECONDS} seconds"
         except jack.JackOpenError:
             return "no JACK server is running"
         except jack.JackError as exception:
@@ -71,6 +76,14 @@ class JackGraph(AudioComponent):
         self.last_xrun = None
         self.xruns_since = utc_now()
         return None
+
+    def _close_abandoned_client(self, opening: asyncio.Future) -> None:
+        if opening.cancelled() or opening.exception() is not None:
+            return
+        try:
+            self._executor.submit(self._close_client, opening.result())
+        except RuntimeError:
+            self._close_client(opening.result())
 
     def _open_client(self, jack: Any) -> Any:
         client = jack.Client(CLIENT_NAME, no_start_server=True, servername=server_name())
