@@ -571,12 +571,7 @@ pub fn build_query_receiver_flows(
     let mut body = [0u8; 6];
     body[1] = 0x01;
     body[2..4].copy_from_slice(&starting_flow.to_be_bytes());
-    arc_packet_with_reserved_word(
-        protocol_id,
-        OPCODE_QUERY_RECEIVER_FLOWS,
-        &body,
-        message_id,
-    )
+    arc_packet_with_reserved_word(protocol_id, OPCODE_QUERY_RECEIVER_FLOWS, &body, message_id)
 }
 
 pub fn build_query_transmit_channel_capabilities(

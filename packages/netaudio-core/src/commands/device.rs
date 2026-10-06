@@ -8,12 +8,7 @@ pub fn build_device_info_for_protocol(
     protocol_id: u16,
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_common_device_query(
-        protocol_id,
-        OPCODE_DEVICE_INFO,
-        &[0x00, 0x00],
-        message_id,
-    )
+    build_common_device_query(protocol_id, OPCODE_DEVICE_INFO, &[0x00, 0x00], message_id)
 }
 
 pub fn build_device_name(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
@@ -28,12 +23,7 @@ pub fn build_channel_count_for_protocol(
     protocol_id: u16,
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_common_device_query(
-        protocol_id,
-        OPCODE_CHANNEL_COUNT,
-        &[0x00, 0x00],
-        message_id,
-    )
+    build_common_device_query(protocol_id, OPCODE_CHANNEL_COUNT, &[0x00, 0x00], message_id)
 }
 
 pub fn build_device_settings(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
@@ -110,11 +100,7 @@ pub fn build_transmitter_names(
     channel_count: u16,
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_transmitter_names_for_protocol(
-        crate::protocol::PROTOCOL_ID,
-        channel_count,
-        message_id,
-    )
+    build_transmitter_names_for_protocol(crate::protocol::PROTOCOL_ID, channel_count, message_id)
 }
 
 pub fn build_transmitter_names_for_protocol(

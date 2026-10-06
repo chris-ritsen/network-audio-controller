@@ -73,12 +73,7 @@ fn build_property_write(
     let protocol_id = require_performance_protocol(negotiated_protocol_id)?;
     let body = property_write_body(properties)?;
 
-    arc_packet_with_reserved_word(
-        protocol_id,
-        OPCODE_DEVICE_SETTINGS_SET,
-        &body,
-        message_id,
-    )
+    arc_packet_with_reserved_word(protocol_id, OPCODE_DEVICE_SETTINGS_SET, &body, message_id)
 }
 
 pub(crate) fn property_write_body(

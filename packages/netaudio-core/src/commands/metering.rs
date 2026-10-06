@@ -92,7 +92,8 @@ mod tests {
     fn generated_start_matches_captured_controller_request() {
         let captured = include_bytes!("../../../../tests/fixtures/metering/controller_start.bin");
         let generated =
-            build_metering_start("ad4d", [192, 0, 2, 10], [2, 0, 0, 0, 0, 1], 8751, 0x25c7).unwrap();
+            build_metering_start("ad4d", [192, 0, 2, 10], [2, 0, 0, 0, 0, 1], 8751, 0x25c7)
+                .unwrap();
         assert_eq!(generated.len(), captured.len());
         let synthetic_client_identifier = 10..18;
         let controller_name_padding = 0x23;
