@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="matrix dots, active larger, idle tiny">
+  <g fill="currentColor">
+    <circle cx="12" cy="12" r="2.5"/><circle cx="32" cy="12" r="8"/><circle cx="52" cy="12" r="2.5"/>
+    <circle cx="12" cy="32" r="8"/><circle cx="32" cy="32" r="2.5"/><circle cx="52" cy="32" r="8"/>
+    <circle cx="12" cy="52" r="2.5"/><circle cx="32" cy="52" r="8"/><circle cx="52" cy="52" r="2.5"/>
+  </g>
+</svg>

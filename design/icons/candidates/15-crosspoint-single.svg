@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="single crosspoint">
+  <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round">
+    <path d="M24 6v52M6 40h52"/>
+  </g>
+  <circle cx="24" cy="40" r="10" fill="currentColor"/>
+</svg>

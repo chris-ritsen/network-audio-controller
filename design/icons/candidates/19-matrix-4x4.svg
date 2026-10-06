@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="4x4 matrix dots">
+  <g fill="currentColor" opacity="0.28">
+    <circle cx="10" cy="10" r="4"/><circle cx="25" cy="10" r="4"/><circle cx="39" cy="10" r="4"/><circle cx="54" cy="10" r="4"/>
+    <circle cx="10" cy="25" r="4"/><circle cx="25" cy="25" r="4"/><circle cx="39" cy="25" r="4"/><circle cx="54" cy="25" r="4"/>
+    <circle cx="10" cy="39" r="4"/><circle cx="25" cy="39" r="4"/><circle cx="39" cy="39" r="4"/><circle cx="54" cy="39" r="4"/>
+    <circle cx="10" cy="54" r="4"/><circle cx="25" cy="54" r="4"/><circle cx="39" cy="54" r="4"/><circle cx="54" cy="54" r="4"/>
+  </g>
+  <g fill="currentColor">
+    <circle cx="25" cy="10" r="5"/><circle cx="10" cy="25" r="5"/><circle cx="54" cy="25" r="5"/>
+    <circle cx="39" cy="39" r="5"/><circle cx="25" cy="54" r="5"/>
+  </g>
+</svg>
