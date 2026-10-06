@@ -7,7 +7,7 @@ RUST_TEST ?=
 LINT_FILES ?=
 BOUNDED := python3 scripts/run_bounded_tests.py
 
-.PHONY: help test-python-full test-webapp-full test-full test-rust test-browser lint audit audit-fix
+.PHONY: help test-python-full test-webapp-full test-full test-rust test-browser lint audit audit-fix release release-status
 help:
 	@echo "test TEST_CASES='tests/test_name.py::test_name'  Focused Python checks; no build or dependency sync"
 	@echo "test-webapp WEB_TESTS='tests/webapp/name.test.mjs'  Focused JavaScript checks"
@@ -19,6 +19,8 @@ help:
 	@echo "core / install / deploy                        Explicit build and deployment commands"
 	@echo "audit                                         Known vulnerabilities in uv.lock and the core's Cargo.lock"
 	@echo "audit-fix                                     Upgrade the vulnerable packages in their lockfiles, then audit"
+	@echo "release [VERSION=x.y.z]                       Background release: checks, tag, GitHub release workflow, PyPI"
+	@echo "release-status                                Progress or result of the latest release"
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
@@ -120,6 +122,12 @@ check-label-provenance:
 
 check-local:
 	$(PYTHON) scripts/check_project.py --scope all --offline
+
+release:
+	@$(PYTHON) scripts/release.py $(if $(VERSION),--version $(VERSION))
+
+release-status:
+	@$(PYTHON) scripts/release.py --status
 
 seed-opcode-fixtures:
 	uv run netaudio lab provenance seed --clean

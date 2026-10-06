@@ -4,6 +4,7 @@ test-results/
 playwright-report/
 .eggs
 .sw*
+/build/
 dist/
 __pycache__
 debug.log
