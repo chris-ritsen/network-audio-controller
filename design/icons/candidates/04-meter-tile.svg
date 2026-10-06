@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio meter">
+  <g fill="currentColor">
+    <rect x="8" y="38" width="9" height="18" rx="3"/>
+    <rect x="21" y="22" width="9" height="34" rx="3"/>
+    <rect x="34" y="30" width="9" height="26" rx="3"/>
+    <rect x="47" y="12" width="9" height="44" rx="3"/>
+  </g>
+  <g fill="currentColor" opacity="0.4">
+    <rect x="8" y="26" width="9" height="5" rx="2.5"/>
+    <rect x="34" y="18" width="9" height="5" rx="2.5"/>
+  </g>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio ethernet port wave">
+  <g fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 48V22h8v-8h28v8h8v26z"/>
+    <path d="M18 36h5l4-8 6 14 5-10 4 4h4"/>
+  </g>
+</svg>
