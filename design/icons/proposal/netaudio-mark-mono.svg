@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="netaudio">
+  <defs>
+    <mask id="na-checks">
+      <rect width="64" height="64" fill="#fff"/>
+      <g fill="none" stroke="#000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18.6 23l2.8 2.8 5.4-6"/>
+        <path d="M33.6 38l2.8 2.8 5.4-6"/>
+        <path d="M48.6 53l2.8 2.8 5.4-6"/>
+      </g>
+    </mask>
+  </defs>
+  <g fill="currentColor" opacity="0.45">
+    <rect x="16.5" y="4" width="12" height="7"/><rect x="31.5" y="4" width="12" height="7"/><rect x="46.5" y="4" width="12" height="7"/>
+    <rect x="4" y="16.5" width="7" height="12"/><rect x="4" y="31.5" width="7" height="12"/><rect x="4" y="46.5" width="7" height="12"/>
+  </g>
+  <g fill="currentColor" mask="url(#na-checks)">
+    <rect x="15" y="15" width="15" height="15"/>
+    <rect x="30" y="30" width="15" height="15"/>
+    <rect x="45" y="45" width="15" height="15"/>
+  </g>
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="15" y="15" width="45" height="45"/>
+    <path d="M30 15v45M45 15v45M15 30h45M15 45h45"/>
+  </g>
+</svg>

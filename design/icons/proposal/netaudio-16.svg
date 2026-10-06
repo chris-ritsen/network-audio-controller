@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges" role="img" aria-label="netaudio">
+  <style>.ink{fill:#18181b}.hd{fill:#18181b;opacity:.5}@media (prefers-color-scheme:dark){.ink,.hd{fill:#e4e4e7}}</style>
+  <g class="hd">
+    <rect x="4" y="0" width="3" height="2"/><rect x="8" y="0" width="3" height="2"/><rect x="12" y="0" width="3" height="2"/>
+    <rect x="0" y="4" width="2" height="3"/><rect x="0" y="8" width="2" height="3"/><rect x="0" y="12" width="2" height="3"/>
+  </g>
+  <g class="ink">
+    <rect x="3" y="3" width="13" height="1"/><rect x="3" y="7" width="13" height="1"/><rect x="3" y="11" width="13" height="1"/><rect x="3" y="15" width="13" height="1"/>
+    <rect x="3" y="3" width="1" height="13"/><rect x="7" y="3" width="1" height="13"/><rect x="11" y="3" width="1" height="13"/><rect x="15" y="3" width="1" height="13"/>
+  </g>
+  <g fill="#22c55e">
+    <rect x="4" y="4" width="3" height="3"/><rect x="8" y="8" width="3" height="3"/><rect x="12" y="12" width="3" height="3"/>
+  </g>
+</svg>
