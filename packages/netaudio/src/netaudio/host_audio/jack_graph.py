@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 import os
 import time
@@ -55,13 +56,18 @@ class JackGraph(AudioComponent):
     async def _run(self, function, *arguments):
         return await asyncio.get_running_loop().run_in_executor(self._executor, function, *arguments)
 
-    async def _open(self) -> str | None:
+    def _installation_problem(self) -> str | None:
         try:
-            import jack
+            importlib.import_module("jack")
         except ImportError:
             return "the JACK-Client Python package is not installed"
         except OSError:
-            return "the JACK library (libjack) is not installed"
+            return "JACK is not installed on this system"
+        return None
+
+    async def _open(self) -> str | None:
+        import jack
+
         opening = asyncio.get_running_loop().run_in_executor(self._executor, self._open_client, jack)
         try:
             self._client = await asyncio.wait_for(asyncio.shield(opening), CLIENT_OPEN_TIMEOUT_SECONDS)

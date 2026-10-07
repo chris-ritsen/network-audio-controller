@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 import math
 from typing import Any
@@ -66,14 +67,20 @@ class PulseGraph(AudioComponent):
         self.sink_inputs: list[dict] = []
         self.source_outputs: list[dict] = []
 
-    async def _open(self) -> str | None:
+    def _installation_problem(self) -> str | None:
         try:
-            import pulsectl
-            import pulsectl_asyncio
+            importlib.import_module("pulsectl")
+            importlib.import_module("pulsectl_asyncio")
         except ImportError:
             return "the pulsectl-asyncio Python package is not installed"
         except OSError:
-            return "the PulseAudio client library (libpulse) is not installed"
+            return "PulseAudio is not installed on this system"
+        return None
+
+    async def _open(self) -> str | None:
+        import pulsectl
+        import pulsectl_asyncio
+
         pulse = pulsectl_asyncio.PulseAsync(CLIENT_NAME)
         try:
             await pulse.connect()

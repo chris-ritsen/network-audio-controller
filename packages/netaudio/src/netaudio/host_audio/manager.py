@@ -54,12 +54,14 @@ class HostAudioManager:
             listener(component)
 
     async def start(self) -> None:
-        if self._watch.start():
-            self._watch.watch(SHARED_MEMORY)
+        await asyncio.gather(self.jack.start(), self.pulse.start())
+        if (self.jack.installed or self.pulse.installed) and self._watch.start():
+            if self.jack.installed:
+                self._watch.watch(SHARED_MEMORY)
             if self._runtime_directory is not None:
                 self._watch.watch(self._runtime_directory)
-                self._watch.watch(self._runtime_directory / "pulse")
-        await asyncio.gather(self.jack.start(), self.pulse.start())
+                if self.pulse.installed:
+                    self._watch.watch(self._runtime_directory / "pulse")
         if self.record_jack_levels:
             self._recording = True
             self.recorder.start(self.jack.connected_at)
@@ -107,7 +109,7 @@ class HostAudioManager:
             self._connect_soon(self.pulse)
 
     def _connect_soon(self, component: AudioComponent) -> None:
-        if component.available:
+        if component.available or not component.installed:
             return
         task = asyncio.create_task(self._connect_with_retries(component), name=f"host-audio-{component.name}-connect")
         self._tasks.add(task)

@@ -97,6 +97,13 @@ def _stale_device_minutes_from_config(daemon_config: dict) -> float:
     return float(raw_value)
 
 
+def _host_audio_from_config(daemon_config: dict) -> bool:
+    raw_value = daemon_config.get("host_audio", False)
+    if not isinstance(raw_value, bool):
+        raise ValueError(f"daemon.host_audio must be true or false, got {raw_value!r}")
+    return raw_value
+
+
 def _record_jack_levels_from_config(daemon_config: dict) -> bool:
     raw_value = daemon_config.get("record_jack_levels", False)
     if not isinstance(raw_value, bool):
@@ -200,7 +207,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self.shure = ShureManager(self.application.dispatcher) if ShureManager else None
         self.host_audio = (
             HostAudioManager(self.level_history, record_jack_levels=_record_jack_levels_from_config(daemon_config))
-            if daemon_config.get("host_audio", True) is not False
+            if _host_audio_from_config(daemon_config)
             else None
         )
         self.http_api = DaemonHTTPServer(

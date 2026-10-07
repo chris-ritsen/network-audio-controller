@@ -27,6 +27,7 @@ class AudioComponent:
     def __init__(self, on_change: Callable[[str], None] | None = None):
         self.on_change = on_change
         self.available = False
+        self.installed = True
         self.reason: str | None = "not started"
         self.connected_at: str | None = None
         self.changes: deque[dict] = deque(maxlen=CHANGE_HISTORY)
@@ -42,6 +43,9 @@ class AudioComponent:
         self._last_connect_attempt = 0.0
         self._waiters: list[asyncio.Future] = []
 
+    def _installation_problem(self) -> str | None:
+        raise NotImplementedError
+
     async def _open(self) -> str | None:
         raise NotImplementedError
 
@@ -55,6 +59,11 @@ class AudioComponent:
         raise NotImplementedError
 
     async def start(self) -> None:
+        problem = self._installation_problem()
+        if problem is not None:
+            self.installed = False
+            self.reason = problem
+            return
         self._loop = asyncio.get_running_loop()
         self._running = True
         await self.connect()

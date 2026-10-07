@@ -11,6 +11,7 @@ class _Component:
     def __init__(self, name):
         self.name = name
         self.available = True
+        self.installed = True
         self.reason = None
         self.connected_at = object()
 
