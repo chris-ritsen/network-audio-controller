@@ -295,7 +295,7 @@ class DanteBrowser:
             service = service_task.result()
             if not service or service.get("type") != SERVICE_ARC:
                 continue
-            instance = self._service_instance(service)
+            instance = self._service_instance(service).casefold()
             identifiers.update({instance, f"{instance}.local", f"{instance}.local.", str(service.get("ipv4"))})
         return identifiers
 

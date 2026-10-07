@@ -13,6 +13,7 @@ from netaudio.cli_support.execution import (
     _load_device_for_show,
     _log_unreachable,
     run_command,
+    selected_device_identifiers,
 )
 from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
@@ -163,7 +164,7 @@ def identify(
     ),
 ):
     """Blink the identify LED on a device."""
-    run_command(run_identify, all_devices)
+    run_command(run_identify, all_devices, device_identifiers=selected_device_identifiers())
 
 
 async def run_reboot(application, devices, all_devices: bool) -> None:
@@ -182,7 +183,7 @@ def reboot(
     ),
 ):
     """Reboot a device."""
-    run_command(run_reboot, all_devices)
+    run_command(run_reboot, all_devices, device_identifiers=selected_device_identifiers())
 
 
 def _confirmed_device(filtered, confirm: str):

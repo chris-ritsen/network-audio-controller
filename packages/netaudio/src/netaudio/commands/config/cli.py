@@ -12,7 +12,7 @@ import typer
 
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
-from netaudio.cli_support.execution import CapabilityProbeTimeout, run_command
+from netaudio.cli_support.execution import CapabilityProbeTimeout, run_command, selected_device_identifiers
 from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.config.latency import run_latency
@@ -460,7 +460,7 @@ def sample_rate_pullup(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set sample-rate pull-up/down."""
-    run_command(run_sample_rate_pullup, selection, all_devices)
+    run_command(run_sample_rate_pullup, selection, all_devices, device_identifiers=selected_device_identifiers())
 
 
 async def run_encoding(application, devices, bits: int | None, all_devices: bool) -> None:
@@ -514,7 +514,7 @@ def encoding(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set the encoding bit depth."""
-    run_command(run_encoding, bits, all_devices)
+    run_command(run_encoding, bits, all_devices, device_identifiers=selected_device_identifiers())
 
 
 @app.command()
@@ -523,7 +523,7 @@ def latency(
     all_devices: bool = typer.Option(False, "--all", help="Read or apply to all devices."),
 ):
     """Get the complete device latency state or set and verify latency."""
-    run_command(run_latency, value, all_devices)
+    run_command(run_latency, value, all_devices, device_identifiers=selected_device_identifiers())
 
 
 @app.command("receive-flow-performance")
@@ -533,7 +533,13 @@ def receive_flow_performance(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
 ):
     """Set and verify receive-flow latency and frames per packet."""
-    run_command(run_receive_flow_performance, latency_microseconds, frames_per_packet, all_devices)
+    run_command(
+        run_receive_flow_performance,
+        latency_microseconds,
+        frames_per_packet,
+        all_devices,
+        device_identifiers=selected_device_identifiers(),
+    )
 
 
 @app.command("transmit-flow-performance")
@@ -543,7 +549,13 @@ def transmit_flow_performance(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
 ):
     """Set and verify transmit-flow latency and frames per packet."""
-    run_command(run_transmit_flow_performance, latency_microseconds, frames_per_packet, all_devices)
+    run_command(
+        run_transmit_flow_performance,
+        latency_microseconds,
+        frames_per_packet,
+        all_devices,
+        device_identifiers=selected_device_identifiers(),
+    )
 
 
 @app.command("unicast-performance")
@@ -553,7 +565,13 @@ def unicast_performance(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
 ):
     """Set and verify the unicast properties advertised by each device."""
-    run_command(run_unicast_performance, latency_microseconds, frames_per_packet, all_devices)
+    run_command(
+        run_unicast_performance,
+        latency_microseconds,
+        frames_per_packet,
+        all_devices,
+        device_identifiers=selected_device_identifiers(),
+    )
 
 
 @app.command("receive-flow-default-slots")
@@ -562,7 +580,7 @@ def receive_flow_default_slots(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
 ):
     """Set and verify the default receive-flow slot count."""
-    run_command(run_receive_flow_default_slots, slots, all_devices)
+    run_command(run_receive_flow_default_slots, slots, all_devices, device_identifiers=selected_device_identifiers())
 
 
 @app.command("store-current-configuration")
@@ -570,7 +588,7 @@ def store_current_configuration(
     all_devices: bool = typer.Option(False, "--all", help="Request storage on all selected devices."),
 ):
     """Request storage without claiming persistence confirmation."""
-    run_command(run_store_current_configuration, all_devices)
+    run_command(run_store_current_configuration, all_devices, device_identifiers=selected_device_identifiers())
 
 
 def _aes67_state_label(value):
@@ -737,7 +755,7 @@ def aes67(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set AES67 mode."""
-    run_command(run_aes67, enabled, multicast_prefix, all_devices)
+    run_command(run_aes67, enabled, multicast_prefix, all_devices, device_identifiers=selected_device_identifiers())
 
 
 def _preferred_leader_label(device) -> str:
@@ -781,7 +799,7 @@ def preferred_leader(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set preferred leader mode."""
-    run_command(run_preferred_leader, enabled, all_devices)
+    run_command(run_preferred_leader, enabled, all_devices, device_identifiers=selected_device_identifiers())
 
 
 async def _read_clock_subdomain(application, device):
@@ -844,7 +862,7 @@ def clock_source(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set the device's raw clock-source code."""
-    run_command(run_clock_source, selection, all_devices)
+    run_command(run_clock_source, selection, all_devices, device_identifiers=selected_device_identifiers())
 
 
 async def run_clock_subdomain(application, devices, selection: str | None, all_devices: bool) -> None:
@@ -899,7 +917,7 @@ def clock_subdomain(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set the PTP subdomain name."""
-    run_command(run_clock_subdomain, selection, all_devices)
+    run_command(run_clock_subdomain, selection, all_devices, device_identifiers=selected_device_identifiers())
 
 
 from netaudio.commands.config.interface import interface

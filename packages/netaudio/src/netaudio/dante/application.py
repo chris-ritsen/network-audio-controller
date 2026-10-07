@@ -1105,31 +1105,53 @@ class DanteApplication:
         if not include_settings:
             return self.devices
 
-        await self._query_settings_fields()
+        probed = self._devices_matching(wanted_identifiers)
 
-        await self._query_conmon_all()
+        await self._query_settings_fields(devices=probed)
 
-        await self._probe_interface_status()
-        await self._probe_preferred_leader_all()
+        await self._query_conmon_all(devices=probed)
+
+        await self._probe_interface_status(devices=probed)
+        await self._probe_preferred_leader_all(devices=probed)
         await asyncio.gather(
-            self._probe_aes67_all(),
-            self._probe_sample_rates_all(),
-            self._probe_encodings_all(),
-            self._probe_codec_status_all(),
-            self._probe_sample_rate_pullups_all(),
+            self._probe_aes67_all(devices=probed),
+            self._probe_sample_rates_all(devices=probed),
+            self._probe_encodings_all(devices=probed),
+            self._probe_codec_status_all(devices=probed),
+            self._probe_sample_rate_pullups_all(devices=probed),
         )
 
         return self.devices
+
+    def _devices_matching(self, identifiers: Collection[str]) -> dict | None:
+        if not identifiers:
+            return None
+        wanted = {identifier.casefold() for identifier in identifiers}
+        matched = {}
+        found = set()
+        for server_name, device in self.devices.items():
+            names = {
+                candidate.casefold()
+                for candidate in (device.name, server_name, server_name.rstrip("."), server_name.split(".")[0])
+                if candidate
+            }
+            if device.ipv4:
+                names.add(str(device.ipv4))
+            if names & wanted:
+                matched[server_name] = device
+                found |= names & wanted
+        return matched if found == wanted else None
 
     @staticmethod
     async def _wait_for_discovery(browser, duration: float, wanted_identifiers: Collection[str]) -> None:
         if not wanted_identifiers:
             await asyncio.sleep(duration)
             return
+        wanted = {identifier.casefold() for identifier in wanted_identifiers}
         event_loop = asyncio.get_running_loop()
         deadline = event_loop.time() + duration
         while event_loop.time() < deadline:
-            if set(wanted_identifiers) <= browser.resolved_device_identifiers():
+            if wanted <= browser.resolved_device_identifiers():
                 return
             await asyncio.sleep(min(0.05, max(0.0, deadline - event_loop.time())))
 

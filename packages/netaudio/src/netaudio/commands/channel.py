@@ -12,6 +12,7 @@ from netaudio.cli_support.execution import (
     CapabilityProbeTimeout,
     report_inventory_failures,
     run_command,
+    selected_device_identifiers,
 )
 from netaudio.cli_support.output import output_sections, output_single, structured_output_selected
 from netaudio.cli_support.selection import (
@@ -96,7 +97,7 @@ async def run_channel_list(application, devices) -> None:
 @app.command("list")
 def channel_list():
     """List channels on devices."""
-    run_command(run_channel_list)
+    run_command(run_channel_list, device_identifiers=selected_device_identifiers())
 
 
 async def _read_channel_name(device, channel_type: str, channel_number: int) -> str:
@@ -187,7 +188,7 @@ def name(
 ):
     """Get or set a channel name."""
     reference = parse_channel_reference(channel)
-    run_command(run_channel_name, reference, new_name)
+    run_command(run_channel_name, reference, new_name, device_identifiers=selected_device_identifiers())
 
 
 def _select_gain_side(device, reference: ChannelReference, level: int | None):
@@ -304,4 +305,4 @@ def gain(
 ):
     """Get or set channel gain level."""
     reference = parse_channel_reference(channel)
-    run_command(run_channel_gain, reference, level)
+    run_command(run_channel_gain, reference, level, device_identifiers=selected_device_identifiers())

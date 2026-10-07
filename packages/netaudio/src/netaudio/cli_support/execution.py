@@ -254,6 +254,13 @@ def _explicit_selection() -> bool:
     return bool(state.names or state.hosts or state.server_names or state.macs or state.ddm_context)
 
 
+def selected_device_identifiers() -> tuple[str, ...]:
+    state = _get_state()
+    if state.macs or state.server_names or any(has_magic(name) for name in state.names):
+        return ()
+    return (*state.names, *state.hosts)
+
+
 def _device_label(device: DanteDevice) -> str:
     return device.server_name or device.name or str(device.ipv4)
 

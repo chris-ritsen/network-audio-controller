@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from glob import has_magic
 from typing import NoReturn, Optional
 
 import typer
 
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS, _get_state
-from netaudio.cli_support.execution import populate_devices, run_command
+from netaudio.cli_support.execution import populate_devices, run_command, selected_device_identifiers
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import (
     filter_devices,
@@ -50,13 +49,6 @@ def _device_by_identifier(devices, identifier: str, side: str):
 
 def _device_identifier(value: str) -> str:
     return value.rpartition("@")[2].strip()
-
-
-def _selected_identifiers() -> tuple[str, ...]:
-    state = _get_state()
-    if state.macs or state.server_names or state.ddm_context or any(has_magic(name) for name in state.names):
-        return ()
-    return (*state.names, *state.hosts)
 
 
 def _subscription_has_configured_source(subscription) -> bool:
@@ -433,5 +425,7 @@ def remove(
         _fail("use either specific --rx channels or --all, not both")
     if not all_channels and not rx:
         _fail("--rx is required unless --all is used")
-    identifiers = _selected_identifiers() if all_channels else tuple(_device_identifier(spec) for spec in rx or [])
+    identifiers = (
+        selected_device_identifiers() if all_channels else tuple(_device_identifier(spec) for spec in rx or [])
+    )
     run_command(run_subscription_remove, rx, all_channels, populate_controls=False, device_identifiers=identifiers)
