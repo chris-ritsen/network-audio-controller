@@ -287,6 +287,18 @@ class DanteBrowser:
 
         return self.devices
 
+    def resolved_device_identifiers(self) -> set[str]:
+        identifiers = set()
+        for service_task in self.services:
+            if not service_task.done() or service_task.cancelled() or service_task.exception() is not None:
+                continue
+            service = service_task.result()
+            if not service or service.get("type") != SERVICE_ARC:
+                continue
+            instance = self._service_instance(service)
+            identifiers.update({instance, f"{instance}.local", f"{instance}.local.", str(service.get("ipv4"))})
+        return identifiers
+
     def _assemble_completed_services(self) -> None:
         resolved_services = []
 

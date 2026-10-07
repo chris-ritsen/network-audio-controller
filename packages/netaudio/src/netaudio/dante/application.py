@@ -4,7 +4,7 @@ import asyncio
 import ipaddress
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from functools import partial
 from typing import TYPE_CHECKING, TypeVar
 
@@ -137,6 +137,7 @@ class DanteApplication:
         sap_service=None,
         operation_recorder=None,
         verify_mutations=True,
+        probe_answer_cache=None,
     ):
         from netaudio.common.app_config import settings as app_settings
 
@@ -183,6 +184,7 @@ class DanteApplication:
         self._managed_transports: dict[str, ManagedDeviceTransport] = {}
         self.operation_recorder = operation_recorder
         self.verify_mutations = verify_mutations
+        self.probe_answer_cache = probe_answer_cache
 
     def set_operation_recorder(self, recorder) -> None:
         self.operation_recorder = recorder
@@ -480,13 +482,17 @@ class DanteApplication:
     ) -> None:
         target_devices = self.devices if devices is None else devices
         probe_tasks = {}
+        target_devices_by_key = {}
         for device in target_devices.values():
-            if (not device.requires_managed_control and not device.ipv4) or (
-                skip_device is not None and skip_device(device)
+            if (
+                (not device.requires_managed_control and not device.ipv4)
+                or (skip_device is not None and skip_device(device))
+                or self._probe_unanswered(device, description)
             ):
                 continue
             target = device if device.requires_managed_control else str(device.ipv4)
             key = self._control_key(target)
+            target_devices_by_key.setdefault(key, []).append(device)
             if key in probe_tasks:
                 continue
             probe_tasks[key] = asyncio.create_task(probe(target, timeout=timeout))
@@ -500,6 +506,7 @@ class DanteApplication:
         for key, result in zip(probe_tasks, results):
             if isinstance(result, asyncio.CancelledError):
                 raise result
+            self._record_probe_answer(target_devices_by_key[key], description, result)
             if isinstance(result, CapabilityProbeTimeout):
                 logger.debug(f"{description} probe timed out for {key}")
                 continue
@@ -508,6 +515,21 @@ class DanteApplication:
                 continue
             response_count += 1
         logger.debug(f"{description.capitalize()}: {response_count}/{len(probe_tasks)} device addresses responded")
+
+    def _probe_unanswered(self, device, probe: str) -> bool:
+        return self.probe_answer_cache is not None and self.probe_answer_cache.skips(device, probe)
+
+    def _record_probe_answer(self, devices, probe: str, result) -> None:
+        if self.probe_answer_cache is None:
+            return
+        if isinstance(result, CapabilityProbeTimeout):
+            answered = False
+        elif isinstance(result, Exception):
+            return
+        else:
+            answered = True
+        for device in devices:
+            self.probe_answer_cache.record(device, probe, answered=answered)
 
     async def _probe_capabilities_all(
         self,
@@ -526,6 +548,7 @@ class DanteApplication:
                 not device.online
                 or (not device.requires_managed_control and not device.ipv4)
                 or capability_is_known(device)
+                or self._probe_unanswered(device, capability_description)
             ):
                 continue
             target = device if device.requires_managed_control else str(device.ipv4)
@@ -545,6 +568,7 @@ class DanteApplication:
         for key, result in zip(probe_tasks, probe_results):
             if isinstance(result, asyncio.CancelledError):
                 raise result
+            self._record_probe_answer(target_devices_by_key[key], capability_description, result)
             if isinstance(result, CapabilityProbeTimeout):
                 logger.debug(f"{capability_description} probe timed out for {key}")
                 continue
@@ -710,15 +734,15 @@ class DanteApplication:
     async def _query_conmon_all(self, timeout: float = 10.0, devices: dict | None = None) -> None:
         target_devices = self.devices if devices is None else devices
         deadline = time.monotonic() + timeout
-        incomplete_devices = []
-        for device in target_devices.values():
-            if deadline - time.monotonic() <= 0:
-                logger.debug("Conmon query timeout reached, skipping remaining devices")
-                break
-            if device.requires_managed_control or not device.ipv4 or not device.mac_address:
-                continue
-            if not await self._query_conmon_for_device(device, deadline):
-                incomplete_devices.append(device)
+        queried_devices = [
+            device
+            for device in target_devices.values()
+            if not device.requires_managed_control and device.ipv4 and device.mac_address
+        ]
+        completed = await asyncio.gather(
+            *(self._query_conmon_for_device(device, deadline) for device in queried_devices)
+        )
+        incomplete_devices = [device for device, complete in zip(queried_devices, completed) if not complete]
         for retry in range(2):
             if not incomplete_devices or deadline - time.monotonic() <= 0:
                 break
@@ -1022,7 +1046,12 @@ class DanteApplication:
             await self.state.refresh_after_configuration_clear(device, f"{action} acknowledged")
         return status
 
-    async def discover_and_populate(self, timeout: float = 5.0) -> dict:
+    async def discover_and_populate(
+        self,
+        timeout: float = 5.0,
+        wanted_identifiers: Collection[str] = (),
+        include_settings: bool = True,
+    ) -> dict:
         from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
         from netaudio.dante.browser import DanteBrowser
@@ -1040,7 +1069,7 @@ class DanteApplication:
             handlers=[browser.async_on_service_state_change],
         )
 
-        await asyncio.sleep(discovery_time)
+        await self._wait_for_discovery(browser, discovery_time, wanted_identifiers)
 
         if browser.services:
             await asyncio.gather(*browser.services, return_exceptions=True)
@@ -1073,6 +1102,9 @@ class DanteApplication:
                     if isinstance(result, Exception):
                         logger.warning(f"Failed to populate device controls: {result}")
 
+        if not include_settings:
+            return self.devices
+
         await self._query_settings_fields()
 
         await self._query_conmon_all()
@@ -1088,6 +1120,18 @@ class DanteApplication:
         )
 
         return self.devices
+
+    @staticmethod
+    async def _wait_for_discovery(browser, duration: float, wanted_identifiers: Collection[str]) -> None:
+        if not wanted_identifiers:
+            await asyncio.sleep(duration)
+            return
+        event_loop = asyncio.get_running_loop()
+        deadline = event_loop.time() + duration
+        while event_loop.time() < deadline:
+            if set(wanted_identifiers) <= browser.resolved_device_identifiers():
+                return
+            await asyncio.sleep(min(0.05, max(0.0, deadline - event_loop.time())))
 
     async def discover_named_device(self, device_name: str, timeout: float = 2.0) -> dict:
         from zeroconf import ServiceStateChange

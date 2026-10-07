@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from contextlib import asynccontextmanager
 from glob import has_magic
 from typing import Any
@@ -13,6 +13,7 @@ from netaudio import DanteDevice
 from netaudio.cli_support.context import _get_state
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.common.app_config import settings
+from netaudio.common.probe_answer_cache import ProbeAnswerCache, default_probe_answer_cache_path
 from netaudio.daemon.client import append_operation_event_on_daemon, get_devices_from_daemon
 from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.state import apply_device_status
@@ -39,12 +40,17 @@ def _make_dante_application(packet_store=None, session_id=None) -> DanteApplicat
     return DanteApplication(
         packet_store=packet_store,
         dissect=state.dissect,
+        probe_answer_cache=ProbeAnswerCache(default_probe_answer_cache_path()),
         session_id=session_id,
         verify_mutations=state.verify,
     )
 
 
-async def _discover_with_application(application: DanteApplication) -> dict[str, DanteDevice]:
+async def _discover_with_application(
+    application: DanteApplication,
+    wanted_identifiers: Collection[str] = (),
+    include_settings: bool = True,
+) -> dict[str, DanteDevice]:
     devices = await get_devices_from_daemon()
     if devices is not None:
 
@@ -72,7 +78,14 @@ async def _discover_with_application(application: DanteApplication) -> dict[str,
         application.operation_recorder = recorder
     else:
         configure_recorder(recorder)
-    return await application.discover_and_populate(timeout=settings.mdns_timeout) or {}
+    return (
+        await application.discover_and_populate(
+            timeout=settings.mdns_timeout,
+            wanted_identifiers=wanted_identifiers,
+            include_settings=include_settings,
+        )
+        or {}
+    )
 
 
 async def _populate_audio_capabilities(application: DanteApplication, device: DanteDevice) -> None:
@@ -189,7 +202,11 @@ def _capture_session():
 
 
 @asynccontextmanager
-async def _command_context(discover_devices: bool = True, populate_controls: bool = True):
+async def _command_context(
+    discover_devices: bool = True,
+    populate_controls: bool = True,
+    device_identifiers: Collection[str] = (),
+):
     store, session_id = _capture_session()
     application = _make_dante_application(packet_store=store, session_id=session_id)
     try:
@@ -197,12 +214,17 @@ async def _command_context(discover_devices: bool = True, populate_controls: boo
         try:
             devices = {}
             if discover_devices:
-                devices = await _discover_with_application(application)
+                devices = await _discover_with_application(
+                    application,
+                    wanted_identifiers=device_identifiers,
+                    include_settings=populate_controls,
+                )
                 if populate_controls:
                     await _populate_controls(devices, application)
             yield devices, application
         finally:
             await application.shutdown()
+            application.probe_answer_cache.save()
     finally:
         if store:
             store.close()
@@ -213,13 +235,15 @@ def run_command(
     *arguments,
     discover_devices: bool = True,
     populate_controls: bool = True,
+    device_identifiers: Collection[str] = (),
     **options,
 ) -> Any:
     async def _run():
-        async with _command_context(discover_devices=discover_devices, populate_controls=populate_controls) as (
-            devices,
-            application,
-        ):
+        async with _command_context(
+            discover_devices=discover_devices,
+            populate_controls=populate_controls,
+            device_identifiers=device_identifiers,
+        ) as (devices, application):
             return await run(application, devices, *arguments, **options)
 
     return asyncio.run(_run())

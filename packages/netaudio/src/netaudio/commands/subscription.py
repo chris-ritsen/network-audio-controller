@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from glob import has_magic
 from typing import NoReturn, Optional
 
 import typer
@@ -45,6 +46,17 @@ def _device_by_identifier(devices, identifier: str, side: str):
         raise typer.Exit(code=ExitCode.ERROR)
     [(_, device)] = select_device(matches)
     return device
+
+
+def _device_identifier(value: str) -> str:
+    return value.rpartition("@")[2].strip()
+
+
+def _selected_identifiers() -> tuple[str, ...]:
+    state = _get_state()
+    if state.macs or state.server_names or state.ddm_context or any(has_magic(name) for name in state.names):
+        return ()
+    return (*state.names, *state.hosts)
 
 
 def _subscription_has_configured_source(subscription) -> bool:
@@ -276,12 +288,27 @@ def add(
     if is_single:
         if count or offset_tx or offset_rx:
             _fail("--count and channel offsets are only valid for bulk subscriptions")
-        run_command(run_subscription_add_single, tx, rx, populate_controls=False)
+        run_command(
+            run_subscription_add_single,
+            tx,
+            rx,
+            populate_controls=False,
+            device_identifiers=(_device_identifier(tx), _device_identifier(rx)),
+        )
         return
 
     if "@" in tx or "@" in rx:
         _fail("both --tx and --rx must be CHANNEL@DEVICE or both must be device names")
-    run_command(run_subscription_add_bulk, tx, rx, count, offset_tx, offset_rx, populate_controls=False)
+    run_command(
+        run_subscription_add_bulk,
+        tx,
+        rx,
+        count,
+        offset_tx,
+        offset_rx,
+        populate_controls=False,
+        device_identifiers=(tx, rx),
+    )
 
 
 def _subscribed_channels(device):
@@ -406,4 +433,5 @@ def remove(
         _fail("use either specific --rx channels or --all, not both")
     if not all_channels and not rx:
         _fail("--rx is required unless --all is used")
-    run_command(run_subscription_remove, rx, all_channels, populate_controls=False)
+    identifiers = _selected_identifiers() if all_channels else tuple(_device_identifier(spec) for spec in rx or [])
+    run_command(run_subscription_remove, rx, all_channels, populate_controls=False, device_identifiers=identifiers)
