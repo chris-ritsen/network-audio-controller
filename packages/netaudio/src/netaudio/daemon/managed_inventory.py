@@ -339,6 +339,9 @@ def _overlay_channel_metadata(direct_channels: dict, managed_channels: dict) -> 
 def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
     merged = dict(direct_record)
     channels = direct_record.get("channels")
+    subscriptions_observed = bool(direct_record.get("subscriptions")) or (
+        isinstance(channels, dict) and bool(channels.get("receivers"))
+    )
     if isinstance(channels, dict):
         merged["channels"] = {
             direction: {number: dict(channel) for number, channel in entries.items()}
@@ -368,7 +371,7 @@ def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
             "identity": "direct",
             "audio_configuration": "direct",
             "channels": "direct" if direct_record.get("channels") else "ddm",
-            "subscriptions": "direct" if direct_record.get("subscriptions") else "ddm",
+            "subscriptions": "direct" if subscriptions_observed else "ddm",
         }
     )
     merged["field_sources"] = field_sources
@@ -376,7 +379,7 @@ def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
     merged["self_connection_support"] = receiver_self_connection_support(
         (merged.get("channels") or {}).get("receivers", {}).values()
     )
-    if not merged.get("subscriptions"):
+    if not subscriptions_observed:
         merged["subscriptions"] = copy.deepcopy(managed_record.get("subscriptions") or [])
     return merged
 

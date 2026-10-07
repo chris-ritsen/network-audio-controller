@@ -73,7 +73,7 @@ class DanteSubscription:
             if not any((self.ddm_status, self.ddm_summary, self.ddm_status_message)):
                 return (*self.status_message,) or ("Status unavailable",)
             status = managed_subscription_status(self.ddm_status, self.ddm_status_message, self.ddm_summary)
-            detail = status["detail"]
+            detail = status["detail"] if status["severity"] != "ok" else None
             return (status["label"], *((detail,) if detail else ()), *self.status_message)
         entry = subscription_status(self.status_code, self.rx_channel_status_code)
         return (str(entry["label"]), *self.status_message)
