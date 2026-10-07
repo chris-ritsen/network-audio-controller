@@ -445,7 +445,7 @@ async def run_sample_rate_pullup(application, devices, selection: str | None, al
         lambda device: application.set_sample_rate_pullup(device, raw_value),
         raw_value,
         "sample-rate pull-up change",
-        lambda label: f"Set sample-rate pull-up for {label}: {sample_rate_pullup_label(raw_value)} (verified)",
+        lambda label: f"Set sample-rate pull-up for {label}: {sample_rate_pullup_label(raw_value)}",
     )
     if failures + capability_failures:
         raise typer.Exit(code=ExitCode.ERROR)
@@ -502,7 +502,7 @@ async def run_encoding(application, devices, bits: int | None, all_devices: bool
         lambda device: application.set_encoding(device, bits),
         bits,
         "encoding change",
-        lambda label: f"Set encoding for {label}: {bits}-bit (verified)",
+        lambda label: f"Set encoding for {label}: {bits}-bit",
     )
     if failures + capability_failures:
         raise typer.Exit(code=ExitCode.ERROR)
@@ -613,7 +613,7 @@ async def _set_aes67_multicast_prefix(application, targets, multicast_prefix: st
         lambda device: application.set_aes67_multicast_prefix(device, requested_multicast_prefix),
         requested_multicast_prefix,
         "AES67 multicast prefix change",
-        lambda label: f"Set AES67 multicast prefix for {label}: {requested_multicast_prefix} (verified)",
+        lambda label: f"Set AES67 multicast prefix for {label}: {requested_multicast_prefix}",
         read_for=lambda device: _read_aes67_multicast_prefix(application, device),
     )
     if failures + capability_failures:
@@ -719,7 +719,7 @@ async def run_aes67(
         lambda device: application.set_aes67_enabled(device, is_enabled),
         is_enabled,
         "AES67 configuration change",
-        lambda label: f"Set AES67 configured state for {label}: {enabled} (verified)",
+        lambda label: f"Set AES67 configured state for {label}: {enabled}",
         read_for=lambda device: _read_aes67_configured(application, device),
     )
     if failures + capability_failures:
@@ -831,7 +831,7 @@ async def run_clock_source(application, devices, selection: str | None, all_devi
         lambda device: application.set_clock_source(device, requested_source),
         requested_source,
         "clock source change",
-        lambda label: f"Set clock source for {label}: {format_clock_source_code(requested_source)} (verified)",
+        lambda label: f"Set clock source for {label}: {format_clock_source_code(requested_source)}",
         read_for=lambda device: _read_clock_source(application, device),
     )
     if failures:
@@ -883,7 +883,7 @@ async def run_clock_subdomain(application, devices, selection: str | None, all_d
         lambda device: application.set_clock_subdomain(device, requested_subdomain),
         requested_subdomain,
         "clock subdomain change",
-        lambda label: f"Set clock subdomain for {label}: {format_clock_subdomain(requested_subdomain)} (verified)",
+        lambda label: f"Set clock subdomain for {label}: {format_clock_subdomain(requested_subdomain)}",
         read_for=lambda device: _read_clock_subdomain(application, device),
     )
     if failures:
@@ -911,6 +911,8 @@ app.command("redundancy")(redundancy)
 
 async def run_clock_configuration(application, devices, changes, control_profile, preview):
     from netaudio.monitoring.model import _json_safe
+
+    application.verify_mutations = True
 
     _, device = select_device(filter_devices(devices))[0]
     if preview:

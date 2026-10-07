@@ -77,6 +77,7 @@ class State:
     timeout: float = 5.0
     timeout_explicit: bool = False
     verbose: bool = False
+    verify: bool = False
     capture: bool = False
     dissect: bool = False
     icons: bool = False
@@ -150,6 +151,12 @@ def _global_options(
     timeout: float = typer.Option(
         5.0, "--timeout", help="mDNS discovery timeout in seconds.", envvar="NETAUDIO_TIMEOUT"
     ),
+    verify: bool = typer.Option(
+        False,
+        "--verify",
+        help="Wait for each change to be confirmed by a fresh readback instead of sending it and returning.",
+        envvar="NETAUDIO_VERIFY",
+    ),
     lock_state_timeout: float = typer.Option(
         4.0,
         "--lock-state-timeout",
@@ -194,6 +201,7 @@ def _global_options(
     state.timeout = timeout
     state.timeout_explicit = ctx.get_parameter_source("timeout") is not ParameterSource.DEFAULT
     state.verbose = verbose
+    state.verify = verify
     state.dissect = dissect
     state.capture = capture
     state.ddm_context = ddm_context

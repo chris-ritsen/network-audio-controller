@@ -140,6 +140,7 @@ def make_http_server(devices=None, metering=None, on_shutdown=None, tls=None):
         subscribe_external_rtp=AsyncMock(),
         get_latency_settings=AsyncMock(return_value={"active_latency_ns": 1_000_000}),
         unlock_device=AsyncMock(return_value={"success": True, "lock_state": 0}),
+        verify_mutations=True,
         probe_sample_rate_status=AsyncMock(
             return_value={
                 "current_value": 48000,

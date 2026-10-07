@@ -35,7 +35,13 @@ def ansi(code: str, text: str) -> str:
 
 
 def _make_dante_application(packet_store=None, session_id=None) -> DanteApplication:
-    return DanteApplication(packet_store=packet_store, dissect=_get_state().dissect, session_id=session_id)
+    state = _get_state()
+    return DanteApplication(
+        packet_store=packet_store,
+        dissect=state.dissect,
+        session_id=session_id,
+        verify_mutations=state.verify,
+    )
 
 
 async def _discover_with_application(application: DanteApplication) -> dict[str, DanteDevice]:
@@ -183,7 +189,7 @@ def _capture_session():
 
 
 @asynccontextmanager
-async def _command_context(discover_devices: bool = True):
+async def _command_context(discover_devices: bool = True, populate_controls: bool = True):
     store, session_id = _capture_session()
     application = _make_dante_application(packet_store=store, session_id=session_id)
     try:
@@ -192,7 +198,8 @@ async def _command_context(discover_devices: bool = True):
             devices = {}
             if discover_devices:
                 devices = await _discover_with_application(application)
-                await _populate_controls(devices, application)
+                if populate_controls:
+                    await _populate_controls(devices, application)
             yield devices, application
         finally:
             await application.shutdown()
@@ -201,9 +208,18 @@ async def _command_context(discover_devices: bool = True):
             store.close()
 
 
-def run_command(run: Callable[..., Awaitable[Any]], *arguments, discover_devices: bool = True, **options) -> Any:
+def run_command(
+    run: Callable[..., Awaitable[Any]],
+    *arguments,
+    discover_devices: bool = True,
+    populate_controls: bool = True,
+    **options,
+) -> Any:
     async def _run():
-        async with _command_context(discover_devices=discover_devices) as (devices, application):
+        async with _command_context(discover_devices=discover_devices, populate_controls=populate_controls) as (
+            devices,
+            application,
+        ):
             return await run(application, devices, *arguments, **options)
 
     return asyncio.run(_run())
@@ -267,12 +283,19 @@ def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[
     return candidates
 
 
+async def populate_devices(application: DanteApplication, devices) -> None:
+    missing = {_device_label(device): device for device in devices if not (device.tx_channels or device.rx_channels)}
+    if missing:
+        await _populate_controls(missing, application, apply_selection=False)
+
+
 async def _populate_controls(
     devices: dict[str, DanteDevice],
     application: DanteApplication | None = None,
+    apply_selection: bool = True,
 ) -> None:
     explicit = _explicit_selection()
-    if explicit:
+    if explicit and apply_selection:
         devices = filter_devices(devices)
     population_requests = []
     managed_devices = []

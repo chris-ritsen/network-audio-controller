@@ -7,7 +7,7 @@ import typer
 
 from netaudio import core
 from netaudio._exit_codes import ExitCode
-from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS, _get_state
 from netaudio.cli_support.execution import (
     CapabilityProbeTimeout,
     report_inventory_failures,
@@ -155,6 +155,10 @@ async def run_channel_name(application, devices, reference: ChannelReference, ne
         typer.echo(f"Error: could not send channel name change: {exception}", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
 
+    if not _get_state().verify:
+        typer.echo(f"{icon('name')}Set channel name: {new_name} (sent)")
+        return
+
     result = await readback_after_notification(
         lambda: _read_channel_name(device, channel_type, found_channel.number),
         new_name,
@@ -274,6 +278,12 @@ async def run_channel_gain(application, devices, reference: ChannelReference, le
     observed_level = channel_levels[channel_index] if 0 <= channel_index < len(channel_levels) else None
     readback = core.analog_level_control(status, found_channel.number, level, device_type)
 
+    if readback["action"] != "unchanged" and not _get_state().verify:
+        typer.echo(
+            f"{icon('gain')}Set {device_type} reference level for channel {found_channel.number}: "
+            f"{gain_level_label(device_type, level)} (sent)"
+        )
+        return
     if readback["action"] != "unchanged":
         typer.echo(
             "Error: gain change was not applied; "

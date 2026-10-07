@@ -95,6 +95,7 @@ async def run_preset_load(
     confirm_destructive: bool,
     store_current_configuration: bool,
 ) -> None:
+    application.verify_mutations = True
     matched_devices = _match_preset_devices(devices, preset_devices)
     try:
         plan = await build_preset_plan(application, matched_devices)

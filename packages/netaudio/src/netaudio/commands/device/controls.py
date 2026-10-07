@@ -24,6 +24,7 @@ class Category(str, Enum):
 
 
 async def _run(application, devices, action, category=None, value=None, confirm=False):
+    application.verify_mutations = True
     _, device = await _load_device_for_show(application, include_channels=False)
     if action == "inspect":
         result = await application.inspect_device_controls(device)

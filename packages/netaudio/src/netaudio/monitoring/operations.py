@@ -472,9 +472,17 @@ def remote_recorder(
         payload["kind"] = fields["kind"].value
         payload["derivation_status"] = fields["derivation_status"].value
         payload["severity"] = fields["severity"].value
-        payload["device_snapshot"] = (
-            _json_safe(dict(device)) if isinstance(device, Mapping) else snapshot_from_device(device)
-        )
+        if isinstance(device, Mapping):
+            payload["device_snapshot"] = _json_safe(dict(device))
+        elif observe_device:
+            payload["device_snapshot"] = snapshot_from_device(device)
+        else:
+            payload["device_snapshot"] = _json_safe(
+                {
+                    field: getattr(device, field, None)
+                    for field in ("inventory_id", "mac_address", "name", "server_name")
+                }
+            )
         payload["observe_device"] = observe_device
         result = append(_json_safe(payload))
         if inspect.isawaitable(result):

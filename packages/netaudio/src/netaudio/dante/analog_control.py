@@ -69,7 +69,7 @@ async def plan_analog(application, device, channel, level, direction=None, *, ti
     return {**plan, "action": "unavailable" if reason else "change", "reason": reason}
 
 
-async def apply_analog(application, device, channel, level, direction=None, timeout=2.0):
+async def apply_analog(application, device, channel, level, direction=None, timeout=2.0, verify=True):
     async with application._capability_probe_lock("analog_write", application._control_key(device)):
         plan = await plan_analog(application, device, channel, level, direction, timeout=min(timeout, 1.0))
         result = {
@@ -101,6 +101,8 @@ async def apply_analog(application, device, channel, level, direction=None, time
 
         await application.send_set_gain_level(device, channel, level, plan["direction"])
         result["request_sent"] = True
+        if not verify:
+            return result
         deadline = asyncio.get_running_loop().time() + timeout
 
         while asyncio.get_running_loop().time() < deadline:

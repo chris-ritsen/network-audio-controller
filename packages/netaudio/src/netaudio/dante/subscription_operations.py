@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from netaudio import core
 from netaudio.core import _requests
@@ -13,6 +13,7 @@ class SubscriptionReconciliationResult:
     unchanged: dict[int, tuple[str, str] | None]
     verified: dict[int, tuple[str, str] | None]
     failures: dict[int, str]
+    sent: dict[int, tuple[str, str] | None] = field(default_factory=dict)
 
 
 def plan_receiver_subscription_commands(device, records):
@@ -77,10 +78,24 @@ async def read_subscription_readback(device, expected):
     return evaluate_subscription_readback(device, expected)
 
 
+def request_rejection(response) -> str | None:
+    successful = getattr(response, "successful", None)
+    if successful is not None:
+        return None if successful else "the managing server rejected the request"
+    if not isinstance(response, (bytes, bytearray)):
+        return None
+    receipt = core.command_acknowledgement(bytes(response))
+    if not receipt or not receipt["parseable"] or receipt.get("accepted") is not False:
+        return None
+    code = receipt.get("result_code")
+    return "device rejected the request" if code is None else f"device rejected the request (result 0x{code:04x})"
+
+
 async def reconcile_receiver_subscriptions(
     application,
     device,
     desired_sources: dict[int, tuple[str, str] | None],
+    verify: bool = True,
 ) -> SubscriptionReconciliationResult:
     await device.get_rx_channels()
     evidence = _subscription_evidence(device, desired_sources)
@@ -98,13 +113,14 @@ async def reconcile_receiver_subscriptions(
     unchanged = {entry["number"]: _source_tuple(entry["source"]) for entry in plan["unchanged"]}
     verified: dict[int, tuple[str, str] | None] = {}
     failures: dict[int, str] = {}
+    sent: dict[int, tuple[str, str] | None] = {}
 
     for batch in plan["batches"]:
         expected = {entry["number"]: _source_tuple(entry["source"]) for entry in batch["expected"]}
 
         try:
             if batch["action"] == "clear":
-                await application.remove_subscriptions(device, list(expected))
+                response = await application.remove_subscriptions(device, list(expected))
             else:
                 records = []
 
@@ -112,11 +128,20 @@ async def reconcile_receiver_subscriptions(
                     assert source is not None, "core returned an empty source in a set batch"
                     records.append((number, *source))
 
-                await application.add_subscriptions(device, records)
+                response = await application.add_subscriptions(device, records)
         except MUTATION_ERRORS as exception:
             for number in expected:
                 failures[number] = f"request failed: {exception}"
 
+            continue
+
+        if not verify:
+            rejection = request_rejection(response)
+            if rejection is None:
+                sent.update(expected)
+            else:
+                for number in expected:
+                    failures[number] = rejection
             continue
 
         try:
@@ -139,4 +164,5 @@ async def reconcile_receiver_subscriptions(
         unchanged=unchanged,
         verified=verified,
         failures=failures,
+        sent=sent,
     )

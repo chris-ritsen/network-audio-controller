@@ -25,16 +25,18 @@ def reset_cli_state():
         list(state.server_names),
         list(state.macs),
         state.output_format,
+        state.verify,
     )
     state.names = []
     state.hosts = []
     state.server_names = []
     state.macs = []
     state.output_format = OutputFormat.plain
+    state.verify = True
     try:
         yield state
     finally:
-        state.names, state.hosts, state.server_names, state.macs, state.output_format = original
+        state.names, state.hosts, state.server_names, state.macs, state.output_format, state.verify = original
 
 
 def _channel(number, name):
@@ -62,6 +64,7 @@ def _subscription_devices(refresh_rx=None):
         mac_address="00:1d:c1:00:00:10",
         tx_channels={1: _channel(1, "Tx1"), 2: _channel(2, "Tx2")},
         rx_channels={},
+        requires_managed_control=False,
         subscriptions=[],
         services={},
         topology_mutation_lock=DeferredAsyncioLock(),
@@ -73,6 +76,7 @@ def _subscription_devices(refresh_rx=None):
         mac_address="00:1d:c1:00:00:20",
         tx_channels={},
         rx_channels={1: _channel(1, "Rx1"), 2: _channel(2, "Rx2")},
+        requires_managed_control=False,
         subscriptions=[],
         services={},
         topology_mutation_lock=DeferredAsyncioLock(),

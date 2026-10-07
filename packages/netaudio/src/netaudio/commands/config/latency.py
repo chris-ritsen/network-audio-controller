@@ -6,6 +6,7 @@ import math
 import typer
 
 from netaudio._exit_codes import ExitCode
+from netaudio.cli_support.context import _get_state
 from netaudio.cli_support.output import output_single, output_table
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.dante.readback import MUTATION_ERRORS
@@ -136,6 +137,10 @@ async def run_latency(application, devices, value: float | None, all_devices: bo
 
         if result["effective_state_confirmed"]:
             typer.echo(f"Set configured latency for {label}: {result['configured_latency_ms']:g} ms (verified)")
+            continue
+
+        if not _get_state().verify and result["state"] != "rejected":
+            typer.echo(f"Set configured latency for {label}: {value:g} ms (sent)")
             continue
 
         failures += 1

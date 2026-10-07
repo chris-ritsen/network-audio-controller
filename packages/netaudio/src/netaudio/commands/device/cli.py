@@ -6,7 +6,7 @@ from typing import Optional
 
 import typer
 
-from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS, _get_state
 from netaudio.cli_support.execution import (
     CapabilityProbeTimeout,
     _enrich_lock_states,
@@ -287,6 +287,10 @@ async def run_name(application, devices, new_name: str | None) -> None:
     except MUTATION_ERRORS as exception:
         typer.echo(f"Error: could not send name change to {device.name or server_name}: {exception}", err=True)
         raise typer.Exit(code=1)
+
+    if not _get_state().verify:
+        typer.echo(f"{icon('name')}Set name: {new_name} (sent)")
+        return
 
     async def _read_name():
         reported_name = await device.fetch_device_name()

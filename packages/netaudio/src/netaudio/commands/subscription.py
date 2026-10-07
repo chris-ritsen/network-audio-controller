@@ -5,8 +5,8 @@ from typing import NoReturn, Optional
 import typer
 
 from netaudio._exit_codes import ExitCode
-from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
-from netaudio.cli_support.execution import run_command
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS, _get_state
+from netaudio.cli_support.execution import populate_devices, run_command
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import (
     filter_devices,
@@ -128,6 +128,7 @@ async def run_subscription_add_single(application, devices, tx: str, rx: str) ->
 
     tx_device = _device_by_identifier(devices, tx_device_id, "TX")
     rx_device = _device_by_identifier(devices, rx_device_id, "RX")
+    await populate_devices(application, [tx_device, rx_device])
 
     _, tx_channel = resolve_channel(tx_device, tx_reference)
     _, rx_channel = resolve_channel(rx_device, rx_reference)
@@ -139,7 +140,7 @@ async def run_subscription_add_single(application, devices, tx: str, rx: str) ->
 
     try:
         result = await reconcile_receiver_subscriptions(
-            application, rx_device, {rx_channel.number: (tx_channel_name, tx_device.name)}
+            application, rx_device, {rx_channel.number: (tx_channel_name, tx_device.name)}, verify=_get_state().verify
         )
     except MUTATION_ERRORS as error:
         _fail(f"could not request subscription: {error}")
@@ -151,6 +152,8 @@ async def run_subscription_add_single(application, devices, tx: str, rx: str) ->
 
     if result.unchanged:
         typer.echo(f"UNCHANGED {label} (already subscribed)")
+    elif result.sent:
+        typer.echo(f"{icon('add')}{label} (sent)")
     else:
         typer.echo(f"{icon('add')}{label} (verified)")
 
@@ -191,6 +194,7 @@ async def run_subscription_add_bulk(
 ) -> None:
     tx_device = _device_by_identifier(devices, tx, "TX")
     rx_device = _device_by_identifier(devices, rx, "RX")
+    await populate_devices(application, [tx_device, rx_device])
 
     try:
         await rx_device.get_rx_channels()
@@ -211,7 +215,7 @@ async def run_subscription_add_bulk(
         labels[rx_channel.number] = f"{rx_name}@{rx_device.name} <- {tx_name}@{tx_device.name}"
 
     try:
-        result = await reconcile_receiver_subscriptions(application, rx_device, desired)
+        result = await reconcile_receiver_subscriptions(application, rx_device, desired, verify=_get_state().verify)
     except MUTATION_ERRORS as error:
         _fail(f"could not apply subscriptions to {_device_label(rx_device)}: {error}")
 
@@ -220,6 +224,8 @@ async def run_subscription_add_bulk(
             typer.echo(f"UNCHANGED {label} (already subscribed)")
         elif number in result.verified:
             typer.echo(f"MODIFIED {label} (verified)")
+        elif number in result.sent:
+            typer.echo(f"MODIFIED {label} (sent)")
         else:
             typer.echo(f"{icon('fail')}FAILED {label}: {result.failures[number]}", err=True)
 
@@ -270,12 +276,12 @@ def add(
     if is_single:
         if count or offset_tx or offset_rx:
             _fail("--count and channel offsets are only valid for bulk subscriptions")
-        run_command(run_subscription_add_single, tx, rx)
+        run_command(run_subscription_add_single, tx, rx, populate_controls=False)
         return
 
     if "@" in tx or "@" in rx:
         _fail("both --tx and --rx must be CHANNEL@DEVICE or both must be device names")
-    run_command(run_subscription_add_bulk, tx, rx, count, offset_tx, offset_rx)
+    run_command(run_subscription_add_bulk, tx, rx, count, offset_tx, offset_rx, populate_controls=False)
 
 
 def _subscribed_channels(device):
@@ -288,11 +294,12 @@ def _subscribed_channels(device):
     ]
 
 
-async def _removals_for_all(devices) -> dict[int, dict]:
+async def _removals_for_all(application, devices) -> dict[int, dict]:
     device_removals: dict[int, dict] = {}
     selected = filter_devices(devices)
     if not selected:
         _fail("no devices matched the global filters")
+    await populate_devices(application, selected.values())
     for device in selected.values():
         try:
             await device.get_rx_channels()
@@ -306,7 +313,7 @@ async def _removals_for_all(devices) -> dict[int, dict]:
     return device_removals
 
 
-async def _removals_for_channels(devices, rx: list[str]) -> dict[int, dict]:
+async def _removals_for_channels(application, devices, rx: list[str]) -> dict[int, dict]:
     device_removals: dict[int, dict] = {}
     refreshed_devices = set()
     for rx_spec in rx:
@@ -321,6 +328,7 @@ async def _removals_for_channels(devices, rx: list[str]) -> dict[int, dict]:
         rx_device = _device_by_identifier(devices, rx_device_id, "RX")
 
         if id(rx_device) not in refreshed_devices:
+            await populate_devices(application, [rx_device])
             try:
                 await rx_device.get_rx_channels()
             except MUTATION_ERRORS as error:
@@ -339,9 +347,9 @@ async def _removals_for_channels(devices, rx: list[str]) -> dict[int, dict]:
 
 async def run_subscription_remove(application, devices, rx: list[str] | None, all_channels: bool) -> None:
     if all_channels:
-        device_removals = await _removals_for_all(devices)
+        device_removals = await _removals_for_all(application, devices)
     else:
-        device_removals = await _removals_for_channels(devices, rx or [])
+        device_removals = await _removals_for_channels(application, devices, rx or [])
 
     failures = 0
     for entry in device_removals.values():
@@ -352,7 +360,7 @@ async def run_subscription_remove(application, devices, rx: list[str] | None, al
 
         try:
             result = await reconcile_receiver_subscriptions(
-                application, rx_device, {channel.number: None for channel in channels}
+                application, rx_device, {channel.number: None for channel in channels}, verify=_get_state().verify
             )
         except MUTATION_ERRORS as error:
             failures += 1
@@ -371,6 +379,8 @@ async def run_subscription_remove(application, devices, rx: list[str] | None, al
                 typer.echo(f"{icon('fail')}FAILED {label}: {result.failures[channel.number]}", err=True)
             elif channel.number in result.unchanged:
                 typer.echo(f"UNCHANGED {label} (already unsubscribed)")
+            elif channel.number in result.sent:
+                typer.echo(f"{icon('remove')}Removed: {label} (sent)")
             else:
                 typer.echo(f"{icon('remove')}Removed: {label} (verified)")
 
@@ -396,4 +406,4 @@ def remove(
         _fail("use either specific --rx channels or --all, not both")
     if not all_channels and not rx:
         _fail("--rx is required unless --all is used")
-    run_command(run_subscription_remove, rx, all_channels)
+    run_command(run_subscription_remove, rx, all_channels, populate_controls=False)

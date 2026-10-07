@@ -136,6 +136,7 @@ class DanteApplication:
         managed_transport=None,
         sap_service=None,
         operation_recorder=None,
+        verify_mutations=True,
     ):
         from netaudio.common.app_config import settings as app_settings
 
@@ -181,6 +182,7 @@ class DanteApplication:
         self._managed_transport = managed_transport
         self._managed_transports: dict[str, ManagedDeviceTransport] = {}
         self.operation_recorder = operation_recorder
+        self.verify_mutations = verify_mutations
 
     def set_operation_recorder(self, recorder) -> None:
         self.operation_recorder = recorder
@@ -397,6 +399,9 @@ class DanteApplication:
         mutate: Callable[[], Awaitable[None]],
         timeout: float,
     ):
+        if not self.verify_mutations:
+            await mutate()
+            return None
         key = self._control_key(target)
         waiter = self.notifications.register_waiter(kind, key)
         try:
@@ -1407,6 +1412,9 @@ class DanteApplication:
         probe_status: Callable[[], Awaitable[dict | None]],
         timeout: float = 2.0,
     ) -> dict | None:
+        if not self.verify_mutations:
+            await mutate()
+            return None
         key = self._control_key(device)
 
         async def mutate_without_result() -> None:
@@ -1429,7 +1437,7 @@ class DanteApplication:
         notification_ids,
         timeout: float = 2.0,
     ) -> Result:
-        if getattr(device, "requires_managed_control", False):
+        if getattr(device, "requires_managed_control", False) or not self.verify_mutations:
             return await mutate()
         device_ip_address = str(device.ipv4)
         waiter = self.notifications.register_notification_waiter(device_ip_address, notification_ids)
@@ -1600,7 +1608,7 @@ class DanteApplication:
                 device,
                 "analog_level",
                 requested,
-                lambda: apply_analog(self, device, **requested, timeout=timeout),
+                lambda: apply_analog(self, device, **requested, timeout=timeout, verify=self.verify_mutations),
                 result_adapter=audit_control_result,
             )
         return await self._run_configuration_operation(
@@ -2254,6 +2262,8 @@ class DanteApplication:
             lambda: device.execute(self.commands.set_aes67_multicast_prefix(normalized_prefix)),
             (NOTIFICATION_SETTINGS_CHANGE,),
         )
+        if not self.verify_mutations:
+            return None
         await self.get_aes67_configured(device)
         return device.aes67_multicast_prefix
 
@@ -2313,6 +2323,8 @@ class DanteApplication:
                 return result
 
             await self._send_settings(device, self.commands.clock_control(preview["control"]))
+            if not self.verify_mutations:
+                return result
             deadline = asyncio.get_running_loop().time() + timeout
 
             while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
@@ -2337,12 +2349,16 @@ class DanteApplication:
     async def set_clock_source(self, device, clock_source: int, timeout: float = 4.0) -> int | None:
         result = await self.set_clock_configuration(device, {"clock_source": clock_source}, timeout=timeout)
         if not result["effective_state_confirmed"]:
+            if not self.verify_mutations:
+                return None
             raise RuntimeError("Clock source was sent but fresh readback has not confirmed it.")
         return result["status"].get("clock_source_code")
 
     async def set_clock_subdomain(self, device, subdomain, timeout: float = 4.0) -> bytes | None:
         result = await self.set_clock_configuration(device, {"subdomain": subdomain}, timeout=timeout)
         if not result["effective_state_confirmed"]:
+            if not self.verify_mutations:
+                return None
             raise RuntimeError("Clock subdomain was sent but fresh readback has not confirmed it.")
         raw = result["status"].get("clock_subdomain")
         return bytes(raw) if raw is not None else None
@@ -2393,7 +2409,7 @@ class DanteApplication:
             timeout=timeout,
         )
 
-        if not result["effective_state_confirmed"]:
+        if not result["effective_state_confirmed"] and (self.verify_mutations or not result["request_sent"]):
             raise RuntimeError(result.get("reason") or "Analog setting was sent but fresh readback did not confirm it.")
 
         return result["status"]
@@ -2453,7 +2469,7 @@ class DanteApplication:
             acknowledgement = core.parse_response("command_acknowledgement", response) if response else None
 
         accepted = acknowledgement["accepted"] if acknowledgement is not None else None
-        settings = await self.get_latency_settings(device) if accepted is True else None
+        settings = await self.get_latency_settings(device) if accepted is True and self.verify_mutations else None
 
         return {**core.latency_control(milliseconds, settings, accepted), "request_acknowledgement": acknowledgement}
 

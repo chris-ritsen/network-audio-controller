@@ -95,7 +95,10 @@ class RecordingDevice:
 
 
 @pytest.fixture(autouse=True)
-def _reset_cli_state_for_module(reset_cli_state):
+def _reset_cli_state_for_module(reset_cli_state, monkeypatch):
+    from netaudio.cli import state
+
+    monkeypatch.setattr(state, "verify", True)
     yield
 
 

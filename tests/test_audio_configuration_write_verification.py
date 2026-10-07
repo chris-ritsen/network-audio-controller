@@ -18,6 +18,13 @@ from tests.cli_test_support import FakeApplication, FakeChannelDevice, FakeDevic
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _verified_writes(monkeypatch):
+    from netaudio.cli import state
+
+    monkeypatch.setattr(state, "verify", True)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation,field", [("set_encoding", "encoding"), ("set_sample_rate_pullup", "raw_value")])
 @pytest.mark.parametrize("value", [True, -1, 2**32, 1.5, "24", None])

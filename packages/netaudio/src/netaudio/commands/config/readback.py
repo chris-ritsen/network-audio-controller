@@ -3,8 +3,9 @@ import asyncio
 import typer
 
 from netaudio._exit_codes import ExitCode
-from netaudio.dante.readback import MUTATION_ERRORS, audio_readback_result, readback_after_notification
+from netaudio.cli_support.context import _get_state
 from netaudio.cli_support.output import output_single, output_table, structured_output_selected
+from netaudio.dante.readback import MUTATION_ERRORS, audio_readback_result, readback_after_notification
 
 
 async def _read_aes67_configured(application, device):
@@ -120,6 +121,8 @@ def _targets_supporting_value(
 
 
 async def _send_verified_change(targets, mutate_for, expected, action, success_message, read_for=None, describe=repr):
+    verify = _get_state().verify
+
     async def _send_and_read(server_name, device):
         label = device.name or server_name
 
@@ -127,6 +130,9 @@ async def _send_verified_change(targets, mutate_for, expected, action, success_m
             status = await mutate_for(device)
         except MUTATION_ERRORS as exception:
             return label, None, exception
+
+        if not verify:
+            return label, None, None
 
         if read_for is None:
             return label, audio_readback_result(status, expected), None
@@ -141,8 +147,11 @@ async def _send_verified_change(targets, mutate_for, expected, action, success_m
             typer.echo(f"Error: could not send {action} to {label}: {send_error}", err=True)
             failures += 1
             continue
+        if result is None:
+            typer.echo(f"{success_message(label)} (sent)")
+            continue
         if result.matched:
-            typer.echo(success_message(label))
+            typer.echo(f"{success_message(label)} (verified)")
             continue
 
         failures += 1
