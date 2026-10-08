@@ -46,7 +46,10 @@ def _rename(device, channel):
 
 @pytest.mark.parametrize("direction", ["rx", "tx"])
 @pytest.mark.parametrize("inventory", ["rekeyed", "wrong_channel", "duplicate"])
-def test_rename_readback_checks_identity_not_dictionary_key(reset_cli_state, direction, inventory):
+def test_rename_readback_checks_identity_not_dictionary_key(reset_cli_state, monkeypatch, direction, inventory):
+    from netaudio.cli import state
+
+    monkeypatch.setattr(state, "verify", True)
     response = bytes.fromhex("2729000a000030010001" if direction == "rx" else "2729000c0302201300010000")
     device = ExecutingChannelDevice(channel_type=direction, responses=[response])
     device.receiver_channel_name_protocol_identifier = 0x2729
