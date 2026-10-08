@@ -2,12 +2,16 @@
 Description=netaudio daemon for Dante network audio device control
 After=network-online.target
 Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=15min
 
 [Service]
 Type=notify
 ExecStart=/usr/bin/netaudio daemon run
 Restart=on-failure
+RestartMaxDelaySec=5min
 RestartSec=5
+RestartSteps=5
 
 [Install]
 WantedBy=default.target
