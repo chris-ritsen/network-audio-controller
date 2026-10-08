@@ -301,7 +301,7 @@ export function TransmitFlows({ device }) {
   const [result, setResult] = useState(null);
   const authoring = device.transmit_flow_authoring;
   const authoringFacts = JSON.stringify([requestName, authoring, device.aes67_current,
-    device.aes67_configuration_supported, device.is_locked, device.sample_rate, device.encoding]);
+    device.aes67_configuration_supported, device.is_locked, device.sample_rate_hz, device.encoding]);
   useEffect(() => {
     setPlan(null);
     setResult(null);
@@ -333,7 +333,7 @@ export function TransmitFlows({ device }) {
       primaryAddress,
       primaryPort,
       authoring,
-      sampleRate: device.sample_rate,
+      sampleRate: device.sample_rate_hz,
       secondaryAddress,
       secondaryPort,
     });
