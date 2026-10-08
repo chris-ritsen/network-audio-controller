@@ -219,6 +219,9 @@ command: `-n` matches names (including quoted patterns such as `'avio-*'`),
 `-s` matches server names, `-m` matches MAC addresses, and `--host` selects an
 IP address.
 
+Commands that change a device send the change and return. Add `--verify`
+before the command to wait until a fresh readback confirms it.
+
 ### Channels and routing
 
 Channels use `tx:NUMBER` or `rx:NUMBER`; a channel name can replace the number.
@@ -280,6 +283,10 @@ does not use Redis:
 host = "localhost"
 port = 6379
 ```
+
+The daemon follows this computer's JACK and PulseAudio audio only when
+`host_audio = true` is set under `[daemon]` and JACK or PulseAudio is
+installed.
 
 `netaudio config path` shows which configuration file is used. For a DDM
 network, `netaudio ddm login --default` guides you through connecting to a
