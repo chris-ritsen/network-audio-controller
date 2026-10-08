@@ -238,7 +238,7 @@ def _parse_netaudio_extension(device_element: ET.Element, device_name: str) -> d
         version = int(extension.get("schema_version", ""))
     except ValueError as exception:
         raise ValueError(f"{device_name}: invalid NetAudio preset schema version") from exception
-    if version > PRESET_SCHEMA_VERSION or version < 1:
+    if version != PRESET_SCHEMA_VERSION:
         raise ValueError(f"{device_name}: unsupported NetAudio preset schema version {version}")
     content = extension.findtext(PRESET_EXTENSION_CONTENT_TAG)
     if content is None:
