@@ -15,12 +15,6 @@ from netaudio.presets.schema import (
 )
 
 INTERFACE_MODES = ("dynamic", "dhcp", "static")
-STATIC_INTERFACE_FIELDS = (
-    ("dns", "dns_server"),
-    ("gateway", "gateway"),
-    ("ip", "ip_address"),
-    ("netmask", "netmask"),
-)
 
 
 def parse_preset(preset_path: Path) -> tuple[str, dict[str, dict[str, Any]]]:
@@ -66,7 +60,6 @@ def _parse_device_element(device_element: ET.Element) -> dict[str, Any] | None:
     interfaces = _parse_interfaces(device_element)
     if interfaces:
         device_config["interfaces"] = interfaces
-        device_config.update(_legacy_primary_interface_fields(interfaces[0]))
     transmitter_channel_names = _parse_transmitter_channel_names(device_element)
     if transmitter_channel_names:
         device_config["transmitter_channel_names"] = transmitter_channel_names
@@ -123,8 +116,6 @@ def _validate_extension_projection(
     if extension.get("name") != device_name:
         raise ValueError(f"{device_name}: extension device identity does not match the XML device name")
     for field_name, conventional_value in conventional.items():
-        if field_name in {"interface_mode", "ip_address", "netmask", "gateway", "dns_server"}:
-            continue
         if field_name not in extension:
             raise ValueError(f"{device_name}: NetAudio extension omits XML field {field_name}")
         extension_value = _conventional_projection(field_name, extension[field_name])
@@ -211,13 +202,6 @@ def _parse_interfaces(device_element: ET.Element) -> list[dict[str, Any]]:
             }
         interfaces.append(entry)
     return interfaces
-
-
-def _legacy_primary_interface_fields(interface: dict[str, Any]) -> dict[str, Any]:
-    fields = {"interface_mode": interface["mode"]}
-    if interface["mode"] == "static":
-        fields.update({key: interface[key] for _, key in STATIC_INTERFACE_FIELDS})
-    return fields
 
 
 def _parse_transmitter_channel_names(device_element: ET.Element) -> dict[int, str]:

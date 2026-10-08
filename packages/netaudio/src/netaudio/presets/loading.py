@@ -255,17 +255,7 @@ def _validate_config(config: dict) -> None:
 
 
 def _interface_entries(config: dict) -> list[dict[str, Any]]:
-    if "interfaces" in config:
-        return config["interfaces"]
-    if "interface_mode" not in config:
-        return []
-    return [
-        {
-            "identity": "primary",
-            "mode": config["interface_mode"],
-            **{key: config[key] for key in ("ip_address", "netmask", "gateway", "dns_server") if key in config},
-        }
-    ]
+    return config.get("interfaces", [])
 
 
 def _interface_payload(interface: dict[str, Any]) -> dict[str, Any]:
@@ -885,11 +875,6 @@ def _preserved_actions(config: dict) -> list[PresetAction]:
         "aggregate_ptpv1_unicast_delay_requests",
         "redundancy_mode",
         "interfaces",
-        "interface_mode",
-        "ip_address",
-        "netmask",
-        "gateway",
-        "dns_server",
         "transmitter_channel_names",
         "receiver_channel_names",
         "transmit_flows",

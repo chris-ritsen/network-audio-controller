@@ -110,10 +110,7 @@ def _configuration_summary(config):
         entries.append({"label": "Transmit flows", "value": str(len(config["transmit_flows"]))})
     if "codec_gain" in config:
         entries.append({"label": "Codec gain", "value": f"{len(config['codec_gain'])} channels"})
-    interfaces = config.get("interfaces")
-    if interfaces is None and "interface_mode" in config:
-        interfaces = [{"identity": "primary", "mode": config["interface_mode"]}]
-    for interface in interfaces or []:
+    for interface in config.get("interfaces", []):
         mode = interface["mode"]
         value = f"Static {interface.get('ip_address', '')}" if mode == "static" else mode.upper()
         entries.append({"label": f"Network ({interface['identity']})", "value": value})

@@ -34,10 +34,7 @@ def _fact_key(category: str, key: str) -> str:
 
 
 def get_confidence(fact: dict) -> str:
-    confidence_log = fact.get("confidence_log")
-    if confidence_log:
-        return confidence_log[-1]["level"]
-    return fact.get("confidence", "unknown")
+    return fact["confidence_log"][-1]["level"]
 
 
 def fact_status(fact: dict) -> str:
@@ -55,17 +52,6 @@ def _append_confidence(fact: dict, level: str):
             "timestamp_ns": time.time_ns(),
         }
     )
-    fact.pop("confidence", None)
-
-
-def _migrate_confidence(fact: dict):
-    if "confidence" in fact and "confidence_log" not in fact:
-        fact["confidence_log"] = [
-            {
-                "level": fact.pop("confidence"),
-                "timestamp_ns": fact.get("added_ns", time.time_ns()),
-            }
-        ]
 
 
 @dataclass(frozen=True)
@@ -111,10 +97,7 @@ def add_fact(path: Path, category: str, key: str, record: FactRecord) -> dict:
 
     if existing:
         fact["evidence"] = _merge_evidence(existing.get("evidence", []), record.evidence or [])
-        _migrate_confidence(existing)
-        existing_confidence_log = existing.get("confidence_log", [])
-        if existing_confidence_log:
-            fact["confidence_log"] = existing_confidence_log + fact["confidence_log"]
+        fact["confidence_log"] = existing["confidence_log"] + fact["confidence_log"]
         fact["history"] = existing.get("history", [])
         fact["history"].append(
             {
@@ -162,8 +145,6 @@ def update_fact(path: Path, category: str, key: str, update: FactUpdate) -> dict
 
     if fact is None:
         return None
-
-    _migrate_confidence(fact)
 
     fact.setdefault("history", []).append(
         {
@@ -240,8 +221,6 @@ def disprove_fact(
     if fact is None:
         return None
 
-    _migrate_confidence(fact)
-
     fact.setdefault("history", []).append(
         {
             "replaced_ns": time.time_ns(),
@@ -285,8 +264,6 @@ def reinstate_fact(
     if fact is None:
         return None
 
-    _migrate_confidence(fact)
-
     fact.setdefault("history", []).append(
         {
             "replaced_ns": time.time_ns(),
@@ -318,8 +295,6 @@ def quarantine_fact(
     if fact is None:
         return None
 
-    _migrate_confidence(fact)
-
     fact.setdefault("history", []).append(
         {
             "replaced_ns": time.time_ns(),
@@ -346,8 +321,6 @@ def clear_quarantine(path: Path, category: str, key: str) -> dict | None:
 
     if fact is None or "quarantine" not in fact:
         return None
-
-    _migrate_confidence(fact)
 
     fact.setdefault("history", []).append(
         {
