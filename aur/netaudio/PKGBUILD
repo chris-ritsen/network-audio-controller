@@ -1,24 +1,34 @@
 # Maintainer: Christopher Ritsen <chris.ritsen@gmail.com>
 _name='netaudio'
 pkgname='netaudio'
-pkgver=0.2.4
+pkgver=0.4.0
 pkgrel=1
-pkgdesc="CLI for managing network audio devices"
-arch=(any)
+pkgdesc="Cross-platform control, automation, and monitoring for Dante network audio devices"
+arch=('x86_64' 'aarch64')
 url='https://github.com/chris-ritsen/network-audio-controller'
 license=(Unlicense)
-depends=('python' 'python-zeroconf' 'python-ifaddr' 'python-typer' 'python-rich' 'python-segno' 'python-pyyaml' 'python-pynacl')
-optdepends=('python-redis: packet capture features'
-            'python-dbus-fast: D-Bus integration'
+depends=('python' 'python-click' 'python-cryptography' 'python-dbus-fast' 'python-ifaddr' 'python-rich'
+         'python-segno' 'python-typer' 'python-typing_extensions' 'python-yaml' 'python-zeroconf')
+optdepends=('python-jack-client: follow JACK audio with host_audio'
+            'python-numpy: record JACK audio'
+            'python-pulsectl-asyncio: follow PulseAudio audio with host_audio'
+            'python-redis: publish device state to Redis'
             'wireshark-cli: live network capture')
-makedepends=('python-build' 'python-installer' 'python-wheel' 'python-hatchling')
+makedepends=('python-build' 'python-hatchling' 'python-installer' 'python-wheel' 'rust')
 source=("https://files.pythonhosted.org/packages/source/${_name::1}/${_name}/${_name}-${pkgver}.tar.gz"
-        "netaudio.service::https://raw.githubusercontent.com/chris-ritsen/network-audio-controller/master/systemd/netaudio.service")
-sha256sums=('46bddcef59da83076f1114d9a83a4efdd54afc94b66593ad01a08922161f9b28'
-            'SKIP')
+        "netaudio-${pkgver}.service::https://raw.githubusercontent.com/chris-ritsen/network-audio-controller/v${pkgver}/systemd/netaudio.service")
+sha256sums=('6a06265570e57e04c89ad4e3d20775346fd5d4aa3ccbc53d1f0997670705ab97'
+            '62000946fc3ed099a89358cff33295f94e74dafe8e8d3e21575f1e3202a90f8c')
+
+prepare() {
+    cd "${_name}-${pkgver}/packages/netaudio-core"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
 
 build() {
     cd "${_name}-${pkgver}"
+    export CARGO_NET_OFFLINE=true RUSTUP_TOOLCHAIN=stable
     python -m build --wheel --no-isolation
 }
 
@@ -26,5 +36,5 @@ package() {
     cd "${_name}-${pkgver}"
     python -m installer --destdir="$pkgdir" dist/*.whl
     install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
-    install -Dm644 "$srcdir/netaudio.service" "$pkgdir/usr/lib/systemd/user/netaudio.service"
+    install -Dm644 "$srcdir/netaudio-${pkgver}.service" "$pkgdir/usr/lib/systemd/user/netaudio.service"
 }
