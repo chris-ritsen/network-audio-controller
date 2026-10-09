@@ -66,9 +66,65 @@
     border-bottom-color: var(--accent);
     background: var(--raised);
   }
+  .context-menu {
+    flex-shrink: 0;
+  }
   .context-selector {
-    width: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 8px 0 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .context-selector:hover,
+  .context-selector[aria-expanded="true"] {
+    background: var(--raised);
+  }
+  .context-selector:focus-visible {
+    outline: 2px solid var(--text);
+    outline-offset: 2px;
+  }
+  .context-chevron {
+    display: inline-flex;
+    color: var(--muted);
+    transform: rotate(90deg);
+  }
+  .menu-panel.context-options {
+    position: fixed;
+    inset: auto;
+    margin: 0;
     min-width: 0;
+    width: max-content;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .context-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .context-option:focus-visible {
+    outline: none;
+    background: var(--hover);
+  }
+  .context-check {
+    display: inline-flex;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+  }
+  .filter-panel-toggle-slot {
+    width: 32px;
+    height: 32px;
     flex-shrink: 0;
   }
   .topbar-controls {
@@ -98,7 +154,11 @@
       min-height: 36px;
       font-size: 14px;
     }
-    .routing-filter-container > .context-selector {
+    .routing-filter-container > .context-menu > .context-selector {
+      width: 100%;
+      justify-content: space-between;
+    }
+    .routing-filter-container > .context-menu {
       display: block;
       width: calc(100% - 32px);
       min-width: 0;
