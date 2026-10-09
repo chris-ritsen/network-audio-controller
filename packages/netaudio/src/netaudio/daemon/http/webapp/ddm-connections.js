@@ -2,7 +2,7 @@ import { api } from "./api.js";
 import { Panel } from "./components.js";
 import { Icon } from "./icons.js";
 import { NewDomainDialog } from "./new-domain.js";
-import { html, useCallback, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
+import { html, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
 import { connectionProfiles, managedDomains, selectContext, selectedContext } from "./store.js";
 import { t } from "./i18n.js";
 
@@ -10,13 +10,25 @@ export function ContextSelector() {
   const contexts = connectionProfiles.value?.contexts || [];
   const servers = connectionProfiles.value?.servers || [];
   const domains = managedDomains.value;
-  const options = [
+  const loaded = connectionProfiles.value !== null;
+  let options = [
     { value: "all", label: t("All devices") }, { value: "local", label: t("Unmanaged") },
     ...servers.map((server) => ({ value: `server:${server.name}`, label: t("{server} · All domains", { server: server.name }) })),
     ...contexts.map((context) => ({ value: context.name, label: `${context.server} · ${context.domain_name || t("Domain")}` })),
     ...domains.filter((domain) => !contexts.some((context) => context.server === domain.ddm_server_profile && context.domain_id === domain.id))
       .map((domain) => ({ value: `domain:${JSON.stringify([domain.ddm_server_profile, domain.id])}`, label: `${domain.ddm_server_profile} · ${domain.name || t("Domain")}` })),
   ];
+  const liveOptions = JSON.stringify(options);
+  if (!loaded) {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("netaudio.context-options"));
+      if (Array.isArray(saved) && saved.every((option) => typeof option?.value === "string" && typeof option.label === "string")) options = saved;
+    } catch {}
+  }
+  useLayoutEffect(() => {
+    if (!loaded) return;
+    try { window.localStorage.setItem("netaudio.context-options", liveOptions); } catch {}
+  }, [loaded, liveOptions]);
   const current = selectedContext.value;
   const selected = options.find((option) => option.value === current);
   let rememberedLabel = current;
@@ -29,67 +41,14 @@ export function ContextSelector() {
     try { window.localStorage.setItem("netaudio.context-label", JSON.stringify(selected)); } catch {}
   }, [current, selected?.label]);
   if (!selected) options.push({ value: current, label: rememberedLabel });
-  const [open, setOpen] = useState(false);
-  const trigger = useRef(null);
-  const panel = useRef(null);
-  const position = useCallback(() => {
-    if (!trigger.current || !panel.current) return;
-    const anchor = trigger.current.getBoundingClientRect();
-    const margin = 8;
-    const gap = 6;
-    const menu = panel.current;
-    menu.style.maxHeight = `${Math.max(40, window.innerHeight - anchor.bottom - gap - margin)}px`;
-    const width = menu.getBoundingClientRect().width;
-    menu.style.left = `${Math.max(margin, Math.min(anchor.right - width, window.innerWidth - width - margin))}px`;
-    menu.style.top = `${anchor.bottom + gap}px`;
-  }, []);
-  useEffect(() => {
-    if (!open) return;
-    position();
-    panel.current?.querySelector('[aria-selected="true"]')?.focus();
-    window.addEventListener("resize", position);
-    window.addEventListener("scroll", position, true);
-    return () => {
-      window.removeEventListener("resize", position);
-      window.removeEventListener("scroll", position, true);
-    };
-  }, [open, position]);
-  const choose = (option) => {
-    try { window.localStorage.setItem("netaudio.context-label", JSON.stringify(option)); } catch {}
-    selectContext(option.value);
-    panel.current?.hidePopover();
-    trigger.current?.focus();
-  };
-  const moveFocus = (event) => {
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const items = Array.from(panel.current?.querySelectorAll('[role="option"]') || []);
-    const index = items.indexOf(document.activeElement);
-    const next = event.key === "Home" ? 0
-      : event.key === "End" ? items.length - 1
-        : event.key === "ArrowDown" ? Math.min(items.length - 1, index + 1) : Math.max(0, index - 1);
-    items[next]?.focus();
-  };
-  return html`<div class="menu context-menu">
-    <button ref=${trigger} type="button" class="context-selector" role="combobox" aria-label=${t("Server and domain")}
-      aria-haspopup="listbox" aria-expanded=${open} aria-controls="context-options" popovertarget="context-options"
-      onKeyDown=${(event) => {
-        if (open || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
-        event.preventDefault();
-        panel.current?.showPopover();
-      }}>
-      <span>${selected?.label ?? rememberedLabel}</span>
-      <span class="context-chevron" aria-hidden="true"><${Icon} name="chevron" /></span>
-    </button>
-    <div id="context-options" ref=${panel} popover="auto" role="listbox" aria-label=${t("Server and domain")}
-      class="menu-panel context-options" onToggle=${(event) => setOpen(event.newState === "open")} onKeyDown=${moveFocus}>
-      ${options.map((option) => html`<button key=${option.value} type="button" role="option" class="menu-item context-option"
-        aria-selected=${option.value === current} onClick=${() => choose(option)}>
-        <span class="context-check" aria-hidden="true">${option.value === current ? html`<${Icon} name="check" />` : null}</span>
-        <span>${option.label}</span>
-      </button>`)}
-    </div>
-  </div>`;
+  return html`<select aria-label=${t("Server and domain")} class="context-selector" value=${current}
+    onChange=${(event) => {
+      const option = options.find((item) => item.value === event.target.value);
+      try { window.localStorage.setItem("netaudio.context-label", JSON.stringify(option)); } catch {}
+      selectContext(event.target.value);
+    }}>
+    ${options.map((option) => html`<option key=${option.value} value=${option.value}>${option.label}</option>`)}
+  </select>`;
 }
 
 export function DdmConnections() {

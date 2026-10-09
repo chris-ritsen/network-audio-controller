@@ -68,13 +68,11 @@ test("DDM controls authenticate, log out, filter by scoped domain, and request e
   const columns = page.getByRole("button", { name: /^Columns/ });
   expect((await columns.boundingBox()).height).toBeLessThan(40);
   const scope = page.getByRole("combobox", { name: "Server and domain", exact: true });
-  await scope.click();
-  await page.getByRole("option", { name: "studio · Test", exact: true }).click();
+  await scope.selectOption({ label: "studio · Test" });
   await expect(page.getByText("Managed devices (1)", { exact: true })).toBeVisible();
   await expect(page.locator("tbody").last()).toContainText("studio");
   await expect(page.locator("tbody").last()).not.toContainText("venue");
-  await scope.click();
-  await page.getByRole("option", { name: "Unmanaged", exact: true }).click();
+  await scope.selectOption("local");
   await expect(page.getByText("Managed devices (1)", { exact: true })).toBeVisible();
   page.on("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Enroll", exact: true }).click();
