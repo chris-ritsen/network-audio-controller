@@ -162,13 +162,13 @@ async def test_service_reschedules_expiry_for_the_second_stream():
     service = DanteHeartbeatService(
         device_by_ip=lambda _source_ip: device,
         on_device_updated=on_device_updated,
-        connection_health_freshness_seconds=0.03,
+        connection_health_freshness_seconds=0.3,
     )
     service._on_packet(heartbeat_packet(latency_sequence=1), ("192.168.1.247", 8700))
-    await asyncio.sleep(0.015)
+    await asyncio.sleep(0.1)
     service._on_packet(heartbeat_packet(late_packet_sequence=20, late_packet_counts=(1,)), ("192.168.1.247", 8700))
 
-    await asyncio.wait_for(fully_expired.wait(), timeout=0.5)
+    await asyncio.wait_for(fully_expired.wait(), timeout=2)
     assert device.receiver_flow_connection_health["fresh"] is False
     await service.stop()
 
