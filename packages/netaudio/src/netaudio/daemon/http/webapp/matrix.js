@@ -306,6 +306,7 @@ function readTheme() {
     muted: read("--muted", "#b3bcc4"),
     panel: read("--panel", "#0a0a0a"),
     cell: read("--raised", "#2b2f32"),
+    statusGlyph: read("--status-glyph", "#000000"),
     text: read("--text", "#ffffff"),
     uiFont: read("--font-ui", "system-ui, sans-serif"),
     warn: read("--warn", "#ffc400"),
@@ -831,7 +832,7 @@ function drawStatusIcon(context, x, y, severity, theme, size = CELL - 4) {
   context.translate(x - size / 2, y - size / 2);
   context.scale(size / 26, size / 26);
   context.fillStyle = severityColor(theme, severity);
-  context.strokeStyle = "#000000";
+  context.strokeStyle = theme.statusGlyph;
   context.lineWidth = 1.25;
   if (severity === "pending") {
     context.fillStyle = "#a6abad";

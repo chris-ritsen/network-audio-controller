@@ -29,6 +29,7 @@
     --radius: 6px;
     --radius-small: 4px;
     --raised: #2b2f32;
+    --status-glyph: #000000;
     --text: #ffffff;
     --topbar-height: 44px;
     --warn: #ffc400;
@@ -56,6 +57,7 @@
     --muted: #1c1f22;
     --panel: #ffffff;
     --raised: #f4f5f6;
+    --status-glyph: #ffffff;
     --text: #1c1f22;
     --warn: #d49b00;
   }
