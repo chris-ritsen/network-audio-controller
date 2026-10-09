@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass, field
 
 from netaudio import core
 from netaudio.core import _requests
 from netaudio.dante.arc_protocol import require_arc_protocol_for_device
 from netaudio.dante.readback import MUTATION_ERRORS
+
+READBACK_INTERVAL_SECONDS = 0.5
+READBACK_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -14,6 +19,7 @@ class SubscriptionReconciliationResult:
     verified: dict[int, tuple[str, str] | None]
     failures: dict[int, str]
     sent: dict[int, tuple[str, str] | None] = field(default_factory=dict)
+    unconfirmed: dict[int, str] = field(default_factory=dict)
 
 
 def plan_receiver_subscription_commands(device, records):
@@ -114,6 +120,7 @@ async def reconcile_receiver_subscriptions(
     verified: dict[int, tuple[str, str] | None] = {}
     failures: dict[int, str] = {}
     sent: dict[int, tuple[str, str] | None] = {}
+    unconfirmed: dict[int, str] = {}
 
     for batch in plan["batches"]:
         expected = {entry["number"]: _source_tuple(entry["source"]) for entry in batch["expected"]}
@@ -135,34 +142,51 @@ async def reconcile_receiver_subscriptions(
 
             continue
 
-        if not verify:
-            rejection = request_rejection(response)
-            if rejection is None:
-                sent.update(expected)
-            else:
-                for number in expected:
-                    failures[number] = rejection
-            continue
-
-        try:
-            readback = await read_subscription_readback(device, expected)
-        except MUTATION_ERRORS as exception:
+        rejection = request_rejection(response)
+        if rejection is not None:
             for number in expected:
-                failures[number] = f"fresh readback unavailable: {exception}"
-
+                failures[number] = rejection
             continue
 
-        for channel in readback["channels"]:
-            number = channel["number"]
+        if not verify:
+            sent.update(expected)
+            continue
 
-            if channel["matched"]:
-                verified[number] = expected[number]
+        observed, readback_error = await _poll_subscription_readback(device, expected)
+
+        for number, source in expected.items():
+            if number in observed and observed[number]["matched"]:
+                verified[number] = source
+            elif number in observed:
+                failures[number] = f"fresh readback reports {observed[number]['source']!r}"
             else:
-                failures[number] = f"fresh readback reports {channel['source']!r}"
+                unconfirmed[number] = f"readback unavailable: {readback_error}"
 
     return SubscriptionReconciliationResult(
         unchanged=unchanged,
         verified=verified,
         failures=failures,
         sent=sent,
+        unconfirmed=unconfirmed,
     )
+
+
+async def _poll_subscription_readback(device, expected):
+    deadline = time.monotonic() + READBACK_TIMEOUT_SECONDS
+    observed: dict[int, dict] = {}
+    readback_error = None
+
+    while True:
+        try:
+            readback = await read_subscription_readback(device, expected)
+        except MUTATION_ERRORS as exception:
+            readback_error = exception
+        else:
+            observed = {channel["number"]: channel for channel in readback["channels"]}
+            if all(channel["matched"] for channel in observed.values()) and len(observed) == len(expected):
+                return observed, None
+
+        if time.monotonic() + READBACK_INTERVAL_SECONDS > deadline:
+            return observed, readback_error
+
+        await asyncio.sleep(READBACK_INTERVAL_SECONDS)

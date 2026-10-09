@@ -1152,6 +1152,15 @@ async def _apply_receiver_subscriptions(
             requested={receiver_channel_number: action.payload[receiver_channel_number]},
         )
 
+    for receiver_channel_number, detail in sorted(result.unconfirmed.items()):
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "unconfirmed",
+            f"receiver channel {receiver_channel_number}: sent, but {detail}",
+            requested={receiver_channel_number: action.payload[receiver_channel_number]},
+        )
+
 
 async def _apply_transmitter_channel_names(
     context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction

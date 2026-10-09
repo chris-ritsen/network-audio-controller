@@ -154,6 +154,9 @@ async def run_subscription_add_single(application, devices, tx: str, rx: str) ->
 
     label = f"{rx_reference.identifier}@{rx_device.name} <- {tx_reference.identifier}@{tx_device.name}"
 
+    if result.unconfirmed:
+        typer.echo(f"UNCONFIRMED {label}: sent, but {result.unconfirmed[rx_channel.number]}", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
     if result.unchanged:
         typer.echo(f"UNCHANGED {label} (already subscribed)")
     elif result.sent:
@@ -230,10 +233,12 @@ async def run_subscription_add_bulk(
             typer.echo(f"MODIFIED {label} (verified)")
         elif number in result.sent:
             typer.echo(f"MODIFIED {label} (sent)")
+        elif number in result.unconfirmed:
+            typer.echo(f"UNCONFIRMED {label}: sent, but {result.unconfirmed[number]}", err=True)
         else:
             typer.echo(f"{icon('fail')}FAILED {label}: {result.failures[number]}", err=True)
 
-    if result.failures:
+    if result.failures or result.unconfirmed:
         raise typer.Exit(code=ExitCode.ERROR)
 
 
@@ -396,6 +401,9 @@ async def run_subscription_remove(application, devices, rx: list[str] | None, al
             if channel.number in result.failures:
                 failures += 1
                 typer.echo(f"{icon('fail')}FAILED {label}: {result.failures[channel.number]}", err=True)
+            elif channel.number in result.unconfirmed:
+                failures += 1
+                typer.echo(f"UNCONFIRMED {label}: removal sent, but {result.unconfirmed[channel.number]}", err=True)
             elif channel.number in result.unchanged:
                 typer.echo(f"UNCHANGED {label} (already unsubscribed)")
             elif channel.number in result.sent:
