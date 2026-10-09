@@ -837,7 +837,7 @@ function drawStatusIcon(context, x, y, severity, theme, size = CELL - 4) {
   if (severity === "pending") {
     context.fillStyle = "#a6abad";
     context.fillRect(0, 0, 26, 26);
-    context.strokeStyle = "#343a3d";
+    context.strokeStyle = "#000000";
     context.lineWidth = 1;
     context.beginPath();
     context.moveTo(5, 4);
