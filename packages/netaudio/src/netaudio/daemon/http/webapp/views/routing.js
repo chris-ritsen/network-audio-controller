@@ -77,9 +77,9 @@ function RoutingView() {
             onClick=${() => {
               setGridLocked(!gridLocked);
               try { window.localStorage.setItem("netaudio.matrix.locked", String(!gridLocked)); } catch {}
-            }}><${Icon} name=${gridLocked ? "unlock" : "lock"} /><span class="steady-label">
-              <span aria-hidden=${gridLocked ? "true" : null}>${t("Lock")}</span>
-              <span aria-hidden=${gridLocked ? null : "true"}>${t("Unlock")}</span>
+            }}><${Icon} name=${gridLocked ? "lock" : "unlock"} /><span class="steady-label">
+              <span aria-hidden=${gridLocked ? null : "true"}>${t("Locked")}</span>
+              <span aria-hidden=${gridLocked ? "true" : null}>${t("Unlocked")}</span>
             </span></button>
           <button class="btn btn-sm" type="button" aria-pressed=${!flipped} onClick=${() => {
             setFlipped(!flipped);

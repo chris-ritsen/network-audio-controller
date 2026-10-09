@@ -57,7 +57,7 @@ test("grid lock blocks adds and clears, survives reload, and leaves navigation u
   const writes = [];
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(new URL(request.url()).pathname); });
   await page.goto("http://netaudio.test/routing");
-  const lock = page.getByRole("button", { name: /^(Lock|Unlock)$/ });
+  const lock = page.getByRole("button", { name: /^(Locked|Unlocked)$/ });
   await lock.click();
   await expect(lock).toHaveAttribute("aria-pressed", "true");
   await page.reload();
