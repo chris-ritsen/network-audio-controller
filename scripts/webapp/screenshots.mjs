@@ -28,11 +28,12 @@ const SHOTS = [
 const { values } = parseArgs({
   options: {
     fixture: { type: "string" },
+    language: { type: "string", default: "en" },
     output: { type: "string", default: "build/screenshots/web" },
   },
 });
 if (!values.fixture) {
-  console.error("usage: node scripts/webapp/screenshots.mjs --fixture FIXTURE.json [--output DIRECTORY]");
+  console.error("usage: node scripts/webapp/screenshots.mjs --fixture FIXTURE.json [--language CODE] [--output DIRECTORY]");
   process.exit(2);
 }
 
@@ -85,7 +86,7 @@ const browser = await chromium.launch();
 try {
   for (const shot of SHOTS) {
     for (const appearance of APPEARANCES) {
-      const context = await browser.newContext({ colorScheme: appearance.colorScheme, deviceScaleFactor: shot.scale ?? 2, viewport: shot.viewport });
+      const context = await browser.newContext({ colorScheme: appearance.colorScheme, deviceScaleFactor: shot.scale ?? 2, locale: values.language, viewport: shot.viewport });
       const page = await context.newPage();
       await page.addInitScript((storage) => {
         for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, JSON.stringify(value));
