@@ -21,6 +21,7 @@ from netaudio.dante.packet_store import PacketRecord
 
 logger = logging.getLogger("netaudio")
 
+CLOCK_PUBLICATIONS = itertools.count(1)
 STATUS_KIND_AES67 = "aes67"
 STATUS_KIND_CLEAR_CONFIGURATION = "clear_configuration_status"
 STATUS_KIND_CLOCK = "clock_status"
@@ -295,6 +296,7 @@ def _parse_ptp_clock_status(data: bytes, source_ip: str, device) -> ParsedStatus
     status["clock_subdomain"] = bytes(name) if name is not None else None
     status["clock_status"] = parsed
     status["clock_observed_at"] = datetime.now(timezone.utc).isoformat()
+    status["_clock_publication"] = next(CLOCK_PUBLICATIONS)
     status["_clock_received_monotonic"] = time.monotonic()
     return ParsedStatus(STATUS_KIND_CLOCK, status, status)
 

@@ -199,9 +199,9 @@ def apply_device_status(device, kind: str, status) -> bool:
 
         fields = dict(status)
         received = fields.pop("_clock_received_monotonic")
-        previous = getattr(device, "clock_observations", None)
-        current = ((previous or {}).get("conmon") or {}).get("current") or {}
-        if current.get("observed_at") != fields["clock_observed_at"]:
+        publication = fields.pop("_clock_publication")
+        if getattr(device, "_clock_publication", None) != publication:
+            device._clock_publication = publication
             observed = clock_tracker(device).update(
                 {
                     "previous": None,
