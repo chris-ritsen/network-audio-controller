@@ -171,6 +171,18 @@ def tag(version):
     return name
 
 
+def actions_enabled():
+    return json.loads(output(["gh", "api", f"repos/{GITHUB_REPOSITORY}/actions/permissions"]))["enabled"]
+
+
+def set_actions_enabled(enabled):
+    arguments = ["gh", "api", "--method", "PUT", f"repos/{GITHUB_REPOSITORY}/actions/permissions"]
+    arguments += ["-F", f"enabled={str(enabled).lower()}"]
+    if enabled:
+        arguments += ["-f", "allowed_actions=all"]
+    run(arguments)
+
+
 def workflow_state():
     return output(["gh", "api", f"repos/{GITHUB_REPOSITORY}/actions/workflows/{RELEASE_WORKFLOW}", "--jq", ".state"])
 
@@ -240,6 +252,9 @@ def wait_for_run(tag_name):
 
 
 def publish(tag_name):
+    actions_enabled_here = not actions_enabled()
+    if actions_enabled_here:
+        set_actions_enabled(True)
     enabled_here = False
     if workflow_state() != "active":
         run(["gh", "workflow", "enable", RELEASE_WORKFLOW, "--repo", GITHUB_REPOSITORY])
@@ -250,6 +265,8 @@ def publish(tag_name):
     finally:
         if enabled_here:
             run(["gh", "workflow", "disable", RELEASE_WORKFLOW, "--repo", GITHUB_REPOSITORY])
+        if actions_enabled_here:
+            set_actions_enabled(False)
 
 
 def wait_for_pypi(version):
