@@ -18,6 +18,7 @@ from netaudio.daemon.client import append_operation_event_on_daemon, get_devices
 from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.state import apply_device_status
 from netaudio.monitoring import MonitoringEventJournal, MutationAuditRecorder, remote_recorder
+from netaudio.network_path import active_ipv4_interfaces, interface_supports_multicast
 
 __all__ = [
     "CapabilityProbeTimeout",
@@ -78,7 +79,7 @@ async def _discover_with_application(
         application.operation_recorder = recorder
     else:
         configure_recorder(recorder)
-    return (
+    devices = (
         await application.discover_and_populate(
             timeout=settings.mdns_timeout,
             wanted_identifiers=wanted_identifiers,
@@ -86,6 +87,34 @@ async def _discover_with_application(
         )
         or {}
     )
+    if not devices:
+        _report_empty_discovery()
+    return devices
+
+
+def _describe_interfaces(interfaces) -> str:
+    addresses: dict[str, list[str]] = {}
+    for interface in interfaces:
+        addresses.setdefault(interface.name, []).append(interface.address)
+    return ", ".join(f"{name} ({', '.join(values)})" for name, values in addresses.items())
+
+
+def _report_empty_discovery() -> None:
+    interfaces = [
+        interface for interface in active_ipv4_interfaces() if interface_supports_multicast(interface.name) is not False
+    ]
+    if settings.interface:
+        searched = list(active_ipv4_interfaces(settings.interface, include_loopback=True))
+    else:
+        searched = interfaces
+    others = [interface for interface in interfaces if interface not in searched]
+    if searched:
+        message = f"No devices answered on {_describe_interfaces(searched)}."
+    else:
+        message = "No network interface with IPv4 multicast was available to search."
+    if others:
+        message += f" Other interfaces: {_describe_interfaces(others)}; choose one with --interface."
+    typer.echo(message, err=True)
 
 
 async def _populate_audio_capabilities(application: DanteApplication, device: DanteDevice) -> None:
