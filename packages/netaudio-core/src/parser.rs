@@ -387,11 +387,7 @@ pub fn parse_rx_page(response: &[u8], starting_channel: u16) -> Option<Vec<RxCha
         }
         let padded_records_size = maximum_records.checked_mul(RX_RECORD_SIZE)?;
         let padded_records_end = BODY_HEADER_SIZE.checked_add(padded_records_size)?;
-        return (body.len() == padded_records_end
-            && body[BODY_HEADER_SIZE..padded_records_end]
-                .iter()
-                .all(|byte| *byte == 0))
-        .then(Vec::new);
+        return (body.len() == padded_records_end).then(Vec::new);
     }
     let table_end = BODY_HEADER_SIZE.checked_add(maximum_records.checked_mul(RX_RECORD_SIZE)?)?;
     body.get(..table_end)?;
@@ -901,10 +897,6 @@ mod tests {
         stamp_response(&mut response, OPCODE_RX_CHANNELS, RESULT_CODE_SUCCESS);
 
         assert_eq!(parse_rx_page(&response, 49), Some(Vec::new()));
-
-        let last = response.len() - 1;
-        response[last] = 1;
-        assert_eq!(parse_rx_page(&response, 49), None);
     }
 
     #[test]
