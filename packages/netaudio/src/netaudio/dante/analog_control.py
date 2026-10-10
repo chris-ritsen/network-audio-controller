@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from copy import deepcopy
 
 from netaudio import core
+
+logger = logging.getLogger("netaudio")
 
 
 def _managed_context_available(device) -> bool:
@@ -64,9 +67,23 @@ async def plan_analog(application, device, channel, level, direction=None, *, ti
     if plan["action"] != "change":
         return plan
 
+    await _resolve_lock_state(application, device, timeout)
     reason = permission(device, write=True)
 
     return {**plan, "action": "unavailable" if reason else "change", "reason": reason}
+
+
+async def _resolve_lock_state(application, device, timeout) -> None:
+    if device.requires_managed_control or device.is_locked is not None or not device.ipv4:
+        return
+    try:
+        observation = await application.probe_lock_status(str(device.ipv4), timeout=timeout)
+    except (RuntimeError, TimeoutError, OSError) as exception:
+        device.failed_queries.add("is_locked")
+        logger.debug(f"Lock status unavailable for {device.server_name or device.name}: {exception}")
+        return
+    device.is_locked = observation.is_locked
+    device.failed_queries.discard("is_locked")
 
 
 async def apply_analog(application, device, channel, level, direction=None, timeout=2.0, verify=True):
