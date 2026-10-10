@@ -46,7 +46,10 @@ class ManagedDeviceControls:
                 if device is not None:
                     if records.get(key, {}).get("management_state") == "unenrolled":
                         for field in DEVICE_SCALAR_FIELDS:
-                            if field.startswith("ddm_") or field == "management_state":
+                            if field.startswith("ddm_") or field in {
+                                "managed_operation_permissions",
+                                "management_state",
+                            }:
                                 setattr(device, field, copy.deepcopy(records[key].get(field)))
                     else:
                         # Losing the manager does not unenroll the physical device.
