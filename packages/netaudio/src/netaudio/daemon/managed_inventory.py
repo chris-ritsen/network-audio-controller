@@ -353,7 +353,12 @@ def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
         if field.startswith("ddm_"):
             merged.pop(field)
     for key, value in managed_record.items():
-        if key.startswith("ddm_") or key in {"inventory_id", "management_state", "availability_state"}:
+        if key.startswith("ddm_") or key in {
+            "availability_state",
+            "inventory_id",
+            "managed_operation_permissions",
+            "management_state",
+        }:
             merged[key] = copy.deepcopy(value)
     merged["inventory_sources"] = ["direct", "ddm"]
     merged["control_transports"] = ["direct", "ddm"]
