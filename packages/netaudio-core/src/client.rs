@@ -12,7 +12,9 @@ use crate::parser::{
     parse_tx_info_page, ChannelAudioMetadata, ChannelCount, RxChannel, TxChannel,
     RX_CHANNELS_PER_PAGE, TX_CHANNELS_PER_PAGE,
 };
-use crate::protocol::{build_set_device_name, NetaudioError};
+use crate::protocol::{
+    build_set_device_name, NetaudioError, RESPONSE_HEADER_SIZE, RESULT_CODE_MORE_PAGES,
+};
 use crate::responses::{
     parse_aes67_configured, parse_device_info, parse_device_name, parse_device_settings,
     parse_property_directory, parse_result_code, DeviceInfo, DeviceSettings, PropertyDirectory,
@@ -112,12 +114,8 @@ pub struct PreparedCommand {
     pub packet: Vec<u8>,
 }
 
-fn page_count(channel_count: u16, per_page: u16) -> u16 {
-    if channel_count == 0 {
-        1
-    } else {
-        channel_count.div_ceil(per_page)
-    }
+fn more_pages(response: &[u8]) -> bool {
+    crate::bytes::read_u16(response, 8) == Some(RESULT_CODE_MORE_PAGES)
 }
 
 fn next_message_id(counter: &mut u16) -> u16 {
@@ -433,25 +431,30 @@ impl Client {
     }
 
     pub fn get_rx_inventory(&mut self, rx_count: u16) -> Result<RxInventory, ClientError> {
-        let pages = page_count(rx_count, RX_CHANNELS_PER_PAGE);
         let mut channels = Vec::new();
         let mut channel_audio_metadata = None;
+        let mut starting_channel = 1;
 
-        for page in 0..pages {
+        loop {
             let message_id = self.next_message_id();
-            let packet = commands::build_receivers(page, message_id)?;
+            let packet = commands::build_receivers_from(starting_channel, message_id)?;
             let response = self.request(&packet, message_id)?;
-            if page == 0 {
+            if starting_channel == 1 {
                 channel_audio_metadata = parse_channel_audio_metadata(&response);
             }
-            let starting_channel = page * RX_CHANNELS_PER_PAGE + 1;
             let parsed =
                 parse_rx_page(&response, starting_channel).ok_or(ClientError::MalformedResponse)?;
-            let complete = parsed.len() == RX_CHANNELS_PER_PAGE as usize;
+            let continues = parsed.len() == RX_CHANNELS_PER_PAGE as usize || more_pages(&response);
+            let Some(last_channel) = parsed.last().map(|channel| channel.number) else {
+                break;
+            };
             channels.extend(parsed);
-            if !complete {
+            if !continues || channels.len() >= usize::from(rx_count) {
                 break;
             }
+            starting_channel = last_channel
+                .checked_add(1)
+                .ok_or(ClientError::MalformedResponse)?;
         }
 
         if channels.len() != usize::from(rx_count) {
@@ -466,7 +469,6 @@ impl Client {
 
     pub fn get_tx_channels(&mut self) -> Result<Vec<TxChannel>, ClientError> {
         let tx_count = self.get_channel_count()?.tx_count;
-        let pages = page_count(tx_count, TX_CHANNELS_PER_PAGE);
 
         let friendly_names = if tx_count == 0 {
             Vec::new()
@@ -480,22 +482,36 @@ impl Client {
         };
 
         let mut channels = Vec::new();
-        for page in 0..pages {
+        let mut starting_channel = 1;
+        loop {
             let message_id = self.next_message_id();
-            let packet = commands::build_transmitters(page, false, message_id)?;
+            let packet = commands::build_transmitters_from(starting_channel, message_id)?;
             let response = self.request(&packet, message_id)?;
-            let starting_channel = page * TX_CHANNELS_PER_PAGE + 1;
             let parsed = parse_tx_info_page(&response, starting_channel)
                 .ok_or(ClientError::MalformedResponse)?;
-            let complete = parsed.len() == TX_CHANNELS_PER_PAGE as usize;
+            let declared_rows =
+                usize::from(response.get(RESPONSE_HEADER_SIZE + 1).copied().unwrap_or(0));
+            let continues = parsed.len() == TX_CHANNELS_PER_PAGE as usize
+                || (more_pages(&response) && parsed.len() == declared_rows);
+            let Some(last_channel) = parsed.last().map(|channel| channel.number) else {
+                break;
+            };
             channels.extend(parsed);
-            if !complete {
+            if !continues || channels.len() >= usize::from(tx_count) {
                 break;
             }
+            starting_channel = last_channel
+                .checked_add(1)
+                .ok_or(ClientError::MalformedResponse)?;
         }
 
         if channels.len() > usize::from(tx_count) {
             return Err(ClientError::MalformedResponse);
+        }
+        if tx_count > 0 && channels.is_empty() {
+            return Err(ClientError::MalformedResponseAt(
+                "transmitter channels: the device advertises transmitter channels but listed none",
+            ));
         }
 
         for channel in &mut channels {

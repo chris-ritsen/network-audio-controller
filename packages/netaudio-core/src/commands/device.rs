@@ -72,7 +72,16 @@ fn page_starting_channel(page: u16, channels_per_page: u16) -> Result<u16, Netau
 }
 
 pub fn build_receivers(page: u16, message_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    let starting_channel = page_starting_channel(page, 16)?;
+    build_receivers_from(page_starting_channel(page, 16)?, message_id)
+}
+
+pub fn build_receivers_from(
+    starting_channel: u16,
+    message_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    if starting_channel == 0 {
+        return Err(NetaudioError::InvalidChannel);
+    }
     build_control_packet(
         OPCODE_RX_CHANNELS,
         &channel_query_payload(starting_channel),
@@ -88,7 +97,16 @@ pub fn build_transmitters(
     if friendly_names {
         return Err(NetaudioError::InvalidChannel);
     }
-    let starting_channel = page_starting_channel(page, 32)?;
+    build_transmitters_from(page_starting_channel(page, 32)?, message_id)
+}
+
+pub fn build_transmitters_from(
+    starting_channel: u16,
+    message_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    if starting_channel == 0 {
+        return Err(NetaudioError::InvalidChannel);
+    }
     build_control_packet(
         OPCODE_TX_CHANNEL_INFO,
         &channel_query_payload(starting_channel),

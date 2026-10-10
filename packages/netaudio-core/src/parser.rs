@@ -393,20 +393,8 @@ pub fn parse_rx_page(response: &[u8], starting_channel: u16) -> Option<Vec<RxCha
                 .all(|byte| *byte == 0))
         .then(Vec::new);
     }
-    if envelope.result_code == RESULT_CODE_MORE_PAGES
-        && record_count != usize::from(RX_CHANNELS_PER_PAGE)
-    {
-        return None;
-    }
-    let records_end = BODY_HEADER_SIZE.checked_add(record_count.checked_mul(RX_RECORD_SIZE)?)?;
     let table_end = BODY_HEADER_SIZE.checked_add(maximum_records.checked_mul(RX_RECORD_SIZE)?)?;
-    if !body
-        .get(records_end..table_end)?
-        .iter()
-        .all(|byte| *byte == 0)
-    {
-        return None;
-    }
+    body.get(..table_end)?;
     let minimum_pointer = RESPONSE_HEADER_SIZE.checked_add(table_end)?;
     let mut channels = Vec::with_capacity(record_count);
 
@@ -634,26 +622,17 @@ pub fn parse_tx_info_page(response: &[u8], starting_channel: u16) -> Option<Vec<
     if maximum_records > usize::from(TX_CHANNELS_PER_PAGE) || channel_count > maximum_records {
         return None;
     }
-    if result_code == RESULT_CODE_MORE_PAGES
-        && (maximum_records == 0 || channel_count != maximum_records)
-    {
-        return None;
-    }
+    let table_end = BODY_HEADER_SIZE.checked_add(maximum_records.checked_mul(TX_RECORD_SIZE)?)?;
     if channel_count == 0 {
-        let table_end =
-            BODY_HEADER_SIZE.checked_add(maximum_records.checked_mul(TX_RECORD_SIZE)?)?;
-        let empty_table = body.len() == BODY_HEADER_SIZE
-            || (body.len() == table_end && body[BODY_HEADER_SIZE..].iter().all(|byte| *byte == 0));
+        let empty_table = body.len() == BODY_HEADER_SIZE || body.len() == table_end;
         return (result_code == RESULT_CODE_SUCCESS && empty_table).then(Vec::new);
     }
 
-    let records_size = channel_count.checked_mul(TX_RECORD_SIZE)?;
-    let records_end = BODY_HEADER_SIZE.checked_add(records_size)?;
-    let metadata_pointer = RESPONSE_HEADER_SIZE.checked_add(records_end)?;
+    let metadata_pointer = RESPONSE_HEADER_SIZE.checked_add(table_end)?;
     let metadata_pointer = u16::try_from(metadata_pointer).ok()?;
     let metadata_end = usize::from(metadata_pointer).checked_add(16)?;
     let metadata_body_end = metadata_end.checked_sub(RESPONSE_HEADER_SIZE)?;
-    body.get(records_end..metadata_body_end)?;
+    body.get(table_end..metadata_body_end)?;
 
     channels.reserve(channel_count);
     let mut primary_metadata_group_ended = false;
