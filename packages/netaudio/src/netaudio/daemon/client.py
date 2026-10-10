@@ -217,6 +217,16 @@ async def get_ddm_domains_from_daemon(context: str | None = None) -> list | None
     return data if status == 200 and isinstance(data, list) else None
 
 
+async def set_ddm_enrollment_on_daemon(
+    server: str, device_id: str, action: str, domain_id: str | None = None
+) -> tuple[int | None, dict | None]:
+    body = {"server": server, "device_id": device_id, "action": action}
+    if domain_id is not None:
+        body["domain_id"] = domain_id
+    status, data = await _daemon_request("POST", "/ddm/enrollment", body, timeout=60.0)
+    return status, data if isinstance(data, dict) else None
+
+
 async def get_ddm_status_from_daemon() -> dict | None:
     status, data = await _daemon_request("GET", "/ddm/status")
     return data if status == 200 and isinstance(data, dict) else None

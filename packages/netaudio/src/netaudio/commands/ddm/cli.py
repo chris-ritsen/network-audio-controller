@@ -5,6 +5,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -16,8 +17,10 @@ from netaudio.commands.ddm.render import redact_sensitive_values, report_errors
 from netaudio.commands.ddm.transport import execute, fail
 from netaudio.daemon.client import (
     get_ddm_devices_from_daemon,
+    get_ddm_domains_from_daemon,
     get_ddm_status_from_daemon,
     refresh_ddm_inventory_on_daemon,
+    set_ddm_enrollment_on_daemon,
 )
 from netaudio.ddm import (
     ControllerAPIClient,
@@ -47,6 +50,7 @@ app.add_typer(context_app, name="context")
 app.add_typer(api_app, name="api")
 
 DAEMON_UNAVAILABLE = "netaudio daemon is not running."
+ENROLLMENT_TIMEOUT_SECONDS = 30.0
 PASSWORD_LOGIN_FIELD = "UserLoginWithPassword"
 EXCLUDED_GENERATED_FIELDS = frozenset(
     {
@@ -258,6 +262,103 @@ def devices() -> None:
         json_data=selected_devices,
         empty_message="The daemon has not seen any devices through the Managed API.",
     )
+
+
+def _matching_devices(devices: dict, identifier: str) -> list[dict]:
+    wanted = identifier.casefold()
+    return [
+        device
+        for device in devices.values()
+        if device.get("ddm_device_id")
+        and wanted in {(device.get("name") or "").casefold(), device["ddm_device_id"].casefold()}
+    ]
+
+
+def _inventory_device(context: str | None, identifier: str) -> dict:
+    devices = asyncio.run(get_ddm_devices_from_daemon(context))
+    if devices is None:
+        fail(DAEMON_UNAVAILABLE)
+    matches = _matching_devices(devices, identifier)
+    if not matches:
+        asyncio.run(refresh_ddm_inventory_on_daemon(context))
+        matches = _matching_devices(asyncio.run(get_ddm_devices_from_daemon(context)) or {}, identifier)
+    if not matches:
+        fail(f"{identifier} is not in the DDM inventory.")
+    if len(matches) > 1:
+        servers = ", ".join(sorted({device.get("ddm_server_profile") or "" for device in matches}))
+        fail(f"{identifier} matches devices on several DDM servers ({servers}); choose one with --context.")
+    return matches[0]
+
+
+def _server_domain(domains: list, server: str, identifier: str) -> dict:
+    available = [domain for domain in domains if domain.get("ddm_server_profile") == server]
+    wanted = identifier.casefold()
+    for domain in available:
+        if wanted in {(domain.get("name") or "").casefold(), (domain.get("id") or "").casefold()}:
+            return domain
+    names = ", ".join(sorted(domain.get("name") or domain.get("id") or "" for domain in available)) or "none"
+    fail(f"{identifier} is not a domain on {server}. Domains: {names}.")
+
+
+def _change_enrollment(context: str | None, device: dict, action: str, domain_id: str | None) -> bool:
+    response_status, result = asyncio.run(
+        set_ddm_enrollment_on_daemon(device["ddm_server_profile"], device["ddm_device_id"], action, domain_id)
+    )
+    if response_status is None:
+        fail(DAEMON_UNAVAILABLE)
+    if response_status != 200:
+        fail((result or {}).get("error") or f"The daemon refused the {action} request.")
+    deadline = time.monotonic() + ENROLLMENT_TIMEOUT_SECONDS
+    while True:
+        devices = asyncio.run(get_ddm_devices_from_daemon(context)) or {}
+        current = next(
+            (candidate for candidate in devices.values() if candidate.get("ddm_device_id") == device["ddm_device_id"]),
+            {},
+        )
+        if current.get("ddm_domain_id") == domain_id:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1)
+        asyncio.run(refresh_ddm_inventory_on_daemon(context))
+
+
+@app.command("enroll")
+def enroll(
+    device_name: str = typer.Argument(..., metavar="DEVICE", help="Device name or DDM device ID."),
+    domain_name: str = typer.Argument(..., metavar="DOMAIN", help="Domain name or ID."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Enroll a device in a Dante Domain Manager domain, keeping its configuration."""
+    context = _active_context()
+    device = _inventory_device(context, device_name)
+    domains = asyncio.run(get_ddm_domains_from_daemon(context))
+    if domains is None:
+        fail(DAEMON_UNAVAILABLE)
+    domain = _server_domain(domains, device["ddm_server_profile"], domain_name)
+    label = device.get("name") or device["ddm_device_id"]
+    if not yes and not typer.confirm(f"Enroll {label} in {domain['name']}?"):
+        raise typer.Exit(code=1)
+    if not _change_enrollment(context, device, "enroll", domain["id"]):
+        fail(f"DDM accepted the request, but its inventory does not show {label} in {domain['name']} yet.")
+    typer.echo(f"Enrolled {label} in {domain['name']}.")
+
+
+@app.command("unenroll")
+def unenroll(
+    device_name: str = typer.Argument(..., metavar="DEVICE", help="Device name or DDM device ID."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Unenroll a device from its Dante Domain Manager domain, keeping its configuration."""
+    context = _active_context()
+    device = _inventory_device(context, device_name)
+    label = device.get("name") or device["ddm_device_id"]
+    domain = device.get("ddm_domain_name") or device.get("ddm_domain_id")
+    if not yes and not typer.confirm(f"Unenroll {label} from {domain or 'its domain'}?"):
+        raise typer.Exit(code=1)
+    if not _change_enrollment(context, device, "unenroll", None):
+        fail(f"DDM accepted the request, but its inventory still shows {label} in a domain.")
+    typer.echo(f"Unenrolled {label} from {domain}.")
 
 
 @app.command("refresh")
