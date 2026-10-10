@@ -740,6 +740,21 @@ class DanteStateService:
         self._populating.discard(server_name)
         await self.fetch_device_controls(server_name)
 
+    async def refresh_after_change(self, server_name: str) -> None:
+        device = self._online_device(server_name)
+        if not device or not self._has_control_path(device):
+            return
+        await self.refresh_device(server_name)
+        if probe_supported(device, "codec_control"):
+            self._readback_succeeded(device, "codec")
+            await self._refresh_codec_status(device, "changed by another client")
+        async with self._lock_for(server_name):
+            try:
+                await device.get_rx_channels()
+            except (RuntimeError, OSError) as exception:
+                logger.warning(f"Error re-reading subscriptions for {server_name}: {exception}")
+        self._emit_device_updated(device)
+
     async def refresh_all_devices(self) -> None:
         tasks = []
         for server_name, device in self.devices.items():

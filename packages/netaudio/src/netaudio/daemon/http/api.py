@@ -60,10 +60,22 @@ from netaudio.monitoring import (
     MonitoringEventJournal,
     MonitoringEventKind,
     MutationAuditRecorder,
+    OperationLifecyclePhase,
 )
 from netaudio.monitoring.level_history import LevelHistory
 
 logger = logging.getLogger("netaudio")
+
+CHANGED_DEVICE_PHASES = frozenset(
+    phase.value
+    for phase in (
+        OperationLifecyclePhase.REQUEST_ACKNOWLEDGED,
+        OperationLifecyclePhase.EFFECTIVE_STATE_CONFIRMED,
+        OperationLifecyclePhase.PARTIAL_UNOBSERVABLE,
+        OperationLifecyclePhase.INCONSISTENT,
+        OperationLifecyclePhase.PERSISTENCE_CONFIRMED,
+    )
+)
 
 if TYPE_CHECKING:
     from netaudio.dante.services.heartbeat import DanteHeartbeatService
@@ -238,6 +250,8 @@ class DaemonHTTPServer(
         self.shure = shure
         self.host_audio = host_audio
         self._host_audio_broadcasts: set[asyncio.Task] = set()
+        self._change_refreshes: dict[str, asyncio.Task] = {}
+        self._change_refreshes_requested: set[str] = set()
         if host_audio is not None:
             host_audio.add_listener(self._on_host_audio_changed)
         self.on_shutdown = on_shutdown
@@ -1264,6 +1278,8 @@ class DaemonHTTPServer(
                 **params,
             )
             await self.publish_journal_event(event)
+            if kind is MonitoringEventKind.CONFIGURATION_OPERATION and event.lifecycle_phase in CHANGED_DEVICE_PHASES:
+                self._refresh_changed_device(snapshot.get("server_name"))
             observed_events = self.event_journal.observe_snapshot(snapshot) if observe_device is True else []
             for observed_event in observed_events:
                 await self.publish_journal_event(observed_event)
@@ -1274,6 +1290,30 @@ class DaemonHTTPServer(
             writer,
             {"event": event.to_dict(), "observed_events": [item.to_dict() for item in observed_events]},
         )
+
+    def _refresh_changed_device(self, server_name) -> None:
+        if not isinstance(server_name, str) or not server_name:
+            return
+        running = self._change_refreshes.get(server_name)
+        if running is not None and not running.done():
+            self._change_refreshes_requested.add(server_name)
+            return
+        self._change_refreshes[server_name] = asyncio.get_running_loop().create_task(
+            self._run_change_refresh(server_name), name=f"changed-device-refresh:{server_name}"
+        )
+
+    async def _run_change_refresh(self, server_name: str) -> None:
+        try:
+            while True:
+                self._change_refreshes_requested.discard(server_name)
+                try:
+                    await self.state.refresh_after_change(server_name)
+                except (RuntimeError, OSError) as exception:
+                    logger.warning(f"Error re-reading {server_name} after a change: {exception}")
+                if server_name not in self._change_refreshes_requested:
+                    return
+        finally:
+            self._change_refreshes.pop(server_name, None)
 
     async def _handle_get_issues(self, writer, query: dict[str, list[str]]) -> None:
         def first(name: str) -> str | None:
