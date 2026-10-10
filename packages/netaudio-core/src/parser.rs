@@ -393,18 +393,21 @@ pub fn parse_rx_page(response: &[u8], starting_channel: u16) -> Option<Vec<RxCha
                 .all(|byte| *byte == 0))
         .then(Vec::new);
     }
-    if maximum_records != record_count {
-        return None;
-    }
-    let records_size = record_count.checked_mul(RX_RECORD_SIZE)?;
-    let records_end = BODY_HEADER_SIZE.checked_add(records_size)?;
-    body.get(..records_end)?;
     if envelope.result_code == RESULT_CODE_MORE_PAGES
         && record_count != usize::from(RX_CHANNELS_PER_PAGE)
     {
         return None;
     }
-    let minimum_pointer = RESPONSE_HEADER_SIZE.checked_add(records_end)?;
+    let records_end = BODY_HEADER_SIZE.checked_add(record_count.checked_mul(RX_RECORD_SIZE)?)?;
+    let table_end = BODY_HEADER_SIZE.checked_add(maximum_records.checked_mul(RX_RECORD_SIZE)?)?;
+    if !body
+        .get(records_end..table_end)?
+        .iter()
+        .all(|byte| *byte == 0)
+    {
+        return None;
+    }
+    let minimum_pointer = RESPONSE_HEADER_SIZE.checked_add(table_end)?;
     let mut channels = Vec::with_capacity(record_count);
 
     for index in 0..record_count {
@@ -637,8 +640,11 @@ pub fn parse_tx_info_page(response: &[u8], starting_channel: u16) -> Option<Vec<
         return None;
     }
     if channel_count == 0 {
-        return (result_code == RESULT_CODE_SUCCESS && body.len() == BODY_HEADER_SIZE)
-            .then(Vec::new);
+        let table_end =
+            BODY_HEADER_SIZE.checked_add(maximum_records.checked_mul(TX_RECORD_SIZE)?)?;
+        let empty_table = body.len() == BODY_HEADER_SIZE
+            || (body.len() == table_end && body[BODY_HEADER_SIZE..].iter().all(|byte| *byte == 0));
+        return (result_code == RESULT_CODE_SUCCESS && empty_table).then(Vec::new);
     }
 
     let records_size = channel_count.checked_mul(TX_RECORD_SIZE)?;
