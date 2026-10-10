@@ -218,26 +218,24 @@ def _select_gain_side(device, reference: ChannelReference, level: int | None):
 async def run_channel_gain(application, devices, reference: ChannelReference, level: int | None) -> None:
     [(_, device)] = select_device(filter_devices(devices))
 
-    if device.gain_levels is None:
-        try:
-            adapter = await application.probe_gain_adapter(device)
-        except CapabilityProbeTimeout as exception:
-            typer.echo(f"Error: could not read gain status: {exception}", err=True)
-            raise typer.Exit(code=ExitCode.ERROR)
-        except MUTATION_ERRORS as exception:
-            typer.echo(f"Error: could not read gain status: {exception}", err=True)
-            raise typer.Exit(code=ExitCode.ERROR)
-        else:
-            apply_device_status(
-                device,
-                "gain",
-                {
-                    "gain_adapter": adapter,
-                    "gain_device_type": adapter["device_type"],
-                    "gain_levels": adapter["channel_levels"],
-                    "supported_gain_levels": adapter["supported_levels"],
-                },
-            )
+    try:
+        adapter = await application.probe_gain_adapter(device)
+    except CapabilityProbeTimeout as exception:
+        typer.echo(f"Error: could not read gain status: {exception}", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+    except MUTATION_ERRORS as exception:
+        typer.echo(f"Error: could not read gain status: {exception}", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+    apply_device_status(
+        device,
+        "gain",
+        {
+            "gain_adapter": adapter,
+            "gain_device_type": adapter["device_type"],
+            "gain_levels": adapter["channel_levels"],
+            "supported_gain_levels": adapter["supported_levels"],
+        },
+    )
 
     selected_channel_type, device_type = _select_gain_side(device, reference, level)
     if selected_channel_type is None:
