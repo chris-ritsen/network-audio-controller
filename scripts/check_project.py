@@ -245,6 +245,7 @@ def project_checks(library, *, offline=False):
                 *[str(path.relative_to(ROOT)) for path in sorted((ROOT / "tests/webapp").glob("*.test.mjs"))],
             ],
         ),
+        Check("web-translations", "webapp", ["node", "scripts/webapp/translations.mjs", "check"]),
     ]
 
 
