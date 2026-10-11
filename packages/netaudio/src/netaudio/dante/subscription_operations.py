@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 
 from netaudio import core
-from netaudio.core import _requests
+from netaudio.core import _requests, _types
 from netaudio.dante.arc_protocol import require_arc_protocol_for_device
 from netaudio.dante.readback import MUTATION_ERRORS
 
@@ -173,7 +173,7 @@ async def reconcile_receiver_subscriptions(
 
 async def _poll_subscription_readback(device, expected):
     deadline = time.monotonic() + READBACK_TIMEOUT_SECONDS
-    observed: dict[int, dict] = {}
+    observed: dict[int, _types.ChannelReadback] = {}
     readback_error = None
 
     while True:
