@@ -582,25 +582,33 @@ def mcp_call(
     daemon_port: Optional[int] = typer.Option(
         None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
     ),
+    apps: bool = typer.Option(False, "--apps", help="Call as a client that shows MCP Apps views."),
+    read: Optional[str] = typer.Option(None, "--read", help="Read this resource URI instead of calling a tool."),
 ):
     """Call the running daemon's MCP server as a client would, printing exactly what the client receives."""
-    from netaudio.daemon.mcp_client import McpCallError, call_tool, list_tools
+    from netaudio.daemon.mcp_client import McpCallError, call_tool, list_tools, read_resource
 
     port = _effective_daemon_port(daemon_port)
     try:
+        if read is not None:
+            for content in read_resource(port, read, apps)["contents"]:
+                typer.echo(content.get("text") or json.dumps(content))
+            return
         if tool is None:
-            for entry in list_tools(port):
+            for entry in list_tools(port, apps):
                 typer.echo(f"{entry['name']}: {entry.get('description', '')}")
             return
         parsed = json.loads(arguments)
         if not isinstance(parsed, dict):
             raise ValueError("--arguments must be a JSON object")
-        result = call_tool(port, tool, parsed)
+        result = call_tool(port, tool, parsed, apps)
     except (McpCallError, ValueError) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1)
     for content in result.get("content") or []:
         typer.echo(content.get("text", json.dumps(content)))
+    if "structuredContent" in result:
+        typer.echo(json.dumps(result["structuredContent"], ensure_ascii=False))
     if result.get("isError"):
         raise typer.Exit(code=1)
 

@@ -680,6 +680,8 @@ export default {
   "Show grid": "グリッドを表示",
   "Channel list": "チャンネル一覧",
   "Flip axes": "軸を入れ替え",
+  "Full screen": "フルスクリーン",
+  "Exit full screen": "フルスクリーンを解除",
   "Channel groups": "チャンネルグループ",
   "No devices match the current filters.": "現在のフィルターに一致するデバイスがありません。",
   "Appearance": "外観",

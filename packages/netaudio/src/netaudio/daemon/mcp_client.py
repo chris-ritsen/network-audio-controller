@@ -4,6 +4,7 @@ import json
 import urllib.error
 import urllib.request
 
+from netaudio.daemon.http.mcp_apps import APP_MIME_TYPE, UI_EXTENSION
 from netaudio.daemon.http.mcp_protocol import (
     META_CLIENT_CAPABILITIES,
     META_PROTOCOL_VERSION,
@@ -14,14 +15,21 @@ from netaudio.daemon.mcp_access import ensure_mcp_token
 DAEMON_HOST = "127.0.0.1"
 META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
 CLIENT_INFO = {"name": "netaudio daemon mcp-call", "version": "1"}
+APPS_CAPABILITIES = {"extensions": {UI_EXTENSION: {"mimeTypes": [APP_MIME_TYPE]}}}
 
 
 class McpCallError(Exception):
     pass
 
 
-def _request(port: int, method: str, params: dict, name: str | None = None, timeout: float = 60.0) -> dict:
-    meta = {META_PROTOCOL_VERSION: MODERN_PROTOCOL_VERSION, META_CLIENT_CAPABILITIES: {}, META_CLIENT_INFO: CLIENT_INFO}
+def _request(
+    port: int, method: str, params: dict, name: str | None = None, timeout: float = 60.0, apps: bool = False
+) -> dict:
+    meta = {
+        META_PROTOCOL_VERSION: MODERN_PROTOCOL_VERSION,
+        META_CLIENT_CAPABILITIES: APPS_CAPABILITIES if apps else {},
+        META_CLIENT_INFO: CLIENT_INFO,
+    }
     body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": {**params, "_meta": meta}}
     headers = {
         "Authorization": f"Bearer {ensure_mcp_token()}",
@@ -56,9 +64,13 @@ def _request(port: int, method: str, params: dict, name: str | None = None, time
     return payload["result"]
 
 
-def list_tools(port: int) -> list[dict]:
-    return _request(port, "tools/list", {})["tools"]
+def list_tools(port: int, apps: bool = False) -> list[dict]:
+    return _request(port, "tools/list", {}, apps=apps)["tools"]
 
 
-def call_tool(port: int, name: str, arguments: dict) -> dict:
-    return _request(port, "tools/call", {"name": name, "arguments": arguments}, name=name)
+def call_tool(port: int, name: str, arguments: dict, apps: bool = False) -> dict:
+    return _request(port, "tools/call", {"name": name, "arguments": arguments}, name=name, apps=apps)
+
+
+def read_resource(port: int, uri: str, apps: bool = False) -> dict:
+    return _request(port, "resources/read", {"uri": uri}, name=uri, apps=apps)

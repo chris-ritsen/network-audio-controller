@@ -60,8 +60,18 @@ export function devicePath(view, deviceName, section) {
   return section ? `/${view}/${encoded}/${section}` : `/${view}/${encoded}`;
 }
 
+let navigator = null;
+
+export function setNavigator(next) {
+  navigator = next;
+}
+
 export function navigate(path, { replace = false } = {}) {
   const target = path || DEFAULT_PATH;
+  if (navigator) {
+    navigator(target);
+    return;
+  }
   if (target === `${window.location.pathname}${window.location.search}`) {
     return;
   }

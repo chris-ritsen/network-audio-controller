@@ -1,0 +1,23 @@
+html,
+body {
+  height: var(--mcp-app-height, 640px);
+  margin: 0;
+  overflow: hidden;
+}
+#view,
+.mcp-app {
+  height: 100%;
+}
+.mcp-app {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
+.mcp-app > .content {
+  min-height: 0;
+}
+.mcp-app-display {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+}

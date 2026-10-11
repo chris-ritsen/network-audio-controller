@@ -696,6 +696,8 @@ export default {
   "Show grid": "Afficher la grille",
   "Channel list": "Liste des canaux",
   "Flip axes": "Inverser les axes",
+  "Full screen": "Plein écran",
+  "Exit full screen": "Quitter le plein écran",
   "Channel groups": "Groupes de canaux",
   "No devices match the current filters.": "Aucun appareil ne correspond aux filtres actuels.",
   "Appearance": "Apparence",

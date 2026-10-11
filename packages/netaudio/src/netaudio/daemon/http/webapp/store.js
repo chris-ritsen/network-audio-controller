@@ -346,6 +346,13 @@ let loadedApiVersion = null;
 const EVENT_STREAM_PATH =
   "/events?patches=1&telemetry=clock_frequency_offset_parts_per_billion,last_seen,network_interface_traffic";
 
+export function receiveEvent(payload) {
+  applyEvent(payload);
+  if (payload.event !== "meter_values" && payload.event !== "shure_meter_values") {
+    recordEvent(payload);
+  }
+}
+
 export function connect() {
   const source = new EventSource(EVENT_STREAM_PATH);
 
@@ -361,10 +368,7 @@ export function connect() {
       recordEvent({ data: event.data, event: "parse_error", message: String(error) });
       return;
     }
-    applyEvent(payload);
-    if (payload.event !== "meter_values" && payload.event !== "shure_meter_values") {
-      recordEvent(payload);
-    }
+    receiveEvent(payload);
   });
 
   source.addEventListener("error", () => {

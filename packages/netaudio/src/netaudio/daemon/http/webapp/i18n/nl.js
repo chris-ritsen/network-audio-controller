@@ -688,6 +688,8 @@ export default {
   "Show grid": "Toon raster",
   "Channel list": "Kanaallijst",
   "Flip axes": "Wissel assen om",
+  "Full screen": "Volledig scherm",
+  "Exit full screen": "Volledig scherm sluiten",
   "Channel groups": "Kanaalgroepen",
   "No devices match the current filters.": "Geen apparaten voldoen aan de huidige filters.",
   "Appearance": "Uiterlijk",

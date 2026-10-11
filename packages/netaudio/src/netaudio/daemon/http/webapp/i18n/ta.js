@@ -664,6 +664,8 @@ export default {
   "Show grid": "கட்டத்தைக் காட்டு",
   "Channel list": "சேனல் பட்டியல்",
   "Flip axes": "அச்சுகளை மாற்று",
+  "Full screen": "முழுத்திரை",
+  "Exit full screen": "முழுத்திரையிலிருந்து வெளியேறு",
   "Channel groups": "சேனல் குழுக்கள்",
   "No devices match the current filters.": "தற்போதைய வடிகட்டிகளுடன் பொருந்தும் சாதனங்கள் இல்லை.",
   "Appearance": "தோற்றம்",

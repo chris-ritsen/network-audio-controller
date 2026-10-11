@@ -10,6 +10,35 @@ export class ApiError extends Error {
   }
 }
 
+async function fetchTransport(method, path, body) {
+  const options = { method, headers: { Accept: "application/json" } };
+  if (body !== undefined) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  const raw = await response.text();
+  let payload = null;
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch (error) {
+      throw new ApiError(
+        t("{method} {path} returned invalid JSON: {raw}", { method, path, raw }),
+        response.status,
+        raw,
+      );
+    }
+  }
+  return { status: response.status, payload };
+}
+
+let transport = fetchTransport;
+
+export function setRequestTransport(next) {
+  transport = next;
+}
+
 async function request(method, path, body) {
   if (
     method !== "GET" &&
@@ -31,31 +60,13 @@ async function request(method, path, body) {
       null,
     );
   }
-  const options = { method, headers: { Accept: "application/json" } };
-  if (body !== undefined) {
-    options.headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(body);
-  }
-  const response = await fetch(path, options);
-  const raw = await response.text();
-  let payload = null;
-  if (raw) {
-    try {
-      payload = JSON.parse(raw);
-    } catch (error) {
-      throw new ApiError(
-        t("{method} {path} returned invalid JSON: {raw}", { method, path, raw }),
-        response.status,
-        raw,
-      );
-    }
-  }
-  if (!response.ok) {
+  const { status, payload } = await transport(method, path, body);
+  if (status < 200 || status >= 300) {
     const message =
       payload && payload.error
         ? payload.error
-        : t("{method} {path} failed with {status}", { method, path, status: response.status });
-    throw new ApiError(message, response.status, payload);
+        : t("{method} {path} failed with {status}", { method, path, status });
+    throw new ApiError(message, status, payload);
   }
   return payload;
 }

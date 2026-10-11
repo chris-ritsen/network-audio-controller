@@ -10,10 +10,12 @@ import { devicePath, navigate } from "../router.js";
 import { contextDevices, contextExternalFlows, deviceRequestName, pendingSubscriptions, scopedDevices as devices } from "../store.js";
 import { inventoryFilters, saveRoutingFilters } from "../device-filters.js";
 
+export const routingLayout = { compactQuery: "(max-width: 900px)" };
+
 function RoutingView() {
   const all = format.sortedDevices(contextDevices.value);
   useLayoutEffect(() => initializeExpansion(all), [devices.value]);
-  const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 900px)").matches);
+  const [compact, setCompact] = useState(() => window.matchMedia(routingLayout.compactQuery).matches);
   const filters = inventoryFilters.value;
   const listMode = filters.listMode === true;
   const receiverFilter = filters.receiverSearch || "";
@@ -28,7 +30,7 @@ function RoutingView() {
     catch { return true; }
   });
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 900px)");
+    const media = window.matchMedia(routingLayout.compactQuery);
     const update = () => setCompact(media.matches);
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);

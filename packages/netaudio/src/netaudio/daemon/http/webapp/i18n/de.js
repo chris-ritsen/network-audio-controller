@@ -688,6 +688,8 @@ export default {
   "Show grid": "Raster anzeigen",
   "Channel list": "Kanalliste",
   "Flip axes": "Achsen tauschen",
+  "Full screen": "Vollbild",
+  "Exit full screen": "Vollbild beenden",
   "Channel groups": "Kanalgruppen",
   "No devices match the current filters.": "Keine Geräte entsprechen den aktuellen Filtern.",
   "Appearance": "Darstellung",

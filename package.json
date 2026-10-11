@@ -10,6 +10,7 @@
     "@playwright/test": "1.63.0",
     "@tailwindcss/cli": "4.3.3",
     "daisyui": "5.7.28",
+    "esbuild": "0.28.2",
     "lucide-static": "1.41.0",
     "prettier": "3.9.6",
     "tailwindcss": "4.3.3"

@@ -696,6 +696,8 @@ export default {
   "Show grid": "Mostrar grade",
   "Channel list": "Lista de canais",
   "Flip axes": "Inverter eixos",
+  "Full screen": "Tela cheia",
+  "Exit full screen": "Sair da tela cheia",
   "Channel groups": "Grupos de canais",
   "No devices match the current filters.": "Nenhum dispositivo corresponde aos filtros atuais.",
   "Appearance": "Aparência",

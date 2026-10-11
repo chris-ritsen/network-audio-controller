@@ -12,6 +12,18 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
+from netaudio.daemon.http.mcp_apps import (
+    APP_TOOL_NAMES,
+    APP_TOOLS,
+    APP_VIEWS_BY_URI,
+    CLIENT_CAPABILITIES,
+    INVOKED_INDIRECTLY,
+    SHOW_ROUTING_MATRIX,
+    VIEW_TOOL_SPECS,
+    McpAppTools,
+    app_resources,
+    read_app_view,
+)
 from netaudio.daemon.http.mcp_host_audio import HOST_AUDIO_TOOL_NAMES, HOST_AUDIO_TOOL_SPECS, McpHostAudioTools
 from netaudio.daemon.http.mcp_planned import PLANNED_BY_NAME, PLANNED_OPERATIONS, PlannedOperation
 from netaudio.daemon.http.mcp_presets import PRESET_TOOLS, McpPresetTools
@@ -24,6 +36,7 @@ from netaudio.daemon.http.mcp_preview import (
     write_settled,
 )
 from netaudio.daemon.http.mcp_protocol import (
+    META_CLIENT_CAPABILITIES,
     complete_result,
     discover_result,
     is_modern_request,
@@ -109,7 +122,8 @@ MCP_INSTRUCTIONS = (
     "present (with over_last_seconds or listen_seconds for sound that comes and goes, such as speech, since one "
     "sample can miss it), trace_signal to follow audio from any point through Shure wireless, Dante, this computer's sound "
     "cards, JACK and PulseAudio with levels at each step, get_host_audio for this computer's JACK and PulseAudio, "
-    "get_wireless_devices for Shure mics, inspect_device_controls for a device's own panel (AVIO "
+    "get_wireless_devices for Shure mics, show_routing_matrix to show the user an interactive routing matrix in apps "
+    "that display MCP Apps views, inspect_device_controls for a device's own panel (AVIO "
     "Bluetooth pairing and name, analog levels, Dante AV video), and save_preset/apply_preset to keep and restore "
     "setups by name. Reads are compact by default; detail=debug exposes raw evidence. Channels accept unique labels or "
     "numbers. Call a write without confirmed to see exactly what it would change; nothing changes until the "
@@ -133,6 +147,7 @@ class McpTool:
     read_only: bool = False
     confirmable: bool = True
     defaults: dict = field(default_factory=dict)
+    meta: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.read_only or not self.confirmable:
@@ -141,7 +156,7 @@ class McpTool:
         object.__setattr__(self, "requires_confirmation", True)
 
     def to_dict(self) -> dict:
-        return {
+        tool = {
             "name": self.name,
             "description": self.description,
             "inputSchema": self.input_schema,
@@ -150,6 +165,9 @@ class McpTool:
                 "readOnlyHint": self.read_only,
             },
         }
+        if self.meta:
+            tool["_meta"] = self.meta
+        return tool
 
 
 @dataclass(frozen=True)
@@ -1368,6 +1386,7 @@ TOOLS: tuple[McpTool, ...] = tuple(
             *ACTION_TOOLS,
             *(resource.to_tool() for resource in RESOURCES),
             *(McpTool(**specification) for specification in HOST_AUDIO_TOOL_SPECS),
+            *(McpTool(**specification) for specification in VIEW_TOOL_SPECS),
         ),
         key=lambda tool: tool.name,
     )
@@ -1389,6 +1408,7 @@ PUBLIC_TOOL_NAMES = frozenset(
         "set_subscriptions",
         "get_device_diagnostics",
         "trace_signal",
+        SHOW_ROUTING_MATRIX,
     }
 )
 PUBLIC_TOOLS = tuple(tool for tool in TOOLS if tool.name in PUBLIC_TOOL_NAMES)
@@ -1558,6 +1578,7 @@ DISCOVERY_HINTS = {
     "list_devices": {"network", "online", "offline"},
     "forget_device": {"forget", "remove", "dismiss", "offline", "off", "old", "stale", "clean", "gone", "inventory"},
     "get_routing": {"subscription"},
+    SHOW_ROUTING_MATRIX: {"view", "visual", "interactive", "grid", "patchbay", "app", "ui", "display", "render"},
     "rename_device": {"name", "device"},
     "set_subscriptions": {"route", "subscription", "many", "several", "bulk"},
     "subscribe": {"subscription", "receive", "transmit"},
@@ -2239,7 +2260,7 @@ def _result_payload(result: dict):
     return payload
 
 
-class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
+class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
     mcp_token: str | None = None
 
     def mcp_server_info(self) -> dict:
@@ -2310,6 +2331,15 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
         if request_id is None:
             self._write_mcp_raw(writer, 202, None)
             return
+        capabilities = (params.get("_meta") or {}).get(META_CLIENT_CAPABILITIES)
+        self._note_app_client(capabilities, getattr(self, "_mcp_current_grant", None))
+        scope = CLIENT_CAPABILITIES.set(capabilities)
+        try:
+            await self._answer_modern_mcp(request_id, method, params, writer, reader)
+        finally:
+            CLIENT_CAPABILITIES.reset(scope)
+
+    async def _answer_modern_mcp(self, request_id, method: str, params: dict, writer, reader) -> None:
         if method == "subscriptions/listen":
             requested = params.get("notifications")
             grant = getattr(self, "_mcp_current_grant", None)
@@ -2358,7 +2388,9 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
     async def _mcp_call(self, method: str, params: dict, writer) -> dict:
+        grant = getattr(self, "_mcp_current_grant", None)
         if method == "initialize":
+            self._note_app_client(params.get("capabilities"), grant, initializing=True)
             return {
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {
@@ -2372,11 +2404,12 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
         if method == "ping":
             return {}
         if method == "tools/list":
-            return {"tools": [tool.to_dict() for tool in PUBLIC_TOOLS]}
+            logger.info("MCP %s listed tools", grant.client_name if grant else "unknown client")
+            return {"tools": [tool.to_dict() for tool in PUBLIC_TOOLS] + list(APP_TOOLS)}
         if method == "tools/call":
             return await self._mcp_tool_call(params, writer)
         if method == "resources/list":
-            return {"resources": [resource.to_dict() for resource in RESOURCES]}
+            return {"resources": [resource.to_dict() for resource in RESOURCES] + app_resources()}
         if method == "resources/templates/list":
             return {"resourceTemplates": [DEVICE_RESOURCE_TEMPLATE]}
         if method == "resources/read":
@@ -2384,6 +2417,18 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
         if method == "prompts/list":
             return {"prompts": []}
         raise McpError(JSON_RPC_METHOD_NOT_FOUND, f"unknown method {method}")
+
+    async def _mcp_app_tool_call(self, name: str, arguments, writer) -> dict:
+        if not isinstance(arguments, dict):
+            raise McpError(JSON_RPC_INVALID_PARAMS, "arguments must be an object")
+        schema = next(tool["inputSchema"] for tool in APP_TOOLS if tool["name"] == name)
+        problems = schema_errors(schema, arguments)
+        if problems:
+            return _tool_result(
+                {"error": f"invalid arguments for {name}", "problems": problems, "input_schema": schema},
+                is_error=True,
+            )
+        return await self._app_tool_call(name, arguments, writer, getattr(self, "_mcp_current_grant", None))
 
     def _unknown_tool(self, name) -> str:
         names = [tool.name for tool in TOOLS if tool.name not in {"discover_tools", "invoke_tool"}]
@@ -2403,6 +2448,8 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
 
     async def _mcp_tool_call_in_scope(self, params: dict, writer) -> dict:
         name = params.get("name")
+        if name in APP_TOOL_NAMES:
+            return await self._mcp_app_tool_call(name, params.get("arguments") or {}, writer)
         tool = TOOLS_BY_NAME.get(name) if isinstance(name, str) else None
         if tool is None and name in PLANNED_BY_NAME:
             return _tool_result(PLANNED_BY_NAME[name].not_implemented(), is_error=True)
@@ -2440,7 +2487,11 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
                 )
             if selected_name not in TOOLS_BY_NAME and selected_name not in PLANNED_BY_NAME:
                 return _tool_result({"error": self._unknown_tool(selected_name)}, is_error=True)
-            return await self._mcp_tool_call({"name": selected_name, "arguments": selected_arguments}, writer)
+            scope = INVOKED_INDIRECTLY.set(True)
+            try:
+                return await self._mcp_tool_call({"name": selected_name, "arguments": selected_arguments}, writer)
+            finally:
+                INVOKED_INDIRECTLY.reset(scope)
         grant: Grant | None = getattr(self, "_mcp_current_grant", None)
         if grant is not None and not grant.can_write and not tool.read_only:
             return _tool_result(
@@ -2449,6 +2500,8 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
                 },
                 is_error=True,
             )
+        if tool.name == SHOW_ROUTING_MATRIX:
+            return await self._show_routing_matrix(arguments, writer, grant)
         if tool.name not in WARMUP_EXEMPT_TOOLS:
             await self._await_inventory(_request_selectors(arguments), writer)
         if tool.name == "apply_to_devices":
@@ -3346,6 +3399,10 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools):
         uri = params.get("uri")
         if not isinstance(uri, str):
             raise McpError(JSON_RPC_INVALID_PARAMS, "uri is required")
+        if uri in APP_VIEWS_BY_URI:
+            grant = getattr(self, "_mcp_current_grant", None)
+            logger.info("MCP %s read the view %s", grant.client_name if grant else "unknown client", uri)
+            return read_app_view(uri)
         resource = RESOURCES_BY_URI.get(uri)
         if resource is not None:
             path = resource.path

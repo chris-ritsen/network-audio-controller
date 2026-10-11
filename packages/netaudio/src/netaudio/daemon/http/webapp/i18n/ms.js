@@ -664,6 +664,8 @@ export default {
   "Show grid": "Tunjukkan grid",
   "Channel list": "Senarai saluran",
   "Flip axes": "Terbalikkan paksi",
+  "Full screen": "Skrin penuh",
+  "Exit full screen": "Keluar daripada skrin penuh",
   "Channel groups": "Kumpulan saluran",
   "No devices match the current filters.": "Tiada peranti sepadan dengan penapis semasa.",
   "Appearance": "Penampilan",

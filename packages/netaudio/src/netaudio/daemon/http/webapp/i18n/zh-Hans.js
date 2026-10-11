@@ -680,6 +680,8 @@ export default {
   "Show grid": "显示网格",
   "Channel list": "通道列表",
   "Flip axes": "交换坐标轴",
+  "Full screen": "全屏",
+  "Exit full screen": "退出全屏",
   "Channel groups": "通道组",
   "No devices match the current filters.": "没有设备符合当前筛选条件。",
   "Appearance": "外观",

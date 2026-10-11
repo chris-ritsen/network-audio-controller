@@ -44,16 +44,22 @@ export function currentLanguage() {
   return active;
 }
 
-export async function loadLanguage() {
+let loadCatalog = async (code) => (await import(new URL(`./i18n/${code}.js`, import.meta.url))).default;
+
+export function setCatalogLoader(loader) {
+  loadCatalog = loader;
+}
+
+export async function loadLanguage(requested) {
   const preference = languagePreference();
   const browser = globalThis.navigator?.languages?.length ? globalThis.navigator.languages : [globalThis.navigator?.language || "en"];
-  const code = preference === "system" ? matchLanguage(browser) : preference;
+  const code = requested ? matchLanguage([requested]) : preference === "system" ? matchLanguage(browser) : preference;
   active = code;
   pluralRules = new Intl.PluralRules(code);
   if (globalThis.document?.documentElement) globalThis.document.documentElement.lang = code;
   if (code === "en") return;
   try {
-    catalog = (await import(`./i18n/${code}.js`)).default;
+    catalog = await loadCatalog(code);
   } catch (error) {
     console.warn(`Translations for ${code} could not be loaded`, error);
     catalog = {};

@@ -680,6 +680,8 @@ export default {
   "Show grid": "그리드 보기",
   "Channel list": "채널 목록",
   "Flip axes": "축 바꾸기",
+  "Full screen": "전체 화면",
+  "Exit full screen": "전체 화면 종료",
   "Channel groups": "채널 그룹",
   "No devices match the current filters.": "현재 필터와 일치하는 장치가 없습니다.",
   "Appearance": "모양",

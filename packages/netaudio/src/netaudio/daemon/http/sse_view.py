@@ -45,7 +45,15 @@ def substantive_record(record: dict) -> dict:
 
 
 class SseDeviceView:
-    def __init__(self, *, patches: bool, telemetry: bool | frozenset[str], meters: bool = True, notices: bool = True):
+    def __init__(
+        self,
+        *,
+        patches: bool,
+        telemetry: bool | frozenset[str],
+        meters: bool = True,
+        notices: bool = True,
+        omitted: frozenset[str] = frozenset(),
+    ):
         self.devices: dict[str, dict] = {}
         self.managed = None
         self.notified_telemetry: dict[str, dict] = {}
@@ -59,7 +67,7 @@ class SseDeviceView:
         else:
             self.telemetry_fields = frozenset(telemetry) & TELEMETRY_FIELDS
         self.telemetry = telemetry is not False
-        self.hidden_fields = TELEMETRY_FIELDS - self.telemetry_fields
+        self.hidden_fields = (TELEMETRY_FIELDS - self.telemetry_fields) | omitted
         self.notified_fields = NOTIFIED_TELEMETRY_FIELDS & self.hidden_fields
 
     @classmethod

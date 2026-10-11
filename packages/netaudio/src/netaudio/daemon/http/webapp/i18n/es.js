@@ -696,6 +696,8 @@ export default {
   "Show grid": "Mostrar cuadrícula",
   "Channel list": "Lista de canales",
   "Flip axes": "Invertir ejes",
+  "Full screen": "Pantalla completa",
+  "Exit full screen": "Salir de pantalla completa",
   "Channel groups": "Grupos de canales",
   "No devices match the current filters.": "Ningún dispositivo coincide con los filtros actuales.",
   "Appearance": "Apariencia",

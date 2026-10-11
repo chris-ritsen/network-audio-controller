@@ -696,6 +696,8 @@ export default {
   "Show grid": "Mostra griglia",
   "Channel list": "Elenco canali",
   "Flip axes": "Inverti assi",
+  "Full screen": "Schermo intero",
+  "Exit full screen": "Esci da schermo intero",
   "Channel groups": "Gruppi di canali",
   "No devices match the current filters.": "Nessun dispositivo corrisponde ai filtri attuali.",
   "Appearance": "Aspetto",
