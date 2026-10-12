@@ -1585,6 +1585,8 @@ def overview_answer(view: dict) -> str:
     findings.extend((streams.get("problems") or [])[:1])
     others = (view.get("other_problems") or [])[:2]
     also = f" Also, {'; '.join(others)}." if others else ""
+    muted = view.get("muted") or []
+    also += f" Muted: {'; '.join(muted)}." if muted else ""
     if not findings:
         working = "The Dante network is working" if others else "Everything is working"
         return f"{working}: {devices}, with no open problems.{also}"

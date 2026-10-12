@@ -24,6 +24,7 @@ from netaudio.host_audio.trace import (
     node_level,
     render,
     muted_stages,
+    mute_wording,
     silence_causes,
     silence_summary,
     trace_answer,
@@ -36,6 +37,12 @@ from netaudio.host_audio.trace import (
 logger = logging.getLogger("netaudio")
 
 DIRECTIONS = ("upstream", "downstream")
+PULSE_MUTE_KINDS = (
+    ("sinks", "PulseAudio output"),
+    ("sources", "PulseAudio input"),
+    ("sink_inputs", "playback by"),
+    ("source_outputs", "recording by"),
+)
 MAXIMUM_METERED_PORTS = 32
 DEFAULT_METER_SECONDS = 0.5
 METERING_TIMEOUT_SECONDS = 4.0
@@ -182,11 +189,40 @@ class DaemonHostAudioHandlers:
         await self._apply_volume_states(graph)
         return graph, snapshots, records, notes
 
-    async def _apply_volume_states(self, graph: SignalGraph) -> None:
+    def _volume_reader(self) -> VolumeStateReader | None:
         reader = getattr(self, "_volume_state_reader", False)
         if reader is False:
             source = volume_state_source()
             reader = self._volume_state_reader = VolumeStateReader(source) if source else None
+        return reader
+
+    async def muted_points(self, snapshots: dict[str, dict]) -> list[str]:
+        muted = []
+        for host, snapshot in snapshots.items():
+            pulse = snapshot.get("pulse") or {}
+            for key, kind in PULSE_MUTE_KINDS:
+                for entry in pulse.get(key) or []:
+                    if entry.get("mute"):
+                        name = entry.get("name") or entry.get("application") or entry.get("binary") or "unnamed"
+                        muted.append(f"{kind} {name} on {host}")
+        reader = self._volume_reader()
+        if reader is None:
+            return muted
+        directions: dict[tuple[str, str], set[str]] = {}
+        for host, snapshot in snapshots.items():
+            for port in ((snapshot.get("jack") or {}).get("ports") or {}).values():
+                directions.setdefault((host, port["client"]), set()).add(port["direction"])
+        clients = sorted(client for client, found in directions.items() if found == {"input", "output"})
+        states = await reader.read(clients)
+        muted.extend(
+            f"{client} ({state['name']}) on {host}" if state.get("name") else f"{client} on {host}"
+            for (host, client), state in sorted(states.items())
+            if state["muted"]
+        )
+        return muted
+
+    async def _apply_volume_states(self, graph: SignalGraph) -> None:
+        reader = self._volume_reader()
         if reader is None:
             return
         clients = sorted(
@@ -582,6 +618,7 @@ class DaemonHostAudioHandlers:
             }
         directions = DIRECTIONS if direction == "both" else (direction,)
         walks = {name: graph.walk(starts, name) for name in directions}
+        own = list(dict.fromkeys(starts + [step.identity for steps in walks.values() for step in steps]))
         followed: dict[str, list[str]] = {}
         if not any(walks[name] for name in directions):
             followed = related_paths(graph, graph.also_named_identities(point, set(starts)))
@@ -648,9 +685,9 @@ class DaemonHostAudioHandlers:
         causes = None
         if levels:
             walked = walks.get("upstream", walks.get("downstream", []))
-            causes = None if stops else silence_causes(graph, starts, walked, measured, muted_stages(graph, identities))
+            causes = None if stops else silence_causes(graph, starts, walked, measured, muted_stages(graph, own))
             if causes:
-                payload["why_silent"] = silence_summary(causes)
+                payload["why_silent"] = silence_summary(causes, mute_wording(graph, starts))
             else:
                 payload["signal_stops"] = list(dict.fromkeys(stops)) or "no step where signal stops"
             payload["measured_at"] = utc_now()

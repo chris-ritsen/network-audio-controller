@@ -651,6 +651,9 @@ class McpHostAudioTools:
             conditions.extend(wireless_conditions(wireless))
         if conditions:
             view["other_problems"] = conditions
+        muted = await self.muted_points(snapshots)
+        if muted:
+            view["muted"] = muted
         return view
 
     def _snapshot_conditions(self, snapshot: dict, records: dict) -> list[str]:

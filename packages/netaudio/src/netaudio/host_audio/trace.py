@@ -725,9 +725,9 @@ def _is_muted_stage(node: Node) -> bool:
     )
 
 
-def _mute_wording(graph: SignalGraph, starts: list[str]) -> str:
+def mute_wording(graph: SignalGraph, starts: list[str]) -> str:
     if any(_is_muted_stage(graph.nodes[identity]) for identity in starts):
-        return "it is also muted at"
+        return "it is muted at"
     seen = set(starts)
     pending = list(starts)
     muted_upstream = bypassed = False
@@ -747,8 +747,8 @@ def _mute_wording(graph: SignalGraph, starts: list[str]) -> str:
                 seen.add(source)
                 pending.append(source)
     if not muted_upstream:
-        return "it is also muted further on, at"
-    return "some of its inputs are also muted at" if bypassed else "it is also muted at"
+        return "it is muted further on, at"
+    return "some of its inputs are muted at" if bypassed else "it is muted at"
 
 
 def muted_stages(graph: SignalGraph, identities: list[str]) -> list[str]:
@@ -856,7 +856,11 @@ def silence_causes(
     return parts
 
 
-def silence_summary(causes: list[str]) -> str:
+def silence_summary(causes: list[str], wording: str = "it is muted at") -> str:
+    causes = [
+        cause.replace("it is muted at", wording, 1) if cause.startswith("it is muted at ") else cause
+        for cause in causes
+    ]
     text = f"No signal: {causes[0]}."
     if len(causes) > 1:
         text += " Also, " + "; ".join(causes[1:]) + "."
@@ -909,7 +913,11 @@ def trace_answer(
         unmeasured = any(cause.endswith(" not measured") for cause in sources)
         everything = "no measured source feeding it has signal" if unmeasured else "nothing feeding it has signal"
         reason = " and ".join(sources) if len(sources) <= ANSWER_CAUSE_LIMIT else everything
-        also = muted.replace("it is muted at", _mute_wording(graph, starts), 1) if muted else None
+        wording = mute_wording(graph, starts) if muted else None
+        if wording is None or (reason == everything and wording.startswith("some of its inputs")):
+            also = None
+        else:
+            also = muted.replace("it is muted at", wording.replace(" muted", " also muted", 1), 1)
         return f"{subject} has no signal because {reason}" + (f", and {also}" if also else "") + "."
     signal = any(_has_signal(levels, identity) for identity in starts)
     if stops:
