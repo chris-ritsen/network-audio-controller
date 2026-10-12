@@ -339,6 +339,7 @@ class ShureManager:
     def __init__(self, dispatcher: DanteEventDispatcher):
         self.dispatcher = dispatcher
         self.devices: dict[str, ShureDeviceInfo] = {}
+        self.remembered: dict[str, dict] = {}
         self._connections: dict[str, ShureConnection] = {}
         self._raw_reports: dict[str, dict] = {}
         self._scan_task: asyncio.Task[None] | None = None

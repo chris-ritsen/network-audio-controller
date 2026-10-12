@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from netaudio.host_audio.links import bridge_channel, hardware_channel
+from netaudio.shure.memory import type_words
 
 MAXIMUM_STARTS = 12
 REMOTE_PRIORITY = 3
@@ -119,6 +120,9 @@ class SignalGraph:
 
         best = min(rank(identity) for identity in found)
         chosen = sorted((identity for identity in found if rank(identity) == best), key=_natural)
+        if len(chosen) > LOOSE_LIMIT:
+            transmitters = [identity for identity in chosen if self.nodes[identity].kind == "dante_tx"]
+            chosen = transmitters if transmitters else chosen
         return chosen if len(chosen) <= LOOSE_LIMIT else []
 
     def walk(self, starts: list[str], direction: str) -> list[Step]:
@@ -191,6 +195,7 @@ def _add_wireless(graph: SignalGraph, wireless: dict, wireless_links: dict[str, 
                     channel_name: 1,
                     device_name: 2,
                     mac: 2,
+                    **{word: 3 for word in type_words(device.get("device_type"))},
                 },
             )
             dante_device = wireless_links.get(mac)

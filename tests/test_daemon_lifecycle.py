@@ -89,7 +89,7 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks(tmp_path):
 
     daemon._dbus = _component(stop=AsyncMock())
     daemon.heartbeat = _component(stop=AsyncMock())
-    daemon.shure = _component(stop=AsyncMock())
+    daemon.shure = _component(stop=AsyncMock(), devices={}, remembered={})
     daemon.host_audio = None
     daemon.http_api = _component(stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
@@ -99,6 +99,7 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks(tmp_path):
     daemon.level_history_path = tmp_path / "level_history.sqlite"
     daemon.event_journal = MonitoringEventJournal()
     daemon.event_journal_path = tmp_path / "event_journal.sqlite"
+    daemon.shure_memory_path = tmp_path / "shure_devices.json"
     daemon._redis = _component(aclose=AsyncMock())
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = _component(close=MagicMock())
@@ -162,6 +163,7 @@ async def test_component_failure_does_not_skip_remaining_shutdown(tmp_path):
     daemon.level_history_path = tmp_path / "level_history.sqlite"
     daemon.event_journal = MonitoringEventJournal()
     daemon.event_journal_path = tmp_path / "event_journal.sqlite"
+    daemon.shure_memory_path = tmp_path / "shure_devices.json"
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = None
@@ -191,7 +193,7 @@ async def test_partial_start_failure_unwinds_started_components(tmp_path):
     daemon._background_tasks = set()
     daemon._dbus = None
     daemon.heartbeat = None
-    daemon.shure = _component(stop=AsyncMock())
+    daemon.shure = _component(stop=AsyncMock(), devices={}, remembered={})
     daemon.host_audio = None
     daemon.http_api = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
@@ -201,6 +203,7 @@ async def test_partial_start_failure_unwinds_started_components(tmp_path):
     daemon.level_history_path = tmp_path / "level_history.sqlite"
     daemon.event_journal = MonitoringEventJournal()
     daemon.event_journal_path = tmp_path / "event_journal.sqlite"
+    daemon.shure_memory_path = tmp_path / "shure_devices.json"
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = None
@@ -264,6 +267,7 @@ async def test_concurrent_start_callers_share_one_initialization_and_exit_togeth
     daemon.level_history_path = tmp_path / "level_history.sqlite"
     daemon.event_journal = MonitoringEventJournal()
     daemon.event_journal_path = tmp_path / "event_journal.sqlite"
+    daemon.shure_memory_path = tmp_path / "shure_devices.json"
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = None

@@ -63,9 +63,10 @@ HOST_AUDIO_TOOL_SPECS: tuple[dict, ...] = (
         "method": "GET",
         "read_only": True,
         "description": (
-            "This computer's audio: the JACK server (rate, buffer, xruns, clients, ports and connections), "
+            "A computer's audio: the JACK server (rate, buffer, xruns, clients, ports and connections), "
             "PulseAudio outputs, inputs and application streams, sound cards and which Dante device each card "
-            "is, and recent changes. Pick a section; client narrows connections and ports to one JACK client."
+            "is, and recent changes. It reads this server's computer unless host names another one, such as "
+            "workstation. Pick a section; client narrows connections and ports to one JACK client."
         ),
         "input_schema": object_schema(
             {

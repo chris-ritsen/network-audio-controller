@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
+from netaudio.shure.memory import describe_type, type_words
 from netaudio.daemon.http.mcp_apps import (
     APP_TOOL_NAMES,
     APP_TOOLS,
@@ -69,6 +70,7 @@ from netaudio.daemon.http.mcp_views import (
     device_addresses,
     device_list_view,
     device_summary,
+    _iso_from_epoch,
     device_view,
     diagnostics_view,
     events_view,
@@ -123,7 +125,8 @@ MCP_INSTRUCTIONS = (
     "present (with over_last_seconds or listen_seconds for sound that comes and goes, such as speech, since one "
     "sample can miss it), trace_signal to follow audio from any point (a device, a channel, or an application such "
     "as Discord, Chromium or mpv) through Shure wireless, Dante, this computer's sound cards, JACK and PulseAudio "
-    "with levels at each step and why it is silent, get_host_audio for this computer's JACK and PulseAudio, "
+    "with levels at each step and why it is silent, get_host_audio for a computer's JACK and PulseAudio (host "
+    "names another computer, such as workstation), "
     "get_wireless_devices for Shure mics, show_routing_matrix to show the user an interactive routing matrix in apps "
     "that display MCP Apps views, inspect_device_controls for a device's own panel (AVIO "
     "Bluetooth pairing and name, analog levels, Dante AV video), and save_preset/apply_preset to keep and restore "
@@ -133,7 +136,7 @@ MCP_INSTRUCTIONS = (
     "apply_to_devices to make one change on several devices. A device that is off the network is not a problem, "
     "even when it is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it "
     "are not failures, and neither is worth mentioning unless the user asks about that device or about what is "
-    "off. forget_device removes devices that no longer matter. Operations with status planned are designed but not built; calling one explains what blocks it."
+    "off. forget_device removes devices that no longer matter. Answer questions about how the user's audio sounds (silent, quiet, distorted, not reaching someone) from trace_signal and get_signal_levels on the actual chain rather than general advice. Operations with status planned are designed but not built; calling one explains what blocks it."
 )
 
 
@@ -2692,6 +2695,9 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 link = wireless_link(shure_payload, records, payload.get("name")) if shure_status < 400 else None
                 if link:
                     payload["wireless"] = link
+            computer = (await self.device_computers()).get(str(payload.get("name")))
+            if computer:
+                payload = {"computer": computer, **payload}
         elif tool.name == "inspect_device_controls" and status < 400:
             payload = controls_view(payload, request)
         elif tool.name == "plan_device_control":
@@ -2701,7 +2707,10 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
         elif tool.name == "get_device_diagnostics" and status < 400:
             payload = diagnostics_view(payload, request, records)
         elif tool.name == "get_wireless_devices" and status < 400:
+            live = set(payload) if isinstance(payload, dict) else set()
             payload = wireless_view(payload, records)
+            if isinstance(payload, dict):
+                payload["devices"] = list(payload.get("devices") or []) + self._remembered_wireless(live)
         elif tool.name == "get_transmit_flows" and status < 400:
             payload = transmit_flows_view(
                 payload, request, _record_for_selector(records, request["device"]), device_addresses(records)
@@ -2731,6 +2740,9 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 found = await self.host_audio_find(str(request.get("query") or ""))
                 if found and isinstance(payload, dict):
                     payload["jack_pulseaudio_and_wireless"] = found
+                off = self._remembered_wireless_matching(str(request.get("query") or ""))
+                if off and isinstance(payload, dict):
+                    payload["wireless_off_the_network"] = off
         if status < 400 and tool.name == "get_signal_levels":
             payload = name_meter_channels(payload, self._serialized_devices())
             off = off_devices(records)
@@ -3208,6 +3220,44 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                     return message
         return _device_not_found(records, selector)
 
+    def _remembered_wireless(self, live: set[str]) -> list[dict]:
+        remembered = getattr(self.shure, "remembered", None) or {}
+        present = {str(name).casefold() for name in live}
+        return [
+            compact(
+                {
+                    "name": record.get("name"),
+                    "type": describe_type(record.get("device_type")) or record.get("device_type"),
+                    "model": record.get("model"),
+                    "state": f"off the network, last seen {_iso_from_epoch(record.get('last_seen')) or 'at an unknown time'}",
+                }
+            )
+            for mac, record in sorted(remembered.items(), key=lambda item: str(item[1].get("name")))
+            if mac.casefold() not in present and not (self.shure and mac in self.shure.devices)
+        ]
+
+    def _remembered_wireless_matching(self, query: str) -> list[str]:
+        words = re.findall(r"[a-z0-9]+", query.casefold())
+        if not words:
+            return []
+        lines = []
+        for entry in self._remembered_wireless(set()):
+            record = next(
+                (value for value in (self.shure.remembered or {}).values() if value.get("name") == entry.get("name")),
+                {},
+            )
+            text = " ".join(
+                [
+                    str(entry.get("name")),
+                    str(entry.get("model")),
+                    str(entry.get("type")),
+                    *type_words(record.get("device_type")),
+                ]
+            ).casefold()
+            if all(word in text for word in words):
+                lines.append(f"{entry.get('name')} ({entry.get('type')}) is {entry['state']}")
+        return lines
+
     def _unlisted_off_devices(self, devices: dict, journal: dict, listed: dict, ddm_known: bool) -> dict:
         known = {str(name).casefold() for name in listed}
         found: dict[str, dict] = {}
@@ -3257,6 +3307,9 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
         if name == "list_devices":
             ddm_known = ddm_inventory_known(snapshots["ddm"])
             listed = device_list_view(snapshots["devices"], ddm_known)
+            for device, computer in (await self.device_computers()).items():
+                if isinstance(listed.get(device), dict) and "last_seen" not in listed[device]:
+                    listed[device] = {**listed[device], "computer": computer}
             listed.update(self._unlisted_off_devices(snapshots["devices"], snapshots["journal"], listed, ddm_known))
             return _tool_result(listed, is_error=False)
         view = network_overview_view(**snapshots)

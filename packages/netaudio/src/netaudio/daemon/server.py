@@ -38,6 +38,7 @@ from netaudio.monitoring.level_history_store import (
     load_level_history,
     save_level_history,
 )
+from netaudio.shure.memory import default_shure_memory_path, load_shure_memory, save_shure_memory
 from netaudio.monitoring.journal_store import (
     default_event_journal_path,
     load_event_journal,
@@ -206,6 +207,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self.level_history = LevelHistory()
         self.level_history_path = default_level_history_path()
         self.event_journal_path = default_event_journal_path()
+        self.shure_memory_path = default_shure_memory_path()
         self.metering = MeteringManager(self.application)
         self.metering.add_listener(self._record_dante_levels)
         self.managed_signals = ManagedSignalReceiver(self.application, self.metering)
@@ -677,6 +679,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self.http_api.discovery_started_monotonic = time.monotonic()
         load_level_history(self.level_history, self.level_history_path)
         load_event_journal(self.event_journal, self.event_journal_path)
+        if self.shure:
+            load_shure_memory(self.shure, self.shure_memory_path)
 
         try:
             await self.http_api.start()
@@ -818,6 +822,10 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 await self.shure.stop()
             except (OSError, RuntimeError) as exception:
                 logger.warning(f"Shure stop error: {exception}", exc_info=True)
+            try:
+                save_shure_memory(self.shure, self.shure_memory_path)
+            except OSError as exception:
+                logger.warning(f"Could not save Shure devices: {exception}", exc_info=True)
 
         if self.host_audio:
             try:

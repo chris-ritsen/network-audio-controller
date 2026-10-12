@@ -143,6 +143,18 @@ class DaemonHostAudioHandlers:
             remembered[f"remembered:{identity}"] = {**record, "online": False, "remembered_last_seen": seen_at}
         return remembered
 
+    async def device_computers(self) -> dict[str, str]:
+        if self.host_audio is None:
+            return {}
+        await self.host_audio.ensure()
+        local = self.host_audio.snapshot()
+        peers, _ = await self._peer_snapshots(SUMMARY_PEER_TIMEOUT_SECONDS)
+        found = {}
+        for host, snapshot in {local["host"]: local, **peers}.items():
+            for device, card in (snapshot.get("card_links") or {}).items():
+                found[device] = f"{host}, as its sound card {card}"
+        return found
+
     async def _signal_graph(self) -> tuple[SignalGraph, dict[str, dict], dict, list[str]]:
         await self.host_audio.ensure()
         local = self.host_audio.snapshot()
