@@ -572,6 +572,17 @@ class McpHostAudioTools:
             preview["destination_hears_now"] = change["destination_hears"] or "nothing"
             if change["connected_now"] == (name == "connect_audio_ports"):
                 preview["note"] = "already so; nothing would change"
+            else:
+                others = [port for port in change["destination_hears"] or [] if port != change["source"]]
+                still = (
+                    f"; it would still hear {', '.join(others)}" if others and name == "disconnect_audio_ports" else ""
+                )
+                also = f" as well as {', '.join(others)}" if others and name == "connect_audio_ports" else ""
+                preview["effect"] = (
+                    f"{change['destination']} would start hearing {change['source']}{also}"
+                    if name == "connect_audio_ports"
+                    else f"{change['destination']} would stop hearing {change['source']}{still}"
+                )
             preview["warning"] = "a JACK patchbay or session manager may undo this; the result reports it if so"
         elif name in PULSE_ACTIONS:
             change = pulse_change(self.host_audio.pulse, PULSE_ACTIONS[name], arguments)
@@ -604,7 +615,16 @@ class McpHostAudioTools:
             }
             if change["current_described"] == change["requested_described"]:
                 preview["note"] = "already so; nothing would change"
+        if (
+            name == "move_audio_stream"
+            and preview.get("change")
+            and preview["change"].get("from") != preview["change"].get("to")
+        ):
+            moved = preview["change"]
+            preview["effect"] = f"{moved['target']} would play {moved['to']} instead of {moved['from']}"
         preview["next"] = NEXT_STEP
+        if "effect" in preview:
+            preview = {"effect": preview.pop("effect"), **preview}
         return compact(preview)
 
     def _jack_target_hint(self, name: str, arguments: dict) -> str:

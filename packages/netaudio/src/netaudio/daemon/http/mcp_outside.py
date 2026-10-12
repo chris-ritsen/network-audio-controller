@@ -71,8 +71,27 @@ def outlet_for(device: str, outlets: list[dict]) -> dict | None:
     return None
 
 
+def outlets_matching(query: str, outlets: list[dict]) -> list[str]:
+    words = {word for word in re.findall(r"[a-z0-9]+", query.casefold()) if len(word) > 1}
+    return [
+        plugged_text(outlet)
+        for outlet in outlets
+        if words
+        and words & set(re.findall(r"[a-z0-9]+", str(outlet.get("name") or "").casefold()))
+        and str(outlet.get("name") or "").casefold() != "unused"
+    ]
+
+
+def plugged_text(outlet: dict) -> str:
+    return (
+        f"{outlet.get('name')} is plugged into rack power outlet {outlet.get('outlet')}, which is {outlet.get('state')}"
+    )
+
+
 def outlet_text(outlet: dict) -> str:
-    return f"{outlet.get('name')}, outlet {outlet.get('outlet')}, is switched {outlet.get('state')}"
+    return (
+        f"plugged into rack power outlet {outlet.get('outlet')} ({outlet.get('name')}), which is {outlet.get('state')}"
+    )
 
 
 class OutletReader:

@@ -72,6 +72,22 @@ def _first(query: dict, name: str, default: str | None = None) -> str | None:
     return values[-1] if values else default
 
 
+def _source_name(graph: SignalGraph, host: str, port: str) -> str:
+    node = graph.nodes.get(f"jack@{host}:{port}")
+    if node is None:
+        return port.split(":")[0]
+    stage = node.details.get("stage") or {}
+    if stage.get("name"):
+        return str(stage["name"])
+    if " [" in node.label:
+        return node.label.split(" [", 1)[1].split("]", 1)[0]
+    return port.split(":")[0]
+
+
+def _joined_names(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def _display_answer(
     graph: SignalGraph,
     reading: DisplayReading,
@@ -177,6 +193,8 @@ class DaemonHostAudioHandlers:
             status, payload = result
             if status == 404:
                 notes.append(f"the netaudio server on {host} is too old to report its audio")
+            elif status == 503 and isinstance(payload, dict) and "not running" in str(payload.get("error") or ""):
+                notes.append(f"{host} runs netaudio without following its own audio, so its audio is not traced")
             elif status >= 400 or not isinstance(payload, dict) or "jack" not in payload:
                 notes.append(f"the netaudio server on {host} did not report its audio (HTTP {status})")
             else:
@@ -278,6 +296,62 @@ class DaemonHostAudioHandlers:
             if state["muted"]
         )
         return muted
+
+    async def channel_carries(self, device: str, channel: str) -> str | None:
+        if self.host_audio is None:
+            return None
+        graph, _, _, _ = await self._signal_graph()
+        start = next(
+            (
+                identity
+                for identity, node in graph.nodes.items()
+                if node.kind == "dante_tx"
+                and node.details.get("device") == device
+                and (
+                    str(node.details.get("channel")) == channel.lstrip("0")
+                    or node.label.split(" (")[0].endswith(f" {channel}")
+                )
+            ),
+            None,
+        )
+        if start is None:
+            return None
+        first = None
+        for step in graph.walk([start], "upstream"):
+            node = graph.nodes[step.identity]
+            if node.kind != "jack":
+                continue
+            if node.details.get("mixes"):
+                members = [_source_name(graph, node.details["host"], port) for port in node.details["mixes"]]
+                mix = "a mix of " + _joined_names(list(dict.fromkeys(members)))
+                return f"{first}, {mix}" if first else mix
+            if first is None and node.details.get("direction") == "output":
+                name = _source_name(graph, node.details["host"], node.details["port"])
+                if name and not node.details["port"].startswith("system:"):
+                    first = name
+        return first
+
+    def _volume_stage_lines(self, graph: SignalGraph, identities: list[str]) -> list[str]:
+        reader = self._volume_reader()
+        changed_by = reader.source.changed_by if reader is not None else None
+        lines: dict[tuple[str, str], str] = {}
+        for identity in identities:
+            node = graph.nodes.get(identity)
+            stage = (node.details.get("stage") or {}) if node is not None and node.kind == "jack" else {}
+            if not stage:
+                continue
+            host, client = node.details["host"], node.details["port"].split(":")[0]
+            level = f"{stage['level']:g}%" if isinstance(stage.get("level"), (int, float)) else "level unknown"
+            state = f"{level}, {'muted' if stage.get('muted') else 'not muted'}"
+            name = f" ({stage['name']})" if stage.get("name") else ""
+            where = f" on {host}" if host != graph.local_host else ""
+            who = (
+                f"; netaudio cannot change it, {changed_by} does"
+                if changed_by
+                else "; netaudio cannot change its level or mute"
+            )
+            lines.setdefault((host, client), f"{client}{name}{where}: {state}{who}")
+        return list(lines.values())
 
     async def _apply_volume_states(self, graph: SignalGraph) -> None:
         reader = self._volume_reader()
@@ -794,6 +868,9 @@ class DaemonHostAudioHandlers:
             )
         elif levels and device:
             answer = device_answer(graph, point, starts, directions, measured) or answer
+        stages = self._volume_stage_lines(graph, own)
+        if stages:
+            payload = {"volume_stages": stages, **payload}
         if reading is not None:
             answer, payload["display"] = _display_answer(
                 graph, reading, presented, measured if levels else None, answer

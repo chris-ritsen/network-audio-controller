@@ -28,7 +28,7 @@ from netaudio.daemon.http.mcp_apps import (
 from netaudio.daemon.http.mcp_host_audio import HOST_AUDIO_TOOL_NAMES, HOST_AUDIO_TOOL_SPECS, McpHostAudioTools
 from netaudio.daemon.http.mcp_planned import PLANNED_BY_NAME, PLANNED_OPERATIONS, PlannedOperation
 from netaudio.daemon.http.mcp_presets import PRESET_TOOLS, McpPresetTools
-from netaudio.daemon.http.mcp_outside import elsewhere_instructions, outlet_for, outlet_text
+from netaudio.daemon.http.mcp_outside import elsewhere_instructions, outlet_for, outlet_text, outlets_matching
 from netaudio.daemon.http.mcp_confirmation import INTERNAL_CONFIRMATION, REFUSALS, PreviewTokens, preview_digest
 from netaudio.daemon.http.mcp_preview import (
     NEXT_STEP,
@@ -141,7 +141,7 @@ MCP_INSTRUCTIONS = (
     "apply_to_devices to make one change on several devices. A device that is off the network is not a problem, "
     "even when it is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it "
     "are not failures, and neither is worth mentioning unless the user asks about that device or about what is "
-    "off. forget_device removes devices that no longer matter. Questions about hearing or sound at home (can I hear the TV, why is linux main silent, is my mic working) are about this audio system: answer them from trace_signal and get_signal_levels on the actual chain, passing the user's words as the point, rather than asking which system they mean or giving general advice. The user's voice, or whether people can hear them, means the mic chain: trace_signal with point mic. What is playing right now is in get_network_overview's playing_now and get_signal_levels. To make an application, game or music louder, quieter or muted, find it with trace_signal: netaudio changes PulseAudio outputs and streams (set_audio_volume, set_audio_mute; discord_out for Discord) but not the level of a JACK volume stage such as music_volume, so say where that is done when it is named below. Spoken answers are one or two short sentences unless the user asks for more, without addresses or ids. Short names in a question (a32, ad4d, lx-dante) are usually device or channel names: look them up with get_device or trace_signal instead of asking what they are. netaudio knows devices by name, product and which computer they are a sound card in, not where they are physically; when get_network_overview has power_outlets, those are the rack's power outlets by name with whether each is on, which is what is plugged into the rack. Do not group devices by place otherwise. Dante devices named after a TV, a computer or Bluetooth (avio-usb-tv-1, avio-bt-1) are netaudio's, so is the bluetooth on means is avio-bt-1 on the network;, and identify flashes a device's light so someone can find it. trace_signal also says where a chain is muted, including volume stages between applications and outputs, so use it for questions such as is the work macbook muted; get_network_overview's muted lists everything muted on every computer. trace_signal and get_network_overview start with an answer field: say that sentence first, then detail only as needed. get_network_overview's recent_changes and get_event_journal say what changed. Operations with status planned are designed but not built; calling one explains what blocks it."
+    "off. forget_device removes devices that no longer matter. Questions about hearing or sound at home (can I hear the TV, why is linux main silent, is my mic working) are about this audio system: answer them from trace_signal and get_signal_levels on the actual chain, passing the user's words as the point, rather than asking which system they mean or giving general advice. The user's voice, or whether people can hear them, means the mic chain: trace_signal with point mic. What is playing right now is in get_network_overview's playing_now and get_signal_levels. To make an application, game or music louder, quieter or muted, find it with trace_signal: netaudio changes PulseAudio outputs and streams (set_audio_volume, set_audio_mute; discord_out for Discord) but not the level of a JACK volume stage such as music_volume: trace_signal's volume_stages says who changes each one, so say that instead of offering to change it. Spoken answers are one or two short sentences unless the user asks for more, without addresses or ids. Short names in a question (a32, ad4d, lx-dante) are usually device or channel names: look them up with get_device or trace_signal instead of asking what they are, and so are unfamiliar gear names (p10t, ferrofish), which get_device and find_channels match against device, channel and power outlet names. A channel named after other gear (shelford-channel on a32) carries that gear's audio into the device that sends it; the device is not that gear. netaudio knows devices by name, product and which computer they are a sound card in, not where they are physically; when get_network_overview has power_outlets, those are the rack's power outlets by name with whether each is on, which is what is plugged into the rack. Do not group devices by place otherwise, and describe gear only by the names, products and outlet names the results give: do not say what kind of equipment something is from general knowledge. Dante devices named after a TV, a computer or Bluetooth (avio-usb-tv-1, avio-bt-1) are netaudio's, so is the bluetooth on means is avio-bt-1 on the network;, and identify flashes a device's light so someone can find it. trace_signal also says where a chain is muted, including volume stages between applications and outputs, so use it for questions such as is the work macbook muted; get_network_overview's muted lists everything muted on every computer. trace_signal and get_network_overview start with an answer field: say that sentence first, then detail only as needed. get_network_overview's recent_changes and get_event_journal say what changed. Operations with status planned are designed but not built; calling one explains what blocks it."
 )
 
 
@@ -2575,6 +2575,37 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
         logger.info("MCP %s previewed %s (token %s)", client_name, tool.name, payload["preview_token"])
         return _tool_result(payload, is_error=False)
 
+    async def _route_effect(self, preview: dict) -> str:
+        changes = preview.get("changes") if isinstance(preview.get("changes"), list) else [preview.get("change")]
+        carried = {}
+        sentences = []
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            before, after = change.get("from"), change.get("to")
+            for source in (before, after):
+                if source and source != "nothing" and source not in carried:
+                    device, _, channel = str(source).partition(":")
+                    carried[source] = await self.channel_carries(device, channel)
+
+            def named(source):
+                device, _, channel = str(source).partition(":")
+                text = f"{channel} from {device}"
+                return f"{text} ({carried[source]})" if carried.get(source) else text
+
+            receiver = change.get("receiver")
+            if before == after:
+                sentences.append(
+                    f"{receiver} already hears {named(after) if after != 'nothing' else 'nothing'}; no change"
+                )
+            elif before == "nothing":
+                sentences.append(f"{receiver} would start hearing {named(after)}")
+            elif after == "nothing":
+                sentences.append(f"{receiver} would stop hearing {named(before)} and hear nothing")
+            else:
+                sentences.append(f"{receiver} would stop hearing {named(before)} and hear {named(after)} instead")
+        return ". ".join(sentences) + "." if sentences else "nothing would change."
+
     async def _mcp_tool_dispatch(self, tool: McpTool, arguments: dict, writer, grant: Grant | None) -> dict:
         if tool.name == SHOW_ROUTING_MATRIX:
             return await self._show_routing_matrix(arguments, writer, grant)
@@ -2687,7 +2718,10 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 view["next"] = "create_transmit_flow with the same specification creates it"
             return _tool_result(compact(view), is_error=False)
         if tool.requires_confirmation and request.get("confirmed") is not True:
-            return _tool_result(write_preview(tool.name, request, records, arguments), is_error=False)
+            preview = write_preview(tool.name, request, records, arguments)
+            if tool.name in ROUTE_TOOLS:
+                preview = {"effect": await self._route_effect(preview), **preview}
+            return _tool_result(preview, is_error=False)
         if tool.name in {"start_metering", "stop_metering"}:
             request["client_id"] = f"mcp:{grant.client_id if grant else 'unknown'}"
         if tool.name in {"get_network_overview", "list_devices"}:
@@ -2816,6 +2850,9 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 off = self._remembered_wireless_matching(str(request.get("query") or ""))
                 if off and isinstance(payload, dict):
                     payload["wireless_off_the_network"] = off
+                outlets = outlets_matching(str(request.get("query") or ""), await self.power_outlets() or [])
+                if outlets and isinstance(payload, dict):
+                    payload["power_outlets_named_like_this"] = outlets
         if status < 400 and tool.name == "get_signal_levels":
             payload = name_meter_channels(payload, self._serialized_devices())
             off = off_devices(records)
@@ -3272,11 +3309,16 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
         if status < 400:
             for name, rename in renamed_devices(records, journal).items():
                 if name.casefold() == str(selector).casefold():
-                    return f"{name} was renamed to {rename['renamed_to']} at {rename['renamed_at']}; use {rename['renamed_to']}"
+                    return (
+                        f"{name} was renamed to {rename['renamed_to']} at {local_time_text(rename['renamed_at'])}; "
+                        f"use {rename['renamed_to']}"
+                    )
             for entry in missing_devices(records, journal):
                 if str(entry["name"]).casefold() == str(selector).casefold():
                     when = (
-                        f"last seen {entry['disappeared_at']}" if entry.get("disappeared_at") else self._not_seen_text()
+                        f"last seen {local_time_text(entry['disappeared_at'])}"
+                        if entry.get("disappeared_at")
+                        else self._not_seen_text()
                     )
                     message = (
                         f"{entry['name']} is off the network ({when}), so its own routes, settings and levels are "
@@ -3306,8 +3348,34 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                             f". {entry['routes_still_connected']} route(s) to it are still receiving audio, so it was "
                             "most likely renamed; list_devices shows the current names"
                         )
+                    outlet = outlet_for(str(entry["name"]), await self.power_outlets() or [])
+                    if outlet is not None:
+                        message += f". It is {outlet_text(outlet)}"
                     return message
-        return _device_not_found(records, selector)
+        message = _device_not_found(records, selector)
+        words = {word for word in re.findall(r"[a-z0-9]+", str(selector).casefold()) if len(word) > 1}
+        channels = sorted(
+            {
+                f"{device.get('name')} {'rx' if direction == 'receivers' else 'tx'} {channel_label(channel) or number}"
+                for device in records.values()
+                if isinstance(device, dict)
+                for direction in ("receivers", "transmitters")
+                for number, channel in (((device.get("channels") or {}).get(direction)) or {}).items()
+                if words and words <= set(re.findall(r"[a-z0-9]+", str(channel_label(channel) or "").casefold()))
+            }
+        )
+        outlets = outlets_matching(str(selector), await self.power_outlets() or [])
+        if channels or outlets:
+            named = "; ".join(
+                part
+                for part in (
+                    f"channels {', '.join(channels[:6])}" if channels else "",
+                    "; ".join(outlets) if outlets else "",
+                )
+                if part
+            )
+            message += f". There is no Dante device by that name, but these are named like it: {named}"
+        return message
 
     def _remembered_wireless(self, live: set[str]) -> list[dict]:
         remembered = getattr(self.shure, "remembered", None) or {}
@@ -3446,7 +3514,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
         outlets = await self.power_outlets()
         if outlets:
             view["power_outlets"] = [
-                f"outlet {outlet.get('outlet')} {outlet.get('name')}: {outlet.get('state')}" for outlet in outlets
+                f"outlet {outlet.get('outlet')}: {outlet.get('name')}, {outlet.get('state')}" for outlet in outlets
             ]
         view.update(await self._host_overview())
         devices, problems = await self._stream_health(snapshots["devices"], writer)

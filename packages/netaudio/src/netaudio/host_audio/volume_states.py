@@ -18,6 +18,7 @@ class VolumeStateSource:
     url: str
     key: str
     field: str
+    changed_by: str | None = None
 
 
 def volume_state_source() -> VolumeStateSource | None:
@@ -32,7 +33,8 @@ def volume_state_source() -> VolumeStateSource | None:
     if not (isinstance(url, str) and url and isinstance(key, str) and key and isinstance(field, str) and field):
         logger.warning("[host_audio.volume_states] needs redis_url, hash and field, such as {host}:volume:{client}")
         return None
-    return VolumeStateSource(url, key, field)
+    changed_by = section.get("changed_by")
+    return VolumeStateSource(url, key, field, changed_by if isinstance(changed_by, str) and changed_by else None)
 
 
 def _state(raw: Any) -> dict | None:
