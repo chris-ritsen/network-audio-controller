@@ -585,6 +585,13 @@ class DaemonHostAudioHandlers:
             stops.extend(direction_stops)
         if "downstream" in walks:
             payload["reaches"] = destinations_summary(graph, walks["downstream"])
+        if not any(walks[name] for name in directions):
+            related = graph.also_named(point, set(starts))
+            if related:
+                payload["also_named"] = (
+                    f"nothing is connected to {point} here; other points with that name, which may be the path "
+                    f"you mean: {', '.join(related)}"
+                )
         if levels:
             changes = [change for name in directions for change in level_changes(graph, walks[name], name, measured)]
             changes = changes or self._recorded_level_changes(graph, walks, local_host)

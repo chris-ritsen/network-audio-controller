@@ -13,6 +13,10 @@ REMOTE_PRIORITY = 3
 MAXIMUM_LINES = 80
 SOURCE_LIMIT = 8
 LOOSE_LIMIT = 4
+ALSO_NAMED_LIMIT = 6
+GENERIC_NAME_WORDS = frozenset(
+    {"avio", "usb", "usbc", "aes", "bt", "rx", "tx", "lx", "dante", "ch", "in", "out", "left", "right", "local"}
+)
 LEVEL_CHANGE_DB = 3.0
 PEAK_TEXT = re.compile(r"peak (-?\d+(?:\.\d+)?) dBFS")
 LOOSE_RANK = {"pulse_sink": 0, "pulse_source": 0, "pulse_playback": 0, "pulse_recording": 0, "wireless": 1}
@@ -124,6 +128,22 @@ class SignalGraph:
             transmitters = [identity for identity in chosen if self.nodes[identity].kind == "dante_tx"]
             chosen = transmitters if transmitters else chosen
         return chosen if len(chosen) <= LOOSE_LIMIT else []
+
+    def also_named(self, point: str, exclude: set[str]) -> list[str]:
+        words = [
+            word for word in re.findall(r"[a-z]+", _fold(point)) if len(word) > 1 and word not in GENERIC_NAME_WORDS
+        ]
+        found = []
+        for name, entries in self.names.items():
+            tokens = set(re.findall(r"[a-z]+", name))
+            if words and all(word in tokens for word in words):
+                for _, identity in entries:
+                    node = self.nodes[identity]
+                    if identity not in exclude and node.kind not in {"dante_rx", "dante_tx"} and identity not in found:
+                        found.append(identity)
+        return [LABEL_KIND.sub("", self.nodes[identity].label) for identity in sorted(found, key=_natural)][
+            :ALSO_NAMED_LIMIT
+        ]
 
     def walk(self, starts: list[str], direction: str) -> list[Step]:
         edges = self.downstream if direction == "downstream" else self.upstream

@@ -3339,6 +3339,11 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 if isinstance(listed.get(device), dict) and "last_seen" not in listed[device]:
                     listed[device] = {**listed[device], "computer": computer}
             listed.update(self._unlisted_off_devices(snapshots["devices"], snapshots["journal"], listed, ddm_known))
+            if any(isinstance(entry, dict) and "last_seen" in entry for entry in listed.values()):
+                listed["about_devices_that_are_off"] = (
+                    "A device that is off is not a fault: routes waiting for it resume when it is back. It matters "
+                    "only if the user expects it to be on now."
+                )
             return _tool_result(listed, is_error=False)
         view = network_overview_view(**snapshots)
         view["recent_changes"] = self._recent_changes(snapshots["journal"])
