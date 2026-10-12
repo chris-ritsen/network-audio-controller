@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,8 +13,10 @@ MAXIMUM_STARTS = 12
 REMOTE_PRIORITY = 3
 MAXIMUM_LINES = 80
 SOURCE_LIMIT = 8
+ANSWER_CAUSE_LIMIT = 2
 LOOSE_LIMIT = 4
 ALSO_NAMED_LIMIT = 6
+SPOKEN_FILLER_WORDS = frozenset({"my", "our", "your", "the", "a", "an", "this", "that"})
 GENERIC_NAME_WORDS = frozenset(
     {"avio", "usb", "usbc", "aes", "bt", "rx", "tx", "lx", "dante", "ch", "in", "out", "left", "right", "local"}
 )
@@ -114,6 +117,9 @@ class SignalGraph:
                 found.update(identity for _, identity in entries)
         if "monitor" not in words:
             found = {identity for identity in found if not self.nodes[identity].label.endswith(".monitor")}
+        spoken = [word for word in words if word not in SPOKEN_FILLER_WORDS]
+        if not found and spoken and spoken != words:
+            return self.resolve_loosely(" ".join(spoken))
         if not found:
             return []
 
@@ -131,7 +137,9 @@ class SignalGraph:
 
     def also_named(self, point: str, exclude: set[str]) -> list[str]:
         words = [
-            word for word in re.findall(r"[a-z]+", _fold(point)) if len(word) > 1 and word not in GENERIC_NAME_WORDS
+            word
+            for word in re.findall(r"[a-z]+", _fold(point))
+            if len(word) > 1 and word not in GENERIC_NAME_WORDS and word not in SPOKEN_FILLER_WORDS
         ]
         found = []
         for name, entries in self.names.items():
@@ -290,6 +298,8 @@ def _add_dante(graph: SignalGraph, records: dict) -> None:
             note = status.get("label")
             if status.get("severity") not in (None, "ok", "none") and status.get("detail"):
                 note = f"{note}: {status['detail']}"
+            if tx_number is None or (transmitter or {}).get("online") is False:
+                note = None
             if record.get("remembered_last_seen"):
                 note = f"its last known route, from {record['remembered_last_seen']}"
             graph.link(tx_identity, f"dante:{name}:rx:{rx_number}", note)
@@ -572,7 +582,14 @@ def node_level(
     if node is None:
         return None
     if node.kind == "jack":
-        return _jack_level((jack_levels.get(node.details["host"]) or {}).get(node.details["port"]))
+        state, text = _jack_level((jack_levels.get(node.details["host"]) or {}).get(node.details["port"]))
+        stage = node.details.get("stage")
+        if stage and node.details.get("direction") == "output":
+            if stage["muted"] and state != "signal":
+                return "silent", "muted at this volume stage"
+            if stage.get("level") is not None and stage["level"] != 100:
+                text += f", volume stage at {stage['level']:g}%"
+        return state, text
     if node.kind in {"dante_rx", "dante_tx"}:
         if node.details.get("online") is False:
             return "silent", "device offline"
@@ -630,7 +647,7 @@ def render(
         node = graph.nodes[step.identity]
         text = f"{'  ' * (step.depth - 1)}{arrow} {node.label}"
         if step.note:
-            text += f" via {step.note}"
+            text += f" {step.note}" if step.note.startswith("through ") else f" via {step.note}"
         if step.repeated:
             text += " (shown above)"
         elif step.identity in levels:
@@ -648,7 +665,14 @@ def render(
         upstream_state = levels.get(upstream, ("unknown", ""))[0]
         downstream_state = levels.get(downstream, ("unknown", ""))[0]
         if upstream_state in {"signal", "quiet"} and downstream_state == "silent":
-            stops.append(f"{graph.nodes[upstream].label} has signal but {graph.nodes[downstream].label} is silent")
+            stage = graph.nodes[downstream].details.get("stage") or {}
+            if stage.get("muted"):
+                stops.append(f"muted at {_stage_name(graph.nodes[downstream])}")
+            else:
+                stops.append(
+                    f"{LABEL_KIND.sub('', graph.nodes[downstream].label)} is silent although "
+                    f"{LABEL_KIND.sub('', graph.nodes[upstream].label)} has signal"
+                )
     return lines, stops
 
 
@@ -679,9 +703,33 @@ def _grouped(entries: list[tuple[str | None, str]], local_host: str | None) -> s
     )
 
 
-def silence_summary(
-    graph: SignalGraph, starts: list[str], steps: list[Step], levels: dict[str, tuple[str, str]]
-) -> str | None:
+def _stage_name(node: Node) -> str:
+    client = node.details["port"].split(":")[0]
+    name = (node.details.get("stage") or {}).get("name")
+    host = node.details.get("host")
+    where = f" on {host}" if node.label.startswith(f"{host} ") else ""
+    return f"{client} ({name}){where}" if name else f"{client}{where}"
+
+
+def muted_stages(graph: SignalGraph, identities: list[str]) -> list[str]:
+    return list(
+        dict.fromkeys(
+            _stage_name(graph.nodes[identity])
+            for identity in identities
+            if graph.nodes[identity].kind == "jack"
+            and graph.nodes[identity].details.get("direction") == "output"
+            and (graph.nodes[identity].details.get("stage") or {}).get("muted")
+        )
+    )
+
+
+def silence_causes(
+    graph: SignalGraph,
+    starts: list[str],
+    steps: list[Step],
+    levels: dict[str, tuple[str, str]],
+    muted: list[str],
+) -> list[str] | None:
     identities = list(dict.fromkeys(starts + [step.identity for step in steps if not step.repeated]))
     if any(levels.get(identity, ("unknown", ""))[0] in {"signal", "quiet"} for identity in identities):
         return None
@@ -693,7 +741,7 @@ def silence_summary(
         first.kind == "jack" and first.details.get("direction") == "input"
     )
     if sources == starts and not steps and consumer:
-        return f"Nothing feeds {LABEL_KIND.sub('', first.label)}, so it has no signal."
+        return [f"nothing feeds {LABEL_KIND.sub('', first.label)}"]
     offline: list[str] = []
     carried: dict[str, list[str]] = {}
     quiet_channels: dict[str, list[str]] = {}
@@ -751,14 +799,89 @@ def silence_summary(
     for device, channels in quiet_channels.items():
         parts.append(f"{device} {_joined(channels)} {'is' if len(channels) == 1 else 'are'} silent")
     parts.extend(others[:SOURCE_LIMIT])
-    return "Nothing in this chain has signal, so the cause is at its sources: " + "; ".join(parts) + "."
+    if muted:
+        parts.append(f"it is muted at {_joined(muted)}")
+    return parts
+
+
+def silence_summary(causes: list[str]) -> str:
+    text = f"No signal: {causes[0]}."
+    if len(causes) > 1:
+        text += " Also, " + "; ".join(causes[1:]) + "."
+    return text if causes[0].startswith("nothing feeds ") else text + " Every step of this chain is silent."
+
+
+def _subject(point: str) -> str:
+    plain = point.replace(" ", "").isalpha() and point[:1].islower()
+    return point[:1].upper() + point[1:] if plain else point
+
+
+def _has_signal(levels: dict[str, tuple[str, str]], identity: str) -> bool:
+    return levels.get(identity, ("unknown", ""))[0] in {"signal", "quiet"}
+
+
+def trace_answer(
+    graph: SignalGraph,
+    point: str,
+    starts: list[str],
+    walks: dict[str, list[Step]],
+    levels: dict[str, tuple[str, str]] | None,
+    stops: list[str],
+    causes: list[str] | None,
+) -> str:
+    subject = _subject(point)
+    downstream = walks.get("downstream") or []
+    upstream = walks.get("upstream") or []
+    roots = [step.identity for step in upstream if not step.repeated and not graph.upstream.get(step.identity)]
+    if levels is None:
+        reached = destination_parts(graph, downstream)
+        if reached:
+            return f"{subject} reaches {'; '.join(reached)}."
+        if roots:
+            return f"{subject} is fed by {_joined([LABEL_KIND.sub('', graph.nodes[root].label) for root in roots])}."
+        return f"Nothing is connected to {point}."
+    if causes:
+        muted = next((cause for cause in causes if cause.startswith("it is muted at ")), None)
+        sources = [cause for cause in causes if cause != muted]
+        if all(graph.nodes[identity].details.get("online") is False for identity in starts):
+            return f"{subject} is off the network" + (f", and {muted}" if muted else "") + "."
+        if not sources:
+            return f"{subject} has no signal because {muted}."
+        reason = " and ".join(sources) if len(sources) <= ANSWER_CAUSE_LIMIT else "nothing feeding it has signal"
+        return f"{subject} has no signal because {reason}" + (f", and {muted}" if muted else "") + "."
+    signal = any(_has_signal(levels, identity) for identity in starts)
+    if stops:
+        muted = list(dict.fromkeys(stop.removeprefix("muted at ") for stop in stops if stop.startswith("muted at ")))
+        if muted:
+            return f"{subject} {'has signal, but it' if signal else 'has no signal because it'} is muted at {_joined(muted)}."
+        return f"{subject} {'has signal, but' if signal else 'has no signal:'} {stops[0]}."
+    if not signal:
+        measured = any(levels.get(identity, ("unknown", ""))[0] != "unknown" for identity in starts)
+        return f"{subject} has no signal." if measured else f"{subject}'s level could not be measured."
+    walked = [step.identity for steps in walks.values() for step in steps if not step.repeated]
+    clear = not any(levels.get(identity, ("unknown", ""))[0] == "silent" for identity in walked)
+    ending = "; nothing on the way is muted or silent." if clear and walked else "."
+    reached = destination_parts(graph, downstream, lambda identity: _has_signal(levels, identity))
+    if reached:
+        return f"{subject} has signal and reaches {'; '.join(reached)}{ending}"
+    sources = [LABEL_KIND.sub("", graph.nodes[root].label) for root in roots if _has_signal(levels, root)]
+    if sources:
+        return f"{subject} has signal, from {_joined(sources)}{ending}"
+    return f"{subject} has signal{ending}"
 
 
 def destinations_summary(graph: SignalGraph, steps: list[Step]) -> str | None:
+    parts = destination_parts(graph, steps)
+    return "It ends at: " + "; ".join(parts) + "." if parts else None
+
+
+def destination_parts(graph: SignalGraph, steps: list[Step], keep: Callable[[str], bool] | None = None) -> list[str]:
     groups: dict[str, list[tuple[str | None, str]]] = {}
     dante: dict[str, list[str]] = {}
     for step in steps:
         if step.repeated or graph.downstream.get(step.identity):
+            continue
+        if keep is not None and not keep(step.identity):
             continue
         node = graph.nodes[step.identity]
         host = _host_of(node, step.identity)
@@ -794,7 +917,7 @@ def destinations_summary(graph: SignalGraph, steps: list[Step]) -> str | None:
             groups.setdefault(key, []).append((host, name))
     parts = [f"{kind} {_grouped(entries, graph.local_host)}" for kind, entries in groups.items()]
     parts.extend(f"{device} {_joined(channels)}" for device, channels in dante.items())
-    return "It ends at: " + "; ".join(parts) + "." if parts else None
+    return parts
 
 
 def _peak(text: str) -> float | None:

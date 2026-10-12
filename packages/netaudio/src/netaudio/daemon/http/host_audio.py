@@ -10,6 +10,7 @@ from netaudio.common.config_loader import load_config_document
 from netaudio.daemon.http.mcp_views import _dante_match, utc_now
 from netaudio.host_audio.alsa import is_dante_interface
 from netaudio.host_audio.peers import PeerError
+from netaudio.host_audio.volume_states import VolumeStateReader, volume_state_source
 from netaudio.monitoring.level_history import history_text, iso_second
 from netaudio.host_audio.trace import (
     HostScope,
@@ -22,7 +23,10 @@ from netaudio.host_audio.trace import (
     level_changes,
     node_level,
     render,
+    muted_stages,
+    silence_causes,
     silence_summary,
+    trace_answer,
 )
 
 logger = logging.getLogger("netaudio")
@@ -171,7 +175,30 @@ class DaemonHostAudioHandlers:
             wireless_links=self._wireless_links(records, wireless),
             hosts=[(HostScope(host, remote=host != local["host"]), value) for host, value in snapshots.items()],
         )
+        await self._apply_volume_states(graph)
         return graph, snapshots, records, notes
+
+    async def _apply_volume_states(self, graph: SignalGraph) -> None:
+        reader = getattr(self, "_volume_state_reader", False)
+        if reader is False:
+            source = volume_state_source()
+            reader = self._volume_state_reader = VolumeStateReader(source) if source else None
+        if reader is None:
+            return
+        clients = sorted(
+            {
+                (node.details["host"], node.details["port"].split(":")[0])
+                for identity, node in graph.nodes.items()
+                if node.kind == "jack"
+                and any((note or "").startswith("through ") for _, note in graph.upstream.get(identity, ()))
+            }
+        )
+        states = await reader.read(clients)
+        for node in graph.nodes.values():
+            if node.kind == "jack":
+                state = states.get((node.details["host"], node.details["port"].split(":")[0]))
+                if state is not None:
+                    node.details["stage"] = state
 
     async def _dante_levels(self, graph: SignalGraph, identities: list[str], records: dict) -> dict[str, dict]:
         if not self.metering:
@@ -597,11 +624,12 @@ class DaemonHostAudioHandlers:
             changes = changes or self._recorded_level_changes(graph, walks, local_host)
             if changes:
                 payload["level_changes"] = list(dict.fromkeys(changes))
+        causes = None
         if levels:
             walked = walks.get("upstream", walks.get("downstream", []))
-            silent = None if stops else silence_summary(graph, starts, walked, measured)
-            if silent:
-                payload["why_silent"] = silent
+            causes = None if stops else silence_causes(graph, starts, walked, measured, muted_stages(graph, identities))
+            if causes:
+                payload["why_silent"] = silence_summary(causes)
             else:
                 payload["signal_stops"] = list(dict.fromkeys(stops)) or "no step where signal stops"
             payload["measured_at"] = utc_now()
@@ -609,7 +637,8 @@ class DaemonHostAudioHandlers:
         notes.extend(self._availability_notes(snapshots))
         if notes:
             payload["notes"] = notes
-        return 200, payload
+        answer = trace_answer(graph, point, starts, walks, measured if levels else None, stops, causes)
+        return 200, {"answer": answer, **payload}
 
     async def host_audio_point_levels(
         self,
