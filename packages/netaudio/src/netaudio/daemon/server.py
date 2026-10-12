@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import faulthandler
+import io
 import json
 import logging
 import os
@@ -71,6 +73,8 @@ ONLINE_REVALIDATE_IDLE_SECONDS = 45.0
 REVALIDATE_INTERVAL_SECONDS = 30.0
 STATUS_FIELD_REFRESH_INTERVAL_SECONDS = 300.0
 SHURE_METER_PUBLISH_INTERVAL_SECONDS = 0.25
+SHUTDOWN_TIMEOUT_SECONDS = 20
+SHUTDOWN_TASK_LIMIT = 20
 
 
 REDIS_ENVIRONMENT = {
@@ -1155,6 +1159,16 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 logger.warning(f"Revalidation loop error: {exception}", exc_info=True)
 
 
+def _task_stack(task: asyncio.Future) -> str:
+    output = io.StringIO()
+    if isinstance(task, asyncio.Task):
+        task.print_stack(file=output)
+    pending = [other for other in asyncio.all_tasks() if other is not task and other is not asyncio.current_task()]
+    for other in pending[:SHUTDOWN_TASK_LIMIT]:
+        output.write(f"also pending: {other.get_name()} {other.get_coro()!r}\n")
+    return output.getvalue()
+
+
 async def run_daemon(dissect=False, capture=False, daemon_port=None):
     import signal
 
@@ -1187,10 +1201,18 @@ async def run_daemon(dissect=False, capture=False, daemon_port=None):
         pass
     finally:
         try:
-            try:
-                await asyncio.wait_for(daemon.stop(), timeout=20)
-            except asyncio.TimeoutError:
-                logger.warning("Daemon shutdown timed out after 20s, exiting anyway")
+            stopping = asyncio.ensure_future(daemon.stop())
+            await asyncio.wait({stopping}, timeout=SHUTDOWN_TIMEOUT_SECONDS)
+            if not stopping.done():
+                logger.warning(
+                    "Daemon shutdown timed out after %ss, exiting anyway; it was waiting in:\n%s",
+                    SHUTDOWN_TIMEOUT_SECONDS,
+                    _task_stack(stopping),
+                )
+                faulthandler.dump_traceback(all_threads=True)
+                faulthandler.dump_traceback_later(SHUTDOWN_TIMEOUT_SECONDS)
+                stopping.cancel()
+                await asyncio.gather(stopping, return_exceptions=True)
         finally:
             for sig in installed_signals:
                 loop.remove_signal_handler(sig)
