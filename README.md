@@ -32,7 +32,7 @@ Python application and native iOS client.
 | Web interface | Control and monitor the network in a browser, served by the NetAudio daemon. |
 | Background daemon | Maintain network discovery, device inventory, monitoring, event history, and control services across client sessions. |
 | HTTP API and live events | Integrate network state and device control into other applications, with server-sent events (SSE) for live updates. |
-| Protocol library | Use the Rust core directly or through its [C interface](packages/netaudio-core/include/netaudio_core.h). |
+| Protocol library | Use the Rust core directly or through its [C interface](https://github.com/chris-ritsen/network-audio-controller/blob/master/packages/netaudio-core/include/netaudio_core.h). |
 
 The CLI and daemon run on Linux, macOS, and Windows. Automated checks cover all
 three platforms, including native libraries and installed Python packages.
@@ -332,15 +332,17 @@ make quality
 .venv/bin/python scripts/check_project.py --scope webapp --offline
 ```
 
-The manually dispatched [CI workflow](.github/workflows/quality.yml) uses the
-same check commands. Browser tests and installed-wheel/platform matrices are
-separate, explicitly selected checks.
+The manually dispatched
+[CI workflow](https://github.com/chris-ritsen/network-audio-controller/blob/master/.github/workflows/quality.yml)
+uses the same check commands. Browser tests and installed-wheel/platform
+matrices are separate, explicitly selected checks.
 
 `make audit` checks `uv.lock` and the Rust core's `Cargo.lock` for known
 vulnerabilities, and `make audit-fix` upgrades the affected packages and audits
-again. The daily [security workflow](.github/workflows/security.yml) runs the
-same audit on `master` and the latest release, and rebuilds the published
-container images when their Python base image is updated.
+again. The daily
+[security workflow](https://github.com/chris-ritsen/network-audio-controller/blob/master/.github/workflows/security.yml)
+runs the same audit on `master` and the latest release, and rebuilds the
+published container images when their Python base image is updated.
 
 ## Project background
 
