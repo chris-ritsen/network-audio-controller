@@ -26,6 +26,7 @@ LOOSE_RANK = {"pulse_sink": 0, "pulse_source": 0, "pulse_playback": 0, "pulse_re
 SIGNAL_FLOOR_DBFS = -80.0
 SHURE_LEVEL_OFFSET = 120
 ARROWS = {"downstream": "→", "upstream": "←"}
+TX_NUMBER = re.compile(r"^tx \d+ (?=\S)")
 LABEL_KIND = re.compile(r"\s*\([^()]*\)$")
 
 
@@ -745,6 +746,7 @@ def silence_causes(
     offline: list[str] = []
     carried: dict[str, list[str]] = {}
     quiet_channels: dict[str, list[str]] = {}
+    silent_transmitters: dict[str, list[str]] = {}
     groups: dict[str, list[tuple[str | None, str]]] = {
         "paused": [],
         "muted": [],
@@ -773,7 +775,11 @@ def silence_causes(
             groups["nothing playing to"].append((host, node.details["entry"]["name"]))
         elif node.kind == "jack":
             groups["sending silence"].append((host, node.details["port"].split(":")[0]))
-        elif node.kind in {"dante_rx", "dante_tx"}:
+        elif node.kind == "dante_tx":
+            device = node.details["device"]
+            channel = TX_NUMBER.sub("", LABEL_KIND.sub("", node.label).removeprefix(f"{device} "))
+            silent_transmitters.setdefault(device, []).append(channel)
+        elif node.kind == "dante_rx":
             device = node.details["device"]
             channel = LABEL_KIND.sub("", node.label).removeprefix(f"{device} ")
             quiet_channels.setdefault(device, []).append(channel)
@@ -796,6 +802,8 @@ def silence_causes(
             parts.append(f"{_grouped(entries, graph.local_host)} {'sends' if len(entries) == 1 else 'send'} silence")
         else:
             parts.append(f"{_grouped(entries, graph.local_host)} {'is' if len(entries) == 1 else 'are'} {condition}")
+    for device, channels in silent_transmitters.items():
+        parts.append(f"{device} sends silence on {_joined(channels)}")
     for device, channels in quiet_channels.items():
         parts.append(f"{device} {_joined(channels)} {'is' if len(channels) == 1 else 'are'} silent")
     parts.extend(others[:SOURCE_LIMIT])
@@ -848,7 +856,8 @@ def trace_answer(
         if not sources:
             return f"{subject} has no signal because {muted}."
         reason = " and ".join(sources) if len(sources) <= ANSWER_CAUSE_LIMIT else "nothing feeding it has signal"
-        return f"{subject} has no signal because {reason}" + (f", and {muted}" if muted else "") + "."
+        also = muted.replace("it is muted", "it is also muted", 1) if muted else None
+        return f"{subject} has no signal because {reason}" + (f", and {also}" if also else "") + "."
     signal = any(_has_signal(levels, identity) for identity in starts)
     if stops:
         muted = list(dict.fromkeys(stop.removeprefix("muted at ") for stop in stops if stop.startswith("muted at ")))
