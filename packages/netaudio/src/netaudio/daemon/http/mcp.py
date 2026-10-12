@@ -121,8 +121,9 @@ MCP_INSTRUCTIONS = (
     "details. Use discover_tools to find other operations and their exact schemas, then invoke_tool to run them: "
     "get_device_diagnostics for per-flow latency and late packets, get_signal_levels for whether audio is "
     "present (with over_last_seconds or listen_seconds for sound that comes and goes, such as speech, since one "
-    "sample can miss it), trace_signal to follow audio from any point through Shure wireless, Dante, this computer's sound "
-    "cards, JACK and PulseAudio with levels at each step, get_host_audio for this computer's JACK and PulseAudio, "
+    "sample can miss it), trace_signal to follow audio from any point (a device, a channel, or an application such "
+    "as Discord, Chromium or mpv) through Shure wireless, Dante, this computer's sound cards, JACK and PulseAudio "
+    "with levels at each step and why it is silent, get_host_audio for this computer's JACK and PulseAudio, "
     "get_wireless_devices for Shure mics, show_routing_matrix to show the user an interactive routing matrix in apps "
     "that display MCP Apps views, inspect_device_controls for a device's own panel (AVIO "
     "Bluetooth pairing and name, analog levels, Dante AV video), and save_preset/apply_preset to keep and restore "
@@ -3191,7 +3192,8 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                     ]
                     if sends:
                         message += (
-                            f". These routes wait for it, so its channels carry: {'; '.join(sends[:WAITING_ROUTE_LIMIT])}"
+                            f". trace_signal with point {entry['name']!r} shows everything that depends on it. "
+                            f"These routes wait for it, so its channels carry: {'; '.join(sends[:WAITING_ROUTE_LIMIT])}"
                             + (
                                 f" and {len(sends) - WAITING_ROUTE_LIMIT} more"
                                 if len(sends) > WAITING_ROUTE_LIMIT

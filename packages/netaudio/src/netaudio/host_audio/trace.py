@@ -85,6 +85,17 @@ class SignalGraph:
         suggestions = difflib.get_close_matches(_fold(point), list(self.names), n=5, cutoff=0.6)
         return [], suggestions
 
+    def resolve_device(self, point: str) -> list[str]:
+        folded = _fold(point)
+        routed = [
+            identity
+            for identity, node in self.nodes.items()
+            if node.kind in {"dante_rx", "dante_tx"}
+            and _fold(node.details.get("device")) == folded
+            and (self.downstream.get(identity) if node.kind == "dante_tx" else self.upstream.get(identity))
+        ]
+        return sorted(routed, key=_natural)[:MAXIMUM_STARTS]
+
     def resolve_loosely(self, point: str) -> list[str]:
         words = re.findall(r"[a-z0-9]+", _fold(point))
         if not words:
@@ -704,3 +715,46 @@ def silence_summary(
         parts.append(f"{device} {_joined(channels)} {'is' if len(channels) == 1 else 'are'} silent")
     parts.extend(others[:SOURCE_LIMIT])
     return "Nothing in this chain has signal, so the cause is at its sources: " + "; ".join(parts) + "."
+
+
+def destinations_summary(graph: SignalGraph, steps: list[Step]) -> str | None:
+    groups: dict[str, list[tuple[str | None, str]]] = {}
+    dante: dict[str, list[str]] = {}
+    for step in steps:
+        if step.repeated or graph.downstream.get(step.identity):
+            continue
+        node = graph.nodes[step.identity]
+        host = _host_of(node, step.identity)
+        if node.kind == "pulse_recording":
+            entry = node.details["entry"]
+            parent = graph.nodes.get(step.parent or "")
+            if (
+                entry.get("media") == "Peak detect"
+                and parent is not None
+                and parent.kind == "pulse_source"
+                and not parent.details["entry"].get("monitor_of")
+            ):
+                name = parent.details["entry"]["name"]
+                groups.setdefault("PulseAudio inputs", []).append((_host_of(parent, step.parent), name))
+                continue
+            if entry.get("media") == "Peak detect":
+                continue
+            groups.setdefault("recorded by", []).append((host, entry.get("application") or "an application"))
+        elif node.kind == "pulse_source":
+            groups.setdefault("PulseAudio inputs", []).append((host, node.details["entry"]["name"]))
+        elif node.kind == "pulse_sink":
+            groups.setdefault("PulseAudio outputs", []).append((host, node.details["entry"]["name"]))
+        elif node.kind in {"dante_rx", "dante_tx"}:
+            device = node.details["device"]
+            dante.setdefault(device, []).append(LABEL_KIND.sub("", node.label).removeprefix(f"{device} "))
+        elif node.kind == "jack":
+            hardware = node.details.get("hardware")
+            name = node.label.split(" [", 1)[1].split("]", 1)[0] if " [" in node.label else node.details["port"]
+            if node.details.get("direction") == "output":
+                key = "JACK ports with nothing connected:"
+            else:
+                key = f"sound card {hardware['card']}" if hardware else "JACK ports"
+            groups.setdefault(key, []).append((host, name))
+    parts = [f"{kind} {_grouped(entries, graph.local_host)}" for kind, entries in groups.items()]
+    parts.extend(f"{device} {_joined(channels)}" for device, channels in dante.items())
+    return "It ends at: " + "; ".join(parts) + "." if parts else None

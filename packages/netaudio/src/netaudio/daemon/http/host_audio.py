@@ -17,6 +17,7 @@ from netaudio.host_audio.trace import (
     build_graph,
     jack_meter_targets,
     LABEL_KIND,
+    destinations_summary,
     node_level,
     render,
     silence_summary,
@@ -466,6 +467,9 @@ class DaemonHostAudioHandlers:
         graph, snapshots, records, peer_notes = await self._signal_graph()
         local_host = self.host_audio.host
         starts, suggestions = graph.resolve(point)
+        device = not starts and bool(graph.resolve_device(point))
+        if device:
+            starts = graph.resolve_device(point)
         loose = not starts
         if loose:
             starts = graph.resolve_loosely(point)
@@ -494,6 +498,8 @@ class DaemonHostAudioHandlers:
                 f"nothing is named exactly {point!r}, so this traces what is named after it: "
                 + ", ".join(LABEL_KIND.sub("", graph.nodes[identity].label) for identity in starts)
                 if loose
+                else f"traces every routed channel of {point} ({len(starts)})"
+                if device
                 else None
             ),
             "start": [
@@ -509,6 +515,8 @@ class DaemonHostAudioHandlers:
             if remaining:
                 payload[f"more_{name}"] = f"{remaining} more steps not shown; trace from a later point to see them"
             stops.extend(direction_stops)
+        if "downstream" in walks:
+            payload["reaches"] = destinations_summary(graph, walks["downstream"])
         if levels:
             walked = walks.get("upstream", walks.get("downstream", []))
             silent = None if stops else silence_summary(graph, starts, walked, measured)

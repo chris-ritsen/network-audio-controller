@@ -21,7 +21,7 @@ LOW_BATTERY_MINUTES = 60
 RECENT_CHANGES = 8
 SECTIONS = ["summary", "connections", "ports", "pulse", "cards", "changes"]
 POINT_DESCRIPTION = (
-    "Where to start: a Shure channel (AD4D-A ch1), a Dante channel (lx-dante rx 1), a JACK port or alias "
+    "Where to start: a Shure channel (AD4D-A ch1), a Dante device (every routed channel, such as a32), a Dante channel (lx-dante rx 1), a JACK port or alias "
     "(system:capture_1), a PulseAudio input or output (jack_in, default input), or an application (Discord). "
     "Points on this server's computer need no prefix; put another computer's name first for its points, such as "
     "workstation default input."
