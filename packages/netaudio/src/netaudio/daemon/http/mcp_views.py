@@ -1034,6 +1034,23 @@ def events_view(payload: Any, arguments: dict) -> Any:
     )
 
 
+def local_time_text(value: Any = None) -> str | None:
+    if value is None:
+        moment = datetime.now(timezone.utc)
+    else:
+        try:
+            moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+    local = moment.astimezone()
+    today = datetime.now().astimezone().date()
+    clock = local.strftime("%I:%M %p").lstrip("0")
+    day = "today" if local.date() == today else local.strftime("%A %d %B").replace(" 0", " ")
+    return f"{clock} {local.tzname()} {day}"
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -1502,6 +1519,7 @@ def network_overview_view(devices: dict, issues: dict, ddm: dict, journal: Any =
     return compact(
         {
             "as_of": utc_now(),
+            "local_time": local_time_text(),
             "devices": summaries,
             "online_count": sum(device.get("online") is True for device in summaries),
             "clock_leaders": {name: domain["leaders"] for name, domain in clocks.items()},

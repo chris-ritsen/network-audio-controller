@@ -301,7 +301,7 @@ class HostScope:
 
     def names(self, names: dict[str, int]) -> dict[str, int]:
         if not self.remote:
-            return names
+            return {**names, **{f"{self.host} {name}": priority for name, priority in names.items() if name}}
         scoped: dict[str, int] = {}
         for name, priority in names.items():
             if not name:
@@ -675,6 +675,7 @@ def silence_summary(
     if sources == starts and not steps and consumer:
         return f"Nothing feeds {LABEL_KIND.sub('', first.label)}, so it has no signal."
     offline: list[str] = []
+    carried: dict[str, list[str]] = {}
     quiet_channels: dict[str, list[str]] = {}
     groups: dict[str, list[tuple[str | None, str]]] = {
         "paused": [],
@@ -690,6 +691,11 @@ def silence_summary(
         host = _host_of(node, identity)
         if node.kind in {"dante_rx", "dante_tx"} and node.details.get("online") is False:
             offline.append(node.details["device"])
+            for following, _ in graph.downstream.get(identity, ()):
+                receiver = graph.nodes.get(following)
+                if receiver is not None and receiver.kind == "dante_rx":
+                    label = LABEL_KIND.sub("", receiver.label).split(" ", 3)
+                    carried.setdefault(node.details["device"], []).append(label[3] if len(label) > 3 else label[-1])
         elif node.kind in {"pulse_playback", "pulse_recording"}:
             entry = node.details["entry"]
             application = entry.get("application") or entry.get("binary") or "an application"
@@ -708,7 +714,11 @@ def silence_summary(
     parts = []
     offline = list(dict.fromkeys(offline))
     if offline:
-        parts.append(f"{_joined(offline)} {'is' if len(offline) == 1 else 'are'} off the network")
+        named = [
+            f"{device} ({_joined(list(dict.fromkeys(carried[device])))})" if carried.get(device) else device
+            for device in offline
+        ]
+        parts.append(f"{_joined(named)} {'is' if len(offline) == 1 else 'are'} off the network")
     for condition, entries in groups.items():
         if not entries:
             continue

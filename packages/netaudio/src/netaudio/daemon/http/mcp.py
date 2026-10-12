@@ -71,6 +71,7 @@ from netaudio.daemon.http.mcp_views import (
     device_list_view,
     device_summary,
     _iso_from_epoch,
+    local_time_text,
     device_view,
     diagnostics_view,
     events_view,
@@ -122,7 +123,7 @@ MCP_INSTRUCTIONS = (
     "get_routing for the patch, find_channels to locate a channel by its label, and get_device for focused "
     "details. Use discover_tools to find other operations and their exact schemas, then invoke_tool to run them: "
     "get_device_diagnostics for per-flow latency and late packets, get_signal_levels for whether audio is "
-    "present (with over_last_seconds or listen_seconds for sound that comes and goes, such as speech, since one "
+    "present or clipping (with over_last_seconds or listen_seconds for sound that comes and goes, such as speech, since one "
     "sample can miss it), trace_signal to follow audio from any point (a device, a channel, or an application such "
     "as Discord, Chromium or mpv) through Shure wireless, Dante, this computer's sound cards, JACK and PulseAudio "
     "with levels at each step and why it is silent, get_host_audio for a computer's JACK and PulseAudio (host "
@@ -136,7 +137,7 @@ MCP_INSTRUCTIONS = (
     "apply_to_devices to make one change on several devices. A device that is off the network is not a problem, "
     "even when it is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it "
     "are not failures, and neither is worth mentioning unless the user asks about that device or about what is "
-    "off. forget_device removes devices that no longer matter. Answer questions about how the user's audio sounds (silent, quiet, distorted, not reaching someone) from trace_signal and get_signal_levels on the actual chain rather than general advice. Operations with status planned are designed but not built; calling one explains what blocks it."
+    "off. forget_device removes devices that no longer matter. Answer questions about how the user's audio sounds (silent, quiet, distorted, not reaching someone) from trace_signal and get_signal_levels on the actual chain rather than general advice; get_network_overview's recent_changes and get_event_journal say what changed. Operations with status planned are designed but not built; calling one explains what blocks it."
 )
 
 
@@ -1441,6 +1442,7 @@ NAME_SELECTED_TOOLS = frozenset({"get_issues", "get_event_journal", "get_routing
 CHANNEL_SELECTED_TOOLS = frozenset({"rename_channel", "set_gain"})
 WARMUP_SECONDS = 30.0
 WAITING_ROUTE_LIMIT = 12
+RECENT_CHANGE_LIMIT = 3
 STARTUP_SEARCH_SECONDS = 120.0
 EMPTY_RESULTS = {
     "get_external_flows": "no AES67 or RTP streams are being announced on the network",
@@ -2725,13 +2727,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             payload = issue_groups_view(payload, request, records)
         elif status < 400 and tool.name in TOOL_VIEWS and isinstance(payload, (dict, list)):
             if tool.name == "get_event_journal" and isinstance(payload, dict):
-                journal = getattr(self, "event_journal", None)
-                saved = journal.saved_events() if journal is not None else []
-                payload["startups"] = [
-                    self.server_info.get("started_at"),
-                    saved[0]["timestamp"] if saved else None,
-                    *(started for _, started in (journal.gaps if journal is not None else [])),
-                ]
+                payload["startups"] = self._journal_startups()
             payload = TOOL_VIEWS[tool.name](payload, request)
         if status < 400 and tool.name == "find_channels":
             payload = with_channel_signal(
@@ -2785,7 +2781,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                     if link:
                         payload[record["name"]]["wireless"] = link
         elif status < 400 and tool.name == "get_server_info" and isinstance(payload, dict):
-            payload = {**payload, "now": utc_now()}
+            payload = {**payload, "now": utc_now(), "local_time": local_time_text()}
         elif status < 400 and tool.name == "get_event_journal" and isinstance(payload, dict):
             journal = getattr(self, "event_journal", None)
             saved = journal.saved_events() if journal is not None else []
@@ -3263,6 +3259,35 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 lines.append(f"{entry.get('name')} ({entry.get('type')}) is {entry['state']}")
         return lines
 
+    def _journal_startups(self) -> list:
+        journal = getattr(self, "event_journal", None)
+        saved = journal.saved_events() if journal is not None else []
+        return [
+            self.server_info.get("started_at"),
+            saved[0]["timestamp"] if saved else None,
+            *(started for _, started in (journal.gaps if journal is not None else [])),
+        ]
+
+    def _recent_changes(self, journal: Any) -> str | None:
+        if not isinstance(journal, dict):
+            return None
+        view = events_view({**journal, "startups": self._journal_startups()}, {"limit": RECENT_CHANGE_LIMIT})
+        recorded = getattr(self, "event_journal", None)
+        saved = recorded.saved_events() if recorded is not None else []
+        since = local_time_text(saved[0]["timestamp"]) if saved else None
+        lines = []
+        for event in (view.get("events") or [])[:RECENT_CHANGE_LIMIT] if isinstance(view, dict) else []:
+            value = event.get("value") if isinstance(event.get("value"), dict) else {}
+            detail = value.get("title") or value.get("summary")
+            lines.append(
+                f"{local_time_text(event.get('timestamp'))}: {event.get('device_name')} "
+                f"{str(event.get('kind')).replace('_', ' ')}" + (f", {detail}" if detail else "")
+            )
+        count = view.get("matched") if isinstance(view, dict) else None
+        if not count:
+            return f"nothing changed since recording began at {since}" if since else "nothing has changed"
+        return f"{count} changes since {since}; latest: " + "; ".join(lines) + ". get_event_journal has them all."
+
     def _unlisted_off_devices(self, devices: dict, journal: dict, listed: dict, ddm_known: bool) -> dict:
         known = {str(name).casefold() for name in listed}
         found: dict[str, dict] = {}
@@ -3316,6 +3341,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             listed.update(self._unlisted_off_devices(snapshots["devices"], snapshots["journal"], listed, ddm_known))
             return _tool_result(listed, is_error=False)
         view = network_overview_view(**snapshots)
+        view["recent_changes"] = self._recent_changes(snapshots["journal"])
         view.update(await self._host_overview())
         devices, problems = await self._stream_health(snapshots["devices"], writer)
         worst = [
