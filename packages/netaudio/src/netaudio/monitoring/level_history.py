@@ -7,6 +7,7 @@ from bisect import bisect_right
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 
+from netaudio.common.clock_text import clock_text
 from netaudio.dante.metering import normalize_metering_value
 
 SECOND_SLOTS = 900
@@ -307,21 +308,25 @@ def history_text(summary: dict) -> str:
         return summary["not_recording"]
     if not recorded:
         since = summary.get("recorded_since")
+        since = clock_text(since, seconds=True) if since else None
         return "no levels recorded in that period" + (f"; recording began {since}" if since else "")
     signal = summary.get("signal_seconds") or 0
     loudest = summary.get("loudest_dbfs")
+    loudest_at = clock_text(summary.get("loudest_at"), seconds=True)
+    last_signal = clock_text(summary.get("last_signal_at"), seconds=True)
     if not signal:
         text = f"no signal in {recorded} recorded seconds"
         if loudest is not None:
             text += f" (loudest {loudest:g} dBFS, under the {SIGNAL_FLOOR_DBFS:g} dBFS floor)"
         return text
     text = (
-        f"signal in {signal} of {recorded} recorded seconds, loudest {loudest:g} dBFS at {summary['loudest_at']}, "
-        f"last signal {summary['last_signal_at']}"
+        f"signal in {signal} of {recorded} recorded seconds, loudest {loudest:g} dBFS at {loudest_at}, "
+        f"last signal {last_signal}"
     )
     timeline = summary.get("timeline")
     if timeline:
-        text += f"; peak dBFS every {timeline['step_seconds']} s from {timeline['start']}: {timeline['peaks_dbfs']}"
+        start = clock_text(timeline["start"], seconds=True)
+        text += f"; peak dBFS every {timeline['step_seconds']} s from {start}: {timeline['peaks_dbfs']}"
     return text
 
 

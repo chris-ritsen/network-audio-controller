@@ -6,9 +6,9 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
+from netaudio.common.clock_text import clock_text
 from netaudio.common.config_loader import load_config_document
 
 logger = logging.getLogger("netaudio")
@@ -88,7 +88,7 @@ def _decode(raw: Any) -> dict | None:
 
 
 def _clock(epoch: float) -> str:
-    return datetime.fromtimestamp(epoch).strftime("%I:%M %p").lstrip("0")
+    return clock_text(epoch) or "an unknown time"
 
 
 def evaluate(host: str, record: dict | None, lease: dict | None, now: float) -> tuple[bool, str | None]:

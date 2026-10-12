@@ -100,7 +100,6 @@ from netaudio.daemon.http.mcp_views import (
     signal_levels_view,
     transmit_flow_view,
     transmit_flows_view,
-    utc_now,
     wireless_link,
     wireless_view,
     with_channel_signal,
@@ -2858,7 +2857,12 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                     if link:
                         payload[record["name"]]["wireless"] = link
         elif status < 400 and tool.name == "get_server_info" and isinstance(payload, dict):
-            payload = {**payload, "now": utc_now(), "local_time": local_time_text()}
+            payload = {
+                **payload,
+                "started_at": local_time_text(payload["started_at"]) if payload.get("started_at") else None,
+                "now": local_time_text(seconds=True),
+                "local_time": local_time_text(),
+            }
         elif status < 400 and tool.name == "get_event_journal" and isinstance(payload, dict):
             journal = getattr(self, "event_journal", None)
             saved = journal.saved_events() if journal is not None else []

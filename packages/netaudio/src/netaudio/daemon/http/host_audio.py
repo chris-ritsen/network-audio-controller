@@ -6,14 +6,15 @@ import re
 import time
 from typing import Any
 
+from netaudio.common.clock_text import clock_text
 from netaudio.common.config_loader import load_config_document
-from netaudio.daemon.http.mcp_views import _dante_match, compact, utc_now
+from netaudio.daemon.http.mcp_views import _dante_match, compact
 from netaudio.host_audio.alsa import is_dante_interface
 from netaudio.host_audio.peers import PeerError
 from netaudio.daemon.http.mcp_outside import OutletReader, outlet_for, outlet_source
 from netaudio.host_audio.displays import DisplayReader, DisplayReading, display_source
 from netaudio.host_audio.volume_states import VolumeStateReader, volume_state_source
-from netaudio.monitoring.level_history import history_text, iso_second
+from netaudio.monitoring.level_history import history_text
 from netaudio.host_audio.trace import (
     HostScope,
     SignalGraph,
@@ -572,7 +573,7 @@ class DaemonHostAudioHandlers:
                     else "nothing is playing"
                 )
         notes.extend(note for note in peer_notes if "did not report" not in note)
-        return {"computers": view, "measured_at": utc_now(), "notes": notes or None}
+        return {"computers": view, "measured_at": clock_text(seconds=True), "notes": notes or None}
 
     def _recorded_level_changes(self, graph: SignalGraph, walks: dict, local_host: str) -> list[str]:
         if not getattr(self.host_audio, "record_jack_levels", False):
@@ -604,7 +605,7 @@ class DaemonHostAudioHandlers:
                 verb = "lowered" if result[0] < 0 else "raised"
                 changes.append(
                     f"{client} {verb} it by {abs(result[0]):.0f} dB the last time it carried audio "
-                    f"({iso_second(result[2])}, over {result[1]} s)"
+                    f"({clock_text(result[2], seconds=True)}, over {result[1]} s)"
                 )
         return list(dict.fromkeys(changes))
 
@@ -646,7 +647,7 @@ class DaemonHostAudioHandlers:
         return {
             "matches": lines,
             "omitted": len(matches) - len(shown) or None,
-            "measured_at": utc_now(),
+            "measured_at": clock_text(seconds=True),
             "notes": level_notes or None,
             "trace": "trace_signal follows any of these through the whole chain",
         }
@@ -770,7 +771,7 @@ class DaemonHostAudioHandlers:
                 payload["why_silent"] = silence_summary(causes, mute_wording(graph, starts))
             else:
                 payload["signal_stops"] = list(dict.fromkeys(stops)) or "no step where signal stops"
-            payload["measured_at"] = utc_now()
+            payload["measured_at"] = clock_text(seconds=True)
         notes.extend(self._unlinked_cards(graph, identities, snapshots))
         notes.extend(self._availability_notes(snapshots))
         if notes:
@@ -837,7 +838,7 @@ class DaemonHostAudioHandlers:
             for point, starts in resolved.items()
         }
         payload.update({point: error for point, error in errors.items()})
-        payload["measured_at"] = utc_now()
+        payload["measured_at"] = clock_text(seconds=True)
         if notes:
             payload["notes"] = notes
         return (200 if resolved else 404), payload
@@ -882,7 +883,9 @@ class DaemonHostAudioHandlers:
                 where = f" at {LABEL_KIND.sub('', graph.nodes[device].label)}" if device != identity else ""
                 live[identity] = (measured[device][0], f"{measured[device][1]}{where}")
         summaries, notes, problems = await self._history(graph, identities, snapshots, records, period)
-        payload: dict[str, Any] = {"period": f"{iso_second(period[0])} to {iso_second(period[1])}"}
+        payload: dict[str, Any] = {
+            "period": f"{clock_text(period[0], seconds=True)} to {clock_text(period[1], seconds=True)}"
+        }
         for point, starts in resolved.items():
             lines = []
             for identity in starts:

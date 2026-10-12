@@ -326,7 +326,7 @@ def _client_roles(snapshot: dict) -> dict[str, str]:
 
 def _change_line(component: str, change: dict) -> str:
     kind = change.get("kind")
-    when = change.get("time")
+    when = local_time_text(change.get("time"), seconds=True) if change.get("time") else "at an unknown time"
     if kind in {"connected", "disconnected"}:
         pairs = change.get("pairs") or []
         listed = ", ".join(f"{source} → {destination}" for source, destination in pairs[:4])

@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from netaudio.common.clock_text import clock_text
 from netaudio.daemon.http.mcp_views import _numbered_names, channels_text, compact
-from netaudio.monitoring.level_history import MINUTE_SLOTS, history_text, iso_second
+from netaudio.monitoring.level_history import MINUTE_SLOTS, history_text
 
 MAXIMUM_LISTEN_SECONDS = 30
 MAXIMUM_HISTORY_SECONDS = MINUTE_SLOTS * 60
@@ -101,7 +102,7 @@ def dante_history_view(history: Any, record: dict, period: tuple[float, float], 
 
 
 def signal_history_view(history: Any, records: list[dict], period: tuple[float, float], full: bool) -> dict:
-    view: dict[str, Any] = {"period": f"{iso_second(period[0])} to {iso_second(period[1])}"}
+    view: dict[str, Any] = {"period": f"{clock_text(period[0], seconds=True)} to {clock_text(period[1], seconds=True)}"}
     quiet = []
     for record in sorted(records, key=lambda item: str(item.get("name"))):
         entry = dante_history_view(history, record, period, full)

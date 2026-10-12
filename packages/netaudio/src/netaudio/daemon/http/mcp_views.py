@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from netaudio.dante.device_serializer import DEVICE_SCALAR_FIELDS
+from netaudio.common.clock_text import clock_text
 from netaudio.daemon.http.shure import described_value
 from netaudio.dante.metering import normalize_metering_value
 from netaudio.host_audio.trace import shure_level_text
@@ -1089,21 +1090,8 @@ def events_view(payload: Any, arguments: dict) -> Any:
     )
 
 
-def local_time_text(value: Any = None) -> str | None:
-    if value is None:
-        moment = datetime.now(timezone.utc)
-    else:
-        try:
-            moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=timezone.utc)
-    local = moment.astimezone()
-    today = datetime.now().astimezone().date()
-    clock = local.strftime("%I:%M %p").lstrip("0")
-    day = "today" if local.date() == today else local.strftime("%A %d %B").replace(" 0", " ")
-    return f"{clock} {local.tzname()} {day}"
+def local_time_text(value: Any = None, seconds: bool = False) -> str | None:
+    return clock_text(value, seconds=seconds)
 
 
 def utc_now() -> str:
@@ -1508,6 +1496,9 @@ def issue_groups(issues: Any, devices: dict, state: str = "open", device: str | 
                         f"{source}: {_identities_text(identities)}" for source, identities in sorted(sources.items())
                     )
                     or None,
+                    "first_seen": local_time_text(group["first_seen"]) if group.get("first_seen") else None,
+                    "last_seen": local_time_text(group["last_seen"]) if group.get("last_seen") else None,
+                    "resolved_at": local_time_text(group["resolved_at"]) if group.get("resolved_at") else None,
                     "device_state": (
                         f"{last_seen_text(records.get(group['device']))}; this is its last report"
                         if is_off(records.get(group["device"]))
@@ -1571,7 +1562,7 @@ def network_overview_view(devices: dict, issues: dict, ddm: dict, journal: Any =
     problems = issue_groups(issues, devices)
     return compact(
         {
-            "as_of": utc_now(),
+            "as_of": local_time_text(seconds=True),
             "local_time": local_time_text(),
             "devices": summaries,
             "online_count": sum(device.get("online") is True for device in summaries),
@@ -1771,7 +1762,7 @@ def flow_result_view(payload: Any, device: dict | None, addresses: dict[str, str
 
 def _iso_from_epoch(value: Any) -> Any:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
+        return clock_text(value)
     return value
 
 
