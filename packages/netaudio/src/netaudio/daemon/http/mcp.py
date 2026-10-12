@@ -2553,14 +2553,18 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             tokens = self._mcp_preview_tokens = PreviewTokens()
         client = grant.client_id if grant is not None else "local"
         digest = preview_digest(tool.name, request, payload)
+        client_name = grant.client_name if grant else "unknown client"
         if arguments.get("confirmed") is True:
-            outcome = tokens.redeem(arguments.get("preview_token"), client, digest)
+            outcome, age = tokens.redeem(arguments.get("preview_token"), client, digest)
+            age_text = f"{age:.1f} s" if age is not None else "no"
             if outcome == "accepted":
+                logger.info("MCP %s confirmed %s with a preview token %s old", client_name, tool.name, age_text)
                 return await self._mcp_tool_dispatch(tool, {**request, "confirmed": True}, writer, grant)
             logger.info(
-                "MCP %s confirmed %s without a matching preview (%s); returned the preview",
-                grant.client_name if grant else "unknown client",
+                "MCP %s confirmed %s with %s preview token (%s); returned the preview",
+                client_name,
                 tool.name,
+                f"a {age_text} old" if age is not None else "no matching",
                 outcome,
             )
             payload.pop("next", None)
@@ -2569,6 +2573,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 payload["preview_token"] = tokens.issue(client, digest)
             return _tool_result(payload, is_error=False)
         payload["preview_token"] = tokens.issue(client, digest)
+        logger.info("MCP %s previewed %s (token %s)", client_name, tool.name, payload["preview_token"])
         return _tool_result(payload, is_error=False)
 
     async def _mcp_tool_dispatch(self, tool: McpTool, arguments: dict, writer, grant: Grant | None) -> dict:

@@ -33,6 +33,7 @@ REFUSALS = {
 class _Preview:
     client: str
     digest: str
+    issued: float
     expires: float
 
 
@@ -52,15 +53,17 @@ class PreviewTokens:
         while len(self._previews) >= PREVIEW_TOKEN_LIMIT:
             self._previews.pop(next(iter(self._previews)))
         token = secrets.token_hex(4)
-        self._previews[token] = _Preview(client, digest, now + PREVIEW_TOKEN_SECONDS)
+        self._previews[token] = _Preview(client, digest, now, now + PREVIEW_TOKEN_SECONDS)
         return token
 
-    def redeem(self, token: object, client: str, digest: str) -> str:
+    def redeem(self, token: object, client: str, digest: str) -> tuple[str, float | None]:
         if not isinstance(token, str) or not token:
-            return "missing"
+            return "missing", None
         entry = self._previews.pop(token, None)
-        if entry is None or entry.expires <= time.monotonic() or entry.client != client:
-            return "unknown"
+        now = time.monotonic()
+        age = now - entry.issued if entry is not None else None
+        if entry is None or entry.expires <= now or entry.client != client:
+            return "unknown", age
         if entry.digest != digest:
-            return "changed"
-        return "accepted"
+            return "changed", age
+        return "accepted", age
