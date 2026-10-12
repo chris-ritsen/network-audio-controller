@@ -7,9 +7,10 @@ import time
 from typing import Any
 
 from netaudio.common.config_loader import load_config_document
-from netaudio.daemon.http.mcp_views import _dante_match, utc_now
+from netaudio.daemon.http.mcp_views import _dante_match, compact, utc_now
 from netaudio.host_audio.alsa import is_dante_interface
 from netaudio.host_audio.peers import PeerError
+from netaudio.host_audio.displays import DisplayReader, DisplayReading, display_source
 from netaudio.host_audio.volume_states import VolumeStateReader, volume_state_source
 from netaudio.monitoring.level_history import history_text, iso_second
 from netaudio.host_audio.trace import (
@@ -67,6 +68,41 @@ def _hexadecimal(value: Any) -> str:
 def _first(query: dict, name: str, default: str | None = None) -> str | None:
     values = query.get(name)
     return values[-1] if values else default
+
+
+def _display_answer(
+    graph: SignalGraph,
+    reading: DisplayReading,
+    presented: dict[str, list[str]],
+    measured: dict[str, tuple[str, str]] | None,
+    answer: str,
+) -> tuple[str, dict]:
+    sentences = []
+    view: dict[str, Any] = {}
+    for presentation in reading.presentations:
+        name = f"{presentation.host} {presentation.output}"
+        display = presentation.display.upper()
+        picture = ", and its picture is off" if presentation.picture == "off" else ""
+        sentences.append(f"The {display} is showing {presentation.host} through {presentation.endpoint}{picture}.")
+        view[display] = compact(
+            {
+                "showing": presentation.host,
+                "through": presentation.endpoint,
+                "picture": presentation.picture,
+                "output": name if name in presented else None,
+            }
+        )
+        if name in presented and measured is not None:
+            sentences.append(path_result(graph, name, presented[name], DIRECTIONS, measured).answer)
+    if not reading.presentations:
+        why = "; ".join(reading.problems) or "no computer netaudio follows is being shown on a display right now"
+        sentences.append(f"{why[:1].upper()}{why[1:]}.")
+        return " ".join([*sentences, answer]).strip(), {"problems": reading.problems or None}
+    if reading.problems:
+        view["problems"] = reading.problems
+    if not presented:
+        sentences.append(answer)
+    return " ".join(sentences), view
 
 
 def _applications(snapshot: dict) -> str:
@@ -188,6 +224,13 @@ class DaemonHostAudioHandlers:
         )
         await self._apply_volume_states(graph)
         return graph, snapshots, records, notes
+
+    def _display_reader(self) -> DisplayReader | None:
+        reader = getattr(self, "_display_presentation_reader", False)
+        if reader is False:
+            source = display_source()
+            reader = self._display_presentation_reader = DisplayReader(source) if source else None
+        return reader
 
     def _volume_reader(self) -> VolumeStateReader | None:
         reader = getattr(self, "_volume_state_reader", False)
@@ -601,13 +644,30 @@ class DaemonHostAudioHandlers:
             return 503, {"error": "host audio support is not running"}
         graph, snapshots, records, peer_notes = await self._signal_graph()
         local_host = self.host_audio.host
+        reader = self._display_reader()
+        reading = await reader.read(point) if reader is not None and reader.source.matches(point) else None
+        presented: dict[str, list[str]] = {}
+        for presentation in reading.presentations if reading else []:
+            name = f"{presentation.host} {presentation.output}"
+            group = graph.resolve(name)[0] or graph.resolve_loosely(name)
+            if group:
+                presented[name] = group
+            else:
+                reading.problems.append(
+                    f"{presentation.host}'s output to the {presentation.display.upper()}, {presentation.output}, is not in the signal chain"
+                )
         starts, suggestions = graph.resolve(point)
-        device = not starts and bool(graph.resolve_device(point))
+        device = not presented and not starts and bool(graph.resolve_device(point))
         if device:
             starts = graph.resolve_device(point)
-        loose = not starts
+        loose = not presented and not starts
         if loose:
             starts = graph.resolve_loosely(point)
+        if presented:
+            starts = list(dict.fromkeys(identity for group in presented.values() for identity in group))
+        if not starts and reading is not None:
+            answer, view = _display_answer(graph, reading, presented, None, "")
+            return 200, {"answer": answer.strip(), "point": point, "display": view}
         if not starts:
             hint = f"; did you mean {' or '.join(repr(value) for value in suggestions)}?" if suggestions else ""
             return 404, {
@@ -620,7 +680,7 @@ class DaemonHostAudioHandlers:
         walks = {name: graph.walk(starts, name) for name in directions}
         own = list(dict.fromkeys(starts + [step.identity for steps in walks.values() for step in steps]))
         followed: dict[str, list[str]] = {}
-        if not any(walks[name] for name in directions):
+        if not presented and not any(walks[name] for name in directions):
             followed = related_paths(graph, graph.also_named_identities(point, set(starts)))
         identities = list(
             dict.fromkeys(
@@ -646,7 +706,13 @@ class DaemonHostAudioHandlers:
             ),
             "point": point,
             "matched": (
-                f"nothing is named exactly {point!r}, so this traces what is named after it: "
+                "; ".join(
+                    f"the {presentation.display.upper()} is showing {presentation.host}, so this traces "
+                    f"{presentation.host} {presentation.output}"
+                    for presentation in reading.presentations
+                )
+                if presented and reading is not None
+                else f"nothing is named exactly {point!r}, so this traces what is named after it: "
                 + ", ".join(LABEL_KIND.sub("", graph.nodes[identity].label) for identity in starts)
                 if loose
                 else f"traces every routed channel of {point} ({len(starts)})"
@@ -713,6 +779,10 @@ class DaemonHostAudioHandlers:
             )
         elif levels and device:
             answer = device_answer(graph, point, starts, directions, measured) or answer
+        if reading is not None:
+            answer, payload["display"] = _display_answer(
+                graph, reading, presented, measured if levels else None, answer
+            )
         return 200, {"answer": answer, **payload}
 
     async def host_audio_point_levels(

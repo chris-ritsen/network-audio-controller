@@ -22,7 +22,8 @@ RECENT_CHANGES = 8
 SECTIONS = ["summary", "connections", "ports", "pulse", "cards", "changes"]
 POINT_DESCRIPTION = (
     "Where to start: a Shure channel (AD4D-A ch1), a Dante device (every routed channel, such as a32), a Dante channel (lx-dante rx 1), a JACK port or alias "
-    "(system:capture_1), a PulseAudio input or output (jack_in, default input), or an application (Discord). "
+    "(system:capture_1), a PulseAudio input or output (jack_in, default input), an application (Discord), or a "
+    "TV, which traces the output of the computer the TV is showing when that is known. "
     "The user's own words work too (work macbook, wireless mic), matching names loosely, including devices that "
     "are off the network. Points on this server's computer need no prefix; put another computer's name first for its points, such as "
     "workstation default input."
