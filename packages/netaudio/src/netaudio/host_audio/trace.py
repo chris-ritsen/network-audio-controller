@@ -14,6 +14,7 @@ REMOTE_PRIORITY = 3
 MAXIMUM_LINES = 80
 SOURCE_LIMIT = 8
 ANSWER_CAUSE_LIMIT = 2
+RELATED_ANSWER_LIMIT = 4
 LOOSE_LIMIT = 4
 ALSO_NAMED_LIMIT = 6
 SPOKEN_FILLER_WORDS = frozenset({"my", "our", "your", "the", "a", "an", "this", "that"})
@@ -836,8 +837,15 @@ def trace_answer(
     levels: dict[str, tuple[str, str]] | None,
     stops: list[str],
     causes: list[str] | None,
+    related: list[str] | None = None,
 ) -> str:
     subject = _subject(point)
+    if not any(walks.values()):
+        names = [LABEL_KIND.sub("", graph.nodes[identity].label) for identity in starts]
+        shown = f" ({_joined(names)})" if names != [point] else ""
+        paths = list(dict.fromkeys(name if "[" in name else name.split(":")[0] for name in related or []))
+        others = f"; other points with that name: {_joined(paths[:RELATED_ANSWER_LIMIT])}" if paths else ""
+        return f"Nothing is connected to {point}{shown}{others}."
     downstream = walks.get("downstream") or []
     upstream = walks.get("upstream") or []
     roots = [step.identity for step in upstream if not step.repeated and not graph.upstream.get(step.identity)]

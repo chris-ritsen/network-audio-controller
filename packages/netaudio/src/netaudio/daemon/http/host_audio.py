@@ -612,6 +612,7 @@ class DaemonHostAudioHandlers:
             stops.extend(direction_stops)
         if "downstream" in walks:
             payload["reaches"] = destinations_summary(graph, walks["downstream"])
+        related: list[str] = []
         if not any(walks[name] for name in directions):
             related = graph.also_named(point, set(starts))
             if related:
@@ -637,7 +638,7 @@ class DaemonHostAudioHandlers:
         notes.extend(self._availability_notes(snapshots))
         if notes:
             payload["notes"] = notes
-        answer = trace_answer(graph, point, starts, walks, measured if levels else None, stops, causes)
+        answer = trace_answer(graph, point, starts, walks, measured if levels else None, stops, causes, related)
         return 200, {"answer": answer, **payload}
 
     async def host_audio_point_levels(
