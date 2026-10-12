@@ -1891,6 +1891,26 @@ class McpError(Exception):
         self.code = code
 
 
+def _gaps_text(gaps: list) -> str | None:
+    spans = []
+    for stopped, started in gaps:
+        try:
+            first = datetime.fromisoformat(str(stopped).replace("Z", "+00:00"))
+            last = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        spans.append((first, last))
+    if not spans:
+        return None
+    total = sum((last - first).total_seconds() for first, last in spans)
+    longest = max(spans, key=lambda span: span[1] - span[0])
+    duration = f"{total / 60:.0f} min" if total >= 120 else f"{total:.0f} s"
+    return (
+        f"the server was stopped {len(spans)} time{'' if len(spans) == 1 else 's'}, for {duration} in all; "
+        f"the longest was from {local_time_text(longest[0].isoformat())} to {local_time_text(longest[1].isoformat())}"
+    )
+
+
 def _record_for_selector(records: dict, selector: str) -> dict | None:
     if not isinstance(selector, str) or not selector:
         return None
@@ -2798,10 +2818,16 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             journal = getattr(self, "event_journal", None)
             saved = journal.saved_events() if journal is not None else []
             gaps = journal.gaps if journal is not None else []
+            since = saved[0]["timestamp"] if saved else self.server_info.get("started_at")
+            debug = request.get("detail") == "debug"
             payload = {
                 **payload,
-                "recorded_since": saved[0]["timestamp"] if saved else self.server_info.get("started_at"),
-                "not_recorded": [f"{stopped} to {started} (the server was stopped)" for stopped, started in gaps]
+                "recorded_since": since if debug else local_time_text(since),
+                "not_recorded": (
+                    [f"{stopped} to {started} (the server was stopped)" for stopped, started in gaps]
+                    if debug
+                    else _gaps_text(gaps)
+                )
                 or None,
                 "retention": (
                     "kept across restarts; nothing is recorded while the server is stopped. Issue events from the "
@@ -3292,7 +3318,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             value = event.get("value") if isinstance(event.get("value"), dict) else {}
             detail = value.get("title") or value.get("summary")
             lines.append(
-                f"{local_time_text(event.get('timestamp'))}: {event.get('device_name')} "
+                f"{event.get('time')}: {event.get('device_name')} "
                 f"{str(event.get('kind')).replace('_', ' ')}" + (f", {detail}" if detail else "")
             )
         count = view.get("matched") if isinstance(view, dict) else None

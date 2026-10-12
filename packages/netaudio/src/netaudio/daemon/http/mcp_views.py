@@ -882,6 +882,22 @@ def _waiting_route_event(event: dict) -> bool:
     return isinstance(status, dict) and status.get("status") == "UNRESOLVED"
 
 
+def _planned_operation(event: dict) -> bool:
+    if event.get("kind") != "configuration_operation":
+        return False
+    value = event.get("current_value") if isinstance(event.get("current_value"), dict) else {}
+    operation = str(event.get("operation_name") or value.get("operation") or "")
+    return operation.startswith("validate_") or (event.get("final_operation_state") or value.get("state")) == "planned"
+
+
+def _with_local_times(view: dict) -> dict:
+    if "timestamp" in view:
+        view["time"] = local_time_text(view.pop("timestamp"))
+    if "first_observed_at" in view:
+        view["first_observed_at"] = local_time_text(view["first_observed_at"])
+    return view
+
+
 def events_view(payload: Any, arguments: dict) -> Any:
     if not isinstance(payload, dict):
         return payload
@@ -893,7 +909,10 @@ def events_view(payload: Any, arguments: dict) -> Any:
         events = [
             event
             for event in events
-            if isinstance(event, dict) and not _waiting_route_event(event) and not _during_startup(event, startups)
+            if isinstance(event, dict)
+            and not _waiting_route_event(event)
+            and not _during_startup(event, startups)
+            and not _planned_operation(event)
         ]
     selected = [
         event
@@ -964,7 +983,7 @@ def events_view(payload: Any, arguments: dict) -> Any:
                 "from": before.get(field) if field else None,
                 "to": after.get(field) if field else None,
             }
-            views.append(compact(view))
+            views.append(compact(_with_local_times(view)))
             continue
         if event.get("kind") in OPERATION_EVENT_KINDS:
             value = event.get("current_value") if isinstance(event.get("current_value"), dict) else {}
@@ -978,7 +997,7 @@ def events_view(payload: Any, arguments: dict) -> Any:
                     "message": raw.get("message"),
                 }
             )
-            views.append(compact(view))
+            views.append(compact(_with_local_times(view)))
             continue
         targets = event.get("_targets", [event])
         issue_ids = {
@@ -1048,7 +1067,7 @@ def events_view(payload: Any, arguments: dict) -> Any:
             view["change"] = changed or None
         elif isinstance(current_view, dict) and "summary" in current_view:
             view["current_value"] = {**current_view, "summary": readable_summary(current_view["summary"])}
-        views.append(view)
+        views.append(_with_local_times(view))
     return compact(
         {
             "events": views,
