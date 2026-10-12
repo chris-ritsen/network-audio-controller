@@ -15,7 +15,6 @@ DEVICE_SECTIONS = ("availability", "channels", "flows", "full", "network", "subs
 DEVICE_SUMMARY_FIELDS = (
     "encoding",
     "inventory_id",
-    "ipv4",
     "is_locked",
     "kind",
     "latency_ms",
@@ -133,7 +132,7 @@ def is_off(device: Any) -> bool:
 def last_seen_text(device: Any) -> str | None:
     if not is_off(device):
         return None
-    seen = iso_time(device.get("last_seen"))
+    seen = local_time_text(iso_time(device.get("last_seen"))) if device.get("last_seen") else None
     return f"last seen {seen}" if seen else "last seen at an unknown time"
 
 
@@ -241,8 +240,11 @@ def device_summary(device: Any, ddm_known: bool = False, devices: dict | None = 
     summary["management"] = management_state(device, ddm_known) or "unknown"
     if device.get("server_name") != summary.get("inventory_id"):
         summary["server_name"] = device.get("server_name")
+    summary.pop("inventory_id", None)
     routes = _subscription_list(device)
-    summary["last_seen"] = iso_time(device.get("last_seen")) if is_off(device) else None
+    summary["last_seen"] = (
+        local_time_text(iso_time(device.get("last_seen"))) if is_off(device) and device.get("last_seen") else None
+    )
     summary["subscription_count"] = len(routes)
     problems, waiting = _subscription_problems(device, _device_records(devices) if devices is not None else None)
     summary["subscription_problems"] = problems
@@ -266,7 +268,9 @@ def clock_view(device: dict) -> dict:
         synchronization = "synchronized"
     return compact(
         {
-            "clock_observed_at": device.get("clock_observed_at"),
+            "clock_observed_at": local_time_text(device["clock_observed_at"])
+            if device.get("clock_observed_at")
+            else None,
             "ddm_frequency_offset": clocking.get("frequency_offset") if managed else None,
             "frequency_offset_parts_per_billion": device.get("clock_frequency_offset_parts_per_billion"),
             "synchronization": synchronization,
@@ -1356,7 +1360,6 @@ def device_list_view(devices: dict, ddm_known: bool) -> dict:
                 compact(
                     {
                         "product": summary.get("product") or summary.get("model"),
-                        "ipv4": summary.get("ipv4"),
                         "online": summary.get("online"),
                         "management": summary.get("management"),
                         "domain": device.get("ddm_domain_name") if summary.get("management") == "managed" else None,
@@ -1557,7 +1560,6 @@ def network_overview_view(devices: dict, issues: dict, ddm: dict, journal: Any =
                     "product": summary.get("product") or summary.get("model"),
                     "online": summary.get("online"),
                     "management": summary.get("management"),
-                    "ipv4": summary.get("ipv4"),
                     "sample_rate_hz": summary.get("sample_rate_hz"),
                     "latency_ms": summary.get("latency_ms"),
                     "subscription_count": summary.get("subscription_count"),
@@ -1609,8 +1611,16 @@ def overview_answer(view: dict) -> str:
     findings.extend((streams.get("problems") or [])[:1])
     others = (view.get("other_problems") or [])[:2]
     also = f" Also, {'; '.join(others)}." if others else ""
+    playing = view.get("playing_now")
+    if isinstance(playing, dict) and playing:
+        lines = [f"{host}: {'; '.join(value)}" for host, value in playing.items() if isinstance(value, list)]
+        also += (
+            f" Playing now: {'; '.join(lines)}."
+            if lines
+            else " Nothing is playing on any computer right now, so every output is silent."
+        )
     muted = view.get("muted") or []
-    also += f" Muted: {'; '.join(muted)}." if muted else ""
+    also += f" Muted, which silences only what passes through them: {'; '.join(muted)}." if muted else ""
     if not findings:
         working = "The Dante network is working" if others else "Everything is working"
         return f"{working}: {devices}, with no open problems.{also}"

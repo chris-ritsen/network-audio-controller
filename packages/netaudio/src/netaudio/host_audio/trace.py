@@ -18,6 +18,7 @@ RELATED_ANSWER_LIMIT = 4
 RELATED_FOLLOW_LIMIT = 3
 LOOSE_LIMIT = 4
 ALSO_NAMED_LIMIT = 6
+STEM_MINIMUM = 4
 SPOKEN_FILLER_WORDS = frozenset({"my", "our", "your", "the", "a", "an", "this", "that"})
 GENERIC_NAME_WORDS = frozenset(
     {"avio", "usb", "usbc", "aes", "bt", "rx", "tx", "lx", "dante", "ch", "in", "out", "left", "right", "local"}
@@ -109,20 +110,24 @@ class SignalGraph:
         ]
         return sorted(routed, key=_natural)[:MAXIMUM_STARTS]
 
-    def resolve_loosely(self, point: str) -> list[str]:
+    def resolve_loosely(self, point: str, prefix: bool = False) -> list[str]:
         words = re.findall(r"[a-z0-9]+", _fold(point))
         if not words:
             return []
         found: set[str] = set()
         for name, entries in self.names.items():
             tokens = re.findall(r"[a-z0-9]+", name)
-            if all(word in tokens for word in words):
+            if all(word in tokens or (prefix and any(token.startswith(word) for token in tokens)) for word in words):
                 found.update(identity for _, identity in entries)
         if "monitor" not in words:
             found = {identity for identity in found if not self.nodes[identity].label.endswith(".monitor")}
         spoken = [word for word in words if word not in SPOKEN_FILLER_WORDS]
         if not found and spoken and spoken != words:
             return self.resolve_loosely(" ".join(spoken))
+        if not found and not prefix:
+            stems = [word[:-1] if len(word) >= STEM_MINIMUM else word for word in words]
+            if stems != words:
+                return self.resolve_loosely(" ".join(stems), prefix=True)
         if not found:
             return []
 

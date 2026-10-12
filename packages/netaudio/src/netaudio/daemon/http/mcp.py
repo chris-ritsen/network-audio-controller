@@ -142,7 +142,7 @@ MCP_INSTRUCTIONS = (
     "apply_to_devices to make one change on several devices. A device that is off the network is not a problem, "
     "even when it is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it "
     "are not failures, and neither is worth mentioning unless the user asks about that device or about what is "
-    "off. forget_device removes devices that no longer matter. Questions about hearing or sound at home (can I hear the TV, why is linux main silent, is my mic working) are about this audio system: answer them from trace_signal and get_signal_levels on the actual chain, passing the user's words as the point, rather than asking which system they mean or giving general advice. Short names in a question (a32, ad4d, lx-dante) are usually device or channel names: look them up with get_device or trace_signal instead of asking what they are. netaudio knows devices by name, product and which computer they are a sound card in, not where they are physically; when get_network_overview has power_outlets, those are the rack's power outlets by name with whether each is on, which is what is plugged into the rack. Do not group devices by place otherwise. Dante devices named after a TV or computer (avio-usb-tv-1) are netaudio's, and identify flashes a device's light so someone can find it. trace_signal also says where a chain is muted, including volume stages between applications and outputs, so use it for questions such as is the work macbook muted; get_network_overview's muted lists everything muted on every computer. trace_signal and get_network_overview start with an answer field: say that sentence first, then detail only as needed. get_network_overview's recent_changes and get_event_journal say what changed. Operations with status planned are designed but not built; calling one explains what blocks it."
+    "off. forget_device removes devices that no longer matter. Questions about hearing or sound at home (can I hear the TV, why is linux main silent, is my mic working) are about this audio system: answer them from trace_signal and get_signal_levels on the actual chain, passing the user's words as the point, rather than asking which system they mean or giving general advice. The user's voice, or whether people can hear them, means the mic chain: trace_signal with point mic. What is playing right now is in get_network_overview's playing_now and get_signal_levels. To make an application, game or music louder, quieter or muted, find it with trace_signal: netaudio changes PulseAudio outputs and streams (set_audio_volume, set_audio_mute; discord_out for Discord) but not the level of a JACK volume stage such as music_volume, so say where that is done when it is named below. Spoken answers are one or two short sentences unless the user asks for more, without addresses or ids. Short names in a question (a32, ad4d, lx-dante) are usually device or channel names: look them up with get_device or trace_signal instead of asking what they are. netaudio knows devices by name, product and which computer they are a sound card in, not where they are physically; when get_network_overview has power_outlets, those are the rack's power outlets by name with whether each is on, which is what is plugged into the rack. Do not group devices by place otherwise. Dante devices named after a TV, a computer or Bluetooth (avio-usb-tv-1, avio-bt-1) are netaudio's, so is the bluetooth on means is avio-bt-1 on the network;, and identify flashes a device's light so someone can find it. trace_signal also says where a chain is muted, including volume stages between applications and outputs, so use it for questions such as is the work macbook muted; get_network_overview's muted lists everything muted on every computer. trace_signal and get_network_overview start with an answer field: say that sentence first, then detail only as needed. get_network_overview's recent_changes and get_event_journal say what changed. Operations with status planned are designed but not built; calling one explains what blocks it."
 )
 
 
@@ -3085,7 +3085,8 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
     def _not_seen_text(self) -> str:
         age = self._server_age()
         if age is not None and age < STARTUP_SEARCH_SECONDS:
-            return f"not seen yet; the server started {age:.0f} s ago and is still finding devices"
+            started = local_time_text(self.server_info.get("started_at"))
+            return f"not seen yet; the server started at {started} and is still finding devices"
         return "not seen since the server started"
 
     def _server_age(self) -> float | None:
@@ -3435,6 +3436,9 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             return _tool_result(listed, is_error=False)
         view = network_overview_view(**snapshots)
         view["recent_changes"] = self._recent_changes(snapshots["journal"])
+        playing = await self.host_audio_now_playing() if getattr(self, "host_audio", None) is not None else None
+        if playing:
+            view["playing_now"] = playing["computers"]
         outlets = await self.power_outlets()
         if outlets:
             view["power_outlets"] = [
