@@ -35,6 +35,7 @@ class _MeterClient:
     def __init__(self, jack) -> None:
         self.stopped = False
         self.active: tuple = ()
+        self.ports: list = []
         self.client = jack.Client(
             METER_CLIENT_NAME, no_start_server=True, servername=os.environ.get("JACK_DEFAULT_SERVER") or None
         )
@@ -115,12 +116,11 @@ def measure(targets: dict[str, list[str]], seconds: float) -> dict[str, dict]:
 
 def _measure(jack, targets: dict[str, list[str]], seconds: float) -> dict[str, dict]:
     meter = _client(jack)
-    inputs = {}
-    totals: dict[str, list[float]] = {}
+    while len(meter.ports) < len(targets):
+        meter.ports.append(meter.client.inports.register(f"meter_{len(meter.ports) + 1}"))
+    inputs = dict(zip(targets, meter.ports))
+    totals: dict[str, list[float]] = {target: [0.0, 0.0, 0.0] for target in targets}
     try:
-        for index, target in enumerate(targets):
-            inputs[target] = meter.client.inports.register(f"meter_{index + 1}")
-            totals[target] = [0.0, 0.0, 0.0]
         unreachable = {}
         for target, sources in targets.items():
             for source in sources:
@@ -137,9 +137,9 @@ def _measure(jack, targets: dict[str, list[str]], seconds: float) -> dict[str, d
         meter.active = ()
         for port in inputs.values():
             try:
-                port.unregister()
+                port.disconnect()
             except jack.JackError as exception:
-                logger.debug("Removing JACK meter port %s: %s", port.name, exception)
+                logger.debug("Disconnecting JACK meter port %s: %s", port.name, exception)
     results = {}
     for target, (peak, energy, count) in totals.items():
         if target in unreachable:

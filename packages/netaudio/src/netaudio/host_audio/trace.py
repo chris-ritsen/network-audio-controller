@@ -971,8 +971,8 @@ def related_paths(graph: SignalGraph, identities: list[str]) -> dict[str, list[s
     for identity in identities:
         if graph.upstream.get(identity) or graph.downstream.get(identity):
             groups.setdefault(_path_name(graph, graph.nodes[identity]), []).append(identity)
-    ordered = sorted(groups.items(), key=lambda item: not all(_is_output(graph.nodes[i]) for i in item[1]))
-    return dict(ordered[:RELATED_FOLLOW_LIMIT])
+    outputs = {name: group for name, group in groups.items() if all(_is_output(graph.nodes[i]) for i in group)}
+    return dict(list((outputs or groups).items())[:RELATED_FOLLOW_LIMIT])
 
 
 def path_result(
