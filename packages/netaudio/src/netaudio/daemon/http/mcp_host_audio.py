@@ -469,6 +469,32 @@ def wireless_lines(devices: dict) -> list[str]:
     return lines
 
 
+def _pulse_effect(pulse: dict, change: dict, mute: bool) -> str:
+    target = change["target"]
+    kind = change["kind"]
+    if kind in {"sink", "source"}:
+        entry = next((entry for entry in pulse.get(f"{kind}s") or [] if entry.get("index") == change["index"]), {})
+        streams = pulse.get("sink_inputs" if kind == "sink" else "source_outputs") or []
+        users = [
+            stream.get("application") or stream.get("binary") or f"stream {stream.get('index')}"
+            for stream in streams
+            if stream.get(kind) == entry.get("name") and stream.get("media") != "Peak detect"
+        ]
+        default = (pulse.get("server") or {}).get("default_sink" if kind == "sink" else "default_source")
+        verb = "playing to" if kind == "sink" else "recording from"
+        who = f"everything {verb} it" + (
+            f" ({', '.join(dict.fromkeys(users))})" if users else f"; nothing is {verb} it now"
+        )
+        role = (
+            f", the default {'output' if kind == 'sink' else 'input'} that applications use unless told otherwise,"
+            if entry.get("name") == default
+            else ""
+        )
+        result = "goes silent" if mute else "changes volume"
+        return f"{target}{role} {result} for {who}"
+    return f"{target} {'goes silent' if mute else 'changes volume'}; other applications are not affected"
+
+
 def wireless_conditions(devices: dict) -> list[str]:
     conditions = []
     for device in devices.values():
@@ -552,6 +578,8 @@ class McpHostAudioTools:
             preview["change"] = {"target": change["target"], "from": change["current"], "to": change["requested"]}
             if change["current"] == change["requested"]:
                 preview["note"] = "already so; nothing would change"
+            elif name in {"set_audio_mute", "set_audio_volume"}:
+                preview["effect"] = _pulse_effect(self.host_audio.snapshot()["pulse"], change, name == "set_audio_mute")
         elif name == "link_audio_card":
             change = card_change(self.host_audio.snapshot(), self._serialized_devices(), arguments)
             preview["change"] = {
@@ -578,6 +606,20 @@ class McpHostAudioTools:
                 preview["note"] = "already so; nothing would change"
         preview["next"] = NEXT_STEP
         return compact(preview)
+
+    def _jack_target_hint(self, name: str, arguments: dict) -> str:
+        target = str(arguments.get("target") or arguments.get("stream") or "")
+        if name not in PULSE_ACTIONS or not target or self.host_audio is None:
+            return ""
+        ports = (self.host_audio.snapshot().get("jack") or {}).get("ports") or {}
+        client = target.split(":")[0]
+        if target not in ports and not any(port.get("client") == client for port in ports.values()):
+            return ""
+        return (
+            f". {target} is in JACK, not PulseAudio: netaudio can disconnect JACK ports with disconnect_audio_ports "
+            "but cannot mute JACK ports or change their volume, and muting a PulseAudio output such as jack_out "
+            "would silence every application playing to it instead"
+        )
 
     async def _host_audio_tool(self, name: str, arguments: dict, writer, client_name: str) -> tuple[Any, bool]:
         if name == "set_wireless_value":
@@ -608,7 +650,7 @@ class McpHostAudioTools:
                     await self.host_audio.ensure()
                 return self._host_audio_preview(name, arguments), False
         except ValueError as exception:
-            return {"error": str(exception)}, True
+            return {"error": str(exception) + self._jack_target_hint(name, arguments)}, True
         logger.info("MCP %s called %s", client_name, name)
         body = {key: value for key, value in arguments.items() if key != "confirmed"}
         status, payload = await self._post_captured(WRITE_PATHS[name], body, writer)

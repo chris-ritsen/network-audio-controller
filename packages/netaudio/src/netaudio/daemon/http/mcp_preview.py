@@ -41,6 +41,22 @@ AVAILABILITY_KEYS = {
     "store_current_configuration": ("performance_operation_availability", "store_current_configuration"),
     "unlock_device": ("operation_availability", "locking"),
 }
+UNITS = {"set_latency": " ms", "set_sample_rate": " Hz", "set_encoding": "-bit"}
+CURRENT_VALUES = {
+    "set_clock_source": ("clock_source", "clock_source_code"),
+    "set_clock_subdomain": ("subdomain", "clock_subdomain_presentation"),
+    "set_aes67_multicast_prefix": ("prefix", "aes67_multicast_prefix"),
+    "set_receive_flow_default_slots": ("default_slots", "receive_flow_default_slots"),
+    "set_sample_rate_pullup": ("value", "sample_rate_pullup"),
+}
+DEVICE_EFFECTS = {
+    "identify": "{device}'s identify light flashes so someone can find it; audio is not affected",
+    "report_unresponsive": "netaudio treats {device} as possibly off the network and checks it again; the device is not touched",
+    "reset_device_diagnostics": "netaudio clears its own late-packet and clock counters for {device}; the device and its audio are not touched",
+    "start_metering": "{device} starts sending detailed level meters to netaudio; audio is not affected",
+    "stop_metering": "{device} stops sending the detailed level meters this client started; audio is not affected",
+    "store_current_configuration": "{device} saves its current settings so it starts with them after a reboot; audio is not affected",
+}
 LOCK_EXEMPT = {"identify", "unlock_device", "lock_device", "start_metering", "stop_metering", "refresh"}
 
 
@@ -195,8 +211,21 @@ def _rate_effects(device_name: str, record: dict | None, records: dict, rate) ->
     return effects, routes
 
 
+def _with_unit(name: str, value):
+    return f"{value:g}{UNITS[name]}" if name in UNITS and isinstance(value, (int, float)) else value
+
+
 def _device_change(name: str, request: dict, record: dict | None, records: dict, warnings: list[str]) -> dict:
     device_name = _display(record, request.get("device"))
+    if name in CURRENT_VALUES:
+        argument, field = CURRENT_VALUES[name]
+        before = (record or {}).get(field)
+        if isinstance(before, dict):
+            before = before.get("label") or before.get("text")
+        after = request.get(argument)
+        if before is not None and str(before) == str(after):
+            warnings.append(f"{device_name} already has {argument} {after}; nothing would change")
+        return {argument: {"from": "unknown" if before is None else before, "to": after}}
     if name in SETTINGS:
         argument, field, choices_field = SETTINGS[name]
         before = (record or {}).get(field)
@@ -210,8 +239,11 @@ def _device_change(name: str, request: dict, record: dict | None, records: dict,
             effects, routes = _rate_effects(device_name, record, records, after)
             warnings.extend(effects)
             if routes:
-                return {argument: {"from": before, "to": after}, "routes_that_stop": routes}
-        return {argument: {"from": before, "to": after}}
+                return {
+                    argument: {"from": _with_unit(name, before), "to": _with_unit(name, after)},
+                    "routes_that_stop": routes,
+                }
+        return {argument: {"from": _with_unit(name, before), "to": _with_unit(name, after)}}
     if name == "rename_device":
         routes = _routes_from(records, device_name)
         if routes:
@@ -250,7 +282,12 @@ def _device_change(name: str, request: dict, record: dict | None, records: dict,
             warnings.append(
                 f"{device_name} channel {number} is already at {choices.get(after, after)}; nothing would change"
             )
-        return {f"channel {number} level": {"from": choices.get(before, before), "to": choices.get(after, after)}}
+        return {
+            f"channel {number} level": {
+                "from": "unknown" if before is None else choices.get(before, before),
+                "to": choices.get(after, after),
+            }
+        }
     if name == "delete_transmit_flow":
         flows = [flow for flow in (record or {}).get("transmitter_flows") or [] if isinstance(flow, dict)]
         flow = next((flow for flow in flows if flow.get("flow_number") == request.get("flow_id")), None)
@@ -396,10 +433,45 @@ def write_preview(name: str, request: dict, records: dict, arguments: dict | Non
         )
     else:
         preview["change"] = _plain_arguments(request, {"confirmed"})
+    if "effect" not in preview:
+        effect = _effect(name, request, records, preview.get("device"))
+        if effect:
+            preview["effect"] = effect
     if warnings:
         preview["warnings"] = warnings
     preview["next"] = NEXT_STEP
     return preview
+
+
+def _effect(name: str, request: dict, records: dict, device: str | None) -> str | None:
+    if name in DEVICE_EFFECTS and device:
+        return DEVICE_EFFECTS[name].format(device=device)
+    if name == "clear_configuration" and device:
+        kept = " except its network settings" if request.get("mode") == "keep_network" else ""
+        return f"{device} clears its stored configuration{kept}, including routes and names, when it next reboots"
+    if name == "set_clock_warning_policy" and device:
+        verb = "warns" if request.get("clock_variation_warnings") else "stops warning"
+        return f"netaudio {verb} about {device}'s clock variation; the device is not touched"
+    server = request.get("server")
+    if name == "logout_ddm":
+        return (
+            f"netaudio removes the saved login for {server} and stops reading its managed devices until someone "
+            "logs in again; the devices keep running"
+        )
+    if name == "configure_monitoring_port":
+        return f"netaudio's monitoring port becomes {request.get('port')} and stays so after it restarts"
+    if name == "create_ddm_domain":
+        return f"{server} gets a new, empty domain named {request.get('name')}; no device joins it"
+    if name == "edit_ddm_profile":
+        if request.get("action") == "remove":
+            return f"netaudio removes its saved {server} server profile"
+        return f"netaudio changes its saved {server} server profile"
+    if name == "subscribe_external_flow":
+        receiver = _display(_record(records, request.get("rx_device")), request.get("rx_device"))
+        return (
+            f"{receiver} starts receiving the AES67 flow {request.get('session_id')} from {request.get('source_ipv4')}"
+        )
+    return None
 
 
 READBACK_TOOLS = frozenset(SETTINGS) | {"rename_channel", "rename_device", "set_gain", "lock_device", "unlock_device"}
