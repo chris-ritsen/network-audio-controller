@@ -12,6 +12,8 @@ REMOTE_PRIORITY = 3
 MAXIMUM_LINES = 80
 SOURCE_LIMIT = 8
 LOOSE_LIMIT = 4
+LEVEL_CHANGE_DB = 3.0
+PEAK_TEXT = re.compile(r"peak (-?\d+(?:\.\d+)?) dBFS")
 LOOSE_RANK = {"pulse_sink": 0, "pulse_source": 0, "pulse_playback": 0, "pulse_recording": 0, "wireless": 1}
 SIGNAL_FLOOR_DBFS = -80.0
 SHURE_LEVEL_OFFSET = 120
@@ -758,3 +760,29 @@ def destinations_summary(graph: SignalGraph, steps: list[Step]) -> str | None:
     parts = [f"{kind} {_grouped(entries, graph.local_host)}" for kind, entries in groups.items()]
     parts.extend(f"{device} {_joined(channels)}" for device, channels in dante.items())
     return "It ends at: " + "; ".join(parts) + "." if parts else None
+
+
+def _peak(text: str) -> float | None:
+    match = PEAK_TEXT.search(text)
+    return float(match.group(1)) if match else None
+
+
+def level_changes(
+    graph: SignalGraph, steps: list[Step], direction: str, levels: dict[str, tuple[str, str]]
+) -> list[str]:
+    changes = []
+    for step in steps:
+        if step.repeated or step.parent is None or not (step.note or "").startswith("through "):
+            continue
+        before, after = (step.parent, step.identity) if direction == "downstream" else (step.identity, step.parent)
+        before_state, before_text = levels.get(before, ("unknown", ""))
+        after_state, after_text = levels.get(after, ("unknown", ""))
+        if before_state != "signal" or after_state != "signal":
+            continue
+        first, second = _peak(before_text), _peak(after_text)
+        if first is None or second is None or abs(second - first) < LEVEL_CHANGE_DB:
+            continue
+        client = step.note.removeprefix("through ").split(",", 1)[0]
+        verb = "lowers" if second < first else "raises"
+        changes.append(f"{client} {verb} it by {abs(second - first):.0f} dB ({first:g} to {second:g} dBFS peak)")
+    return list(dict.fromkeys(changes))

@@ -331,6 +331,10 @@ def _change_line(component: str, change: dict) -> str:
         f"{key} {value}" for key, value in change.items() if key not in {"time", "kind"} and value not in (None, "")
     )
     label = "JACK" if component == "jack" else "PulseAudio"
+    if kind == "server_connected":
+        return f"{when} netaudio connected to {label}"
+    if kind == "server_stopped":
+        return f"{when} netaudio lost its connection to {label}: {change.get('reason') or 'unknown reason'}"
     return f"{when} {label} {str(kind).replace('_', ' ')}" + (f": {details}" if details else "")
 
 
@@ -418,7 +422,7 @@ def host_audio_view(snapshot: dict, arguments: dict) -> dict:
                 for client, bridge in snapshot["bridges"].items()
             }
     elif section == "changes":
-        view["changes"] = _changes(snapshot, None) or "no changes since the server connected"
+        view["changes"] = _changes(snapshot, None) or "no changes since netaudio connected"
     return compact(view)
 
 

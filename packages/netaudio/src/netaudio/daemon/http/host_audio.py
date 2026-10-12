@@ -18,6 +18,7 @@ from netaudio.host_audio.trace import (
     jack_meter_targets,
     LABEL_KIND,
     destinations_summary,
+    level_changes,
     node_level,
     render,
     silence_summary,
@@ -536,6 +537,10 @@ class DaemonHostAudioHandlers:
             stops.extend(direction_stops)
         if "downstream" in walks:
             payload["reaches"] = destinations_summary(graph, walks["downstream"])
+        if levels:
+            changes = [change for name in directions for change in level_changes(graph, walks[name], name, measured)]
+            if changes:
+                payload["level_changes"] = list(dict.fromkeys(changes))
         if levels:
             walked = walks.get("upstream", walks.get("downstream", []))
             silent = None if stops else silence_summary(graph, starts, walked, measured)
