@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from netaudio.daemon.http.mcp_preview import NEXT_STEP
 from netaudio.daemon.http.mcp_schema import close_matches
 from netaudio.daemon.http.mcp_views import availability_verdict, channel_label
 from netaudio.presets.parsing import parse_preset_xml
@@ -16,8 +17,8 @@ from netaudio.presets.storage import (
 PRESET_TOOLS = frozenset({"list_presets", "save_preset", "preview_preset", "apply_preset"})
 DEFAULT_PRESET_SECTIONS = ["audio", "routing"]
 PRESET_NEXT_STEP = (
-    "Nothing has changed. Tell the user which devices this changes and how; after they agree, call again with the "
-    "same arguments and confirmed=true."
+    "Nothing has changed. Tell the user which devices this changes and how and wait for their answer; only after "
+    "they agree, call again with the same arguments, confirmed=true and this preview's preview_token."
 )
 
 
@@ -227,6 +228,21 @@ class McpPresetTools:
             "devices": [_record_key(records, selector) for selector in arguments["devices"]],
             "sections": arguments.get("sections") or DEFAULT_PRESET_SECTIONS,
         }
+        if arguments.get("confirmed") is not True:
+            devices = [_device_name(records, key) for key in request["devices"]]
+            return 200, {
+                "changed": False,
+                "confirmation_required": True,
+                "operation": "save_preset",
+                "change": {"preset": reference, "devices": devices, "sections": request["sections"]},
+                "effect": (
+                    f"netaudio reads the {' and '.join(request['sections'])} settings of {len(devices)} device"
+                    f"{'' if len(devices) == 1 else 's'} and saves them as preset {reference}"
+                    + (", replacing the saved preset with that name" if path.exists() else "")
+                    + "; nothing on the devices changes"
+                ),
+                "next": NEXT_STEP,
+            }
         status, payload = await self._post_captured("/presets/save", request, writer)
         if status >= 400 or not isinstance(payload, dict):
             return status, payload

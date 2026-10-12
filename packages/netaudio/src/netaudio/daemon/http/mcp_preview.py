@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from netaudio import core
 from netaudio.daemon.http.mcp_views import (
     availability_verdict,
     channel_label,
@@ -10,8 +11,8 @@ from netaudio.daemon.http.mcp_views import (
 )
 
 NEXT_STEP = (
-    "Nothing has changed. Tell the user what this will do; after they agree, call again with the same "
-    "arguments and confirmed=true."
+    "Nothing has changed. Tell the user what this will do and wait for their answer; only after they agree, call "
+    "again with the same arguments, confirmed=true and this preview's preview_token."
 )
 SETTINGS = {
     "set_aes67": ("enabled", "aes67_configured", None),
@@ -46,7 +47,7 @@ CURRENT_VALUES = {
     "set_clock_source": ("clock_source", "clock_source_code"),
     "set_clock_subdomain": ("subdomain", "clock_subdomain_presentation"),
     "set_aes67_multicast_prefix": ("prefix", "aes67_multicast_prefix"),
-    "set_receive_flow_default_slots": ("default_slots", "receive_flow_default_slots"),
+    "set_receive_flow_default_slots": ("default_slots", None),
     "set_sample_rate_pullup": ("value", "sample_rate_pullup"),
 }
 DEVICE_EFFECTS = {
@@ -211,6 +212,18 @@ def _rate_effects(device_name: str, record: dict | None, records: dict, rate) ->
     return effects, routes
 
 
+def _performance(record: dict | None) -> dict:
+    values = (record or {}).get("performance_settings")
+    if not isinstance(values, dict) or not values:
+        return {}
+    try:
+        return core.performance_snapshot(
+            {"property_ids": [int(key) for key in values], "values": {str(key): value for key, value in values.items()}}
+        )
+    except (TypeError, ValueError):
+        return {}
+
+
 def _with_unit(name: str, value):
     return f"{value:g}{UNITS[name]}" if name in UNITS and isinstance(value, (int, float)) else value
 
@@ -219,13 +232,43 @@ def _device_change(name: str, request: dict, record: dict | None, records: dict,
     device_name = _display(record, request.get("device"))
     if name in CURRENT_VALUES:
         argument, field = CURRENT_VALUES[name]
-        before = (record or {}).get(field)
+        before = (record or {}).get(field) if field else _performance(record).get("receive_flow_default_slots")
         if isinstance(before, dict):
             before = before.get("label") or before.get("text")
         after = request.get(argument)
         if before is not None and str(before) == str(after):
             warnings.append(f"{device_name} already has {argument} {after}; nothing would change")
         return {argument: {"from": "unknown" if before is None else before, "to": after}}
+    if name == "configure_flow_performance":
+        kind = request.get("kind")
+        current = _performance(record).get("unicast_performance" if kind == "unicast" else f"{kind}_flow_performance")
+        current = current or {}
+        change = {}
+        for field, unit, scale in (("latency_microseconds", " ms", 1000), ("frames_per_packet", "", 1)):
+            before, after = current.get(field), request.get(field)
+            change[field.replace("_microseconds", "")] = {
+                "from": "unknown" if before is None else f"{before / scale:g}{unit}",
+                "to": f"{after / scale:g}{unit}" if isinstance(after, (int, float)) else after,
+            }
+        if current and all(
+            current.get(field) == request.get(field) for field in ("latency_microseconds", "frames_per_packet")
+        ):
+            warnings.append(
+                f"{device_name} already uses these {request.get('kind')} flow settings; nothing would change"
+            )
+        return {f"{request.get('kind')} flows": change}
+    if name == "configure_clock":
+        record = record or {}
+        current = {
+            "clock_source": record.get("clock_source"),
+            "preferred_leader": record.get("preferred_leader"),
+            "subdomain": (record.get("clock_subdomain_presentation") or {}).get("label"),
+        }
+        changes = request.get("changes") if isinstance(request.get("changes"), dict) else {}
+        return {
+            field: {"from": "unknown" if current.get(field) is None else current[field], "to": value}
+            for field, value in changes.items()
+        }
     if name in SETTINGS:
         argument, field, choices_field = SETTINGS[name]
         before = (record or {}).get(field)

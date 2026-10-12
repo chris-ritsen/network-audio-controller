@@ -251,6 +251,19 @@ async def test_full_authorization_code_flow_then_tool_call_and_refresh():
         "content-type": "application/json",
         "authorization": f"Bearer {tokens['access_token']}",
     }
+    _, preview, _ = await request(
+        server,
+        "POST",
+        "/mcp",
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "identify", "arguments": {"device": "lx-dante"}},
+        },
+        headers=mcp_headers,
+    )
+    preview_token = json.loads(preview["result"]["content"][0]["text"])["preview_token"]
     status, body, _ = await request(
         server,
         "POST",
@@ -259,7 +272,10 @@ async def test_full_authorization_code_flow_then_tool_call_and_refresh():
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": "identify", "arguments": {"device": "lx-dante", "confirmed": True}},
+            "params": {
+                "name": "identify",
+                "arguments": {"device": "lx-dante", "confirmed": True, "preview_token": preview_token},
+            },
         },
         headers=mcp_headers,
     )

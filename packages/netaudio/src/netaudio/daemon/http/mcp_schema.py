@@ -5,7 +5,11 @@ import json
 import re
 
 DEVICE_DESCRIPTION = "Device name, server name, or inventory ID as returned by list_devices."
-CONFIRMATION_DESCRIPTION = "Set true only after the user authorized this change. Leave it out to see what would change without changing anything."
+CONFIRMATION_DESCRIPTION = (
+    "Set true only after the user agreed to the change a preview showed, together with that preview's "
+    "preview_token. Leave it out to see what would change without changing anything."
+)
+PREVIEW_TOKEN_DESCRIPTION = "The preview_token from the preview of this exact change; required with confirmed=true."
 TYPE_NAMES = {
     "array": "a list",
     "boolean": "true or false",
@@ -32,6 +36,7 @@ def object_schema(properties: dict, required: list[str]) -> dict:
 def with_confirmation(schema: dict) -> dict:
     properties = dict(schema["properties"])
     properties["confirmed"] = {"type": "boolean", "description": CONFIRMATION_DESCRIPTION}
+    properties["preview_token"] = {"type": "string", "description": PREVIEW_TOKEN_DESCRIPTION}
     required = [key for key in schema["required"] if key != "confirmed"]
     return object_schema(properties, required)
 

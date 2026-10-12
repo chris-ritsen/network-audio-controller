@@ -13,6 +13,15 @@ AUTHORIZED = {"authorization": f"Bearer {TOKEN}", "content-type": "application/j
 
 
 async def rpc(server, method, params=None, *, request_id=1, headers=AUTHORIZED):
+    arguments = (params or {}).get("arguments") if method == "tools/call" else None
+    if isinstance(arguments, dict) and arguments.get("confirmed") is True and "preview_token" not in arguments:
+        preview_arguments = {key: value for key, value in arguments.items() if key != "confirmed"}
+        _, preview = await rpc(server, method, {**params, "arguments": preview_arguments}, headers=headers)
+        token = (
+            json.loads(preview["result"]["content"][0]["text"]).get("preview_token") if "result" in preview else None
+        )
+        if token:
+            params = {**params, "arguments": {**arguments, "preview_token": token}}
     writer = FakeWriter()
     message = {"jsonrpc": "2.0", "id": request_id, "method": method}
     if params is not None:

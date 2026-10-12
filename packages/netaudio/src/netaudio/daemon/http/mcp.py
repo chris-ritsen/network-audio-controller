@@ -28,6 +28,7 @@ from netaudio.daemon.http.mcp_apps import (
 from netaudio.daemon.http.mcp_host_audio import HOST_AUDIO_TOOL_NAMES, HOST_AUDIO_TOOL_SPECS, McpHostAudioTools
 from netaudio.daemon.http.mcp_planned import PLANNED_BY_NAME, PLANNED_OPERATIONS, PlannedOperation
 from netaudio.daemon.http.mcp_presets import PRESET_TOOLS, McpPresetTools
+from netaudio.daemon.http.mcp_confirmation import INTERNAL_CONFIRMATION, REFUSALS, PreviewTokens, preview_digest
 from netaudio.daemon.http.mcp_preview import (
     NEXT_STEP,
     READBACK_TOOLS,
@@ -134,8 +135,9 @@ MCP_INSTRUCTIONS = (
     "that display MCP Apps views, inspect_device_controls for a device's own panel (AVIO "
     "Bluetooth pairing and name, analog levels, Dante AV video), and save_preset/apply_preset to keep and restore "
     "setups by name. Reads are compact by default; detail=debug exposes raw evidence. Channels accept unique labels or "
-    "numbers. Call a write without confirmed to see exactly what it would change; nothing changes until the "
-    "user agrees and you call it again with confirmed=true, and the result reads the device back. Use "
+    "numbers. Call a write without confirmed to see exactly what it would change and to get a preview_token; "
+    "tell the user and wait for their answer. Only after they agree, call it again with confirmed=true and that "
+    "preview_token; a confirmation without one is refused, and the result reads the device back. Use "
     "apply_to_devices to make one change on several devices. A device that is off the network is not a problem, "
     "even when it is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it "
     "are not failures, and neither is worth mentioning unless the user asks about that device or about what is "
@@ -1032,7 +1034,6 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
             },
             ["devices", "name"],
         ),
-        confirmable=False,
     ),
     McpTool(
         name="list_presets",
@@ -2532,6 +2533,44 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 },
                 is_error=True,
             )
+        if tool.requires_confirmation and not INTERNAL_CONFIRMATION.get():
+            return await self._confirmation_gate(tool, arguments, writer, grant)
+        return await self._mcp_tool_dispatch(tool, arguments, writer, grant)
+
+    async def _confirmation_gate(self, tool: McpTool, arguments: dict, writer, grant: Grant | None) -> dict:
+        request = {key: value for key, value in arguments.items() if key not in {"confirmed", "preview_token"}}
+        result = await self._mcp_tool_dispatch(tool, request, writer, grant)
+        payload = _tool_payload(result)
+        if result.get("isError") or not isinstance(payload, dict):
+            return result
+        if payload.get("confirmation_required") is not True:
+            if arguments.get("confirmed") is True:
+                return await self._mcp_tool_dispatch(tool, {**request, "confirmed": True}, writer, grant)
+            return result
+        tokens = getattr(self, "_mcp_preview_tokens", None)
+        if tokens is None:
+            tokens = self._mcp_preview_tokens = PreviewTokens()
+        client = grant.client_id if grant is not None else "local"
+        digest = preview_digest(tool.name, request, payload)
+        if arguments.get("confirmed") is True:
+            outcome = tokens.redeem(arguments.get("preview_token"), client, digest)
+            if outcome == "accepted":
+                return await self._mcp_tool_dispatch(tool, {**request, "confirmed": True}, writer, grant)
+            logger.info(
+                "MCP %s confirmed %s without a matching preview (%s); returned the preview",
+                grant.client_name if grant else "unknown client",
+                tool.name,
+                outcome,
+            )
+            payload.pop("next", None)
+            payload["confirmation"] = REFUSALS[outcome]
+            if outcome != "missing":
+                payload["preview_token"] = tokens.issue(client, digest)
+            return _tool_result(payload, is_error=False)
+        payload["preview_token"] = tokens.issue(client, digest)
+        return _tool_result(payload, is_error=False)
+
+    async def _mcp_tool_dispatch(self, tool: McpTool, arguments: dict, writer, grant: Grant | None) -> dict:
         if tool.name == SHOW_ROUTING_MATRIX:
             return await self._show_routing_matrix(arguments, writer, grant)
         if tool.name not in WARMUP_EXEMPT_TOOLS:
@@ -3555,9 +3594,14 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             )
         results = []
         for record in selection["selected"]:
-            result = await self._mcp_tool_call(
-                {"name": name, "arguments": {**shared, "device": record.get("server_name"), "confirmed": True}}, writer
-            )
+            confirmation = INTERNAL_CONFIRMATION.set(True)
+            try:
+                result = await self._mcp_tool_call(
+                    {"name": name, "arguments": {**shared, "device": record.get("server_name"), "confirmed": True}},
+                    writer,
+                )
+            finally:
+                INTERNAL_CONFIRMATION.reset(confirmation)
             results.append(
                 {
                     "device": record.get("name") or record.get("server_name"),
@@ -3670,6 +3714,16 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
 
 def _error_response(request_id, code: int, message: str) -> dict:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+def _tool_payload(result: dict) -> Any:
+    content = result.get("content") if isinstance(result, dict) else None
+    if not isinstance(content, list) or not content or not isinstance(content[0], dict):
+        return None
+    try:
+        return json.loads(content[0].get("text") or "")
+    except ValueError:
+        return None
 
 
 def _tool_result(payload, *, is_error: bool) -> dict:
