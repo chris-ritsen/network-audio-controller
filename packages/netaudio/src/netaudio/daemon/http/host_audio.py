@@ -270,7 +270,7 @@ class DaemonHostAudioHandlers:
 
     async def _host_meter(self, host: str, targets: dict[str, list[str]], seconds: float) -> dict[str, dict]:
         if host == self.host_audio.host:
-            return await self.host_audio.meter.measure(targets, seconds)
+            return await self.host_audio.measure(targets, seconds)
         try:
             status, payload = await self.host_audio.peers.request(
                 host, "POST", "/host-audio/meter", {"targets": targets, "seconds": seconds}, timeout=seconds + 4
@@ -921,4 +921,4 @@ class DaemonHostAudioHandlers:
         if not self.host_audio.jack.available:
             await self._send_json(writer, {"error": f"JACK is not available: {self.host_audio.jack.reason}"}, 503)
             return
-        await self._send_json(writer, await self.host_audio.meter.measure(targets, float(seconds)))
+        await self._send_json(writer, await self.host_audio.measure(targets, float(seconds)))

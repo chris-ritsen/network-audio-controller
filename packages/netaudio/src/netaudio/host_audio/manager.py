@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import socket
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -24,6 +26,8 @@ SHARED_MEMORY = Path("/dev/shm")
 CONNECT_ATTEMPTS = 5
 CONNECT_RETRY_SECONDS = 0.5
 CLOSE_SECONDS = 5.0
+RECENT_LEVEL_SECONDS = 2.5
+RECENT_LEVEL_WINDOW_SECONDS = 1.0
 
 
 class HostAudioManager:
@@ -35,6 +39,7 @@ class HostAudioManager:
         self.record_jack_levels = record_jack_levels
         self.recorder = JackRecorder(self._record_levels, lambda: self.jack.available)
         self._recording = False
+        self._latest_levels: tuple[int, dict] | None = None
         self.peers = HostAudioPeers()
         self.host = socket.gethostname().removesuffix(".local")
         self._watch = DirectoryWatch(self._created)
@@ -46,7 +51,37 @@ class HostAudioManager:
         self._listeners.append(listener)
 
     def _record_levels(self, second: int, levels: dict) -> None:
+        self._latest_levels = (second, levels)
         self.level_history.record("jack", second, jack_values(levels), levels.keys())
+
+    async def measure(self, targets: dict[str, list[str]], seconds: float) -> dict[str, dict]:
+        found: dict[str, dict] = {target: {"connected": False} for target, sources in targets.items() if not sources}
+        if seconds <= RECENT_LEVEL_WINDOW_SECONDS:
+            found.update(self._recorded_levels(targets))
+        missing = {target: sources for target, sources in targets.items() if target not in found}
+        if missing:
+            found.update(await self.meter.measure(missing, seconds))
+        return found
+
+    def _recorded_levels(self, targets: dict[str, list[str]]) -> dict[str, dict]:
+        if not self.recorder.recording or self._latest_levels is None:
+            return {}
+        second, levels = self._latest_levels
+        if time.time() - second > RECENT_LEVEL_SECONDS:
+            return {}
+        found = {}
+        for target, sources in targets.items():
+            readings = [levels.get(source) for source in sources]
+            if not sources or any(reading is None for reading in readings):
+                continue
+            peaks = [reading[0] for reading in readings if reading[0] is not None]
+            powers = [10 ** (reading[1] / 10) for reading in readings if reading[1] is not None]
+            found[target] = {
+                "peak_dbfs": max(peaks) if peaks else None,
+                "rms_dbfs": round(10 * math.log10(sum(powers)), 1) if powers else None,
+                "recorded_second": second,
+            }
+        return found
 
     def _changed(self, component: str) -> None:
         if component == "jack" and self._recording and self.jack.available:
