@@ -171,6 +171,33 @@ def routes_by_source(devices: dict) -> dict[str, dict[str, list]]:
     return sources
 
 
+def off_device_feeds(devices: dict) -> dict[str, str]:
+    online = {
+        str(device.get("name") or server_name).casefold()
+        for server_name, device in devices.items()
+        if isinstance(device, dict) and device.get("online") is not False
+    }
+    feeds: dict[str, dict[str, list[str]]] = {}
+    for server_name, device in devices.items():
+        if not isinstance(device, dict) or device.get("online") is False:
+            continue
+        for subscription in _subscription_list(device):
+            source = subscription.get("tx_device")
+            if not source or str(source).casefold() in online:
+                continue
+            channel = subscription.get("rx_channel") or subscription.get("rx_channel_number")
+            receiver = feeds.setdefault(str(source), {}).setdefault(str(device.get("name") or server_name), [])
+            if str(channel) not in receiver:
+                receiver.append(str(channel))
+    return {
+        source: "; ".join(
+            f"{receiver} {', '.join(channels[:-1]) + ' and ' + channels[-1] if len(channels) > 1 else channels[0]}"
+            for receiver, channels in sorted(receivers.items())
+        )
+        for source, receivers in sorted(feeds.items())
+    }
+
+
 def channels_text(channels: list) -> str:
     numbers = [channel for channel in channels if isinstance(channel, int)]
     names = [str(channel) for channel in channels if not isinstance(channel, int)]
@@ -1538,6 +1565,31 @@ def network_overview_view(devices: dict, issues: dict, ddm: dict, journal: Any =
             ),
         }
     )
+
+
+def overview_answer(view: dict) -> str:
+    online = view.get("online_count") or 0
+    devices = f"{online} Dante device{'' if online == 1 else 's'} {'is' if online == 1 else 'are'} on the network"
+    findings = []
+    count = view.get("open_issue_count") or 0
+    if count:
+        first = (view.get("issue_groups") or [{}])[0]
+        example = ": ".join(str(part) for part in (first.get("device"), first.get("summary")) if part)
+        findings.append(
+            f"{count} open problem{'' if count == 1 else 's'}" + (f", such as {example}" if example else "")
+        )
+    streams = view.get("streams") or {}
+    late = streams.get("late_packets_since_server_start") or 0
+    if late:
+        findings.append(f"{late} late packet{'' if late == 1 else 's'} since the server started")
+    findings.extend((streams.get("problems") or [])[:1])
+    others = (view.get("other_problems") or [])[:2]
+    also = f" Also, {'; '.join(others)}." if others else ""
+    if not findings:
+        working = "The Dante network is working" if others else "Everything is working"
+        return f"{working}: {devices}, with no open problems.{also}"
+    text = "; ".join(findings)
+    return f"{text[:1].upper()}{text[1:]}. {devices[:1].upper()}{devices[1:]}.{also}"
 
 
 def device_addresses(records: dict) -> dict[str, str]:

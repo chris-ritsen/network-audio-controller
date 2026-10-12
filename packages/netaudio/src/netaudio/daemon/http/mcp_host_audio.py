@@ -10,7 +10,7 @@ from netaudio.daemon.http.host_audio_control import card_change, jack_change, pu
 from netaudio.daemon.http.mcp_preview import NEXT_STEP
 from netaudio.daemon.http.mcp_schema import object_schema
 from netaudio.daemon.http.mcp_signal_history import signal_period
-from netaudio.daemon.http.mcp_views import compact
+from netaudio.daemon.http.mcp_views import compact, local_time_text
 from netaudio.host_audio.alsa import is_dante_interface
 from netaudio.host_audio.links import bridge_channel, hardware_channel
 
@@ -23,7 +23,8 @@ SECTIONS = ["summary", "connections", "ports", "pulse", "cards", "changes"]
 POINT_DESCRIPTION = (
     "Where to start: a Shure channel (AD4D-A ch1), a Dante device (every routed channel, such as a32), a Dante channel (lx-dante rx 1), a JACK port or alias "
     "(system:capture_1), a PulseAudio input or output (jack_in, default input), or an application (Discord). "
-    "Points on this server's computer need no prefix; put another computer's name first for its points, such as "
+    "The user's own words work too (work macbook, wireless mic), matching names loosely, including devices that "
+    "are off the network. Points on this server's computer need no prefix; put another computer's name first for its points, such as "
     "workstation default input."
 )
 TARGET_DESCRIPTION = (
@@ -42,7 +43,8 @@ HOST_AUDIO_TOOL_SPECS: tuple[dict, ...] = (
             "routes, this computer's sound cards, JACK ports and connections, and PulseAudio inputs, outputs and "
             "application streams, on this computer and on other computers running netaudio. Lists every step "
             "upstream and downstream with its level, all measured at the same moment, and says where signal stops. "
-            "Use it to answer why something can't be heard."
+            "Use it to answer why something can't be heard. Its answer field is a one-sentence reply to say first; "
+            "the rest is detail."
         ),
         "input_schema": object_schema(
             {
@@ -220,8 +222,9 @@ def _jack_line(jack: dict) -> str:
     clients = len({port["client"] for port in (jack.get("ports") or {}).values()})
     xruns = jack.get("xruns") or 0
     xrun_text = (
-        f"{xruns} xrun{'' if xruns == 1 else 's'} since netaudio began watching at {jack.get('xruns_since')}"
-        + (f", last at {jack.get('last_xrun')}" if jack.get("last_xrun") else "")
+        f"{xruns} xrun{'' if xruns == 1 else 's'} since netaudio began watching at "
+        f"{local_time_text(jack.get('xruns_since'))}"
+        + (f", last at {local_time_text(jack.get('last_xrun'))}" if jack.get("last_xrun") else "")
     )
     return f"{rate / 1000:g} kHz, {frames} frames{latency}, DSP load {jack.get('cpu_load')}%, {clients} clients, {xrun_text}"
 
@@ -636,8 +639,18 @@ class McpHostAudioTools:
                 }
             else:
                 view.setdefault("other_computers_audio", {})[host] = summary
+        records = {
+            record.get("name"): record for record in self._serialized_devices().values() if isinstance(record, dict)
+        }
+        conditions = [
+            condition for snapshot in snapshots.values() for condition in self._snapshot_conditions(snapshot, records)
+        ]
         if self.shure and self.shure.devices:
-            view["wireless"] = wireless_lines({mac: device.to_json() for mac, device in self.shure.devices.items()})
+            wireless = {mac: device.to_json() for mac, device in self.shure.devices.items()}
+            view["wireless"] = wireless_lines(wireless)
+            conditions.extend(wireless_conditions(wireless))
+        if conditions:
+            view["other_problems"] = conditions
         return view
 
     def _snapshot_conditions(self, snapshot: dict, records: dict) -> list[str]:
@@ -651,7 +664,7 @@ class McpHostAudioTools:
         if jack.get("xruns"):
             conditions.append(
                 f"JACK on {host} had {jack['xruns']} xrun{'' if jack['xruns'] == 1 else 's'} since netaudio began "
-                f"watching at {jack.get('xruns_since')}, last at {jack.get('last_xrun')}"
+                f"watching at {local_time_text(jack.get('xruns_since'))}, last at {local_time_text(jack.get('last_xrun'))}"
             )
         present = {card["id"] for card in snapshot["cards"]}
         for device, card in sorted((snapshot.get("card_links") or {}).items()):

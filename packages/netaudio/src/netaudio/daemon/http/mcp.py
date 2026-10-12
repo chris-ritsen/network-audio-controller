@@ -85,10 +85,12 @@ from netaudio.daemon.http.mcp_views import (
     name_meter_channels,
     network_levels_view,
     network_overview_view,
+    overview_answer,
     last_seen_text,
     off_devices,
     receive_channels_text,
     routes_by_source,
+    off_device_feeds,
     is_off,
     record_fields_view,
     renamed_devices,
@@ -137,7 +139,7 @@ MCP_INSTRUCTIONS = (
     "apply_to_devices to make one change on several devices. A device that is off the network is not a problem, "
     "even when it is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it "
     "are not failures, and neither is worth mentioning unless the user asks about that device or about what is "
-    "off. forget_device removes devices that no longer matter. Answer questions about how the user's audio sounds (silent, quiet, distorted, not reaching someone) from trace_signal and get_signal_levels on the actual chain rather than general advice; get_network_overview's recent_changes and get_event_journal say what changed. Operations with status planned are designed but not built; calling one explains what blocks it."
+    "off. forget_device removes devices that no longer matter. Answer questions about how the user's audio sounds (silent, quiet, distorted, not reaching someone) from trace_signal and get_signal_levels on the actual chain rather than general advice. trace_signal and get_network_overview start with an answer field: say that sentence first, then detail only as needed. get_network_overview's recent_changes and get_event_journal say what changed. Operations with status planned are designed but not built; calling one explains what blocks it."
 )
 
 
@@ -684,7 +686,8 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
         description=(
             "One compact snapshot of the devices on the network, clock leaders, problems and Dante Domain Manager "
             "state. Devices that are off the network are not problems and are left out; list_devices shows them with "
-            "when they were last seen. Use focused tools for channels, routes or forensic detail."
+            "when they were last seen. Its answer field is a one-sentence reply to say first. Use focused tools for "
+            "channels, routes or forensic detail."
         ),
         input_schema=object_schema({}, []),
         method="GET",
@@ -2714,6 +2717,15 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             payload = wireless_view(payload, records)
             if isinstance(payload, dict):
                 payload["devices"] = list(payload.get("devices") or []) + self._remembered_wireless(live)
+                if not payload["devices"]:
+                    feeds = off_device_feeds(records)
+                    payload["note"] = "No Shure device is on the network now." + (
+                        " Dante devices that are off, with what they feed: "
+                        + "; ".join(f"{source} ({text})" for source, text in feeds.items())
+                        + "."
+                        if feeds
+                        else ""
+                    )
         elif tool.name == "get_transmit_flows" and status < 400:
             payload = transmit_flows_view(
                 payload, request, _record_for_selector(records, request["device"]), device_addresses(records)
@@ -3369,7 +3381,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 "detail": "get_device_diagnostics",
             }
         )
-        return _tool_result(view, is_error=False)
+        return _tool_result({"answer": overview_answer(view), **view}, is_error=False)
 
     async def _forget_device(self, request: dict, records: dict, writer) -> dict:
         captured = CapturedResponse(writer.get_extra_info("peername"))
