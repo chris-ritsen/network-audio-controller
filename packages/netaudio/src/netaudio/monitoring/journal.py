@@ -93,6 +93,9 @@ class MonitoringEventJournal:
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._conditions: dict[tuple[str, str, str], bool] = {}
         self._next_sequence = 1
+        self.gaps: list[tuple[str, str]] = []
+        self.remembered: dict[str, dict[str, Any]] = {}
+        self._seen_at: dict[str, str] = {}
         self.issue_engine = IssueEngine(history_limit=max_events, thresholds=self.thresholds)
 
     @classmethod
@@ -113,6 +116,8 @@ class MonitoringEventJournal:
 
     def forget_device(self, identity: str) -> None:
         self._snapshots.pop(identity, None)
+        self.remembered.pop(identity, None)
+        self._seen_at.pop(identity, None)
         self._conditions = {key: value for key, value in self._conditions.items() if key[0] != identity}
         self.issue_engine.forget_device(identity)
 
@@ -142,6 +147,8 @@ class MonitoringEventJournal:
         previous = self._snapshots.get(identity)
         self._snapshots[identity] = current
         observed_at = timestamp or self._timestamp()
+        if current.get("online") is not False:
+            self._seen_at[identity] = observed_at
         issue_transitions = self.issue_engine._observe_normalized_snapshot(
             current,
             timestamp=observed_at,
@@ -253,6 +260,28 @@ class MonitoringEventJournal:
             "count": len(events),
             "events": events,
         }
+
+    def last_known(self) -> dict[str, tuple[str | None, dict[str, Any]]]:
+        known = {identity: (entry.get("seen_at"), entry["record"]) for identity, entry in self.remembered.items()}
+        for identity, snapshot in self._snapshots.items():
+            known[identity] = (self._seen_at.get(identity) or known.get(identity, (None, {}))[0], snapshot)
+        return known
+
+    def saved_events(self) -> list[dict[str, Any]]:
+        return [event.to_dict() for event in self._events]
+
+    def restore(self, events: list[dict[str, Any]], gaps: list[tuple[str, str]]) -> int:
+        if self._events:
+            return 0
+        restored = sorted((MonitoringEvent.from_dict(event) for event in events), key=lambda event: event.sequence)
+        restored = restored[-self.max_events :]
+        self._events.extend(restored)
+        if restored:
+            self._next_sequence = max(event.sequence for event in restored) + 1
+            oldest = restored[0].timestamp
+            gaps = [gap for gap in gaps if gap[1] >= oldest]
+        self.gaps = list(gaps)
+        return len(restored)
 
     def clear(self) -> int:
         count = len(self._events)

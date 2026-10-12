@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from netaudio.daemon.server import NetaudioDaemon
+from netaudio.monitoring.journal import MonitoringEventJournal
 from netaudio.monitoring.level_history import LevelHistory
 
 
@@ -96,6 +97,8 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks(tmp_path):
     daemon.metering = _component(stop=AsyncMock())
     daemon.level_history = LevelHistory()
     daemon.level_history_path = tmp_path / "level_history.sqlite"
+    daemon.event_journal = MonitoringEventJournal()
+    daemon.event_journal_path = tmp_path / "event_journal.sqlite"
     daemon._redis = _component(aclose=AsyncMock())
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = _component(close=MagicMock())
@@ -157,6 +160,8 @@ async def test_component_failure_does_not_skip_remaining_shutdown(tmp_path):
     daemon.metering = _component(stop=AsyncMock())
     daemon.level_history = LevelHistory()
     daemon.level_history_path = tmp_path / "level_history.sqlite"
+    daemon.event_journal = MonitoringEventJournal()
+    daemon.event_journal_path = tmp_path / "event_journal.sqlite"
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = None
@@ -194,6 +199,8 @@ async def test_partial_start_failure_unwinds_started_components(tmp_path):
     daemon.metering = _component(stop=AsyncMock())
     daemon.level_history = LevelHistory()
     daemon.level_history_path = tmp_path / "level_history.sqlite"
+    daemon.event_journal = MonitoringEventJournal()
+    daemon.event_journal_path = tmp_path / "event_journal.sqlite"
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = None
@@ -255,6 +262,8 @@ async def test_concurrent_start_callers_share_one_initialization_and_exit_togeth
     daemon.metering = _component(stop=AsyncMock())
     daemon.level_history = LevelHistory()
     daemon.level_history_path = tmp_path / "level_history.sqlite"
+    daemon.event_journal = MonitoringEventJournal()
+    daemon.event_journal_path = tmp_path / "event_journal.sqlite"
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
     daemon._packet_store = None

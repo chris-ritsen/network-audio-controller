@@ -68,6 +68,7 @@ from netaudio.daemon.http.mcp_views import (
     ddm_inventory_known,
     device_addresses,
     device_list_view,
+    device_summary,
     device_view,
     diagnostics_view,
     events_view,
@@ -1435,6 +1436,7 @@ HISTORICAL_DEVICE_TOOLS = frozenset({"get_issues", "get_event_journal"})
 NAME_SELECTED_TOOLS = frozenset({"get_issues", "get_event_journal", "get_routing", "get_signal_levels"})
 CHANNEL_SELECTED_TOOLS = frozenset({"rename_channel", "set_gain"})
 WARMUP_SECONDS = 30.0
+WAITING_ROUTE_LIMIT = 12
 EMPTY_RESULTS = {
     "get_external_flows": "no AES67 or RTP streams are being announced on the network",
     "get_metering_status": "no detailed metering is running",
@@ -2558,6 +2560,18 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             elif "device" in request or "rx_device" in request:
                 selector_key = "device" if "device" in request else "rx_device"
                 record = _record_for_selector(records, request[selector_key])
+                if record is None and tool.name == "get_device":
+                    remembered = _record_for_selector(self._remembered_devices(records), request["device"])
+                    if remembered is not None:
+                        view = device_view(remembered, request["sections"])
+                        state = (
+                            f"off the network, last seen {remembered['remembered_last_seen']}"
+                            if remembered.get("remembered_last_seen")
+                            else "off the network"
+                        )
+                        return _tool_result(
+                            {"state": f"{state}; this is how it was then", **compact(view)}, is_error=False
+                        )
                 if record is None and tool.name not in HISTORICAL_DEVICE_TOOLS:
                     raise ValueError(await self._device_not_found(records, request[selector_key], writer))
                 if record is not None:
@@ -2699,6 +2713,14 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
         elif tool.name == "get_issues" and status < 400:
             payload = issue_groups_view(payload, request, records)
         elif status < 400 and tool.name in TOOL_VIEWS and isinstance(payload, (dict, list)):
+            if tool.name == "get_event_journal" and isinstance(payload, dict):
+                journal = getattr(self, "event_journal", None)
+                saved = journal.saved_events() if journal is not None else []
+                payload["startups"] = [
+                    self.server_info.get("started_at"),
+                    saved[0]["timestamp"] if saved else None,
+                    *(started for _, started in (journal.gaps if journal is not None else [])),
+                ]
             payload = TOOL_VIEWS[tool.name](payload, request)
         if status < 400 and tool.name == "find_channels":
             payload = with_channel_signal(
@@ -2724,6 +2746,13 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                     if isinstance(payload, dict)
                     else payload
                 )
+                playing = await self.host_audio_now_playing()
+                if playing and isinstance(payload, dict):
+                    payload = {
+                        "playing_now": playing["computers"],
+                        **payload,
+                        "playing_notes": playing["notes"],
+                    }
             elif request.get("device") and isinstance(payload, dict):
                 if request.get("detail") != "debug":
                     for name, entry in payload.items():
@@ -2744,10 +2773,19 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
         elif status < 400 and tool.name == "get_server_info" and isinstance(payload, dict):
             payload = {**payload, "now": utc_now()}
         elif status < 400 and tool.name == "get_event_journal" and isinstance(payload, dict):
+            journal = getattr(self, "event_journal", None)
+            saved = journal.saved_events() if journal is not None else []
+            gaps = journal.gaps if journal is not None else []
             payload = {
                 **payload,
-                "recorded_since": self.server_info.get("started_at"),
-                "retention": "kept in memory; the journal starts empty whenever the server restarts",
+                "recorded_since": saved[0]["timestamp"] if saved else self.server_info.get("started_at"),
+                "not_recorded": [f"{stopped} to {started} (the server was stopped)" for stopped, started in gaps]
+                or None,
+                "retention": (
+                    "kept across restarts; nothing is recorded while the server is stopped. Issue events from the "
+                    "first minute after each start, while devices are still being found, are left out; get_issues "
+                    "shows any that stayed open, and detail=debug shows them all"
+                ),
             }
         if request.get("detail") == "debug" or "full" in (request.get("sections") or ()):
             payload = hexadecimal_byte_fields(payload)
@@ -3142,8 +3180,24 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                         f"{entry['name']} is off the network ({when}), so its own routes, settings and levels are "
                         "not known"
                     )
-                    if entry.get("waiting_routes"):
-                        message += f"; routes on other devices that wait for it: {entry['waiting_routes']}"
+                    sends = [
+                        f"{subscription.get('tx_channel')} \u2192 {device.get('name')} rx "
+                        f"{subscription.get('rx_channel_number')} {subscription.get('rx_channel')}"
+                        for device in records.values()
+                        if isinstance(device, dict) and device.get("online") is not False
+                        for subscription in device.get("subscriptions") or []
+                        if isinstance(subscription, dict)
+                        and str(subscription.get("tx_device")).casefold() == str(entry["name"]).casefold()
+                    ]
+                    if sends:
+                        message += (
+                            f". These routes wait for it, so its channels carry: {'; '.join(sends[:WAITING_ROUTE_LIMIT])}"
+                            + (
+                                f" and {len(sends) - WAITING_ROUTE_LIMIT} more"
+                                if len(sends) > WAITING_ROUTE_LIMIT
+                                else ""
+                            )
+                        )
                     if entry.get("routes_still_connected"):
                         message += (
                             f". {entry['routes_still_connected']} route(s) to it are still receiving audio, so it was "
@@ -3151,6 +3205,33 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                         )
                     return message
         return _device_not_found(records, selector)
+
+    def _unlisted_off_devices(self, devices: dict, journal: dict, listed: dict, ddm_known: bool) -> dict:
+        known = {str(name).casefold() for name in listed}
+        found: dict[str, dict] = {}
+        for record in self._remembered_devices(devices).values():
+            name = str(record.get("name"))
+            if name.casefold() in known:
+                continue
+            summary = device_summary(record, ddm_known, devices)
+            found[name] = compact(
+                {"product": summary.get("product") or summary.get("model"), "last_seen": record["remembered_last_seen"]}
+            )
+        for entry in missing_devices(devices, journal):
+            name = str(entry["name"])
+            if name.casefold() in known or entry.get("renamed_to"):
+                continue
+            current = found.get(name, {})
+            found[name] = compact(
+                {
+                    **current,
+                    "last_seen": current.get("last_seen")
+                    or entry.get("disappeared_at")
+                    or "not seen since the server started",
+                    "routes_waiting_for_it": entry.get("routes_waiting") or None,
+                }
+            )
+        return found
 
     async def _inventory_view(self, name: str, request: dict, writer) -> dict:
         snapshots = {}
@@ -3160,7 +3241,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             ("ddm", "/ddm/status"),
             ("journal", "/event-journal"),
         ):
-            if name == "list_devices" and key in {"issues", "journal"}:
+            if name == "list_devices" and key == "issues":
                 continue
             captured = CapturedResponse(writer.get_extra_info("peername"))
             try:
@@ -3173,7 +3254,9 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             snapshots[key] = snapshot
         if name == "list_devices":
             ddm_known = ddm_inventory_known(snapshots["ddm"])
-            return _tool_result(device_list_view(snapshots["devices"], ddm_known), is_error=False)
+            listed = device_list_view(snapshots["devices"], ddm_known)
+            listed.update(self._unlisted_off_devices(snapshots["devices"], snapshots["journal"], listed, ddm_known))
+            return _tool_result(listed, is_error=False)
         view = network_overview_view(**snapshots)
         view.update(await self._host_overview())
         devices, problems = await self._stream_health(snapshots["devices"], writer)

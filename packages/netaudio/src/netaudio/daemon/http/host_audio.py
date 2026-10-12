@@ -16,8 +16,10 @@ from netaudio.host_audio.trace import (
     SignalGraph,
     build_graph,
     jack_meter_targets,
+    LABEL_KIND,
     node_level,
     render,
+    silence_summary,
 )
 
 logger = logging.getLogger("netaudio")
@@ -31,10 +33,11 @@ SUMMARY_PEER_TIMEOUT_SECONDS = 1.5
 FIND_LIMIT = 24
 HISTORY_FLUSH_SECONDS = 1.5
 MAXIMUM_HISTORY_KEYS = 64
-NEIGHBOUR_LIMIT = 4
+NEIGHBOUR_LIMIT = 8
 POINT_FORMS = (
     "a Shure channel (AD4D-A ch1), a Dante channel (lx-dante rx 1), a JACK port or alias, "
-    "a PulseAudio input or output, or an application name; add @computer for another computer"
+    "a PulseAudio input or output, or an application name; put another computer's name first, such as "
+    "workstation default input"
 )
 
 
@@ -123,11 +126,27 @@ class DaemonHostAudioHandlers:
                 snapshots[host] = payload
         return snapshots, notes
 
+    def _remembered_devices(self, records: dict) -> dict[str, dict]:
+        journal = getattr(self, "event_journal", None)
+        if journal is None:
+            return {}
+        live = [record for record in records.values() if isinstance(record, dict)]
+        names = {str(record.get("name")).casefold() for record in live if record.get("name")}
+        addresses = {record.get("mac_address") for record in live if record.get("mac_address")}
+        remembered = {}
+        for identity, (seen_at, record) in journal.last_known().items():
+            name = record.get("name")
+            if not name or str(name).casefold() in names or record.get("mac_address") in addresses - {None}:
+                continue
+            remembered[f"remembered:{identity}"] = {**record, "online": False, "remembered_last_seen": seen_at}
+        return remembered
+
     async def _signal_graph(self) -> tuple[SignalGraph, dict[str, dict], dict, list[str]]:
         await self.host_audio.ensure()
         local = self.host_audio.snapshot()
         peer_snapshots, notes = await self._peer_snapshots()
         records = self._serialized_devices()
+        records = {**records, **self._remembered_devices(records)}
         wireless = self._wireless_payload()
         snapshots = {local["host"]: local, **peer_snapshots}
         graph = build_graph(
@@ -342,6 +361,60 @@ class DaemonHostAudioHandlers:
         shown = ", ".join(labels[:NEIGHBOUR_LIMIT])
         return shown + (f" and {len(labels) - NEIGHBOUR_LIMIT} more" if len(labels) > NEIGHBOUR_LIMIT else "")
 
+    @staticmethod
+    def _signal_sources(graph: SignalGraph) -> list[str]:
+        chosen, clients = [], set()
+        for identity, node in sorted(graph.nodes.items(), key=lambda item: item[0]):
+            if node.kind != "jack" or node.details.get("direction") != "output" or not graph.downstream.get(identity):
+                continue
+            if any(graph.nodes[other].kind == "jack" for other, _ in graph.upstream.get(identity, ())):
+                continue
+            client = (node.details["host"], node.details["port"].split(":")[0])
+            if client[1] != "system":
+                if client in clients:
+                    continue
+                clients.add(client)
+            chosen.append(identity)
+        return chosen
+
+    @staticmethod
+    def _fed_by(graph: SignalGraph, identity: str) -> list[str]:
+        pending, seen, leaves = [identity], {identity}, []
+        while pending:
+            current = pending.pop(0)
+            for other, _ in graph.upstream.get(current, ()):
+                if other in seen:
+                    continue
+                seen.add(other)
+                if graph.upstream.get(other):
+                    pending.append(other)
+                else:
+                    leaves.append(LABEL_KIND.sub("", graph.nodes[other].label))
+        return list(dict.fromkeys(leaves))
+
+    async def host_audio_now_playing(self) -> dict | None:
+        if self.host_audio is None:
+            return None
+        graph, snapshots, records, peer_notes = await self._signal_graph()
+        sources = self._signal_sources(graph)
+        measured, notes = await self._levels(graph, sources, snapshots, records, DEFAULT_METER_SECONDS)
+        view: dict[str, Any] = {host: [] for host in snapshots}
+        for identity in sources:
+            state, text = measured.get(identity, ("unknown", ""))
+            if state not in {"signal", "quiet"}:
+                continue
+            node = graph.nodes[identity]
+            client = node.details["port"].split(":")[0]
+            name = LABEL_KIND.sub("", node.label) if client == "system" else client
+            fed_by = self._fed_by(graph, identity)
+            line = f"{name}: {text}" + (f", from {'; '.join(fed_by)}" if fed_by else "")
+            view.setdefault(node.details["host"], []).append(line)
+        for host, lines in view.items():
+            if not lines:
+                view[host] = "nothing is playing"
+        notes.extend(note for note in peer_notes if "did not report" not in note)
+        return {"computers": view, "measured_at": utc_now(), "notes": notes or None}
+
     async def host_audio_find(self, query: str) -> dict | None:
         if self.host_audio is None:
             return None
@@ -393,6 +466,9 @@ class DaemonHostAudioHandlers:
         graph, snapshots, records, peer_notes = await self._signal_graph()
         local_host = self.host_audio.host
         starts, suggestions = graph.resolve(point)
+        loose = not starts
+        if loose:
+            starts = graph.resolve_loosely(point)
         if not starts:
             hint = f"; did you mean {' or '.join(repr(value) for value in suggestions)}?" if suggestions else ""
             return 404, {
@@ -414,6 +490,12 @@ class DaemonHostAudioHandlers:
                 else None
             ),
             "point": point,
+            "matched": (
+                f"nothing is named exactly {point!r}, so this traces what is named after it: "
+                + ", ".join(LABEL_KIND.sub("", graph.nodes[identity].label) for identity in starts)
+                if loose
+                else None
+            ),
             "start": [
                 graph.nodes[identity].label + (f": {measured[identity][1]}" if identity in measured else "")
                 for identity in starts
@@ -428,7 +510,12 @@ class DaemonHostAudioHandlers:
                 payload[f"more_{name}"] = f"{remaining} more steps not shown; trace from a later point to see them"
             stops.extend(direction_stops)
         if levels:
-            payload["signal_stops"] = list(dict.fromkeys(stops)) or "no step where signal stops"
+            walked = walks.get("upstream", walks.get("downstream", []))
+            silent = None if stops else silence_summary(graph, starts, walked, measured)
+            if silent:
+                payload["why_silent"] = silent
+            else:
+                payload["signal_stops"] = list(dict.fromkeys(stops)) or "no step where signal stops"
             payload["measured_at"] = utc_now()
         notes.extend(self._unlinked_cards(graph, identities, snapshots))
         notes.extend(self._availability_notes(snapshots))
@@ -449,6 +536,7 @@ class DaemonHostAudioHandlers:
         errors = {}
         for point in points:
             starts, suggestions = graph.resolve(point)
+            starts = starts or graph.resolve_loosely(point)
             if starts:
                 resolved[point] = starts
             else:

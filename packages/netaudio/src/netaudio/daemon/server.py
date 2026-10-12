@@ -38,6 +38,11 @@ from netaudio.monitoring.level_history_store import (
     load_level_history,
     save_level_history,
 )
+from netaudio.monitoring.journal_store import (
+    default_event_journal_path,
+    load_event_journal,
+    save_event_journal,
+)
 from netaudio.shure.manager import ShureManager
 
 
@@ -200,6 +205,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._stop_complete = False
         self.level_history = LevelHistory()
         self.level_history_path = default_level_history_path()
+        self.event_journal_path = default_event_journal_path()
         self.metering = MeteringManager(self.application)
         self.metering.add_listener(self._record_dante_levels)
         self.managed_signals = ManagedSignalReceiver(self.application, self.metering)
@@ -670,6 +676,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
     async def _start_once(self):
         self.http_api.discovery_started_monotonic = time.monotonic()
         load_level_history(self.level_history, self.level_history_path)
+        load_event_journal(self.event_journal, self.event_journal_path)
 
         try:
             await self.http_api.start()
@@ -843,6 +850,11 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             save_level_history(self.level_history, self.level_history_path)
         except (OSError, sqlite3.Error) as exception:
             logger.warning(f"Could not save signal level history: {exception}", exc_info=True)
+
+        try:
+            save_event_journal(self.event_journal, self.event_journal_path)
+        except (OSError, sqlite3.Error) as exception:
+            logger.warning(f"Could not save the event journal: {exception}", exc_info=True)
 
         if self._redis:
             try:

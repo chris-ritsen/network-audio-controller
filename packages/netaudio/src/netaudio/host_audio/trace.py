@@ -10,6 +10,9 @@ from netaudio.host_audio.links import bridge_channel, hardware_channel
 MAXIMUM_STARTS = 12
 REMOTE_PRIORITY = 3
 MAXIMUM_LINES = 80
+SOURCE_LIMIT = 8
+LOOSE_LIMIT = 4
+LOOSE_RANK = {"pulse_sink": 0, "pulse_source": 0, "pulse_playback": 0, "pulse_recording": 0, "wireless": 1}
 SIGNAL_FLOOR_DBFS = -80.0
 SHURE_LEVEL_OFFSET = 120
 ARROWS = {"downstream": "→", "upstream": "←"}
@@ -54,6 +57,7 @@ class SignalGraph:
         self.downstream: dict[str, list[tuple[str, str | None]]] = {}
         self.upstream: dict[str, list[tuple[str, str | None]]] = {}
         self.names: dict[str, list[tuple[int, str]]] = {}
+        self.local_host: str | None = None
 
     def add(self, node: Node, names: dict[str, int] | None = None) -> Node:
         if node.identity not in self.nodes:
@@ -80,6 +84,29 @@ class SignalGraph:
             return identities[:MAXIMUM_STARTS], []
         suggestions = difflib.get_close_matches(_fold(point), list(self.names), n=5, cutoff=0.6)
         return [], suggestions
+
+    def resolve_loosely(self, point: str) -> list[str]:
+        words = re.findall(r"[a-z0-9]+", _fold(point))
+        if not words:
+            return []
+        found: set[str] = set()
+        for name, entries in self.names.items():
+            tokens = re.findall(r"[a-z0-9]+", name)
+            if all(word in tokens for word in words):
+                found.update(identity for _, identity in entries)
+        if "monitor" not in words:
+            found = {identity for identity in found if not self.nodes[identity].label.endswith(".monitor")}
+        if not found:
+            return []
+
+        def rank(identity: str) -> tuple[int, bool]:
+            kind = self.nodes[identity].kind
+            host = identity.split("@", 1)[1].split(":", 1)[0] if "@" in identity else self.local_host
+            return LOOSE_RANK.get(kind, 2 if kind.startswith("dante") else 3), host != self.local_host
+
+        best = min(rank(identity) for identity in found)
+        chosen = sorted((identity for identity in found if rank(identity) == best), key=_natural)
+        return chosen if len(chosen) <= LOOSE_LIMIT else []
 
     def walk(self, starts: list[str], direction: str) -> list[Step]:
         edges = self.downstream if direction == "downstream" else self.upstream
@@ -174,7 +201,9 @@ def _add_dante(graph: SignalGraph, records: dict) -> None:
                     Node(
                         identity,
                         f"dante_{direction}",
-                        f"{name} {direction} {number}" + (f" {label}" if label != str(number) else "") + " (Dante)",
+                        f"{name} {direction} {number}"
+                        + (f" {label}" if label != str(number) else "")
+                        + (" (Dante, off the network)" if record.get("online") is False else " (Dante)"),
                         {
                             "device": name,
                             "direction": direction,
@@ -223,6 +252,8 @@ def _add_dante(graph: SignalGraph, records: dict) -> None:
             note = status.get("label")
             if status.get("severity") not in (None, "ok", "none") and status.get("detail"):
                 note = f"{note}: {status['detail']}"
+            if record.get("remembered_last_seen"):
+                note = f"its last known route, from {record['remembered_last_seen']}"
             graph.link(tx_identity, f"dante:{name}:rx:{rx_number}", note)
 
 
@@ -397,6 +428,7 @@ def build_graph(
     hosts: list[tuple[HostScope, dict]],
 ) -> SignalGraph:
     graph = SignalGraph()
+    graph.local_host = next((scope.host for scope, _ in hosts if not scope.remote), None)
     _add_dante(graph, records)
     _add_wireless(graph, wireless, wireless_links)
     for scope, snapshot in hosts:
@@ -580,3 +612,95 @@ def render(
         if upstream_state in {"signal", "quiet"} and downstream_state == "silent":
             stops.append(f"{graph.nodes[upstream].label} has signal but {graph.nodes[downstream].label} is silent")
     return lines, stops
+
+
+def _joined(names: list[str]) -> str:
+    shown = names[:SOURCE_LIMIT]
+    text = ", ".join(shown[:-1]) + (f" and {shown[-1]}" if len(shown) > 1 else shown[0])
+    return text + (f" and {len(names) - SOURCE_LIMIT} more" if len(names) > SOURCE_LIMIT else "")
+
+
+def _host_of(node: Node, identity: str) -> str | None:
+    host = node.details.get("host") or (identity.split("@", 1)[1].split(":", 1)[0] if "@" in identity else None)
+    return host if host and node.label.startswith(f"{host} ") else None
+
+
+def _grouped(entries: list[tuple[str | None, str]], local_host: str | None) -> str:
+    names: dict[str, list[str]] = {}
+    for host, name in entries:
+        where = host or local_host
+        if where not in names.setdefault(name, []):
+            names[name].append(where)
+    if all(hosts == [local_host] for hosts in names.values()):
+        return _joined(list(names))
+    by_hosts: dict[tuple, list[str]] = {}
+    for name, hosts in names.items():
+        by_hosts.setdefault(tuple(hosts), []).append(name)
+    return ", ".join(
+        f"{_joined(group)} on {_joined([str(host) for host in hosts])}" for hosts, group in by_hosts.items()
+    )
+
+
+def silence_summary(
+    graph: SignalGraph, starts: list[str], steps: list[Step], levels: dict[str, tuple[str, str]]
+) -> str | None:
+    identities = list(dict.fromkeys(starts + [step.identity for step in steps if not step.repeated]))
+    if any(levels.get(identity, ("unknown", ""))[0] in {"signal", "quiet"} for identity in identities):
+        return None
+    sources = [identity for identity in identities if not graph.upstream.get(identity)]
+    if not sources:
+        return None
+    first = graph.nodes[starts[0]]
+    consumer = first.kind in {"pulse_sink", "dante_rx"} or (
+        first.kind == "jack" and first.details.get("direction") == "input"
+    )
+    if sources == starts and not steps and consumer:
+        return f"Nothing feeds {LABEL_KIND.sub('', first.label)}, so it has no signal."
+    offline: list[str] = []
+    quiet_channels: dict[str, list[str]] = {}
+    groups: dict[str, list[tuple[str | None, str]]] = {
+        "paused": [],
+        "muted": [],
+        "playing but silent": [],
+        "nothing playing to": [],
+        "sending silence": [],
+    }
+    others: list[str] = []
+    for identity in sources:
+        node = graph.nodes[identity]
+        text = levels.get(identity, ("unknown", "not measured"))[1]
+        host = _host_of(node, identity)
+        if node.kind in {"dante_rx", "dante_tx"} and node.details.get("online") is False:
+            offline.append(node.details["device"])
+        elif node.kind in {"pulse_playback", "pulse_recording"}:
+            entry = node.details["entry"]
+            application = entry.get("application") or entry.get("binary") or "an application"
+            condition = "paused" if entry.get("corked") else "muted" if entry.get("mute") else "playing but silent"
+            groups[condition].append((host, application))
+        elif node.kind == "pulse_sink":
+            groups["nothing playing to"].append((host, node.details["entry"]["name"]))
+        elif node.kind == "jack":
+            groups["sending silence"].append((host, node.details["port"].split(":")[0]))
+        elif node.kind in {"dante_rx", "dante_tx"}:
+            device = node.details["device"]
+            channel = LABEL_KIND.sub("", node.label).removeprefix(f"{device} ")
+            quiet_channels.setdefault(device, []).append(channel)
+        else:
+            others.append(f"{LABEL_KIND.sub('', node.label)} is {text}")
+    parts = []
+    offline = list(dict.fromkeys(offline))
+    if offline:
+        parts.append(f"{_joined(offline)} {'is' if len(offline) == 1 else 'are'} off the network")
+    for condition, entries in groups.items():
+        if not entries:
+            continue
+        if condition == "nothing playing to":
+            parts.append(f"nothing is playing to {_grouped(entries, graph.local_host)}")
+        elif condition == "sending silence":
+            parts.append(f"{_grouped(entries, graph.local_host)} {'sends' if len(entries) == 1 else 'send'} silence")
+        else:
+            parts.append(f"{_grouped(entries, graph.local_host)} {'is' if len(entries) == 1 else 'are'} {condition}")
+    for device, channels in quiet_channels.items():
+        parts.append(f"{device} {_joined(channels)} {'is' if len(channels) == 1 else 'are'} silent")
+    parts.extend(others[:SOURCE_LIMIT])
+    return "Nothing in this chain has signal, so the cause is at its sources: " + "; ".join(parts) + "."

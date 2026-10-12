@@ -828,12 +828,46 @@ def issues_view(payload: Any, arguments: dict) -> Any:
     )
 
 
+STARTUP_SETTLE_SECONDS = 60
+
+
+def _moment(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _during_startup(event: dict, startups: list[datetime]) -> bool:
+    if not str(event.get("kind")).startswith("issue_"):
+        return False
+    moment = _moment(event.get("timestamp"))
+    return moment is not None and any(
+        0 <= (moment - start).total_seconds() <= STARTUP_SETTLE_SECONDS for start in startups
+    )
+
+
+def _waiting_route_event(event: dict) -> bool:
+    value = event.get("previous_value") if event.get("kind") == "issue_resolved" else event.get("current_value")
+    if not isinstance(value, dict) or value.get("kind") != "subscription_failure":
+        return False
+    status = (value.get("raw_source_fields") or {}).get("status")
+    return isinstance(status, dict) and status.get("status") == "UNRESOLVED"
+
+
 def events_view(payload: Any, arguments: dict) -> Any:
     if not isinstance(payload, dict):
         return payload
     limit = arguments.get("limit", 20)
     kind = arguments.get("kind")
     events = payload.get("events") or []
+    if arguments.get("detail") != "debug":
+        startups = [moment for moment in (_moment(value) for value in payload.get("startups") or []) if moment]
+        events = [
+            event
+            for event in events
+            if isinstance(event, dict) and not _waiting_route_event(event) and not _during_startup(event, startups)
+        ]
     selected = [
         event
         for event in events
@@ -2116,6 +2150,7 @@ def network_levels_view(levels: Any) -> Any:
     if not isinstance(levels, dict):
         return levels
     summary = {}
+    silent_devices: list[str] = []
     for name, entry in levels.items():
         if not isinstance(entry, dict):
             summary[name] = entry
@@ -2139,9 +2174,15 @@ def network_levels_view(levels: Any) -> Any:
                     silent += 1
             if active or silent:
                 device[direction] = compact({"signal": active or None, "silent_channels": silent or None})
+        if not any(isinstance(value, dict) and value.get("signal") for value in device.values()):
+            silent_devices.append(name)
+            continue
         device["observed_at"] = entry.get("observed_at")
         summary[name] = compact(device)
-    return {
-        "devices": summary,
-        "detail": "get_signal_levels with a device lists every channel's state and level",
-    }
+    return compact(
+        {
+            "dante": summary or "no Dante channel has signal",
+            "silent_dante_devices": ", ".join(silent_devices) or None,
+            "detail": "get_signal_levels with a device lists every channel's state and level",
+        }
+    )

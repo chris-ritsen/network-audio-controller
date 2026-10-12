@@ -399,7 +399,7 @@ async def test_signal_levels_request_detailed_metering_from_devices_without_pass
 
     _, body = await rpc(server, "tools/call", {"name": "get_signal_levels", "arguments": {}})
     assert body["result"]["isError"] is False
-    assert "lx-dante" in json.loads(body["result"]["content"][0]["text"])["devices"]
+    assert "lx-dante" in body["result"]["content"][0]["text"]
     assert sorted(metering.snapshots) == ["lx-dante.local.", "mixer.local."]
 
     metering.snapshots.clear()
