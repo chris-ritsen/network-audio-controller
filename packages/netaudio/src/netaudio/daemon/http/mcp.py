@@ -1441,6 +1441,7 @@ NAME_SELECTED_TOOLS = frozenset({"get_issues", "get_event_journal", "get_routing
 CHANNEL_SELECTED_TOOLS = frozenset({"rename_channel", "set_gain"})
 WARMUP_SECONDS = 30.0
 WAITING_ROUTE_LIMIT = 12
+STARTUP_SEARCH_SECONDS = 120.0
 EMPTY_RESULTS = {
     "get_external_flows": "no AES67 or RTP streams are being announced on the network",
     "get_metering_status": "no detailed metering is running",
@@ -3002,6 +3003,12 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
         }
         return _tool_result(compact(preview), is_error=False)
 
+    def _not_seen_text(self) -> str:
+        age = self._server_age()
+        if age is not None and age < STARTUP_SEARCH_SECONDS:
+            return f"not seen yet; the server started {age:.0f} s ago and is still finding devices"
+        return "not seen since the server started"
+
     def _server_age(self) -> float | None:
         started = str(self.server_info.get("started_at") or "")
         try:
@@ -3185,9 +3192,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             for entry in missing_devices(records, journal):
                 if str(entry["name"]).casefold() == str(selector).casefold():
                     when = (
-                        f"last seen {entry['disappeared_at']}"
-                        if entry.get("disappeared_at")
-                        else "not seen since the server started"
+                        f"last seen {entry['disappeared_at']}" if entry.get("disappeared_at") else self._not_seen_text()
                     )
                     message = (
                         f"{entry['name']} is off the network ({when}), so its own routes, settings and levels are "
@@ -3277,9 +3282,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             found[name] = compact(
                 {
                     **current,
-                    "last_seen": current.get("last_seen")
-                    or entry.get("disappeared_at")
-                    or "not seen since the server started",
+                    "last_seen": current.get("last_seen") or entry.get("disappeared_at") or self._not_seen_text(),
                     "routes_waiting_for_it": entry.get("routes_waiting") or None,
                 }
             )

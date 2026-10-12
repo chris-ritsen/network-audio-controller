@@ -17,6 +17,7 @@ from netaudio.host_audio.trace import (
     build_graph,
     jack_meter_targets,
     LABEL_KIND,
+    LEVEL_CHANGE_DB,
     destinations_summary,
     level_changes,
     node_level,
@@ -36,6 +37,7 @@ FIND_LIMIT = 24
 HISTORY_FLUSH_SECONDS = 1.5
 MAXIMUM_HISTORY_KEYS = 64
 NEIGHBOUR_LIMIT = 8
+RECORDED_CHANGE_SECONDS = 900
 POINT_FORMS = (
     "a Shure channel (AD4D-A ch1), a Dante channel (lx-dante rx 1), a JACK port or alias, "
     "a PulseAudio input or output, or an application name; put another computer's name first, such as "
@@ -448,6 +450,40 @@ class DaemonHostAudioHandlers:
         notes.extend(note for note in peer_notes if "did not report" not in note)
         return {"computers": view, "measured_at": utc_now(), "notes": notes or None}
 
+    def _recorded_level_changes(self, graph: SignalGraph, walks: dict, local_host: str) -> list[str]:
+        if not getattr(self.host_audio, "record_jack_levels", False):
+            return []
+        now = int(time.time())
+        changes = []
+        for direction, steps in walks.items():
+            for step in steps:
+                if step.repeated or step.parent is None or not (step.note or "").startswith("through "):
+                    continue
+                inside, outside = (
+                    (step.parent, step.identity) if direction == "downstream" else (step.identity, step.parent)
+                )
+                sources = [other for other, _ in graph.upstream.get(inside, ()) if graph.nodes[other].kind == "jack"]
+                if len(sources) != 1:
+                    continue
+                source, output = graph.nodes[sources[0]], graph.nodes[outside]
+                if source.details.get("host") != local_host or output.details.get("host") != local_host:
+                    continue
+                result = self.level_history.paired_difference(
+                    ("jack", source.details["port"]),
+                    ("jack", output.details["port"]),
+                    now - RECORDED_CHANGE_SECONDS,
+                    now,
+                )
+                if result is None or abs(result[0]) < LEVEL_CHANGE_DB:
+                    continue
+                client = str(step.note).removeprefix("through ").split(",", 1)[0]
+                verb = "lowered" if result[0] < 0 else "raised"
+                changes.append(
+                    f"{client} {verb} it by {abs(result[0]):.0f} dB the last time it carried audio "
+                    f"({iso_second(result[2])}, over {result[1]} s)"
+                )
+        return list(dict.fromkeys(changes))
+
     async def host_audio_find(self, query: str) -> dict | None:
         if self.host_audio is None:
             return None
@@ -551,6 +587,7 @@ class DaemonHostAudioHandlers:
             payload["reaches"] = destinations_summary(graph, walks["downstream"])
         if levels:
             changes = [change for name in directions for change in level_changes(graph, walks[name], name, measured)]
+            changes = changes or self._recorded_level_changes(graph, walks, local_host)
             if changes:
                 payload["level_changes"] = list(dict.fromkeys(changes))
         if levels:

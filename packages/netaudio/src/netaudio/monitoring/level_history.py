@@ -183,6 +183,19 @@ class LevelHistory:
             self.started = min(source.first_second for source in restored_sources.values())
         return len(restored_tracks)
 
+    def paired_difference(self, before: Key, after: Key, start: int, end: int) -> tuple[float, int, int] | None:
+        differences, last = [], None
+        for second in range(max(start, end - SECOND_SLOTS), end):
+            first_peak, first_signal, first_recorded = self._second(before, second)
+            second_peak, second_signal, second_recorded = self._second(after, second)
+            if first_recorded and second_recorded and first_signal and second_signal:
+                differences.append(second_peak - first_peak)
+                last = second
+        if not differences or last is None:
+            return None
+        differences.sort()
+        return differences[len(differences) // 2], len(differences), last
+
     def recorded_since(self, keys: Iterable[Key]) -> int | None:
         firsts = [self._sources[source].first_second for source, _ in keys if source in self._sources]
         return min(firsts) if firsts else None
