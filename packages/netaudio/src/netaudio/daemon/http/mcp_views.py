@@ -87,15 +87,17 @@ def _subscription_line(subscription: dict) -> str:
     return f"{receiver} \u2190 {subscription.get('tx_channel')} on {subscription.get('tx_device')}"
 
 
-def _subscription_view(subscription: dict) -> dict:
+def _subscription_view(subscription: dict, records: dict[str, dict] | None = None) -> dict:
     status = subscription.get("status") if isinstance(subscription.get("status"), dict) else {}
+    source = subscription.get("tx_device")
+    wait = waiting_text(str(source), records) if records is not None and source else None
     view = {
         "rx_channel": {"number": subscription.get("rx_channel_number"), "name": subscription.get("rx_channel")},
-        "status": status.get("label"),
+        "status": wait or status.get("label"),
         "tx_channel": subscription.get("tx_channel"),
-        "tx_device": subscription.get("tx_device"),
+        "tx_device": source,
     }
-    if status.get("severity") in PROBLEM_SEVERITIES:
+    if status.get("severity") in PROBLEM_SEVERITIES and not wait:
         view["problem"] = status.get("detail")
     return view
 
@@ -580,7 +582,10 @@ def device_view(
             "tx": compact_channel_names(channels.get("transmitters")),
         }
     if "subscriptions" in sections:
-        view["subscriptions"] = [_subscription_view(subscription) for subscription in _subscription_list(device)]
+        view["subscriptions"] = [
+            _subscription_view(subscription, _device_records(devices) if devices is not None else None)
+            for subscription in _subscription_list(device)
+        ]
     if "network" in sections:
         network = {key: device.get(key) for key in DEVICE_NETWORK_FIELDS}
         network["network_redundancy"] = redundancy_summary(network.get("network_redundancy"))
