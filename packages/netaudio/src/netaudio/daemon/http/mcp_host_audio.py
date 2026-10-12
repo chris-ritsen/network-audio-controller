@@ -218,8 +218,9 @@ def _jack_line(jack: dict) -> str:
     latency = f" ({frames / rate * 1000:.1f} ms)" if rate and frames else ""
     clients = len({port["client"] for port in (jack.get("ports") or {}).values()})
     xruns = jack.get("xruns") or 0
-    xrun_text = f"{xruns} xrun{'' if xruns == 1 else 's'} since {jack.get('xruns_since')}" + (
-        f", last at {jack.get('last_xrun')}" if jack.get("last_xrun") else ""
+    xrun_text = (
+        f"{xruns} xrun{'' if xruns == 1 else 's'} since netaudio began watching at {jack.get('xruns_since')}"
+        + (f", last at {jack.get('last_xrun')}" if jack.get("last_xrun") else "")
     )
     return f"{rate / 1000:g} kHz, {frames} frames{latency}, DSP load {jack.get('cpu_load')}%, {clients} clients, {xrun_text}"
 
@@ -644,8 +645,8 @@ class McpHostAudioTools:
                 conditions.append(f"{label} on {host} stopped: {component.get('reason')}")
         if jack.get("xruns"):
             conditions.append(
-                f"JACK on {host} had {jack['xruns']} xrun{'' if jack['xruns'] == 1 else 's'} since "
-                f"{jack.get('xruns_since')}, last at {jack.get('last_xrun')}"
+                f"JACK on {host} had {jack['xruns']} xrun{'' if jack['xruns'] == 1 else 's'} since netaudio began "
+                f"watching at {jack.get('xruns_since')}, last at {jack.get('last_xrun')}"
             )
         present = {card["id"] for card in snapshot["cards"]}
         for device, card in sorted((snapshot.get("card_links") or {}).items()):

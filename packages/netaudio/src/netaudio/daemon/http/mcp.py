@@ -3455,7 +3455,11 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
 
     async def _signal_history(self, request: dict, records: dict, period: tuple[float, float]) -> dict:
         selected = _record_for_selector(records, request["device"]) if request.get("device") else None
+        playing = None
         if period[1] > time.time():
+            listening = period[1] - time.time()
+            if selected is None:
+                playing = asyncio.create_task(self.host_audio_now_playing(listening))
             await self._request_detailed_metering(request.get("device"))
             await asyncio.sleep(period[1] - time.time() + HISTORY_FLUSH_SECONDS)
         devices = (
@@ -3463,7 +3467,11 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             if selected is not None
             else [record for record in records.values() if isinstance(record, dict) and record.get("online")]
         )
-        return compact(signal_history_view(self.level_history, devices, period, full=selected is not None))
+        view = signal_history_view(self.level_history, devices, period, full=selected is not None)
+        heard = await playing if playing is not None else None
+        if heard:
+            view = {"played_during_it": heard["computers"], **view, "playing_notes": heard["notes"]}
+        return compact(view)
 
     async def _request_detailed_metering(self, selector: str | None) -> None:
         if not self.metering:

@@ -393,12 +393,27 @@ class DaemonHostAudioHandlers:
                     leaves.append(LABEL_KIND.sub("", graph.nodes[other].label))
         return list(dict.fromkeys(leaves))
 
-    async def host_audio_now_playing(self) -> dict | None:
+    @staticmethod
+    def _stream_device(graph: SignalGraph, identity: str) -> str:
+        node = graph.nodes[identity]
+        if node.kind not in {"pulse_playback", "pulse_recording"}:
+            return identity
+        edges = graph.downstream if node.kind == "pulse_playback" else graph.upstream
+        return next(
+            (
+                other
+                for other, _ in edges.get(identity, ())
+                if other in graph.nodes and graph.nodes[other].kind in {"pulse_sink", "pulse_source"}
+            ),
+            identity,
+        )
+
+    async def host_audio_now_playing(self, seconds: float = DEFAULT_METER_SECONDS) -> dict | None:
         if self.host_audio is None:
             return None
         graph, snapshots, records, peer_notes = await self._signal_graph()
         sources = self._signal_sources(graph)
-        measured, notes = await self._levels(graph, sources, snapshots, records, DEFAULT_METER_SECONDS)
+        measured, notes = await self._levels(graph, sources, snapshots, records, seconds)
         view: dict[str, Any] = {host: [] for host in snapshots}
         for identity in sources:
             state, text = measured.get(identity, ("unknown", ""))
@@ -412,7 +427,11 @@ class DaemonHostAudioHandlers:
             view.setdefault(node.details["host"], []).append(line)
         for host, lines in view.items():
             if not lines:
-                view[host] = "nothing is playing"
+                view[host] = (
+                    f"nothing played during the {seconds:.0f} s"
+                    if seconds > DEFAULT_METER_SECONDS
+                    else "nothing is playing"
+                )
         notes.extend(note for note in peer_notes if "did not report" not in note)
         return {"computers": view, "measured_at": utc_now(), "notes": notes or None}
 
@@ -586,6 +605,7 @@ class DaemonHostAudioHandlers:
         peer_notes: list[str],
     ) -> tuple[int, dict]:
         waiting = period[1] - time.time()
+        live_task = None
         if waiting > 0:
             devices = {
                 graph.nodes[identity].details["device"]
@@ -593,16 +613,35 @@ class DaemonHostAudioHandlers:
                 if graph.nodes[identity].kind in {"dante_rx", "dante_tx"}
                 and graph.nodes[identity].details.get("online")
             }
+            meterable = list(
+                dict.fromkeys(
+                    self._stream_device(graph, identity)
+                    for identity in identities
+                    if graph.nodes[identity].kind.startswith(("jack", "pulse"))
+                )
+            )
+            if meterable:
+                live_task = asyncio.create_task(self._levels(graph, meterable, snapshots, records, waiting))
             for device in sorted(devices):
                 await self._request_detailed_metering(device)
             await asyncio.sleep(waiting + HISTORY_FLUSH_SECONDS)
+        measured = (await live_task)[0] if live_task is not None else {}
+        live = {}
+        for identity in identities:
+            device = self._stream_device(graph, identity)
+            if device in measured:
+                where = f" at {LABEL_KIND.sub('', graph.nodes[device].label)}" if device != identity else ""
+                live[identity] = (measured[device][0], f"{measured[device][1]}{where}")
         summaries, notes, problems = await self._history(graph, identities, snapshots, records, period)
         payload: dict[str, Any] = {"period": f"{iso_second(period[0])} to {iso_second(period[1])}"}
         for point, starts in resolved.items():
             lines = []
             for identity in starts:
                 label = graph.nodes[identity].label
-                if identity in summaries:
+                summary = summaries.get(identity) or {}
+                if identity in live and (summary.get("not_recording") or not summary.get("recorded_seconds")):
+                    lines.append(f"{label}: loudest during the {waiting:.0f} s: {live[identity][1]}")
+                elif identity in summaries:
                     if identity in notes:
                         label += f" ({notes[identity]})"
                     lines.append(f"{label}: {history_text(summaries[identity])}")
