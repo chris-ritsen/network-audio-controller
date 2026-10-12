@@ -87,13 +87,16 @@ class _Recorder:
     def _wanted(self) -> list[str]:
         wanted = []
         for port in self.client.get_ports(is_audio=True, is_output=True):
-            if port.name.startswith(IGNORED_CLIENT_PREFIX):
+            try:
+                name = port.name
+                connections = self.client.get_all_connections(port)
+            except self.jack.JackError as exception:
+                logger.debug("A JACK port went away while the level recorder read it: %s", exception)
                 continue
-            if any(
-                not connected.name.startswith(IGNORED_CLIENT_PREFIX)
-                for connected in self.client.get_all_connections(port)
-            ):
-                wanted.append(port.name)
+            if name.startswith(IGNORED_CLIENT_PREFIX):
+                continue
+            if any(not connected.name.startswith(IGNORED_CLIENT_PREFIX) for connected in connections):
+                wanted.append(name)
         return wanted
 
     def _update_ports(self) -> None:

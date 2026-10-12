@@ -17,6 +17,7 @@ CLIENT_OPEN_TIMEOUT_SECONDS = 5
 METER_CLIENT_PREFIX = "netaudio-meter"
 PRETTY_NAME_PROPERTY = "http://jackaudio.org/metadata/pretty-name"
 XRUN_GROUP_SECONDS = 0.1
+PORT_LIST_ATTEMPTS = 3
 
 
 def server_name() -> str | None:
@@ -177,6 +178,19 @@ class JackGraph(AudioComponent):
         self.buffer_size = None
         self.cpu_load = None
 
+    @staticmethod
+    def _listed_ports(client) -> list:
+        import jack
+
+        for attempt in range(PORT_LIST_ATTEMPTS):
+            try:
+                return client.get_ports()
+            except jack.JackError as exception:
+                if attempt == PORT_LIST_ATTEMPTS - 1:
+                    raise
+                logger.debug("A JACK port went away while ports were listed: %s", exception)
+        return []
+
     def _snapshot(self) -> dict:
         import jack
 
@@ -189,29 +203,33 @@ class JackGraph(AudioComponent):
             if value is not None:
                 pretty_names[subject] = value[0].decode("utf-8", errors="replace")
         ports: dict[str, dict] = {}
-        for port in client.get_ports():
-            name = port.name
-            if _is_meter_port(name):
+        for port in self._listed_ports(client):
+            try:
+                name = port.name
+                if _is_meter_port(name):
+                    continue
+                entry: dict[str, Any] = {
+                    "client": name.split(":", 1)[0],
+                    "short_name": port.shortname,
+                    "direction": "output" if port.is_output else "input",
+                    "type": _port_type(port),
+                    "physical": port.is_physical,
+                    "terminal": port.is_terminal,
+                    "aliases": list(port.aliases),
+                    "connections": [],
+                }
+                pretty_name = pretty_names.get(port.uuid)
+                if pretty_name:
+                    entry["pretty_name"] = pretty_name
+                if port.is_output:
+                    entry["connections"] = sorted(
+                        connected.name
+                        for connected in client.get_all_connections(port)
+                        if not _is_meter_port(connected.name)
+                    )
+            except jack.JackError as exception:
+                logger.debug("A JACK port went away while it was being read: %s", exception)
                 continue
-            entry: dict[str, Any] = {
-                "client": name.split(":", 1)[0],
-                "short_name": port.shortname,
-                "direction": "output" if port.is_output else "input",
-                "type": _port_type(port),
-                "physical": port.is_physical,
-                "terminal": port.is_terminal,
-                "aliases": list(port.aliases),
-                "connections": [],
-            }
-            pretty_name = pretty_names.get(port.uuid)
-            if pretty_name:
-                entry["pretty_name"] = pretty_name
-            if port.is_output:
-                entry["connections"] = sorted(
-                    connected.name
-                    for connected in client.get_all_connections(port)
-                    if not _is_meter_port(connected.name)
-                )
             ports[name] = entry
         for name, entry in ports.items():
             for destination in entry["connections"] if entry["direction"] == "output" else ():
