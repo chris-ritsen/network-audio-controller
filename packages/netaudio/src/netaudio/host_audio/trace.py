@@ -717,6 +717,40 @@ def _stage_name(node: Node) -> str:
     return f"{client} ({name}){where}" if name else f"{client}{where}"
 
 
+def _is_muted_stage(node: Node) -> bool:
+    return (
+        node.kind == "jack"
+        and node.details.get("direction") == "output"
+        and bool((node.details.get("stage") or {}).get("muted"))
+    )
+
+
+def _mute_wording(graph: SignalGraph, starts: list[str]) -> str:
+    if any(_is_muted_stage(graph.nodes[identity]) for identity in starts):
+        return "it is also muted at"
+    seen = set(starts)
+    pending = list(starts)
+    muted_upstream = bypassed = False
+    while pending:
+        identity = pending.pop()
+        node = graph.nodes.get(identity)
+        if node is None:
+            continue
+        if _is_muted_stage(node):
+            muted_upstream = True
+            continue
+        sources = [source for source, _ in graph.upstream.get(identity, ())]
+        if not sources:
+            bypassed = True
+        for source in sources:
+            if source not in seen:
+                seen.add(source)
+                pending.append(source)
+    if not muted_upstream:
+        return "it is also muted further on, at"
+    return "some of its inputs are also muted at" if bypassed else "it is also muted at"
+
+
 def muted_stages(graph: SignalGraph, identities: list[str]) -> list[str]:
     return list(
         dict.fromkeys(
@@ -875,7 +909,7 @@ def trace_answer(
         unmeasured = any(cause.endswith(" not measured") for cause in sources)
         everything = "no measured source feeding it has signal" if unmeasured else "nothing feeding it has signal"
         reason = " and ".join(sources) if len(sources) <= ANSWER_CAUSE_LIMIT else everything
-        also = muted.replace("it is muted", "it is also muted", 1) if muted else None
+        also = muted.replace("it is muted at", _mute_wording(graph, starts), 1) if muted else None
         return f"{subject} has no signal because {reason}" + (f", and {also}" if also else "") + "."
     signal = any(_has_signal(levels, identity) for identity in starts)
     if stops:
