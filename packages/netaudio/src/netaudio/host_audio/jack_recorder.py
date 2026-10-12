@@ -10,11 +10,15 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from netaudio.host_audio.child_process import ignore_shutdown_signals, wait_for_exit
+
 logger = logging.getLogger("netaudio")
 
 RECORDER_CLIENT_NAME = "netaudio-meter-history"
 IGNORED_CLIENT_PREFIX = "netaudio-meter"
 RESTART_SECONDS = 5.0
+STOP_SECONDS = 3.0
+KILL_SECONDS = 2.0
 
 
 def _decibels(value: float) -> float | None:
@@ -74,6 +78,21 @@ class _Recorder:
     def _shutdown(self, status, reason) -> None:
         self.stopped.set()
         self.changed.set()
+
+    def follow_daemon(self) -> None:
+        try:
+            self.connection.recv()
+        except (EOFError, OSError) as exception:
+            logger.debug("The daemon closed the level recorder's connection: %s", exception)
+        self.stopped.set()
+        self.changed.set()
+
+    def close(self) -> None:
+        try:
+            self.client.deactivate()
+            self.client.close()
+        except self.jack.JackError as exception:
+            logger.debug("Closing the level recorder: %s", exception)
 
     def _graph_changed(self, *arguments) -> None:
         self.changed.set()
@@ -164,14 +183,11 @@ class _Recorder:
                 continue
             self._flush(next_second - 1)
             next_second += 1
-        try:
-            self.client.deactivate()
-            self.client.close()
-        except self.jack.JackError as exception:
-            logger.debug("Closing the level recorder: %s", exception)
+        self.close()
 
 
 def run_recorder(connection) -> None:
+    ignore_shutdown_signals()
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     os.environ["OMP_NUM_THREADS"] = "1"
     try:
@@ -184,10 +200,11 @@ def run_recorder(connection) -> None:
     except (ImportError, jack.JackError, OSError) as exception:
         connection.send({"error": str(exception)})
         return
+    threading.Thread(target=recorder.follow_daemon, name="netaudio-recorder-daemon", daemon=True).start()
     try:
         recorder.run()
     except BrokenPipeError:
-        recorder.client.close()
+        recorder.close()
 
 
 class JackRecorder:
@@ -219,7 +236,7 @@ class JackRecorder:
         if self._failed_key is not None and self._failed_key == self._connection_key:
             return
         context = multiprocessing.get_context("spawn")
-        receiver, sender = context.Pipe(duplex=False)
+        receiver, sender = context.Pipe(duplex=True)
         process = context.Process(target=run_recorder, args=(sender,), name=RECORDER_CLIENT_NAME, daemon=True)
         process.start()
         sender.close()
@@ -264,18 +281,26 @@ class JackRecorder:
         if self._running:
             self.start()
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         self._running = False
         if self._restart is not None:
             self._restart.cancel()
             self._restart = None
-        process = self._process
-        if self._connection is not None and self._loop is not None:
-            self._loop.remove_reader(self._connection.fileno())
-            self._connection.close()
+        process, connection = self._process, self._connection
         self._connection = None
         self._process = None
-        if process is not None:
-            process.terminate()
-            process.join(1)
         self.reason = "stopped"
+        self.ports = 0
+        if connection is not None:
+            if self._loop is not None:
+                self._loop.remove_reader(connection.fileno())
+            try:
+                connection.send({"stop": True})
+            except OSError as exception:
+                logger.debug("The level recorder had already stopped: %s", exception)
+            connection.close()
+        if process is None or await wait_for_exit(process, STOP_SECONDS):
+            return
+        logger.warning("Host audio: the JACK level recorder did not stop within %g s; killing it", STOP_SECONDS)
+        process.kill()
+        await wait_for_exit(process, KILL_SECONDS)

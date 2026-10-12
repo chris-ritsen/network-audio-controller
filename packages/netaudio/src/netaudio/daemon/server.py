@@ -74,6 +74,7 @@ REVALIDATE_INTERVAL_SECONDS = 30.0
 STATUS_FIELD_REFRESH_INTERVAL_SECONDS = 300.0
 SHURE_METER_PUBLISH_INTERVAL_SECONDS = 0.25
 SHUTDOWN_TIMEOUT_SECONDS = 20
+EXIT_BUDGET_SECONDS = 40
 SHUTDOWN_TASK_LIMIT = 20
 
 
@@ -768,9 +769,25 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             await self._stop_once()
             self._stop_complete = True
 
+    def _save_state(self) -> None:
+        if self.shure:
+            try:
+                save_shure_memory(self.shure, self.shure_memory_path)
+            except OSError as exception:
+                logger.warning(f"Could not save Shure devices: {exception}", exc_info=True)
+        try:
+            save_level_history(self.level_history, self.level_history_path)
+        except (OSError, sqlite3.Error) as exception:
+            logger.warning(f"Could not save signal level history: {exception}", exc_info=True)
+        try:
+            save_event_journal(self.event_journal, self.event_journal_path)
+        except (OSError, sqlite3.Error) as exception:
+            logger.warning(f"Could not save the event journal: {exception}", exc_info=True)
+
     async def _stop_once(self):
         self.running = False
         self._stop_event.set()
+        self._save_state()
 
         if self._revalidate_task:
             self._revalidate_task.cancel()
@@ -826,10 +843,6 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 await self.shure.stop()
             except (OSError, RuntimeError) as exception:
                 logger.warning(f"Shure stop error: {exception}", exc_info=True)
-            try:
-                save_shure_memory(self.shure, self.shure_memory_path)
-            except OSError as exception:
-                logger.warning(f"Could not save Shure devices: {exception}", exc_info=True)
 
         if self.host_audio:
             try:
@@ -857,16 +870,6 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 await self.metering.stop()
             except (OSError, RuntimeError) as exception:
                 logger.warning(f"Metering stop error: {exception}", exc_info=True)
-
-        try:
-            save_level_history(self.level_history, self.level_history_path)
-        except (OSError, sqlite3.Error) as exception:
-            logger.warning(f"Could not save signal level history: {exception}", exc_info=True)
-
-        try:
-            save_event_journal(self.event_journal, self.event_journal_path)
-        except (OSError, sqlite3.Error) as exception:
-            logger.warning(f"Could not save the event journal: {exception}", exc_info=True)
 
         if self._redis:
             try:
@@ -1169,7 +1172,7 @@ def _task_stack(task: asyncio.Future) -> str:
     return output.getvalue()
 
 
-async def run_daemon(dissect=False, capture=False, daemon_port=None):
+async def run_daemon(dissect=False, capture=False, daemon_port=None, exit_budget_seconds: float | None = None):
     import signal
 
     daemon = NetaudioDaemon(dissect=dissect, capture=capture, daemon_port=daemon_port)
@@ -1200,6 +1203,8 @@ async def run_daemon(dissect=False, capture=False, daemon_port=None):
     except asyncio.CancelledError:
         pass
     finally:
+        if exit_budget_seconds is not None:
+            faulthandler.dump_traceback_later(exit_budget_seconds, exit=True)
         try:
             stopping = asyncio.ensure_future(daemon.stop())
             await asyncio.wait({stopping}, timeout=SHUTDOWN_TIMEOUT_SECONDS)
@@ -1210,7 +1215,6 @@ async def run_daemon(dissect=False, capture=False, daemon_port=None):
                     _task_stack(stopping),
                 )
                 faulthandler.dump_traceback(all_threads=True)
-                faulthandler.dump_traceback_later(SHUTDOWN_TIMEOUT_SECONDS)
                 stopping.cancel()
                 await asyncio.gather(stopping, return_exceptions=True)
         finally:

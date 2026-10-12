@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
+import functools
 import logging
 import math
 import multiprocessing
@@ -11,6 +13,8 @@ from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from operator import mul
 
+from netaudio.host_audio.child_process import ignore_shutdown_signals
+
 logger = logging.getLogger("netaudio")
 
 METER_CLIENT_NAME = "netaudio-meter"
@@ -18,6 +22,7 @@ SETTLE_SECONDS = 0.1
 DEFAULT_WINDOW_SECONDS = 0.5
 MAXIMUM_WINDOW_SECONDS = 5.0
 IDLE_CLOSE_SECONDS = 60.0
+STOP_SECONDS = 3.0
 
 
 def _decibels(value: float) -> float | None:
@@ -70,6 +75,11 @@ def _close_idle_client() -> None:
                 meter.client.close()
             except jack.JackError as exception:
                 logger.debug("Closing the idle JACK meter client: %s", exception)
+
+
+def _worker_started() -> None:
+    ignore_shutdown_signals()
+    atexit.register(_close_idle_client)
 
 
 def _client(jack) -> _MeterClient:
@@ -153,7 +163,9 @@ class JackMeter:
 
     def _executor(self) -> ProcessPoolExecutor:
         if self._pool is None:
-            self._pool = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+            self._pool = ProcessPoolExecutor(
+                max_workers=1, mp_context=multiprocessing.get_context("spawn"), initializer=_worker_started
+            )
         return self._pool
 
     async def measure(self, targets: dict[str, list[str]], seconds: float = DEFAULT_WINDOW_SECONDS) -> dict[str, dict]:
@@ -168,8 +180,15 @@ class JackMeter:
             self._pool = None
             return await loop.run_in_executor(self._executor(), measure, targets, window)
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         pool = self._pool
         self._pool = None
-        if pool is not None:
-            pool.shutdown(wait=False, cancel_futures=True)
+        if pool is None:
+            return
+        stopping = asyncio.get_running_loop().run_in_executor(
+            None, functools.partial(pool.shutdown, wait=True, cancel_futures=True)
+        )
+        try:
+            await asyncio.wait_for(stopping, STOP_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("Host audio: the JACK meter process did not stop within %g s", STOP_SECONDS)

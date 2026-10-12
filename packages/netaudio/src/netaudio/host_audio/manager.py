@@ -23,6 +23,7 @@ logger = logging.getLogger("netaudio")
 SHARED_MEMORY = Path("/dev/shm")
 CONNECT_ATTEMPTS = 5
 CONNECT_RETRY_SECONDS = 0.5
+CLOSE_SECONDS = 5.0
 
 
 class HostAudioManager:
@@ -84,6 +85,9 @@ class HostAudioManager:
         self.peers.start(zeroconf)
 
     async def stop(self) -> None:
+        self._recording = False
+        await self.recorder.stop()
+        await self.meter.stop()
         await self.peers.stop()
         self._watch.stop()
         tasks = list(self._tasks)
@@ -91,10 +95,10 @@ class HostAudioManager:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        self._recording = False
-        self.recorder.stop()
-        await asyncio.gather(self.jack.stop(), self.pulse.stop())
-        self.meter.stop()
+        try:
+            await asyncio.wait_for(asyncio.gather(self.jack.stop(), self.pulse.stop()), CLOSE_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("Host audio: JACK and PulseAudio did not close within %g s", CLOSE_SECONDS)
         await self.jack.shutdown_executor()
 
     def _created(self, path: Path) -> None:

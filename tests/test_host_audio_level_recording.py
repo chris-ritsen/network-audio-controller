@@ -41,7 +41,7 @@ class _Recorder:
     def start(self, connection_key=None):
         self.starts.append(connection_key)
 
-    def stop(self):
+    async def stop(self):
         self.stops += 1
 
 

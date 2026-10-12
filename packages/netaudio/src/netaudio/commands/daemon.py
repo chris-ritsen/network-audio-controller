@@ -58,11 +58,18 @@ def _wait_for_startup(daemon_port, timeout=15):
 def _run_foreground(daemon_port):
     from netaudio.cli import state
     from netaudio.common.app_config import settings as app_settings
-    from netaudio.daemon.server import run_daemon
+    from netaudio.daemon.server import EXIT_BUDGET_SECONDS, run_daemon
 
     effective_port = _effective_daemon_port(daemon_port)
     app_settings.daemon_port = effective_port
-    asyncio.run(run_daemon(dissect=state.dissect, capture=state.capture, daemon_port=effective_port))
+    asyncio.run(
+        run_daemon(
+            dissect=state.dissect,
+            capture=state.capture,
+            daemon_port=effective_port,
+            exit_budget_seconds=EXIT_BUDGET_SECONDS,
+        )
+    )
 
 
 def _uses_configured_port(effective_port) -> bool:
