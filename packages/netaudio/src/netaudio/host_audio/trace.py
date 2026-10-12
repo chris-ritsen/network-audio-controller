@@ -15,6 +15,7 @@ MAXIMUM_LINES = 80
 SOURCE_LIMIT = 8
 ANSWER_CAUSE_LIMIT = 2
 RELATED_ANSWER_LIMIT = 4
+RELATED_FOLLOW_LIMIT = 3
 LOOSE_LIMIT = 4
 ALSO_NAMED_LIMIT = 6
 SPOKEN_FILLER_WORDS = frozenset({"my", "our", "your", "the", "a", "an", "this", "that"})
@@ -138,6 +139,11 @@ class SignalGraph:
         return chosen if len(chosen) <= LOOSE_LIMIT else []
 
     def also_named(self, point: str, exclude: set[str]) -> list[str]:
+        return [
+            LABEL_KIND.sub("", self.nodes[identity].label) for identity in self.also_named_identities(point, exclude)
+        ][:ALSO_NAMED_LIMIT]
+
+    def also_named_identities(self, point: str, exclude: set[str]) -> list[str]:
         words = [
             word
             for word in re.findall(r"[a-z]+", _fold(point))
@@ -151,9 +157,7 @@ class SignalGraph:
                     node = self.nodes[identity]
                     if identity not in exclude and node.kind not in {"dante_rx", "dante_tx"} and identity not in found:
                         found.append(identity)
-        return [LABEL_KIND.sub("", self.nodes[identity].label) for identity in sorted(found, key=_natural)][
-            :ALSO_NAMED_LIMIT
-        ]
+        return sorted(found, key=_natural)
 
     def walk(self, starts: list[str], direction: str) -> list[Step]:
         edges = self.downstream if direction == "downstream" else self.upstream
@@ -754,6 +758,7 @@ def silence_causes(
         "playing but silent": [],
         "nothing playing to": [],
         "sending silence": [],
+        "not measured": [],
     }
     others: list[str] = []
     for identity in sources:
@@ -775,7 +780,9 @@ def silence_causes(
         elif node.kind == "pulse_sink":
             groups["nothing playing to"].append((host, node.details["entry"]["name"]))
         elif node.kind == "jack":
-            groups["sending silence"].append((host, node.details["port"].split(":")[0]))
+            measured_state = levels.get(identity, ("unknown", ""))[0]
+            condition = "not measured" if measured_state == "unknown" else "sending silence"
+            groups[condition].append((host, node.details["port"].split(":")[0]))
         elif node.kind == "dante_tx":
             device = node.details["device"]
             channel = TX_NUMBER.sub("", LABEL_KIND.sub("", node.label).removeprefix(f"{device} "))
@@ -801,6 +808,8 @@ def silence_causes(
             parts.append(f"nothing is playing to {_grouped(entries, graph.local_host)}")
         elif condition == "sending silence":
             parts.append(f"{_grouped(entries, graph.local_host)} {'sends' if len(entries) == 1 else 'send'} silence")
+        elif condition == "not measured":
+            parts.append(f"{_grouped(entries, graph.local_host)} {'was' if len(entries) == 1 else 'were'} not measured")
         else:
             parts.append(f"{_grouped(entries, graph.local_host)} {'is' if len(entries) == 1 else 'are'} {condition}")
     for device, channels in silent_transmitters.items():
@@ -863,7 +872,9 @@ def trace_answer(
             return f"{subject} is off the network" + (f", and {muted}" if muted else "") + "."
         if not sources:
             return f"{subject} has no signal because {muted}."
-        reason = " and ".join(sources) if len(sources) <= ANSWER_CAUSE_LIMIT else "nothing feeding it has signal"
+        unmeasured = any(cause.endswith(" not measured") for cause in sources)
+        everything = "no measured source feeding it has signal" if unmeasured else "nothing feeding it has signal"
+        reason = " and ".join(sources) if len(sources) <= ANSWER_CAUSE_LIMIT else everything
         also = muted.replace("it is muted", "it is also muted", 1) if muted else None
         return f"{subject} has no signal because {reason}" + (f", and {also}" if also else "") + "."
     signal = any(_has_signal(levels, identity) for identity in starts)
@@ -885,6 +896,114 @@ def trace_answer(
     if sources:
         return f"{subject} has signal, from {_joined(sources)}{ending}"
     return f"{subject} has signal{ending}"
+
+
+@dataclass
+class PathResult:
+    name: str
+    starts: list[str]
+    walks: dict[str, list[Step]]
+    stops: list[str]
+    causes: list[str] | None
+    signal: bool
+    output: bool
+    answer: str = ""
+
+
+def _is_output(node: Node) -> bool:
+    hardware = node.details.get("hardware") or {}
+    return node.kind == "pulse_sink" or (node.kind == "jack" and hardware.get("direction") == "playback")
+
+
+def _path_name(graph: SignalGraph, node: Node) -> str:
+    base = LABEL_KIND.sub("", node.label)
+    if node.kind != "jack" or " [" in base:
+        return base
+    name = base.rsplit(":", 1)[0]
+    host = node.details.get("host")
+    return name if not host or name.startswith(f"{host} ") else f"{host} {name}"
+
+
+def related_paths(graph: SignalGraph, identities: list[str]) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    for identity in identities:
+        if graph.upstream.get(identity) or graph.downstream.get(identity):
+            groups.setdefault(_path_name(graph, graph.nodes[identity]), []).append(identity)
+    ordered = sorted(groups.items(), key=lambda item: not all(_is_output(graph.nodes[i]) for i in item[1]))
+    return dict(ordered[:RELATED_FOLLOW_LIMIT])
+
+
+def path_result(
+    graph: SignalGraph, name: str, starts: list[str], directions: tuple[str, ...], levels: dict[str, tuple[str, str]]
+) -> PathResult:
+    walks = {direction: graph.walk(starts, direction) for direction in directions}
+    stops = [stop for direction in directions for stop in render(graph, starts, walks[direction], direction, levels)[1]]
+    identities = list(dict.fromkeys(starts + [step.identity for steps in walks.values() for step in steps]))
+    walked = walks.get("upstream", walks.get("downstream", []))
+    causes = None if stops else silence_causes(graph, starts, walked, levels, muted_stages(graph, identities))
+    result = PathResult(
+        name,
+        starts,
+        walks,
+        list(dict.fromkeys(stops)),
+        causes,
+        any(_has_signal(levels, identity) for identity in starts),
+        all(_is_output(graph.nodes[identity]) for identity in starts),
+    )
+    result.answer = trace_answer(graph, name, starts, walks, levels, result.stops, causes)
+    return result
+
+
+def related_answer(point: str, results: list[PathResult], unconnected: list[str]) -> str:
+    shown = [result for result in results if result.output] or results
+    loud = [result.name for result in shown if result.signal]
+    quiet = [result.name for result in shown if not result.signal]
+    if loud:
+        lead = f"{_joined(loud)} {'has' if len(loud) == 1 else 'have'} signal now" + (
+            f"; {_joined(quiet)} {'is' if len(quiet) == 1 else 'are'} silent" if quiet else ""
+        )
+    else:
+        kind = "output" if shown[0].output else "path"
+        lead = (
+            f"No {kind} named after {point} has signal right now: "
+            f"{_joined(quiet)} {'is' if len(quiet) == 1 else 'are'} silent"
+        )
+    details = [result.answer for result in sorted(shown, key=lambda result: not result.signal)]
+    return " ".join([lead + ".", *details, f"Nothing is connected to {_joined(unconnected)}."])
+
+
+def device_answer(
+    graph: SignalGraph, point: str, starts: list[str], directions: tuple[str, ...], levels: dict[str, tuple[str, str]]
+) -> str | None:
+    transmitters = [identity for identity in starts if graph.nodes[identity].kind == "dante_tx"]
+    receivers = [identity for identity in starts if graph.nodes[identity].kind == "dante_rx"]
+    if not transmitters or not receivers:
+        return None
+    device = graph.nodes[starts[0]].details["device"]
+    sends = path_result(graph, "what it sends", transmitters, directions, levels)
+    receives = path_result(graph, "what it receives", receivers, directions, levels)
+    lead = (
+        f"{_subject(point)} sends {'signal' if sends.signal else 'silence'} and "
+        f"receives {'signal' if receives.signal else 'nothing'}."
+    )
+    sentences = [lead]
+    for result, unrouted in ((sends, "Nothing receives what it sends."), (receives, "Nothing is routed to it.")):
+        if not any(result.walks.values()):
+            sentences.append(unrouted)
+            continue
+        causes = [cause for cause in result.causes or [] if not cause.startswith(f"{device} sends silence")]
+        if result.causes is not None and not causes:
+            continue
+        if result.causes is not None:
+            result.causes = causes
+            muted = [cause for cause in causes if cause.startswith("it is muted at ")]
+            if muted and len(muted) == len(causes):
+                stage = muted[0].removeprefix("it is muted at ")
+                sentences.append(f"{_subject(result.name)} is also muted further on, at {stage}.")
+                continue
+            result.answer = trace_answer(graph, result.name, result.starts, result.walks, levels, result.stops, causes)
+        sentences.append(result.answer)
+    return " ".join(sentences)
 
 
 def destinations_summary(graph: SignalGraph, steps: list[Step]) -> str | None:

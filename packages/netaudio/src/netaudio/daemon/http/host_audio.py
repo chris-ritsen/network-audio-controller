@@ -27,6 +27,10 @@ from netaudio.host_audio.trace import (
     silence_causes,
     silence_summary,
     trace_answer,
+    device_answer,
+    path_result,
+    related_answer,
+    related_paths,
 )
 
 logger = logging.getLogger("netaudio")
@@ -578,7 +582,22 @@ class DaemonHostAudioHandlers:
             }
         directions = DIRECTIONS if direction == "both" else (direction,)
         walks = {name: graph.walk(starts, name) for name in directions}
-        identities = list(dict.fromkeys(starts + [step.identity for steps in walks.values() for step in steps]))
+        followed: dict[str, list[str]] = {}
+        if not any(walks[name] for name in directions):
+            followed = related_paths(graph, graph.also_named_identities(point, set(starts)))
+        identities = list(
+            dict.fromkeys(
+                starts
+                + [step.identity for steps in walks.values() for step in steps]
+                + [identity for group in followed.values() for identity in group]
+                + [
+                    step.identity
+                    for group in followed.values()
+                    for name in DIRECTIONS
+                    for step in graph.walk(group, name)
+                ]
+            )
+        )
         measured, notes = await self._levels(graph, identities, snapshots, records, seconds) if levels else ({}, [])
         payload: dict[str, Any] = {
             "host": local_host,
@@ -619,6 +638,7 @@ class DaemonHostAudioHandlers:
                 payload["also_named"] = (
                     f"nothing is connected to {point} here; other points with that name, which may be the path "
                     f"you mean: {', '.join(related)}"
+                    + ("; the connected ones are traced under paths" if followed and levels else "")
                 )
         if levels:
             changes = [change for name in directions for change in level_changes(graph, walks[name], name, measured)]
@@ -639,6 +659,23 @@ class DaemonHostAudioHandlers:
         if notes:
             payload["notes"] = notes
         answer = trace_answer(graph, point, starts, walks, measured if levels else None, stops, causes, related)
+        if levels and followed:
+            results = [path_result(graph, name, group, DIRECTIONS, measured) for name, group in followed.items()]
+            payload["paths"] = {
+                result.name: {
+                    "answer": result.answer,
+                    "start": [
+                        graph.nodes[identity].label + (f": {measured[identity][1]}" if identity in measured else "")
+                        for identity in result.starts
+                    ],
+                }
+                for result in results
+            }
+            answer = related_answer(
+                point, results, [LABEL_KIND.sub("", graph.nodes[identity].label) for identity in starts]
+            )
+        elif levels and device:
+            answer = device_answer(graph, point, starts, directions, measured) or answer
         return 200, {"answer": answer, **payload}
 
     async def host_audio_point_levels(
