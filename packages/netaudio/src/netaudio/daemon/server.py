@@ -75,6 +75,7 @@ STATUS_FIELD_REFRESH_INTERVAL_SECONDS = 300.0
 SHURE_METER_PUBLISH_INTERVAL_SECONDS = 0.25
 SHUTDOWN_TIMEOUT_SECONDS = 20
 EXIT_BUDGET_SECONDS = 40
+SHUTDOWN_FAILED_STATUS = 1
 SHUTDOWN_TASK_LIMIT = 20
 
 
@@ -1172,7 +1173,7 @@ def _task_stack(task: asyncio.Future) -> str:
     return output.getvalue()
 
 
-async def run_daemon(dissect=False, capture=False, daemon_port=None, exit_budget_seconds: float | None = None):
+async def run_daemon(dissect=False, capture=False, daemon_port=None, exit_budget_seconds: float | None = None) -> bool:
     import signal
 
     daemon = NetaudioDaemon(dissect=dissect, capture=capture, daemon_port=daemon_port)
@@ -1194,6 +1195,7 @@ async def run_daemon(dissect=False, capture=False, daemon_port=None, exit_budget
             except (NotImplementedError, RuntimeError) as exception:
                 logger.warning(f"Could not install a handler for signal {int(sig)}: {exception}")
 
+    stopped_in_time = True
     try:
         await daemon.start()
     except DaemonAlreadyRunningError as error:
@@ -1209,9 +1211,11 @@ async def run_daemon(dissect=False, capture=False, daemon_port=None, exit_budget
             stopping = asyncio.ensure_future(daemon.stop())
             await asyncio.wait({stopping}, timeout=SHUTDOWN_TIMEOUT_SECONDS)
             if not stopping.done():
+                stopped_in_time = False
                 logger.warning(
-                    "Daemon shutdown timed out after %ss, exiting anyway; it was waiting in:\n%s",
+                    "Daemon shutdown timed out after %ss, exiting with status %s; it was waiting in:\n%s",
                     SHUTDOWN_TIMEOUT_SECONDS,
+                    SHUTDOWN_FAILED_STATUS,
                     _task_stack(stopping),
                 )
                 faulthandler.dump_traceback(all_threads=True)
@@ -1221,3 +1225,4 @@ async def run_daemon(dissect=False, capture=False, daemon_port=None, exit_budget
             for sig in installed_signals:
                 loop.remove_signal_handler(sig)
         logger.info("Daemon stopped")
+    return stopped_in_time
