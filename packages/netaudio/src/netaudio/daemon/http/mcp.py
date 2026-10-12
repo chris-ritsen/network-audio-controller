@@ -28,6 +28,7 @@ from netaudio.daemon.http.mcp_apps import (
 from netaudio.daemon.http.mcp_host_audio import HOST_AUDIO_TOOL_NAMES, HOST_AUDIO_TOOL_SPECS, McpHostAudioTools
 from netaudio.daemon.http.mcp_planned import PLANNED_BY_NAME, PLANNED_OPERATIONS, PlannedOperation
 from netaudio.daemon.http.mcp_presets import PRESET_TOOLS, McpPresetTools
+from netaudio.daemon.http.mcp_outside import elsewhere_instructions, outlet_for, outlet_text
 from netaudio.daemon.http.mcp_confirmation import INTERNAL_CONFIRMATION, REFUSALS, PreviewTokens, preview_digest
 from netaudio.daemon.http.mcp_preview import (
     NEXT_STEP,
@@ -141,7 +142,7 @@ MCP_INSTRUCTIONS = (
     "apply_to_devices to make one change on several devices. A device that is off the network is not a problem, "
     "even when it is enrolled in Dante Domain Manager: it shows only when it was last seen, routes waiting for it "
     "are not failures, and neither is worth mentioning unless the user asks about that device or about what is "
-    "off. forget_device removes devices that no longer matter. Questions about hearing or sound at home (can I hear the TV, why is linux main silent, is my mic working) are about this audio system: answer them from trace_signal and get_signal_levels on the actual chain, passing the user's words as the point, rather than asking which system they mean or giving general advice. Short names in a question (a32, ad4d, lx-dante) are usually device or channel names: look them up with get_device or trace_signal instead of asking what they are. netaudio knows devices by name, product and which computer they are a sound card in, not where they are physically (a rack or a desk), so do not group them by place. trace_signal also says where a chain is muted, including volume stages between applications and outputs, so use it for questions such as is the work macbook muted; get_network_overview's muted lists everything muted on every computer. trace_signal and get_network_overview start with an answer field: say that sentence first, then detail only as needed. get_network_overview's recent_changes and get_event_journal say what changed. Operations with status planned are designed but not built; calling one explains what blocks it."
+    "off. forget_device removes devices that no longer matter. Questions about hearing or sound at home (can I hear the TV, why is linux main silent, is my mic working) are about this audio system: answer them from trace_signal and get_signal_levels on the actual chain, passing the user's words as the point, rather than asking which system they mean or giving general advice. Short names in a question (a32, ad4d, lx-dante) are usually device or channel names: look them up with get_device or trace_signal instead of asking what they are. netaudio knows devices by name, product and which computer they are a sound card in, not where they are physically; when get_network_overview has power_outlets, those are the rack's power outlets by name with whether each is on, which is what is plugged into the rack. Do not group devices by place otherwise. trace_signal also says where a chain is muted, including volume stages between applications and outputs, so use it for questions such as is the work macbook muted; get_network_overview's muted lists everything muted on every computer. trace_signal and get_network_overview start with an answer field: say that sentence first, then detail only as needed. get_network_overview's recent_changes and get_event_journal say what changed. Operations with status planned are designed but not built; calling one explains what blocks it."
 )
 
 
@@ -2386,7 +2387,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             return
         try:
             if method == "server/discover":
-                result = discover_result(MCP_INSTRUCTIONS)
+                result = discover_result(MCP_INSTRUCTIONS + elsewhere_instructions())
             elif method in MODERN_METHODS:
                 result = await self._mcp_call(method, params, writer)
             else:
@@ -2432,7 +2433,7 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                     "tools": {"listChanged": False},
                 },
                 "serverInfo": self._mcp_server_identity(),
-                "instructions": MCP_INSTRUCTIONS,
+                "instructions": MCP_INSTRUCTIONS + elsewhere_instructions(),
             }
         if method == "ping":
             return {}
@@ -3416,6 +3417,11 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
                 if isinstance(listed.get(device), dict) and "last_seen" not in listed[device]:
                     listed[device] = {**listed[device], "computer": computer}
             listed.update(self._unlisted_off_devices(snapshots["devices"], snapshots["journal"], listed, ddm_known))
+            outlets = await self.power_outlets()
+            for device, entry in listed.items() if outlets else ():
+                outlet = outlet_for(device, outlets or []) if isinstance(entry, dict) and "last_seen" in entry else None
+                if outlet is not None:
+                    listed[device] = {**entry, "power": outlet_text(outlet)}
             if any(isinstance(entry, dict) and "last_seen" in entry for entry in listed.values()):
                 listed["about_devices_that_are_off"] = (
                     "A device that is off is not a fault: routes waiting for it resume when it is back. It matters "
@@ -3424,6 +3430,11 @@ class DaemonMcpHandlers(McpPresetTools, McpHostAudioTools, McpAppTools):
             return _tool_result(listed, is_error=False)
         view = network_overview_view(**snapshots)
         view["recent_changes"] = self._recent_changes(snapshots["journal"])
+        outlets = await self.power_outlets()
+        if outlets:
+            view["power_outlets"] = [
+                f"outlet {outlet.get('outlet')} {outlet.get('name')}: {outlet.get('state')}" for outlet in outlets
+            ]
         view.update(await self._host_overview())
         devices, problems = await self._stream_health(snapshots["devices"], writer)
         worst = [

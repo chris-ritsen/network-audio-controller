@@ -10,6 +10,7 @@ from netaudio.common.config_loader import load_config_document
 from netaudio.daemon.http.mcp_views import _dante_match, compact, utc_now
 from netaudio.host_audio.alsa import is_dante_interface
 from netaudio.host_audio.peers import PeerError
+from netaudio.daemon.http.mcp_outside import OutletReader, outlet_for, outlet_source
 from netaudio.host_audio.displays import DisplayReader, DisplayReading, display_source
 from netaudio.host_audio.volume_states import VolumeStateReader, volume_state_source
 from netaudio.monitoring.level_history import history_text, iso_second
@@ -223,7 +224,20 @@ class DaemonHostAudioHandlers:
             hosts=[(HostScope(host, remote=host != local["host"]), value) for host, value in snapshots.items()],
         )
         await self._apply_volume_states(graph)
+        outlets = await self.power_outlets()
+        for node in graph.nodes.values() if outlets else ():
+            if node.kind in {"dante_rx", "dante_tx"} and node.details.get("online") is False:
+                outlet = outlet_for(str(node.details.get("device")), outlets or [])
+                if outlet is not None:
+                    node.details["outlet"] = outlet
         return graph, snapshots, records, notes
+
+    async def power_outlets(self) -> list[dict] | None:
+        reader = getattr(self, "_power_outlet_reader", False)
+        if reader is False:
+            source = outlet_source()
+            reader = self._power_outlet_reader = OutletReader(source) if source else None
+        return await reader.read() if reader is not None else None
 
     def _display_reader(self) -> DisplayReader | None:
         reader = getattr(self, "_display_presentation_reader", False)

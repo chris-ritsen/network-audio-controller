@@ -835,6 +835,17 @@ def silence_causes(
             for device in offline
         ]
         parts.append(f"{_joined(named)} {'is' if len(offline) == 1 else 'are'} off the network")
+        unpowered = list(
+            dict.fromkeys(
+                str(node.details["outlet"].get("name"))
+                for node in (graph.nodes[identity] for identity in sources)
+                if node.details.get("device") in offline
+                and isinstance(node.details.get("outlet"), dict)
+                and node.details["outlet"].get("state") == "off"
+            )
+        )
+        if unpowered:
+            parts[-1] += f", switched off at {'outlet' if len(unpowered) == 1 else 'outlets'} {_joined(unpowered)}"
     for condition, entries in groups.items():
         if not entries:
             continue
@@ -912,7 +923,8 @@ def trace_answer(
             return f"{subject} has no signal because {muted}."
         unmeasured = any(cause.endswith(" not measured") for cause in sources)
         everything = "no measured source feeding it has signal" if unmeasured else "nothing feeding it has signal"
-        reason = " and ".join(sources) if len(sources) <= ANSWER_CAUSE_LIMIT else everything
+        joiner = ", and " if any("," in source for source in sources) else " and "
+        reason = joiner.join(sources) if len(sources) <= ANSWER_CAUSE_LIMIT else everything
         wording = mute_wording(graph, starts) if muted else None
         if wording is None or (reason == everything and wording.startswith("some of its inputs")):
             also = None
