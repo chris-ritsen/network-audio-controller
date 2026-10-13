@@ -44,6 +44,7 @@ from netaudio.daemon.http.tls import (
     identity_coverage,
     identity_is_current,
 )
+from netaudio.daemon.http.tls_named import serve_named_certificate
 from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
 from netaudio.daemon.mcp_access import ensure_mcp_token
 from netaudio.daemon.mcp_oauth import OAuthStore
@@ -375,6 +376,7 @@ class DaemonHTTPServer(
         try:
             if self.tls is not None:
                 context = build_ssl_context(self.tls)
+                serve_named_certificate(context, self.tls.named_certificate, self.tls.named_key)
                 self._tls_context = context
                 self._tls_coverage = identity_coverage(self.tls.certificate) if self.tls.generated else None
                 self._tls_fingerprint = self._read_tls_fingerprint()

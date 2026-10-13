@@ -523,7 +523,9 @@ def web(
 @app.command()
 def tls():
     """Show the daemon's TLS configuration and certificate fingerprint."""
+    from netaudio.common.clock_text import clock_text
     from netaudio.daemon.http.tls import TLSConfigurationError, certificate_fingerprint, daemon_tls_settings
+    from netaudio.daemon.http.tls_named import named_certificate_status
 
     try:
         settings_value = daemon_tls_settings()
@@ -537,12 +539,14 @@ def tls():
             typer.echo("TLS is disabled by [daemon] no_ssl = true.")
         return
     fingerprint = certificate_fingerprint(settings_value.certificate)
+    named = named_certificate_status(settings_value.named_certificate, settings_value.named_key)
     if structured_output_selected():
         output_single(
             {
                 "certificate": str(settings_value.certificate),
                 "certificate_sha256": fingerprint,
                 "key": str(settings_value.key),
+                "named_certificate": named,
                 "port": settings_value.port,
             }
         )
@@ -551,6 +555,15 @@ def tls():
     typer.echo(f"Certificate: {settings_value.certificate}")
     typer.echo(f"Key: {settings_value.key}")
     typer.echo(f"Certificate SHA-256: {fingerprint}")
+    if named is None:
+        return
+    typer.echo(f"Named certificate: {named['certificate']}")
+    typer.echo(f"Named key: {named['key']}")
+    if "error" in named:
+        typer.echo(f"{icon('warning')}Named certificate cannot be loaded: {named['error']}", err=True)
+        return
+    typer.echo(f"Served to clients asking for: {', '.join(named['names'])}")
+    typer.echo(f"Named certificate valid until: {clock_text(named['valid_until'])}")
 
 
 @app.command("mcp-token")

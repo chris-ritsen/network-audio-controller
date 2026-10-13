@@ -23,6 +23,8 @@ GENERATED_IDENTITY_LIFETIME = timedelta(days=365)
 GENERATED_IDENTITY_RENEWAL_WINDOW = timedelta(days=30)
 TLS_CERTIFICATE_KEY = "tls_certificate"
 TLS_KEY_KEY = "tls_key"
+TLS_NAMED_CERTIFICATE_KEY = "tls_named_certificate"
+TLS_NAMED_KEY_KEY = "tls_named_key"
 TLS_PORT_KEY = "tls_port"
 
 
@@ -36,6 +38,8 @@ class TLSSettings:
     key: Path
     port: int
     generated: bool = False
+    named_certificate: Path | None = None
+    named_key: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -46,13 +50,17 @@ class IdentityCoverage:
     not_before: datetime
 
 
-def _resolve_path(value: object, base_directory: Path | None, name: str) -> Path:
+def _configured_path(value: object, base_directory: Path | None, name: str) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise TLSConfigurationError(f"[daemon] {name} must be a file path")
     path = Path(value).expanduser()
     if not path.is_absolute() and base_directory is not None:
         path = base_directory / path
-    path = path.resolve()
+    return path.absolute()
+
+
+def _resolve_path(value: object, base_directory: Path | None, name: str) -> Path:
+    path = _configured_path(value, base_directory, name).resolve()
     if not path.is_file():
         raise TLSConfigurationError(f"[daemon] {name} does not exist: {path}")
     return path
@@ -61,6 +69,8 @@ def _resolve_path(value: object, base_directory: Path | None, name: str) -> Path
 TLS_ENVIRONMENT = {
     TLS_CERTIFICATE_KEY: "NETAUDIO_TLS_CERTIFICATE",
     TLS_KEY_KEY: "NETAUDIO_TLS_KEY",
+    TLS_NAMED_CERTIFICATE_KEY: "NETAUDIO_TLS_NAMED_CERTIFICATE",
+    TLS_NAMED_KEY_KEY: "NETAUDIO_TLS_NAMED_KEY",
     TLS_PORT_KEY: "NETAUDIO_TLS_PORT",
     "no_ssl": "NETAUDIO_NO_SSL",
 }
@@ -85,18 +95,30 @@ def tls_settings_from_config(daemon_config: Mapping, base_directory: Path | None
     daemon_config = {**daemon_config, **_environment_overrides()}
     certificate = daemon_config.get(TLS_CERTIFICATE_KEY)
     key = daemon_config.get(TLS_KEY_KEY)
+    named_certificate = daemon_config.get(TLS_NAMED_CERTIFICATE_KEY)
+    named_key = daemon_config.get(TLS_NAMED_KEY_KEY)
     port = daemon_config.get(TLS_PORT_KEY)
     no_ssl = daemon_config.get("no_ssl", False)
     if not isinstance(no_ssl, bool):
         raise TLSConfigurationError("[daemon] no_ssl must be a boolean")
 
     if no_ssl:
-        if any(value is not None for value in (certificate, key, port)):
+        if any(value is not None for value in (certificate, key, named_certificate, named_key, port)):
             raise TLSConfigurationError("[daemon] no_ssl cannot be combined with TLS settings")
         return None
 
     if (certificate is None) != (key is None):
         raise TLSConfigurationError(f"[daemon] {TLS_CERTIFICATE_KEY} and {TLS_KEY_KEY} must be configured together")
+    if (named_certificate is None) != (named_key is None):
+        raise TLSConfigurationError(
+            f"[daemon] {TLS_NAMED_CERTIFICATE_KEY} and {TLS_NAMED_KEY_KEY} must be configured together"
+        )
+    named = {}
+    if named_certificate is not None:
+        named = {
+            "named_certificate": _configured_path(named_certificate, base_directory, TLS_NAMED_CERTIFICATE_KEY),
+            "named_key": _configured_path(named_key, base_directory, TLS_NAMED_KEY_KEY),
+        }
     if port is None:
         resolved_port = DEFAULT_TLS_PORT
     elif isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
@@ -111,7 +133,7 @@ def tls_settings_from_config(daemon_config: Mapping, base_directory: Path | None
             base_directory = default_config_path().parent
 
         identity = ensure_generated_identity(base_directory / "tls" / "daemon.pem")
-        settings = TLSSettings(certificate=identity, key=identity, port=resolved_port, generated=True)
+        settings = TLSSettings(certificate=identity, key=identity, port=resolved_port, generated=True, **named)
         build_ssl_context(settings)
         return settings
 
@@ -119,6 +141,7 @@ def tls_settings_from_config(daemon_config: Mapping, base_directory: Path | None
         certificate=_resolve_path(certificate, base_directory, TLS_CERTIFICATE_KEY),
         key=_resolve_path(key, base_directory, TLS_KEY_KEY),
         port=resolved_port,
+        **named,
     )
 
 

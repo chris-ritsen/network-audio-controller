@@ -180,6 +180,7 @@ Container options, as environment variables:
 | `NETAUDIO_DAEMON_PORT` | Plain HTTP port, loopback only while HTTPS is on (default 4780) |
 | `NETAUDIO_TLS_PORT` | HTTPS port for the web interface, apps and MCP (default 4781) |
 | `NETAUDIO_TLS_CERTIFICATE`, `NETAUDIO_TLS_KEY` | Your own certificate and key, mounted into the container and readable by user 10001 |
+| `NETAUDIO_TLS_NAMED_CERTIFICATE`, `NETAUDIO_TLS_NAMED_KEY` | A certificate and key served only to clients that ask for a name it covers |
 | `NETAUDIO_NO_SSL` | `true` serves plain HTTP on the network instead of HTTPS |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_SOCKET`, `REDIS_DB`, `REDIS_PASSWORD` | Publish device state to this Redis server |
 
@@ -270,6 +271,19 @@ tls_key = "/path/to/private-key.pem"
 tls_port = 4781
 port = 4780
 ```
+
+To also serve a certificate from a public authority, such as a wildcard
+for your own domain, to browsers that ask for one of its names, add:
+
+```toml
+[daemon]
+tls_named_certificate = "/path/to/fullchain.pem"
+tls_named_key = "/path/to/private-key.pem"
+```
+
+Clients that connect by any other name, by address or without a name
+keep getting the daemon's own certificate, so apps that already trust it
+are unaffected. The daemon picks up renewed files without a restart.
 
 To serve plain HTTP on the network instead, set `no_ssl = true` under
 `[daemon]`.
