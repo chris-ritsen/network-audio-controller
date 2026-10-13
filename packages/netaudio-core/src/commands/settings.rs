@@ -411,19 +411,21 @@ pub fn build_capability_partition_export(
     build_conmon_export_request(mac, message_id, tag, selector)
 }
 
-pub fn build_make_model(mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
-    settings_packet(
+/// Query the target device, named by its device ID (MAC + 0000 for a single-process device).
+pub fn build_make_model(device_id: [u8; 8]) -> Result<Vec<u8>, NetaudioError> {
+    settings_packet_for_device_id(
         0x0FDB,
-        mac,
+        device_id,
         SETTINGS_SUFFIX_IDENTITY,
         &[0x00, 0xC1, 0x00, 0x00, 0x00, 0x00],
     )
 }
 
-pub fn build_dante_model(mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
-    settings_packet(
+/// Query the target device, named by its device ID (MAC + 0000 for a single-process device).
+pub fn build_dante_model(device_id: [u8; 8]) -> Result<Vec<u8>, NetaudioError> {
+    settings_packet_for_device_id(
         0x0FDB,
-        mac,
+        device_id,
         SETTINGS_SUFFIX_IDENTITY,
         &[0x00, 0x61, 0x00, 0x00, 0x00, 0x00],
     )

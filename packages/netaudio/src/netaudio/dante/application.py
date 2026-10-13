@@ -789,6 +789,10 @@ class DanteApplication:
             for device in target_devices.values()
             if not device.requires_managed_control and device.ipv4 and device.mac_address
         ]
+        for device in queried_devices:
+            if self._conmon_device_id(device) is None:
+                logger.warning("Device ID is unavailable for %s", device.server_name)
+        queried_devices = [device for device in queried_devices if self._conmon_device_id(device) is not None]
         completed = await asyncio.gather(
             *(self._query_conmon_for_device(device, deadline) for device in queried_devices)
         )
@@ -802,8 +806,9 @@ class DanteApplication:
         key = self._waiter_key(device)
         waiter = self.notifications.register_conmon_waiter(key)
         try:
-            await self._send_conmon_query_for_device(device, self.send_make_model_request)
-            await self._send_conmon_query_for_device(device, self.send_dante_model_request)
+            sent = await self._send_conmon_query_for_device(device, self.send_make_model_request)
+            if not await self._send_conmon_query_for_device(device, self.send_dante_model_request) and not sent:
+                return True
             per_device_timeout = min(deadline - time.monotonic(), 1.0)
             try:
                 await asyncio.wait_for(waiter.wait(), timeout=per_device_timeout)
@@ -829,10 +834,13 @@ class DanteApplication:
                 continue
             waiter = self.notifications.register_conmon_waiter(self._waiter_key(device), expected_count=expected_count)
             try:
-                if needs_make_model:
-                    await self._send_conmon_query_for_device(device, self.send_make_model_request)
+                sent = needs_make_model and await self._send_conmon_query_for_device(
+                    device, self.send_make_model_request
+                )
                 if needs_dante_model:
-                    await self._send_conmon_query_for_device(device, self.send_dante_model_request)
+                    sent = await self._send_conmon_query_for_device(device, self.send_dante_model_request) or sent
+                if not sent:
+                    continue
                 try:
                     await asyncio.wait_for(waiter.wait(), timeout=min(remaining, 2.0))
                     logger.debug(f"Conmon retry {retry + 1} succeeded for {device.server_name}")
@@ -859,22 +867,33 @@ class DanteApplication:
             if isinstance(result, Exception):
                 logger.debug(f"Bluetooth status unavailable: {result}")
 
-    async def _send_conmon_query_for_device(self, device, request: Callable[[object, str], Awaitable[None]]) -> None:
+    @staticmethod
+    def _conmon_device_id(device) -> str | None:
+        """The ID a make/model or Dante model query names: the device's MAC, or its full device ID when the
+        ID does not reduce to one (a process other than the first on its host)."""
+        from netaudio import core
+
+        device_id = core.canonical_device_mac(device.mac_address) if device.mac_address else None
+        return device_id if device_id is not None and len(device_id) in (12, 16) else None
+
+    async def _send_conmon_query_for_device(self, device, request: Callable[[object, str], Awaitable[None]]) -> bool:
         from netaudio import core
 
         if device.requires_managed_control or not device.ipv4 or not device.mac_address:
-            return
+            return False
 
-        mac_hex = core.canonical_device_mac(device.mac_address)
+        device_id = self._conmon_device_id(device)
 
-        if mac_hex is None or len(mac_hex) != 12:
-            logger.warning("Device MAC address is unavailable for %s", device.server_name)
-            return
+        if device_id is None:
+            logger.warning("Device ID is unavailable for %s", device.server_name)
+            return False
 
         try:
-            await request(device, mac_hex)
+            await request(device, device_id)
         except (core.NetaudioCoreError, OSError) as exception:
             logger.warning(f"Failed to send conmon {request.__name__} to {device.server_name}: {exception}")
+            return False
+        return True
 
     async def _send_registered_system_reset(self, device, build_specification, host_mac) -> None:
         if getattr(device, "requires_managed_control", False):

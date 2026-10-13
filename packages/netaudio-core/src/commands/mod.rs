@@ -104,10 +104,21 @@ fn settings_packet(
     suffix: u8,
     tail: &[u8],
 ) -> Result<Vec<u8>, NetaudioError> {
+    let mut device_id = [0u8; 8];
+    device_id[..6].copy_from_slice(&mac);
+    settings_packet_for_device_id(message_id, device_id, suffix, tail)
+}
+
+/// A settings packet whose header names a full 8-byte device ID: a MAC followed by a process number.
+fn settings_packet_for_device_id(
+    message_id: u16,
+    device_id: [u8; 8],
+    suffix: u8,
+    tail: &[u8],
+) -> Result<Vec<u8>, NetaudioError> {
     let mut body = Vec::with_capacity(20 + tail.len());
     body.extend_from_slice(&0u16.to_be_bytes());
-    body.extend_from_slice(&mac);
-    body.extend_from_slice(&0u16.to_be_bytes());
+    body.extend_from_slice(&device_id);
     body.extend_from_slice(MAGIC_VENDOR);
     body.push(VENDOR_SEPARATOR);
     body.push(suffix);

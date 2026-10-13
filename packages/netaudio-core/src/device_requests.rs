@@ -40,16 +40,17 @@ pub fn parse_device_request(data: &[u8]) -> Option<DeviceRequest> {
 
     let message_id = read_u16(data, 4)?;
     let mac = data.get(8..14)?.try_into().ok()?;
+    let device_id = data.get(8..16)?.try_into().ok()?;
 
     // Compare complete envelopes against the same builders used by clients.
     // Identity queries have a fixed builder ID, but callers may choose another ID.
     for (mut packet, request) in [
         (
-            commands::build_dante_model(mac).ok()?,
+            commands::build_dante_model(device_id).ok()?,
             SettingsRequest::BoardInfo,
         ),
         (
-            commands::build_make_model(mac).ok()?,
+            commands::build_make_model(device_id).ok()?,
             SettingsRequest::ProductInfo,
         ),
     ] {

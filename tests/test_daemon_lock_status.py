@@ -287,7 +287,7 @@ class TestDaemonLockStatus:
             events.append("unlock")
             return {"success": True, "lock_state": 0}
 
-        async def probe_lock_status(device_ip_address, timeout):
+        async def probe_lock_status(_device, timeout):
             probe_number = sum(event.startswith("probe") for event in events) + 1
             events.append(f"probe-{probe_number}")
             if probe_number == 1:
