@@ -484,5 +484,6 @@ class _McastInfoProtocol(asyncio.DatagramProtocol):
         self.transport = transport
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
-        logger.debug(f"MCAST_RECV {addr} ({len(data)}B)")
+        local = self.transport.get_extra_info("sockname") if self.transport else None
+        logger.debug(f"MCAST_RECV {addr} -> :{local[1] if local else '?'} ({len(data)}B)")
         self._device._handle_request(data, addr, settings_only=True)
