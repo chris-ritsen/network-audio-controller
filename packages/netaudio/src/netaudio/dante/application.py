@@ -361,9 +361,7 @@ class DanteApplication:
         if device is not None or device_id is None:
             return device
         matches = [
-            device
-            for device in self._devices_by_ip(source_ip)
-            if str(device.mac_address or "").replace(":", "").casefold() == device_id.casefold()
+            device for device in self._devices_by_ip(source_ip) if self._device_id(device) == device_id.casefold()
         ]
         return matches[0] if len(matches) == 1 else None
 
@@ -384,19 +382,30 @@ class DanteApplication:
         if len(online) == 1:
             return online[0]
         endpoints = {tuple(sorted(device._service_ports().items())) for device in online}
-        if len(endpoints) > 1 or any(device.requires_managed_control for device in online):
+        if (
+            len(endpoints) > 1
+            or len(self._device_ids(online)) > 1
+            or any(device.requires_managed_control for device in online)
+        ):
             raise self._ambiguous_control_address(target, online)
         return online[0]
+
+    @staticmethod
+    def _device_id(device) -> str | None:
+        return str(getattr(device, "mac_address", None) or "").replace(":", "").casefold() or None
+
+    def _device_ids(self, devices) -> set[str]:
+        return {device_id for device in devices if (device_id := self._device_id(device)) is not None}
 
     def _waiter_key(self, target) -> str:
         device = self._control_target(target)
         key = self._control_key(device)
         if not hasattr(device, "requires_managed_control") or device.requires_managed_control:
             return key
-        settings_port = device._service_ports()["settings_port"]
-        if all(other._service_ports()["settings_port"] == settings_port for other in self._devices_by_ip(key)):
+        device_id = self._device_id(device)
+        if device_id is None or len(self._device_ids(self._devices_by_ip(key))) < 2:
             return key
-        return f"{key}:{settings_port}"
+        return f"{key}#{device_id}"
 
     def _source_waiter_key(self, source_ip: str, device) -> str:
         return source_ip if device is None else self._waiter_key(device)
