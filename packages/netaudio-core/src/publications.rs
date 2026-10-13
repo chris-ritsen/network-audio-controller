@@ -489,11 +489,13 @@ pub enum AudioCapabilityKind {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Publication {
-    source_ip: Ipv4Addr,
-    message_id: u16,
     #[serde(default)]
     device_id: Option<[u8; 8]>,
+    message_id: u16,
+    #[serde(default)]
+    process: u16,
     publication: PublicationBody,
+    source_ip: Ipv4Addr,
 }
 
 pub fn next_publication_id(previous: u16) -> u16 {
@@ -693,8 +695,9 @@ impl Publication {
             return Err(NetaudioError::PacketTooLarge);
         }
 
+        let process = if protocol_id == 0xffff { self.process } else { 0 };
         let mut body = Vec::with_capacity(26 + content.len());
-        body.extend_from_slice(&[0; 2]);
+        body.extend_from_slice(&process.to_be_bytes());
         body.extend_from_slice(&self.device_id());
         body.extend_from_slice(b"Audinate");
         body.extend_from_slice(opcode);
