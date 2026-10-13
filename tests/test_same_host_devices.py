@@ -28,10 +28,13 @@ class _HostedProcess(VirtualDevice):
         self.device_id = f"00007f000001{process_id:04x}"
         self.port = 0
         self.received: list[str] = []
+        self.settings_requests: list[tuple[str, int]] = []
 
     def _handle_request(self, data: bytes, addr, *, settings_only: bool = False):
         if data[:2] == b"\xff\xff":
             self.received.append("settings")
+            # The device ID field a ConMon request addresses, and its request opcode.
+            self.settings_requests.append((data[8:16].hex(), int.from_bytes(data[26:28], "big")))
             return None
         self.received.append(core.parse_response("device_request", data)["operation"])
         return super()._handle_request(data, addr, settings_only=settings_only)
@@ -326,3 +329,44 @@ def test_waiters_for_a_device_alone_on_its_ip_and_for_a_bare_host_address_still_
     receive_packets(application, [_from_process(SAMPLE_RATE_STATUS_PACKET, 1)], (COHOSTED_IP, 10103))
 
     assert device_waiter.is_set() and host_waiter.is_set()
+
+
+@pytest.mark.asyncio
+async def test_lock_probes_from_the_device_list_reach_each_cohosted_device(same_host_devices, monkeypatch):
+    from netaudio.cli_support import execution
+
+    application, devices, processes = same_host_devices
+    await application.cmc.register_all(list(devices.values()))
+    monkeypatch.setattr(execution.settings, "lock_state_timeout", 0.05)
+
+    await execution._enrich_lock_states(application, dict(application.devices))
+
+    for name, process in processes.items():
+        assert any(opcode == 0x1008 for _, opcode in process.settings_requests), name
+
+
+@pytest.mark.asyncio
+async def test_model_queries_reach_each_cohosted_device_by_its_device_id(same_host_devices, caplog):
+    application, devices, processes = same_host_devices
+    await application.cmc.register_all(list(devices.values()))
+
+    with caplog.at_level(logging.WARNING, logger="netaudio"):
+        await application._query_conmon_all(timeout=0.2)
+
+    assert caplog.messages == []
+    for name, process in processes.items():
+        assert {(process.device_id, 0x00C1), (process.device_id, 0x0061)} <= set(process.settings_requests), name
+
+
+@pytest.mark.asyncio
+async def test_model_queries_that_cannot_be_sent_are_not_waited_for(same_host_devices):
+    application, devices, processes = same_host_devices
+    for device in devices.values():
+        device.mac_address = "not a device id"
+
+    started = asyncio.get_running_loop().time()
+    await application._query_conmon_all(timeout=2.0)
+    await application.state.retry_conmon_query(devices["player"].server_name)
+
+    assert asyncio.get_running_loop().time() - started < 0.5
+    assert all(not process.settings_requests for process in processes.values())

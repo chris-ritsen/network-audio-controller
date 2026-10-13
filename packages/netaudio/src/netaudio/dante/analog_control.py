@@ -77,7 +77,7 @@ async def _resolve_lock_state(application, device, timeout) -> None:
     if device.requires_managed_control or device.is_locked is not None or not device.ipv4:
         return
     try:
-        observation = await application.probe_lock_status(str(device.ipv4), timeout=timeout)
+        observation = await application.probe_lock_status(device, timeout=timeout)
     except (RuntimeError, TimeoutError, OSError) as exception:
         device.failed_queries.add("is_locked")
         logger.debug(f"Lock status unavailable for {device.server_name or device.name}: {exception}")

@@ -914,7 +914,9 @@ pub(super) fn build_command(
                 commands::build_create_tx_flow(flow_protocol_id, flow_slot, &channels, message_id)?
             }
         },
-        CommandSpec::DanteModel { mac } => commands::build_dante_model(parse_mac_required(&mac)?)?,
+        CommandSpec::DanteModel { mac } => {
+            commands::build_dante_model(parse_device_id_required(&mac)?)?
+        }
         CommandSpec::DeleteTxFlow {
             flow_protocol_id,
             message_id,
@@ -946,7 +948,9 @@ pub(super) fn build_command(
             message_id,
         } => commands::build_factory_reset(parse_mac(&host_mac, default_host_mac)?, message_id)?,
         CommandSpec::Identify { message_id } => commands::build_identify(message_id)?,
-        CommandSpec::MakeModel { mac } => commands::build_make_model(parse_mac_required(&mac)?)?,
+        CommandSpec::MakeModel { mac } => {
+            commands::build_make_model(parse_device_id_required(&mac)?)?
+        }
         CommandSpec::ProbeAes67 {
             host_mac,
             message_id,

@@ -493,3 +493,29 @@ fn non_ascii_mac_address_is_rejected_without_panicking() {
         Err(SpecError::InvalidMac)
     ));
 }
+
+#[test]
+fn model_queries_address_the_device_id_their_target_publishes() {
+    // A captured Controller query names the target's 8-byte device ID: MAC + 0000 for a single-process device.
+    let captured = crate::test_support::decode_hexadecimal(
+        "ffff00200fdb0000001dc10812580000417564696e6174650731006100000000",
+    );
+    assert_eq!(
+        build_command_from_json(r#"{"command":"dante_model","mac":"001dc1081258"}"#).unwrap(),
+        captured
+    );
+
+    // A device that is one of several processes on a host (Inferno's 0000, IPv4, PROCESS_ID) has no MAC form.
+    for command in ["dante_model", "make_model"] {
+        let packet = build_command_from_json(&format!(
+            r#"{{"command":"{command}","mac":"0000ac1300030002"}}"#
+        ))
+        .unwrap();
+        assert_eq!(&packet[8..16], &[0, 0, 0xac, 0x13, 0, 3, 0, 2]);
+        assert_eq!(&packet[16..24], b"Audinate");
+    }
+    assert!(matches!(
+        build_command_from_json(r#"{"command":"make_model","mac":"0000ac13000300"}"#),
+        Err(SpecError::InvalidMac)
+    ));
+}

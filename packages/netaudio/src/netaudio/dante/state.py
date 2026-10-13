@@ -895,7 +895,7 @@ class DanteStateService:
         before = (device.is_locked, device.lock_reset_status)
         try:
             await self.application.probe_lock_status(
-                str(device.ipv4),
+                device,
                 timeout=app_settings.lock_state_timeout,
             )
         except (RuntimeError, OSError) as exception:
@@ -964,10 +964,11 @@ class DanteStateService:
 
             try:
                 logger.debug(f"Conmon retry {attempt} for {server_name}")
-                await self.application._send_conmon_query_for_device(
+                if not await self.application._send_conmon_query_for_device(
                     device,
                     self.application.send_dante_model_request,
-                )
+                ):
+                    return
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:
                 logger.debug(f"Conmon retry {attempt} timed out for {server_name}")

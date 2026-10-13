@@ -295,7 +295,7 @@ class DaemonDeviceHandlers:
             return
 
         observation = await self.application.probe_lock_status(
-            str(device.ipv4),
+            device,
             timeout=app_settings.lock_state_timeout,
         )
         if observation is None:
@@ -768,7 +768,7 @@ class DaemonDeviceHandlers:
             # make the cached state known again.
             self._invalidate_cached_lock_status(device)
             observation = await self.application.probe_lock_status(
-                device_ip_address,
+                device,
                 timeout=app_settings.lock_state_timeout,
             )
             if observation is None:

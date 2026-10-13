@@ -224,7 +224,7 @@ async def test_enrich_lock_states_only_unknown_skips_daemon_supplied_values(monk
         only_unknown=True,
     )
 
-    application.probe_lock_status.assert_awaited_once_with("192.0.2.11", timeout=4.0)
+    application.probe_lock_status.assert_awaited_once_with(unknown, timeout=4.0)
     assert described.is_locked is False
     assert list(failures) == ["unknown.local."]
     assert "is_locked" in unknown.failed_queries
