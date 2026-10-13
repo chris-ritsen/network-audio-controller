@@ -78,7 +78,7 @@ class PanelTransport:
             except asyncio.TimeoutError:
                 return None
             status = waiter.latest_result
-            if not accepts(status):
+            if not accepts(status) or not self.application._is_current_waiter_key(device, key):
                 return None
             status = {**status, "correlated": True}
             status.setdefault("observed_at_unix", observation_time())

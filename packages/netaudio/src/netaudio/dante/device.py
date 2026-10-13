@@ -74,6 +74,26 @@ def cmc_txt_identity(properties: dict | None) -> dict:
     }
 
 
+def cmc_membership_identity(memberships: list[dict]) -> dict:
+    identities = [cmc_txt_identity(properties) for properties in memberships]
+    if not identities:
+        return cmc_txt_identity(None)
+    advertised = {
+        (identity["cmc_source_identifier"], identity["cmc_process_state"], identity["cmc_process"])
+        for identity in identities
+    }
+    if len(advertised) == 1:
+        return identities[0]
+    source_identifiers = {identity["cmc_source_identifier"] for identity in identities}
+    return {
+        "cmc_process": None,
+        "cmc_process_state": "contradictory",
+        "cmc_source_identifier": next(iter(source_identifiers)) if len(source_identifiers) == 1 else None,
+        "cmc_txt_id_raw": None,
+        "cmc_txt_process_raw": None,
+    }
+
+
 class DanteDevice:
     def __init__(self, server_name="", dump_payloads=False, debug=False, app=None):
         self.association_generation = next(ASSOCIATION_GENERATIONS)

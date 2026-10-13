@@ -247,11 +247,7 @@ class DanteApplication:
             self.register_device(server_name, device)
 
         device.services = dict(sorted(device_services.items()))
-        cmc_service = next(
-            (service for service in device_services.values() if service["type"] == SERVICE_CMC),
-            None,
-        )
-        self.apply_cmc_observation(device, cmc_service.get("properties", {}) if cmc_service is not None else None)
+        self.apply_cmc_memberships(device)
         arc_service = next(
             (service for service in device_services.values() if service["type"] == SERVICE_ARC),
             None,
@@ -403,9 +399,32 @@ class DanteApplication:
     def apply_cmc_observation(self, device, properties: dict | None) -> None:
         from netaudio.dante.device import cmc_txt_identity
 
-        for field_name, value in cmc_txt_identity(properties).items():
+        self._apply_cmc_identity(device, cmc_txt_identity(properties))
+
+    def apply_cmc_memberships(self, device) -> None:
+        from netaudio.dante.device import cmc_membership_identity
+
+        memberships = [
+            service.get("properties") or {}
+            for _, service in sorted((getattr(device, "services", None) or {}).items())
+            if isinstance(service, dict) and service.get("type") == SERVICE_CMC
+        ]
+        self._apply_cmc_identity(device, cmc_membership_identity(memberships))
+
+    def _apply_cmc_identity(self, device, identity: dict) -> None:
+        for field_name, value in identity.items():
             setattr(device, field_name, value)
         self.refresh_conmon_associations()
+
+    @staticmethod
+    def _detach_association(device) -> None:
+        from netaudio.dante.device import ASSOCIATION_GENERATIONS
+
+        if not hasattr(device, "association_generation"):
+            return
+        device.association_signature = None
+        device.association_state = "none"
+        device.association_generation = next(ASSOCIATION_GENERATIONS)
 
     @staticmethod
     def _cmc_endpoints(device) -> tuple:
@@ -482,9 +501,11 @@ class DanteApplication:
         if len(online) == 1:
             return online[0]
         endpoints = {tuple(sorted(device._service_ports().items())) for device in online}
+        advertised = {(device.cmc_source_identifier, device.cmc_process_state, device.cmc_process) for device in online}
         if (
             len(endpoints) > 1
             or len(self._device_ids(online)) > 1
+            or len(advertised) > 1
             or any(device.requires_managed_control for device in online)
         ):
             raise self._ambiguous_control_address(target, online)
@@ -507,8 +528,18 @@ class DanteApplication:
             return f"{key}#{device.cmc_source_identifier}:{device.cmc_process}@{generation}"
         return f"{key}#{device.server_name}@{generation}"
 
+    def _is_current_waiter_key(self, target, key: str) -> bool:
+        server_name = getattr(target, "server_name", None)
+        if (
+            hasattr(target, "requires_managed_control")
+            and server_name
+            and self.devices.get(server_name, target) is not target
+        ):
+            return False
+        return self._waiter_key(target) == key
+
     def _require_current_waiter_key(self, target, key: str) -> None:
-        if self._waiter_key(target) != key:
+        if not self._is_current_waiter_key(target, key):
             raise StaleDeviceAssociationError(f"the device association changed while waiting on {key}")
 
     def _source_waiter_key(self, source_ip: str, device) -> str:
@@ -546,6 +577,7 @@ class DanteApplication:
                 request,
                 timeout,
             )
+        self._require_current_waiter_key(device_ip_address, key)
         if result is None:
             raise CapabilityProbeTimeout(f"{operation_name} timed out for {device_ip_address}")
         return result
@@ -924,10 +956,10 @@ class DanteApplication:
             except asyncio.TimeoutError:
                 logger.debug(f"Conmon query partial/timeout for {device.server_name}")
                 received = self.notifications._conmon_received.get(key, set())
-                return len(received) >= 2
+                return len(received) >= 2 and self._is_current_waiter_key(device, key)
         finally:
             self.notifications.unregister_waiter(waiter)
-        return True
+        return self._is_current_waiter_key(device, key)
 
     async def _retry_conmon_query(self, incomplete_devices: list, deadline: float, retry: int) -> list:
         still_incomplete = []
@@ -1214,6 +1246,7 @@ class DanteApplication:
                 timeout,
             )
 
+        self._require_current_waiter_key(target, key)
         if status is None:
             raise CapabilityProbeTimeout(f"clear-configuration status timed out for {key}")
 
@@ -1665,7 +1698,7 @@ class DanteApplication:
         async def mutate_without_result() -> None:
             await mutate()
 
-        return await mutate_and_wait_for_capability_value(
+        result = await mutate_and_wait_for_capability_value(
             self.notifications,
             capability_name,
             key,
@@ -1674,6 +1707,8 @@ class DanteApplication:
             probe_status,
             timeout,
         )
+        self._require_current_waiter_key(device, key)
+        return result
 
     async def mutate_and_wait_for_notification(
         self,
@@ -2907,6 +2942,7 @@ class DanteApplication:
     def unregister_device(self, server_name: str) -> None:
         device = self.devices.pop(server_name, None)
         if device:
+            self._detach_association(device)
             self.refresh_conmon_associations()
             self.dispatcher.emit_nowait(
                 DanteEvent(

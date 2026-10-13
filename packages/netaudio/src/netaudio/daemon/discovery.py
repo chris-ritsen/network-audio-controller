@@ -119,7 +119,7 @@ class DanteDiscoveryMixin:
             if name in device.services:
                 if service_type == SERVICE_CMC:
                     device.services.pop(name, None)
-                    self.application.apply_cmc_observation(device, None)
+                    self.application.apply_cmc_memberships(device)
                 logger.info(f"Device offline candidate (mDNS removed): {server_name}")
                 self.mark_device_offline(server_name)
                 return
@@ -238,7 +238,7 @@ class DanteDiscoveryMixin:
     async def _apply_cmc_identity(self, device, service):
         if service.service_type != SERVICE_CMC:
             return
-        self.application.apply_cmc_observation(device, service.properties)
+        self.application.apply_cmc_memberships(device)
         if "id" not in service.properties:
             return
 
