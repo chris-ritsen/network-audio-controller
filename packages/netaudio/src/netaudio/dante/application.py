@@ -354,14 +354,22 @@ class DanteApplication:
                 continue
         return self._device_by_ip(key)
 
+    @staticmethod
+    def _ambiguous_control_address(address, devices) -> RuntimeError:
+        names = ", ".join(sorted(device.server_name or device.name for device in devices))
+        return RuntimeError(f"control address {address} is ambiguous across devices: {names}")
+
     def _control_target(self, target):
         if hasattr(target, "requires_managed_control"):
             return target
         matches = self._devices_by_ip(str(target))
-        if len(matches) > 1:
-            names = ", ".join(sorted(device.server_name or device.name for device in matches))
-            raise RuntimeError(f"control address {target} is ambiguous across devices: {names}")
-        return matches[0] if matches else target
+        if len(matches) == 1:
+            return matches[0]
+        # A bare address names a host. Several directly controlled devices may share one (each with its own
+        # advertised ARC port); host-scoped settings messages still have a single destination there.
+        if any(device.requires_managed_control for device in matches):
+            raise self._ambiguous_control_address(target, matches)
+        return target
 
     def _require_probe_supported(self, target, operation: _requests.Operation) -> None:
         if hasattr(target, "dante_model_primary_capabilities"):
@@ -490,12 +498,11 @@ class DanteApplication:
                 or self._probe_unanswered(device, description)
             ):
                 continue
-            target = device if device.requires_managed_control else str(device.ipv4)
-            key = self._control_key(target)
+            key = self._control_key(device)
             target_devices_by_key.setdefault(key, []).append(device)
             if key in probe_tasks:
                 continue
-            probe_tasks[key] = asyncio.create_task(probe(target, timeout=timeout))
+            probe_tasks[key] = asyncio.create_task(probe(device, timeout=timeout))
 
         if not probe_tasks:
             return
@@ -1000,10 +1007,11 @@ class DanteApplication:
                 channel.media_service = service
 
     def arc_port_for_address(self, device_ip_address: str) -> int:
-        device = self._device_by_ip(device_ip_address)
-        if device is None:
-            return DEVICE_ARC_PORT
-        return self.get_arc_port(device) or DEVICE_ARC_PORT
+        devices = self._devices_by_ip(device_ip_address)
+        ports = {self.get_arc_port(device) or DEVICE_ARC_PORT for device in devices}
+        if len(ports) > 1:
+            raise self._ambiguous_control_address(device_ip_address, devices)
+        return ports.pop() if ports else DEVICE_ARC_PORT
 
     def attach_devices(self, devices: dict) -> None:
         for server_name, device in devices.items():
@@ -1252,9 +1260,9 @@ class DanteApplication:
 
     async def execute(self, target, specification: dict) -> bytes | None:
         resolved = self._control_target(target)
-        if getattr(resolved, "requires_managed_control", False):
+        if hasattr(resolved, "requires_managed_control"):
             return await resolved.execute(specification)
-        address = resolved._require_address() if hasattr(resolved, "_require_address") else str(resolved)
+        address = str(resolved)
         return await self.transport.execute(address, specification, arc_port=self.arc_port_for_address(address))
 
     async def export_capability_partition(
