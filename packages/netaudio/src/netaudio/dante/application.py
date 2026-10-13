@@ -808,7 +808,7 @@ class DanteApplication:
         try:
             sent = await self._send_conmon_query_for_device(device, self.send_make_model_request)
             if not await self._send_conmon_query_for_device(device, self.send_dante_model_request) and not sent:
-                return True
+                return False
             per_device_timeout = min(deadline - time.monotonic(), 1.0)
             try:
                 await asyncio.wait_for(waiter.wait(), timeout=per_device_timeout)
