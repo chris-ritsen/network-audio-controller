@@ -4,7 +4,6 @@ import logging
 
 from netaudio import core
 from netaudio.dante.const import (
-    DEVICE_SETTINGS_PORT,
     PROTOCOL_CMC,
     PROTOCOL_ID,
     RESULT_CODE_SUCCESS,
@@ -22,6 +21,12 @@ class VirtualDeviceRequestHandler:
                 raise
 
             return None
+
+        if request["family"] == "metering":
+            if settings_only or not self._config.detailed_metering:
+                return None
+
+            return self._handle_metering_request(request, data)
 
         if request["family"] == "settings":
             return self._handle_settings_request(request, addr)
@@ -44,7 +49,7 @@ class VirtualDeviceRequestHandler:
 
         if operation == "board_info":
             self._send_mcast_board_info()
-            self._send_unicast_from_settings(addr, {"kind": "board_info", "name": self._config.name})
+            self._send_unicast_from_settings(addr, self._board_info())
         elif operation == "product_info":
             self._send_mcast_product_info()
             self._send_unicast_from_settings(
@@ -91,7 +96,22 @@ class VirtualDeviceRequestHandler:
             {
                 "kind": "cmc_registration",
                 "device_ip": self._local_ip or "0.0.0.0",
-                "settings_port": DEVICE_SETTINGS_PORT,
+                "instance": int(self._advertised_device_id(), 16),
+                "settings_port": self._config.settings_port,
+            },
+            PROTOCOL_CMC,
+        )
+
+    def _handle_metering_request(self, request: dict, data: bytes) -> bytes:
+        self._update_metering_destination(request)
+
+        return self._build_response(
+            request["transaction_id"],
+            {
+                "kind": "metering",
+                "request": list(data),
+                "responder_process": self._config.process_id,
+                "responder_identity": list(bytes.fromhex(self._advertised_device_id())),
             },
             PROTOCOL_CMC,
         )

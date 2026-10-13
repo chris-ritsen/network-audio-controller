@@ -7,6 +7,10 @@ pub enum DeviceRequest {
         #[serde(flatten)]
         header: protocol::ControlRequestHeader,
     },
+    Metering {
+        #[serde(flatten)]
+        request: commands::MeteringRequest,
+    },
     Settings {
         #[serde(flatten)]
         request: SettingsRequest,
@@ -27,6 +31,10 @@ pub enum SettingsRequest {
 }
 
 pub fn parse_device_request(data: &[u8]) -> Option<DeviceRequest> {
+    if let Some(request) = commands::parse_metering_request(data) {
+        return Some(DeviceRequest::Metering { request });
+    }
+
     if read_u16(data, 0)? != commands::PROTOCOL_SETTINGS {
         return protocol::control_request_header(data)
             .map(|header| DeviceRequest::Control { header });

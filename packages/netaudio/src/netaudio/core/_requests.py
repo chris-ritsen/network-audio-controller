@@ -930,10 +930,12 @@ class VirtualDeviceAdvertisement(_extensions.TypedDict):
     address: str
     arc_port: int
     configured_latency_ns: int
+    control_port: _extensions.NotRequired[_typing.Union[int, None]]
     encoding: int
     manufacturer: str
     model: str
     name: str
+    process_id: _extensions.NotRequired[int]
     sample_rate: int
     supported_encodings: list[int]
     tx_channels: list[str]

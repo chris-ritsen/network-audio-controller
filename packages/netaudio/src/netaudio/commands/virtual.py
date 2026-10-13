@@ -55,6 +55,9 @@ STOP_TIMEOUT_SECONDS = 5.0
 KILL_TIMEOUT_SECONDS = 1.0
 MAX_READINESS_MESSAGE_BYTES = 65_536
 READINESS_HOST = "127.0.0.1"
+MAXIMUM_DEVICE_COUNT = 16
+CO_HOSTED_PORT_BASE = 24500
+CO_HOSTED_PORT_STRIDE = 10
 
 
 def _ensure_runtime_directory() -> None:
@@ -353,7 +356,9 @@ def _terminate_spawned_process(process: subprocess.Popen[Any]) -> None:
         logger.warning("Could not terminate failed virtual-device child PID %s: %s", process.pid, exception)
 
 
-def _validate_configuration(tx: int, rx: int, sample_rate: int) -> None:
+def _validate_configuration(tx: int, rx: int, sample_rate: int, count: int) -> None:
+    if not 1 <= count <= MAXIMUM_DEVICE_COUNT:
+        raise typer.BadParameter(f"--count must be between 1 and {MAXIMUM_DEVICE_COUNT}")
     if tx < 0:
         raise typer.BadParameter("--tx cannot be negative")
     if rx < 0:
@@ -370,6 +375,8 @@ def _start_background_claimed(
     rx: int,
     sample_rate: int,
     interface: Optional[str],
+    count: int = 1,
+    detailed_metering: bool = True,
 ) -> None:
     existing = _existing_managed_process()
     if existing is not None:
@@ -395,6 +402,9 @@ def _start_background_claimed(
         str(rx),
         "--sample-rate",
         str(sample_rate),
+        "--count",
+        str(count),
+        "--detailed-metering" if detailed_metering else "--no-detailed-metering",
     ]
     if interface:
         command.extend(("--interface", interface))
@@ -419,8 +429,8 @@ def _start_background_claimed(
             raise
 
     typer.echo(f"Started virtual device '{name}' (PID {process.pid})")
-    typer.echo(f"  MAC: {message.get('mac', 'unknown')}")
-    typer.echo(f"  Ports: {message.get('ports', [])}")
+    for device in message.get("devices", []):
+        typer.echo(f"  {device['name']}: MAC {device['mac']}, ports {device['ports']}")
     typer.echo(f"  Log: {LOGFILE}")
 
 
@@ -432,6 +442,8 @@ def _start_background(
     rx: int,
     sample_rate: int,
     interface: Optional[str],
+    count: int = 1,
+    detailed_metering: bool = True,
 ) -> None:
     with _startup_claim():
         _start_background_claimed(
@@ -441,6 +453,8 @@ def _start_background(
             rx=rx,
             sample_rate=sample_rate,
             interface=interface,
+            count=count,
+            detailed_metering=detailed_metering,
         )
 
 
@@ -471,6 +485,8 @@ async def _run_virtual_device(
     rx: int,
     sample_rate: int,
     interface: Optional[str],
+    count: int,
+    detailed_metering: bool,
     ownership_token: Optional[str],
     readiness_port: Optional[int],
 ) -> None:
@@ -478,21 +494,43 @@ async def _run_virtual_device(
 
     tx_channels = [f"Ch {index + 1}" for index in range(tx)]
     rx_channels = [f"Ch {index + 1}" for index in range(rx)]
-    device_configuration = VirtualDeviceConfig(
-        name=name,
-        model=model,
-        tx_channels=tx_channels,
-        rx_channels=rx_channels,
-        sample_rate=sample_rate,
-        interface_ip=interface,
-    )
-    device = VirtualDevice(device_configuration)
+    devices = []
+    for index in range(count):
+        ports = {}
+        if index:
+            base = CO_HOSTED_PORT_BASE + index * CO_HOSTED_PORT_STRIDE
+            ports = {"arc_port": base, "control_port": base + 1, "settings_port": base + 3}
+        devices.append(
+            VirtualDevice(
+                VirtualDeviceConfig(
+                    name=name if index == 0 else f"{name}-{index + 1}",
+                    model=model,
+                    tx_channels=tx_channels,
+                    rx_channels=rx_channels,
+                    sample_rate=sample_rate,
+                    interface_ip=interface,
+                    process_id=index,
+                    detailed_metering=detailed_metering,
+                    **ports,
+                )
+            )
+        )
+    started = []
     record: Optional[ProcessRecord] = None
     readiness_reported = False
 
     try:
-        await device.start()
-        ports = [transport.get_extra_info("sockname")[1] for transport in device._transports]
+        for device in devices:
+            started.append(device)
+            await device.start()
+        summaries = [
+            {
+                "name": device.config.name,
+                "mac": device.mac,
+                "ports": [transport.get_extra_info("sockname")[1] for transport in device._transports],
+            }
+            for device in devices
+        ]
 
         if ownership_token is not None:
             record = ProcessRecord(
@@ -511,15 +549,14 @@ async def _run_virtual_device(
                     "status": "ready",
                     "token": ownership_token,
                     "pid": os.getpid(),
-                    "mac": device.mac,
-                    "ports": ports,
+                    "devices": summaries,
                 },
             )
             readiness_reported = True
 
         typer.echo(f"Virtual device '{name}' running ({tx} TX, {rx} RX, {sample_rate}Hz)")
-        typer.echo(f"  MAC: {device.mac}")
-        typer.echo(f"  Ports: {ports}")
+        for summary in summaries:
+            typer.echo(f"  {summary['name']}: MAC {summary['mac']}, ports {summary['ports']}")
         if ownership_token is None:
             typer.echo("  Foreground session; press Ctrl+C to stop")
 
@@ -543,10 +580,11 @@ async def _run_virtual_device(
                 logger.exception("Could not report virtual-device startup failure")
         raise
     finally:
-        try:
-            await device.stop()
-        except Exception:
-            logger.exception("Virtual device cleanup failed")
+        for device in reversed(started):
+            try:
+                await device.stop()
+            except Exception:
+                logger.exception("Virtual device cleanup failed")
         if record is not None:
             _remove_process_record(record)
 
@@ -560,10 +598,12 @@ def _start_virtual(
     sample_rate: int,
     interface: Optional[str],
     foreground: bool,
+    count: int = 1,
+    detailed_metering: bool = True,
     ownership_token: Optional[str] = None,
     readiness_port: Optional[int] = None,
 ) -> None:
-    _validate_configuration(tx, rx, sample_rate)
+    _validate_configuration(tx, rx, sample_rate, count)
     if (ownership_token is None) != (readiness_port is None):
         raise typer.BadParameter("internal startup options must be provided together")
 
@@ -575,6 +615,8 @@ def _start_virtual(
             rx=rx,
             sample_rate=sample_rate,
             interface=interface,
+            count=count,
+            detailed_metering=detailed_metering,
         )
         return
 
@@ -593,6 +635,8 @@ def _start_virtual(
             rx=rx,
             sample_rate=sample_rate,
             interface=interface,
+            count=count,
+            detailed_metering=detailed_metering,
             ownership_token=ownership_token,
             readiness_port=readiness_port,
         )
@@ -612,6 +656,10 @@ def virtual_start(
     rx: int = typer.Option(2, "--rx", help="Number of receiver channels."),
     sample_rate: int = typer.Option(48000, "--sample-rate", "-r", help="Sample rate in Hz."),
     interface: Optional[str] = typer.Option(None, "--interface", "-i", help="Network interface to bind."),
+    count: int = typer.Option(1, "--count", help="Number of virtual devices to run on this address."),
+    detailed_metering: bool = typer.Option(
+        True, "--detailed-metering/--no-detailed-metering", help="Answer detailed metering subscriptions."
+    ),
     foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in the foreground instead of detaching."),
     ownership_token: Optional[str] = typer.Option(
         None, "--ownership-token", hidden=True, help="Ownership token handed to the detached process."
@@ -629,6 +677,8 @@ def virtual_start(
             sample_rate=sample_rate,
             interface=interface,
             foreground=foreground,
+            count=count,
+            detailed_metering=detailed_metering,
             ownership_token=ownership_token,
             readiness_port=readiness_port,
         )
@@ -725,6 +775,10 @@ def virtual_restart(
     rx: int = typer.Option(2, "--rx", help="Number of receiver channels."),
     sample_rate: int = typer.Option(48000, "--sample-rate", "-r", help="Sample rate in Hz."),
     interface: Optional[str] = typer.Option(None, "--interface", "-i", help="Network interface to bind."),
+    count: int = typer.Option(1, "--count", help="Number of virtual devices to run on this address."),
+    detailed_metering: bool = typer.Option(
+        True, "--detailed-metering/--no-detailed-metering", help="Answer detailed metering subscriptions."
+    ),
 ) -> None:
     try:
         _stop_virtual(missing_ok=True)
@@ -736,6 +790,8 @@ def virtual_restart(
             sample_rate=sample_rate,
             interface=interface,
             foreground=False,
+            count=count,
+            detailed_metering=detailed_metering,
         )
     except VirtualLifecycleError as exception:
         _report_lifecycle_error(exception)

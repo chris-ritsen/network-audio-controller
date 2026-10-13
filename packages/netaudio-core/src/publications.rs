@@ -48,6 +48,11 @@ enum ArcResponseBody {
     LatencyApplied {
         latency_ns: u32,
     },
+    Metering {
+        request: Vec<u8>,
+        responder_process: u16,
+        responder_identity: [u8; 8],
+    },
     CmcRegistration {
         device_ip: Ipv4Addr,
         #[serde(default)]
@@ -116,7 +121,7 @@ impl ArcResponse {
         let is_arc = protocol::is_supported_arc_protocol(self.protocol_id);
         let is_cmc = self.protocol_id == crate::commands::PROTOCOL_CMC;
         let supported = match &self.response {
-            ArcResponseBody::CmcRegistration { .. } => is_cmc,
+            ArcResponseBody::CmcRegistration { .. } | ArcResponseBody::Metering { .. } => is_cmc,
             _ => is_arc,
         };
 
@@ -143,6 +148,27 @@ impl ArcResponse {
                 };
 
                 (header.opcode, Vec::new())
+            }
+            ArcResponseBody::Metering {
+                request,
+                responder_process,
+                responder_identity,
+            } => {
+                let parsed = crate::commands::parse_metering_request(request)
+                    .ok_or(NetaudioError::UnsupportedProtocolOperation)?;
+
+                if parsed.transaction_id != self.transaction_id {
+                    return Err(NetaudioError::UnsupportedProtocolOperation);
+                }
+
+                let reply = crate::commands::build_metering_reply(
+                    request,
+                    *responder_process,
+                    *responder_identity,
+                )?;
+                result_code = protocol::RESULT_CODE_SUCCESS;
+
+                (crate::commands::OPCODE_CMC_METERING, reply[10..].to_vec())
             }
             ArcResponseBody::EmptyFlows { channel_type } => {
                 let opcode = match channel_type {
@@ -465,6 +491,8 @@ pub enum AudioCapabilityKind {
 pub struct Publication {
     source_ip: Ipv4Addr,
     message_id: u16,
+    #[serde(default)]
+    device_id: Option<[u8; 8]>,
     publication: PublicationBody,
 }
 
@@ -477,6 +505,8 @@ pub fn next_publication_id(previous: u16) -> u16 {
 enum PublicationBody {
     BoardInfo {
         name: String,
+        #[serde(default)]
+        detailed_metering: bool,
     },
     ProductInfo {
         name: String,
@@ -498,6 +528,10 @@ enum PublicationBody {
         tx_count: u16,
         rx_count: u16,
     },
+    Metering {
+        tx_levels: Vec<u8>,
+        rx_levels: Vec<u8>,
+    },
 }
 
 fn fixed_text(destination: &mut [u8], text: &str) -> Result<(), NetaudioError> {
@@ -513,14 +547,17 @@ fn fixed_text(destination: &mut [u8], text: &str) -> Result<(), NetaudioError> {
 impl Publication {
     pub fn packet(&self) -> Result<Vec<u8>, NetaudioError> {
         match &self.publication {
-            PublicationBody::BoardInfo { name } => {
+            PublicationBody::BoardInfo {
+                name,
+                detailed_metering,
+            } => {
                 let mut body = vec![0; 200];
                 body[..8].copy_from_slice(&[4, 1, 0, 6, 4, 1, 0, 3]);
                 body[0x23] = 2;
                 body[0x27] = 1;
                 body[0x28] = 1;
-                body[0x16] = 0x10;
-                body[0xBB] = 0x1F;
+                body[0x16] = if *detailed_metering { 0x90 } else { 0x10 };
+                body[0xBB] = if *detailed_metering { 0x1B } else { 0x1F };
                 fixed_text(&mut body[12..20], name)?;
                 fixed_text(&mut body[0x38..0x40], name)?;
 
@@ -622,7 +659,24 @@ impl Publication {
                 content.resize(16 + record_length, 0);
                 self.frame(0xfffe, &[0, 8, 0, 1, 0x10, 0, 0, 0], &content)
             }
+            PublicationBody::Metering {
+                tx_levels,
+                rx_levels,
+            } => crate::commands::build_metering_frame(
+                self.device_id(),
+                self.message_id,
+                tx_levels,
+                rx_levels,
+            ),
         }
+    }
+
+    fn device_id(&self) -> [u8; 8] {
+        self.device_id.unwrap_or_else(|| {
+            let mut device_id = [0; 8];
+            device_id[2..6].copy_from_slice(&self.source_ip.octets());
+            device_id
+        })
     }
 
     fn frame(
@@ -640,9 +694,8 @@ impl Publication {
         }
 
         let mut body = Vec::with_capacity(26 + content.len());
-        body.extend_from_slice(&[0; 4]);
-        body.extend_from_slice(&self.source_ip.octets());
         body.extend_from_slice(&[0; 2]);
+        body.extend_from_slice(&self.device_id());
         body.extend_from_slice(b"Audinate");
         body.extend_from_slice(opcode);
         body.extend_from_slice(content);

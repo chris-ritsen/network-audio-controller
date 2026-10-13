@@ -41,6 +41,8 @@ def test_restart_passes_real_defaults_instead_of_typer_option_objects(monkeypatc
             "sample_rate": 48000,
             "interface": None,
             "foreground": False,
+            "count": 1,
+            "detailed_metering": True,
         }
     ]
 

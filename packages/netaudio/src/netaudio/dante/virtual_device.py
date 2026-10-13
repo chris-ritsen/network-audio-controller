@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import socket
 import struct
@@ -28,6 +29,9 @@ from netaudio.dante.virtual_device_requests import VirtualDeviceRequestHandler
 
 logger = logging.getLogger("netaudio")
 
+METERING_INTERVAL_SECONDS = 0.1
+METERING_LEASE_SECONDS = 10.0
+
 
 @dataclass
 class VirtualDeviceConfig:
@@ -46,6 +50,11 @@ class VirtualDeviceConfig:
     minimum_latency_ns: int = 150_000
     maximum_latency_ns: int = 21_333_334
     interface_ip: str | None = None
+    arc_port: int = DEVICE_ARC_PORT
+    control_port: int = DEVICE_CONTROL_PORT
+    settings_port: int = DEVICE_SETTINGS_PORT
+    process_id: int = 0
+    detailed_metering: bool = False
 
     def __post_init__(self):
         if self.supported_sample_rates is None:
@@ -73,6 +82,10 @@ class VirtualDevice(VirtualDeviceRequestHandler):
         self._mcast_sock: socket.socket | None = None
         self._mcast_transport: asyncio.DatagramTransport | None = None
         self._subscriptions: dict[int, tuple[str, str]] = {}
+        self._metering_destinations: dict[tuple[str, int], tuple[str, int, float]] = {}
+        self._metering_sequence = 0
+        self._metering_task: asyncio.Task | None = None
+        self._metering_transport: asyncio.DatagramTransport | None = None
 
     @property
     def config(self) -> VirtualDeviceConfig:
@@ -93,11 +106,16 @@ class VirtualDevice(VirtualDeviceRequestHandler):
         ]
         return ":".join(f"{b:02x}" for b in octets)
 
+    def _advertised_device_id(self) -> str:
+        address = socket.inet_aton(self._local_ip or "0.0.0.0")
+        return (b"\x00\x00" + address + self._config.process_id.to_bytes(2, "big")).hex()
+
     def _build_publication(self, publication: dict) -> bytes:
         packet = core.build_publication(
             {
                 "source_ip": self._local_ip or "0.0.0.0",
                 "message_id": self._mcast_seqnum,
+                "device_id": list(bytes.fromhex(self._advertised_device_id())),
                 "publication": publication,
             }
         )
@@ -123,6 +141,7 @@ class VirtualDevice(VirtualDeviceRequestHandler):
 
         await self._start_responders()
         await self._start_mcast_server()
+        await self._start_metering_transport()
         await self._register_mdns()
 
         self._send_mcast_board_info()
@@ -141,13 +160,17 @@ class VirtualDevice(VirtualDeviceRequestHandler):
     async def stop(self) -> None:
         self._running = False
 
-        if self._heartbeat_task:
-            self._heartbeat_task.cancel()
-            try:
-                await self._heartbeat_task
-            except asyncio.CancelledError:
-                pass
-            self._heartbeat_task = None
+        for task in (self._heartbeat_task, self._metering_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._heartbeat_task = None
+        self._metering_task = None
+        self._metering_destinations.clear()
+        self._metering_transport = None
 
         for transport in self._transports:
             transport.close()
@@ -172,8 +195,13 @@ class VirtualDevice(VirtualDeviceRequestHandler):
         else:
             logger.warning("no mcast socket available")
 
+    def _board_info(self) -> dict:
+        if not self._config.detailed_metering:
+            return {"kind": "board_info", "name": self._config.name}
+        return {"kind": "board_info", "name": self._config.name, "detailed_metering": True}
+
     def _send_mcast_board_info(self) -> None:
-        self._send_status_publication({"kind": "board_info", "name": self._config.name})
+        self._send_status_publication(self._board_info())
 
     def _send_mcast_product_info(self) -> None:
         self._send_status_publication(
@@ -251,9 +279,9 @@ class VirtualDevice(VirtualDeviceRequestHandler):
             )
 
         try:
-            sock.bind(("", DEVICE_SETTINGS_PORT))
+            sock.bind(("", self._config.settings_port))
         except OSError as e:
-            logger.warning(f"Could not bind mcast server on :{DEVICE_SETTINGS_PORT}: {e}")
+            logger.warning(f"Could not bind mcast server on :{self._config.settings_port}: {e}")
             sock.close()
             return
 
@@ -271,12 +299,85 @@ class VirtualDevice(VirtualDeviceRequestHandler):
         )
         self._transports.append(transport)
         self._mcast_transport = transport
-        logger.info(f"Multicast server on :{DEVICE_SETTINGS_PORT} (group {MULTICAST_GROUP_CONTROL_MONITORING})")
+        logger.info(f"Multicast server on :{self._config.settings_port} (group {MULTICAST_GROUP_CONTROL_MONITORING})")
+
+    async def _start_metering_transport(self) -> None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+        if self._local_ip and self._local_ip != "0.0.0.0":
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(self._local_ip))
+        sock.bind(("", 0))
+        sock.setblocking(False)
+        transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(asyncio.DatagramProtocol, sock=sock)
+        self._transports.append(transport)
+        self._metering_transport = transport
+
+    def _update_metering_destination(self, request: dict) -> None:
+        key = (request["owner"], request["discriminator"])
+        destination = request["destination"]
+
+        if destination is None:
+            if self._metering_destinations.pop(key, None):
+                logger.info(f"Metering stopped for owner {key[0]} discriminator {key[1]}")
+            return
+
+        expires_at = asyncio.get_running_loop().time() + METERING_LEASE_SECONDS
+        if key not in self._metering_destinations:
+            logger.info(
+                f"Metering to {destination['ipv4']}:{destination['port']} for owner {key[0]} discriminator {key[1]}"
+            )
+        self._metering_destinations[key] = (destination["ipv4"], destination["port"], expires_at)
+
+        if self._running and (self._metering_task is None or self._metering_task.done()):
+            self._metering_task = asyncio.create_task(self._metering_loop())
+
+    async def _metering_loop(self) -> None:
+        loop = asyncio.get_running_loop()
+        while self._metering_destinations:
+            now = loop.time()
+            for key, (_, _, expires_at) in list(self._metering_destinations.items()):
+                if expires_at <= now:
+                    del self._metering_destinations[key]
+                    logger.info(f"Metering lease expired for owner {key[0]} discriminator {key[1]}")
+            if self._metering_destinations:
+                self._send_metering_frame(now)
+            await asyncio.sleep(METERING_INTERVAL_SECONDS)
+
+    def _synthetic_levels(self, count: int, phase: float, now: float) -> list[int]:
+        levels = []
+        for index in range(count):
+            swing = math.sin(now * 2.0 + index * 0.7 + phase + self._config.process_id * 1.3)
+            levels.append(1 + round(2 * (30 - 24 * swing)))
+        return levels
+
+    def _send_metering_frame(self, now: float) -> None:
+        if not self._metering_transport:
+            return
+
+        packet = core.build_publication(
+            {
+                "source_ip": self._local_ip or "0.0.0.0",
+                "message_id": self._metering_sequence,
+                "device_id": list(bytes.fromhex(self._advertised_device_id())),
+                "publication": {
+                    "kind": "metering",
+                    "tx_levels": self._synthetic_levels(len(self._config.tx_channels), 0.0, now),
+                    "rx_levels": self._synthetic_levels(len(self._config.rx_channels), math.pi, now),
+                },
+            }
+        )
+        self._metering_sequence = (self._metering_sequence + 1) & 0xFFFF
+
+        for ipv4, port in {(ipv4, port) for ipv4, port, _ in self._metering_destinations.values()}:
+            self._metering_transport.sendto(packet, (ipv4, port))
 
     async def _start_responders(self) -> None:
         loop = asyncio.get_running_loop()
+        ports = [self._config.arc_port, self._config.control_port]
+        if self._config.arc_port == DEVICE_ARC_PORT:
+            ports.insert(1, DEVICE_ARC_SECONDARY_PORT)
 
-        for port in [DEVICE_ARC_PORT, DEVICE_ARC_SECONDARY_PORT, DEVICE_CONTROL_PORT]:
+        for port in ports:
             try:
                 transport, _ = await loop.create_datagram_endpoint(
                     lambda: _ARCProtocol(self),
@@ -284,7 +385,7 @@ class VirtualDevice(VirtualDeviceRequestHandler):
                     family=socket.AF_INET,
                 )
                 self._transports.append(transport)
-                if port == DEVICE_ARC_PORT:
+                if port == self._config.arc_port:
                     self._arc_port = port
                 logger.info(f"Responder listening on 0.0.0.0:{port}")
             except OSError as e:
@@ -301,6 +402,8 @@ class VirtualDevice(VirtualDeviceRequestHandler):
                 "manufacturer": self._config.manufacturer,
                 "address": self._local_ip,
                 "arc_port": self._arc_port,
+                "control_port": self._config.control_port,
+                "process_id": self._config.process_id,
                 "tx_channels": self._config.tx_channels,
                 "sample_rate": self._config.sample_rate,
                 "encoding": self._config.encoding,

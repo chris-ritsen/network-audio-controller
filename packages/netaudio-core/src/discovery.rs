@@ -14,6 +14,10 @@ pub struct VirtualDeviceAdvertisement {
     pub manufacturer: String,
     pub address: Ipv4Addr,
     pub arc_port: u16,
+    #[serde(default)]
+    pub control_port: Option<u16>,
+    #[serde(default)]
+    pub process_id: u16,
     pub tx_channels: Vec<String>,
     pub sample_rate: u32,
     pub encoding: u16,
@@ -65,10 +69,13 @@ pub fn virtual_device(config: VirtualDeviceAdvertisement) -> Vec<ServiceAdvertis
         service(
             SERVICE_CMC,
             config.name.clone(),
-            NetaudioPort::Control as u16,
+            config.control_port.unwrap_or(NetaudioPort::Control as u16),
             properties(&[
-                ("id", &format!("0000{identity:08x}0000")),
-                ("process", "0"),
+                (
+                    "id",
+                    &format!("0000{identity:08x}{:04x}", config.process_id),
+                ),
+                ("process", &config.process_id.to_string()),
                 ("cmcp_vers", "1.2.0"),
                 ("cmcp_min", "1.0.0"),
                 ("server_vers", "4.0.2"),
