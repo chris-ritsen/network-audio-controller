@@ -102,7 +102,11 @@ pub fn parse_device_info(response: &[u8]) -> Option<DeviceInfo> {
         model_name,
         display_name,
         model_code: required_string(code_pointer)?,
-        port: required_string(port_pointer)?,
+        port: if port_pointer == 0 {
+            String::new()
+        } else {
+            required_string(port_pointer)?
+        },
     })
 }
 
@@ -280,6 +284,7 @@ pub fn parse_aes67_configured(response: &[u8]) -> Option<Option<bool>> {
     let records_end = 2usize.checked_add(record_bytes)?;
     body.get(..records_end)?;
     let mut configured = None;
+    let mut seen = false;
     for record_index in 0..record_count {
         let record_offset = 2 + record_index * 4;
         let info_code = u16_at(body, record_offset);
@@ -290,13 +295,14 @@ pub fn parse_aes67_configured(response: &[u8]) -> Option<Option<bool>> {
         if info_code != DEVICE_SETTINGS_INFO_AES67_CONFIGURED {
             continue;
         }
-        if configured.is_some() {
+        if seen {
             return None;
         }
+        seen = true;
         configured = match inline_value {
             0x0003 => Some(true),
             0x0001 => Some(false),
-            _ => return None,
+            _ => None,
         };
     }
     Some(configured)
