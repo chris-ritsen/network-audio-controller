@@ -107,7 +107,9 @@ pub fn parse_lock_reset_status(data: &[u8]) -> Option<LockResetStatus> {
     let lock_identifier_count = read_u16(record, 12)?;
     let lock_identifier_width = read_u16(record, 14)?;
     let lock_identifier_data_offset = read_u16(record, 16)?;
-    if usize::from(lock_identifier_width) != CONMON_LOCK_RESET_IDENTIFIER_WIDTH {
+    if lock_identifier_count > 0
+        && usize::from(lock_identifier_width) != CONMON_LOCK_RESET_IDENTIFIER_WIDTH
+    {
         return None;
     }
 

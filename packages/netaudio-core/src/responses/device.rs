@@ -346,9 +346,6 @@ fn formatted_version(word: u32, fourth: Option<u32>) -> Option<String> {
 pub fn parse_make_model(data: &[u8]) -> Option<ManufacturerVersions> {
     validate_conmon_envelope(data, CONMON_OPCODE_MAKE_MODEL_RESPONSE)?;
     let record_protocol_version = read_u16(data, CONMON_DANTE_MODEL_BODY_OFFSET)?;
-    if record_protocol_version > 0x0738 {
-        return None;
-    }
     let record_start = CONMON_DANTE_MODEL_BODY_OFFSET;
     let identifier = |offset: usize| data.get(record_start + offset..record_start + offset + 8);
     let manufacturer_identifier_raw = identifier(0x08)?;
@@ -440,9 +437,6 @@ pub fn parse_dante_model(data: &[u8]) -> Option<PlatformVersions> {
     validate_conmon_envelope(data, CONMON_OPCODE_DANTE_MODEL_RESPONSE)?;
     let record_start = CONMON_DANTE_MODEL_BODY_OFFSET;
     let record_protocol_version = read_u16(data, record_start)?;
-    if record_protocol_version > 0x0738 {
-        return None;
-    }
     let platform_software_word = read_u32(data, record_start + 0x08)?;
     let platform_hardware_word = read_u32(data, record_start + 0x0c)?;
     let platform_api_word = read_u32(data, record_start + 0x10)?;

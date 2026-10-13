@@ -838,15 +838,16 @@ fn dante_model_validates_plugin_vector_and_preserves_raw_records() {
 }
 
 #[test]
-fn version_records_fail_closed_above_the_supported_revision_scope() {
+fn version_records_parse_newer_revisions() {
     assert_eq!(
         parse_make_model(&manufacturer_versions_response(0x0738))
             .map(|v| v.record_protocol_version),
         Some(0x0738)
     );
     assert_eq!(
-        parse_make_model(&manufacturer_versions_response(0x0739)),
-        None
+        parse_make_model(&manufacturer_versions_response(0x073c))
+            .map(|v| v.record_protocol_version),
+        Some(0x073c)
     );
     let with_plugin_header = |version: u16| {
         let mut data = dante_model_response(version, 0, 0, 0, 0, 0, 0);
@@ -859,7 +860,10 @@ fn version_records_fail_closed_above_the_supported_revision_scope() {
         parse_dante_model(&with_plugin_header(0x0738)).map(|v| v.record_protocol_version),
         Some(0x0738)
     );
-    assert_eq!(parse_dante_model(&with_plugin_header(0x0739)), None);
+    assert_eq!(
+        parse_dante_model(&with_plugin_header(0x073c)).map(|v| v.record_protocol_version),
+        Some(0x073c)
+    );
 }
 
 #[test]
