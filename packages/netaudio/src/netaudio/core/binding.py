@@ -15,6 +15,8 @@ from . import _requests, _types
 from ._abi import (
     ABI_VERSION,
     PORT_ARC as _PORT_ARC,
+    PORT_CONTROL as _PORT_CONTROL,
+    PORT_SETTINGS as _PORT_SETTINGS,
     STATUS_INVALID_SEQUENCE,
     STATUS_IO_ERROR as _STATUS_IO_ERROR,
     STATUS_OK,
@@ -1037,6 +1039,8 @@ class CoreClient:
         attempts: int = 3,
         *,
         local_ip: str | None = None,
+        control_port: int = _PORT_CONTROL,
+        settings_port: int = _PORT_SETTINGS,
     ):
         self._native_lock = threading.RLock()
         self._handle = ctypes.c_void_p()
@@ -1059,6 +1063,8 @@ class CoreClient:
             )
         if status != STATUS_OK:
             raise NetaudioCoreError(status, f"client_new {device_ip}")
+        if (control_port, settings_port) != (_PORT_CONTROL, _PORT_SETTINGS):
+            self.set_service_ports(control_port, settings_port)
 
     def close(self):
         with self._native_lock:
@@ -1106,6 +1112,13 @@ class CoreClient:
                 raise NetaudioCoreError(status, "get_wire_captures")
 
         return _decode_json_output(data, "wire captures")
+
+    def set_service_ports(self, control_port: int, settings_port: int) -> None:
+        library = self._require_library()
+        with self._native_lock:
+            status = library.netaudio_client_set_service_ports(self._handle, control_port, settings_port)
+        if status != STATUS_OK:
+            raise NetaudioCoreError(status, "set_service_ports")
 
     def set_host_mac(self, mac: bytes):
         if len(mac) != 6:

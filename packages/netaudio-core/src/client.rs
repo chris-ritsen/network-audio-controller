@@ -141,6 +141,8 @@ pub fn fire_repeated(
 pub struct Client {
     socket: UdpSocket,
     device_address: SocketAddr,
+    control_port: u16,
+    settings_port: u16,
     message_counter: u16,
     timeout: Duration,
     attempts: u32,
@@ -180,6 +182,8 @@ impl Client {
         Ok(Client {
             socket,
             device_address: SocketAddr::new(IpAddr::V4(device_ip), arc_port),
+            control_port: DEVICE_CONTROL_PORT,
+            settings_port: DEVICE_SETTINGS_PORT,
             message_counter: 0,
             timeout,
             attempts: attempts.max(1),
@@ -245,6 +249,13 @@ impl Client {
         Ok(())
     }
 
+    /// Route CMC and settings commands to the ports this device advertises or reports, for devices that do not
+    /// use the well-known ones (for example several devices sharing one host).
+    pub fn set_service_ports(&mut self, control_port: u16, settings_port: u16) {
+        self.control_port = control_port;
+        self.settings_port = settings_port;
+    }
+
     pub fn set_host_mac(&mut self, host_mac: [u8; 6]) {
         self.host_mac = Some(host_mac);
     }
@@ -252,8 +263,8 @@ impl Client {
     fn target_address(&self, target: Target) -> SocketAddr {
         let port = match target {
             Target::Arc => self.device_address.port(),
-            Target::Control => DEVICE_CONTROL_PORT,
-            Target::Settings => DEVICE_SETTINGS_PORT,
+            Target::Control => self.control_port,
+            Target::Settings => self.settings_port,
         };
         SocketAddr::new(self.device_address.ip(), port)
     }
@@ -690,6 +701,27 @@ mod tests {
             Err(ClientError::MalformedResponse)
         ));
         device_thread.join().unwrap();
+    }
+
+    #[test]
+    fn control_and_settings_commands_go_to_the_device_service_ports() {
+        let mut client = test_client(4440);
+        client.set_host_mac([2, 0, 0, 0, 0, 1]);
+        let ports = |client: &mut Client| {
+            let control = client
+                .prepare_command(r#"{"command":"cmc_register","message_id":1}"#)
+                .unwrap();
+            let settings = client.prepare_command(r#"{"command":"identify"}"#).unwrap();
+            (control.address.port(), settings.address.port())
+        };
+        assert_eq!(
+            ports(&mut client),
+            (DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT)
+        );
+
+        client.set_service_ports(10101, 10103);
+
+        assert_eq!(ports(&mut client), (10101, 10103));
     }
 
     #[test]

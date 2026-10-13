@@ -40,22 +40,25 @@ class DanteCMCService:
         return frozenset(self._registered_devices)
 
     @staticmethod
-    def _registration_response_is_successful(message_id: int, response: bytes | None) -> bool:
+    def _accepted_registration(message_id: int, response: bytes | None) -> dict | None:
         if response is None:
-            return False
+            return None
         from netaudio import core
 
         try:
             parsed = core.parse_response("cmc_registration", response)
         except core.NetaudioCoreError:
-            return False
-        return parsed["sequence"] == message_id and parsed["accepted"]
+            return None
+        return parsed if parsed["sequence"] == message_id and parsed["accepted"] else None
 
     async def register_device(
         self,
-        device_ip: str,
+        target,
         host_media_access_control_address: bytes | None = None,
+        *,
+        control_port: int | None = None,
     ) -> bytes | None:
+        """Register with a device object at the CMC port it advertises, or at an address and optional port."""
         from netaudio import core
 
         message_id = core.next_message_id()
@@ -65,37 +68,45 @@ class DanteCMCService:
         if host_mac is not None:
             specification["host_mac"] = host_mac.hex()
 
+        is_device = hasattr(target, "server_name")
+        device_ip = str(target.ipv4) if is_device else str(target)
+        registration_key = target.server_name if is_device else device_ip
+        if is_device:
+            ports = target._service_ports()
+        else:
+            ports = {} if control_port is None else {"control_port": control_port}
+
         try:
-            response = await self._transport.execute(
-                str(device_ip),
-                specification,
-            )
+            response = await self._transport.execute(device_ip, specification, **ports)
         except core.NetaudioCoreError as exception:
-            logger.debug(f"CMC registration request failed for {device_ip}: {exception}")
+            logger.debug(f"CMC registration request failed for {registration_key}: {exception}")
             response = None
 
-        if self._registration_response_is_successful(message_id, response):
-            self._registered_devices.add(device_ip)
-            logger.debug(f"CMC registered with {device_ip}")
+        registration = self._accepted_registration(message_id, response)
+        if registration is not None:
+            self._registered_devices.add(registration_key)
+            if is_device and registration.get("settings_port"):
+                target.settings_port = registration["settings_port"]
+            logger.debug(f"CMC registered with {registration_key}")
             return response
 
-        self._registered_devices.discard(device_ip)
+        self._registered_devices.discard(registration_key)
         if response is not None:
-            logger.warning(f"CMC registration returned an invalid response from {device_ip}")
+            logger.warning(f"CMC registration returned an invalid response from {registration_key}")
         return None
 
     async def require_registration(
         self,
-        device_ip: str,
+        target,
         host_media_access_control_address: bytes | None = None,
     ) -> bytes:
-        response = await self.register_device(device_ip, host_media_access_control_address)
+        response = await self.register_device(target, host_media_access_control_address)
         if response is None:
-            raise RuntimeError(f"CMC registration failed for {device_ip}")
+            raise RuntimeError(f"CMC registration failed for {getattr(target, 'ipv4', target)}")
         return response
 
-    async def register_all(self, device_ips: list[str]) -> None:
-        tasks = [self.register_device(ip) for ip in device_ips]
+    async def register_all(self, targets: list) -> None:
+        tasks = [self.register_device(target) for target in targets]
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _heartbeat_loop(self, get_device_ips) -> None:

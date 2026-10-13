@@ -505,16 +505,16 @@ class TestDanteApplication:
             offline_device.server_name: offline_device,
         }
 
-        def respond_to_probe(device_ip_address):
+        def respond_to_probe(target):
             application.notifications.notify_waiters(
-                "sample_rate", device_ip_address, configurable_status(48_000, [44_100, 48_000])
+                "sample_rate", application._control_key(target), configurable_status(48_000, [44_100, 48_000])
             )
 
         application.send_probe_sample_rate = AsyncMock(side_effect=respond_to_probe)
 
         await application._probe_sample_rates_all(timeout=0.1)
 
-        application.send_probe_sample_rate.assert_called_once_with("192.168.1.108")
+        application.send_probe_sample_rate.assert_called_once_with(online_device)
         assert online_device.sample_rate == 48_000
         assert online_device.supported_sample_rates == [44_100, 48_000]
         assert duplicate_address_device.sample_rate == 48_000
@@ -621,16 +621,16 @@ class TestDanteApplication:
             offline_device.server_name: offline_device,
         }
 
-        def respond_to_probe(device_ip_address):
+        def respond_to_probe(target):
             application.notifications.notify_waiters(
-                "encoding", device_ip_address, configurable_status(24, [24, 16, 32])
+                "encoding", application._control_key(target), configurable_status(24, [24, 16, 32])
             )
 
         application.send_probe_encoding = AsyncMock(side_effect=respond_to_probe)
 
         await application._probe_encodings_all(timeout=0.1)
 
-        application.send_probe_encoding.assert_called_once_with("192.168.1.108")
+        application.send_probe_encoding.assert_called_once_with(online_device)
         assert online_device.encoding == 24
         assert online_device.supported_encodings == [24, 16, 32]
         assert duplicate_address_device.encoding == 24
@@ -692,14 +692,16 @@ class TestDanteApplication:
             offline_device.server_name: offline_device,
         }
 
-        def respond_to_probe(device_ip_address):
-            application.notifications.notify_waiters("codec", device_ip_address, codec_status(1, 2, [5, 1]))
+        def respond_to_probe(target):
+            application.notifications.notify_waiters(
+                "codec", application._control_key(target), codec_status(1, 2, [5, 1])
+            )
 
         application.send_probe_codec_status = AsyncMock(side_effect=respond_to_probe)
 
         await application._probe_codec_status_all(timeout=0.1)
 
-        application.send_probe_codec_status.assert_called_once_with("192.168.1.108")
+        application.send_probe_codec_status.assert_called_once_with(online_device)
         assert online_device.gain_device_type == "input"
         assert online_device.codec_parameters == [{"parameter_type": 1, "mode": 2, "values": [5, 1]}]
         assert online_device.gain_levels == [5, 1]
@@ -891,7 +893,7 @@ class TestDanteApplication:
 
         await application.populate_devices(selected_devices, timeout=0.1, include_channels=False)
 
-        application.cmc.register_all.assert_awaited_once_with(["192.168.1.10"])
+        application.cmc.register_all.assert_awaited_once_with([selected_device])
         application._query_settings_fields.assert_awaited_once_with(selected_devices)
         application._query_conmon_all.assert_awaited_once_with(timeout=0.1, devices=selected_devices)
         application._probe_interface_status.assert_awaited_once_with(timeout=0.1, devices=selected_devices)

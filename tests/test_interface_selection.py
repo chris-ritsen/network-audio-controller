@@ -74,7 +74,15 @@ async def test_control_cache_separates_source_addresses_and_rejects_missing_inte
     assert transport.client("192.0.2.10") is first
     await transport.call("192.0.2.10", lambda client: client.get_device_name())
     first.get_device_name.assert_called_once_with()
-    constructor.assert_called_once_with("192.0.2.10", arc_port=4440, timeout_ms=1000, attempts=3, local_ip="192.0.2.62")
+    constructor.assert_called_once_with(
+        "192.0.2.10",
+        arc_port=4440,
+        timeout_ms=1000,
+        attempts=3,
+        local_ip="192.0.2.62",
+        control_port=8800,
+        settings_port=8700,
+    )
     first.set_host_mac.assert_not_called()
     adapters[:] = [adapter("selected", "192.0.2.63")]
     second = transport.client("192.0.2.10")

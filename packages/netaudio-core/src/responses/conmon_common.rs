@@ -31,6 +31,8 @@ pub struct NotificationEnvelope {
     pub notification_name: Option<&'static str>,
     pub is_conmon: bool,
     pub response_kind: Option<&'static str>,
+    /// The sender's device ID from a ConMon header, which tells apart devices that share one IP address.
+    pub device_id: Option<String>,
 }
 
 pub fn parse_notification_envelope(data: &[u8]) -> Option<NotificationEnvelope> {
@@ -40,6 +42,7 @@ pub fn parse_notification_envelope(data: &[u8]) -> Option<NotificationEnvelope> 
             notification_name: None,
             is_conmon: true,
             response_kind: conmon_response_kind(opcode),
+            device_id: data.get(8..16).map(crate::bytes::hexadecimal),
         });
     }
 
@@ -84,6 +87,7 @@ pub fn parse_notification_envelope(data: &[u8]) -> Option<NotificationEnvelope> 
         notification_name,
         is_conmon: false,
         response_kind: None,
+        device_id: None,
     })
 }
 

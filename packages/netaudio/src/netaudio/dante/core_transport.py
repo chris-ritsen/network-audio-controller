@@ -8,7 +8,7 @@ from typing import Optional
 
 from netaudio import core
 from netaudio.common.app_config import settings as app_settings
-from netaudio.dante.const import DEVICE_ARC_PORT
+from netaudio.dante.const import DEVICE_ARC_PORT, DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT
 from netaudio.network_path import NetworkPath, NetworkPathError, NetworkPathManager, path_manager
 
 logger = logging.getLogger("netaudio")
@@ -17,7 +17,8 @@ DEFAULT_REQUEST_ATTEMPTS = 3
 DEFAULT_REQUEST_TIMEOUT_MILLISECONDS = 1000
 
 WireObserver = Callable[[bytes, str, int, str], None]
-ClientKey = tuple[str, int, int, int, Optional[str], Optional[str], int]
+ClientKey = tuple[str, int, int, int, int, int, Optional[str], Optional[str], int]
+CLIENT_OPTION_FIELDS = 6
 
 
 class CoreTransport:
@@ -47,8 +48,11 @@ class CoreTransport:
         arc_port: int = DEVICE_ARC_PORT,
         timeout_milliseconds: int = DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
         attempts: int = DEFAULT_REQUEST_ATTEMPTS,
+        *,
+        control_port: int = DEVICE_CONTROL_PORT,
+        settings_port: int = DEVICE_SETTINGS_PORT,
     ) -> core.CoreClient:
-        key = self._client_key(device_ip_address, arc_port, timeout_milliseconds, attempts)
+        key = self._client_key(device_ip_address, arc_port, timeout_milliseconds, attempts, control_port, settings_port)
         return self._client_for_key(key)
 
     def path(self, device_ip_address) -> NetworkPath:
@@ -60,6 +64,8 @@ class CoreTransport:
         arc_port: int,
         timeout_milliseconds: int,
         attempts: int,
+        control_port: int = DEVICE_CONTROL_PORT,
+        settings_port: int = DEVICE_SETTINGS_PORT,
     ) -> ClientKey:
         destination = str(device_ip_address)
         try:
@@ -70,6 +76,8 @@ class CoreTransport:
         return (
             destination,
             arc_port,
+            control_port,
+            settings_port,
             timeout_milliseconds,
             attempts,
             path.interface.name,
@@ -78,16 +86,20 @@ class CoreTransport:
         )
 
     def _client_for_key(self, key: ClientKey) -> core.CoreClient:
-        self._retire_clients(lambda existing: existing[:4] == key[:4] and existing != key)
+        self._retire_clients(
+            lambda existing: existing[:CLIENT_OPTION_FIELDS] == key[:CLIENT_OPTION_FIELDS] and existing != key
+        )
         with self._cache_lock:
             client = self._clients.get(key)
             if client is None:
                 client = core.CoreClient(
                     key[0],
                     arc_port=key[1],
-                    timeout_ms=key[2],
-                    attempts=key[3],
-                    local_ip=key[5],
+                    timeout_ms=key[4],
+                    attempts=key[5],
+                    local_ip=key[7],
+                    control_port=key[2],
+                    settings_port=key[3],
                 )
                 self._clients[key] = client
                 self._client_locks[key] = threading.Lock()
@@ -118,8 +130,10 @@ class CoreTransport:
         arc_port: int = DEVICE_ARC_PORT,
         timeout_milliseconds: int = DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
         attempts: int = DEFAULT_REQUEST_ATTEMPTS,
+        control_port: int = DEVICE_CONTROL_PORT,
+        settings_port: int = DEVICE_SETTINGS_PORT,
     ):
-        key = self._client_key(device_ip_address, arc_port, timeout_milliseconds, attempts)
+        key = self._client_key(device_ip_address, arc_port, timeout_milliseconds, attempts, control_port, settings_port)
         client = self._client_for_key(key)
         return await asyncio.to_thread(self._call_and_observe, client, self._client_locks[key], operation)
 
@@ -131,6 +145,8 @@ class CoreTransport:
         arc_port: int = DEVICE_ARC_PORT,
         timeout_milliseconds: int = DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
         attempts: int = DEFAULT_REQUEST_ATTEMPTS,
+        control_port: int = DEVICE_CONTROL_PORT,
+        settings_port: int = DEVICE_SETTINGS_PORT,
     ) -> bytes | None:
         return await self.call(
             device_ip_address,
@@ -138,6 +154,8 @@ class CoreTransport:
             arc_port=arc_port,
             timeout_milliseconds=timeout_milliseconds,
             attempts=attempts,
+            control_port=control_port,
+            settings_port=settings_port,
         )
 
     def _call_and_observe(self, client, client_lock, operation):

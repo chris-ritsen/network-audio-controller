@@ -158,7 +158,7 @@ class DanteApplication:
         self.cmc = DanteCMCService(self.transport)
         self.notifications = DanteNotificationService(
             dispatcher=self.dispatcher,
-            device_lookup=self._device_by_control_key,
+            device_lookup=self._device_by_source,
             packet_store=packet_store,
             interface_name=app_settings.interface,
             dissect=dissect,
@@ -354,14 +354,38 @@ class DanteApplication:
                 continue
         return self._device_by_ip(key)
 
+    def _device_by_source(self, source_ip: str, device_id: str | None = None):
+        """The device that sent a packet: by address, or by the device ID it carries when devices share one."""
+        device = self._device_by_control_key(source_ip)
+        if device is not None or device_id is None:
+            return device
+        matches = [
+            device
+            for device in self._devices_by_ip(source_ip)
+            if str(device.mac_address or "").replace(":", "").casefold() == device_id.casefold()
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    @staticmethod
+    def _ambiguous_control_address(address, devices) -> RuntimeError:
+        names = ", ".join(sorted(device.server_name or device.name for device in devices))
+        return RuntimeError(f"control address {address} is ambiguous across devices: {names}")
+
     def _control_target(self, target):
         if hasattr(target, "requires_managed_control"):
             return target
         matches = self._devices_by_ip(str(target))
-        if len(matches) > 1:
-            names = ", ".join(sorted(device.server_name or device.name for device in matches))
-            raise RuntimeError(f"control address {target} is ambiguous across devices: {names}")
-        return matches[0] if matches else target
+        if len(matches) == 1:
+            return matches[0]
+        # A bare address names a host. Several directly controlled devices may share one (each with its own
+        # advertised ARC port); host-scoped settings messages still have a single destination there.
+        if any(device.requires_managed_control for device in matches):
+            raise self._ambiguous_control_address(target, matches)
+        return target
+
+    def _settings_endpoint(self, device) -> tuple[str, int | None]:
+        # Devices that share an address but report their own settings port are probed separately.
+        return self._control_key(device), device.settings_port
 
     def _require_probe_supported(self, target, operation: _requests.Operation) -> None:
         if hasattr(target, "dante_model_primary_capabilities"):
@@ -490,12 +514,11 @@ class DanteApplication:
                 or self._probe_unanswered(device, description)
             ):
                 continue
-            target = device if device.requires_managed_control else str(device.ipv4)
-            key = self._control_key(target)
+            key = self._settings_endpoint(device)
             target_devices_by_key.setdefault(key, []).append(device)
             if key in probe_tasks:
                 continue
-            probe_tasks[key] = asyncio.create_task(probe(target, timeout=timeout))
+            probe_tasks[key] = asyncio.create_task(probe(device, timeout=timeout))
 
         if not probe_tasks:
             return
@@ -508,10 +531,10 @@ class DanteApplication:
                 raise result
             self._record_probe_answer(target_devices_by_key[key], description, result)
             if isinstance(result, CapabilityProbeTimeout):
-                logger.debug(f"{description} probe timed out for {key}")
+                logger.debug(f"{description} probe timed out for {key[0]}")
                 continue
             if isinstance(result, Exception):
-                logger.warning(f"Failed to probe {description} for {key}: {result}")
+                logger.warning(f"Failed to probe {description} for {key[0]}: {result}")
                 continue
             response_count += 1
         logger.debug(f"{description.capitalize()}: {response_count}/{len(probe_tasks)} device addresses responded")
@@ -551,12 +574,11 @@ class DanteApplication:
                 or self._probe_unanswered(device, capability_description)
             ):
                 continue
-            target = device if device.requires_managed_control else str(device.ipv4)
-            key = self._control_key(target)
+            key = self._settings_endpoint(device)
             target_devices_by_key.setdefault(key, []).append(device)
             if key in probe_tasks:
                 continue
-            probe_tasks[key] = asyncio.create_task(probe_status(target, timeout=timeout))
+            probe_tasks[key] = asyncio.create_task(probe_status(device, timeout=timeout))
 
         if not probe_tasks:
             return
@@ -570,10 +592,10 @@ class DanteApplication:
                 raise result
             self._record_probe_answer(target_devices_by_key[key], capability_description, result)
             if isinstance(result, CapabilityProbeTimeout):
-                logger.debug(f"{capability_description} probe timed out for {key}")
+                logger.debug(f"{capability_description} probe timed out for {key[0]}")
                 continue
             if isinstance(result, Exception):
-                logger.warning(f"Failed to probe {capability_description} for {key}: {result}")
+                logger.warning(f"Failed to probe {capability_description} for {key[0]}: {result}")
                 continue
             response_count += 1
             for device in target_devices_by_key[key]:
@@ -830,7 +852,8 @@ class DanteApplication:
     async def _send_registered_system_reset(self, device, build_specification, host_mac) -> None:
         if getattr(device, "requires_managed_control", False):
             raise RuntimeError("system reset has no verified DDM completion path and was not sent")
-        await self.cmc.require_registration(device._require_address(), host_mac)
+        device._require_address()
+        await self.cmc.require_registration(device, host_mac)
         await device.execute(build_specification(host_mac))
 
     def managed_transport(self, device=None):
@@ -885,8 +908,9 @@ class DanteApplication:
             if response is not None:
                 self.notifications.receive_settings_response(response, key)
             return response
-        address = resolved._require_address() if hasattr(resolved, "_require_address") else str(resolved)
-        return await self.transport.execute(address, specification)
+        if hasattr(resolved, "_service_ports"):
+            return await self.transport.execute(resolved._require_address(), specification, **resolved._service_ports())
+        return await self.transport.execute(str(resolved), specification)
 
     async def add_subscriptions(self, device, records):
         records = list(records)
@@ -1000,10 +1024,11 @@ class DanteApplication:
                 channel.media_service = service
 
     def arc_port_for_address(self, device_ip_address: str) -> int:
-        device = self._device_by_ip(device_ip_address)
-        if device is None:
-            return DEVICE_ARC_PORT
-        return self.get_arc_port(device) or DEVICE_ARC_PORT
+        devices = self._devices_by_ip(device_ip_address)
+        ports = {self.get_arc_port(device) or DEVICE_ARC_PORT for device in devices}
+        if len(ports) > 1:
+            raise self._ambiguous_control_address(device_ip_address, devices)
+        return ports.pop() if ports else DEVICE_ARC_PORT
 
     def attach_devices(self, devices: dict) -> None:
         for server_name, device in devices.items():
@@ -1078,11 +1103,11 @@ class DanteApplication:
         await browser.async_close()
         self._browser = None
 
-        device_ips = [
-            str(device.ipv4) for device in self.devices.values() if device.ipv4 and not device.requires_managed_control
+        direct_devices = [
+            device for device in self.devices.values() if device.ipv4 and not device.requires_managed_control
         ]
-        if device_ips:
-            await self.cmc.register_all(device_ips)
+        if direct_devices:
+            await self.cmc.register_all(direct_devices)
 
         populate_tasks = []
         for device in self.devices.values():
@@ -1252,9 +1277,9 @@ class DanteApplication:
 
     async def execute(self, target, specification: dict) -> bytes | None:
         resolved = self._control_target(target)
-        if getattr(resolved, "requires_managed_control", False):
+        if hasattr(resolved, "requires_managed_control"):
             return await resolved.execute(specification)
-        address = resolved._require_address() if hasattr(resolved, "_require_address") else str(resolved)
+        address = str(resolved)
         return await self.transport.execute(address, specification, arc_port=self.arc_port_for_address(address))
 
     async def export_capability_partition(
@@ -1564,9 +1589,7 @@ class DanteApplication:
         timeout: float = 2.0,
         include_channels: bool = True,
     ) -> None:
-        device_ip_addresses = [
-            str(device.ipv4) for device in devices.values() if device.ipv4 and not device.requires_managed_control
-        ]
+        direct_devices = [device for device in devices.values() if device.ipv4 and not device.requires_managed_control]
         request_timeout_milliseconds = None if include_channels else 500
         request_attempts = None if include_channels else 1
 
@@ -1581,8 +1604,8 @@ class DanteApplication:
             ("codec status", self._probe_codec_status_all(timeout=timeout, devices=devices)),
             ("sample rate pull-ups", self._probe_sample_rate_pullups_all(timeout=timeout, devices=devices)),
         ]
-        if device_ip_addresses:
-            phase_coroutines.append(("CMC registration", self.cmc.register_all(device_ip_addresses)))
+        if direct_devices:
+            phase_coroutines.append(("CMC registration", self.cmc.register_all(direct_devices)))
 
         control_coroutines = []
         for device in devices.values():

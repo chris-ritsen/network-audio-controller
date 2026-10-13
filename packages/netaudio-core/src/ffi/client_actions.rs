@@ -230,6 +230,23 @@ pub unsafe extern "C" fn netaudio_client_set_host_mac(
 }
 
 #[no_mangle]
+/// Send CMC (control) and settings commands to these ports instead of the well-known 8800 and 8700.
+pub unsafe extern "C" fn netaudio_client_set_service_ports(
+    client: *mut NetaudioClient,
+    control_port: u16,
+    settings_port: u16,
+) -> NetaudioStatus {
+    guard(|| {
+        if client.is_null() {
+            return Err(NetaudioStatus::NullPointer.into());
+        }
+        let client = unsafe { &*client };
+        lock_client(client).set_service_ports(control_port, settings_port);
+        Ok(())
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn netaudio_host_mac(out_mac: *mut u8) -> NetaudioStatus {
     guard(|| {
         if out_mac.is_null() {

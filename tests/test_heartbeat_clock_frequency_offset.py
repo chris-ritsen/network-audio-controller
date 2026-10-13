@@ -50,7 +50,7 @@ def test_heartbeat_updates_live_device_clock_offset_from_latest_valid_record():
     )
     on_device_updated = MagicMock()
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
         on_device_updated=on_device_updated,
     )
 
@@ -71,7 +71,7 @@ def test_malformed_packet_does_not_replace_clock_offset():
         clock_frequency_offset_parts_per_billion=-394757,
         update_last_seen=MagicMock(),
     )
-    service = DanteHeartbeatService(device_by_ip=lambda _source_ip: device)
+    service = DanteHeartbeatService(device_by_ip=lambda _source_ip, _device_id: device)
 
     service._on_packet(TREATMENT_PACKET[:-1], ("192.168.1.232", 1030))
 
@@ -92,7 +92,7 @@ def test_clock_history_stays_native_while_device_updates_remain_bounded(tmp_path
     now = [status.status["_clock_received_monotonic"] + 0.01]
     publications = []
     service = DanteHeartbeatService(
-        device_by_ip=lambda _ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
         on_device_updated=lambda updated: publications.append(len(json.dumps(DanteDeviceSerializer.to_json(updated)))),
         monotonic_clock=lambda: now[0],
     )

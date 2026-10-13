@@ -606,7 +606,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             logger.info(f"Device discovered (event): {event.server_name}")
             await self._publish_journal_events(self.event_journal.observe_device(device))
             if device.ipv4 and not device.requires_managed_control:
-                await self.application.cmc.register_device(str(device.ipv4))
+                await self.application.cmc.register_device(device)
             await self._publish_device_to_redis(device)
             await self._republish_correlated_shure(device)
 
@@ -715,7 +715,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             await self.host_audio.start()
 
         self.heartbeat = DanteHeartbeatService(
-            device_by_ip=self.application._device_by_ip,
+            device_by_ip=self.application._device_by_source,
             get_devices=lambda: self.application.devices,
             mark_offline=self.mark_device_offline,
             interface_name=app_settings.interface,

@@ -191,7 +191,7 @@ class DanteDiscoveryMixin:
                 self.metering.reactivate_device(device_key)
 
         if service.address and service.service_type == SERVICE_CMC:
-            await self.application.cmc.register_device(service.address)
+            await self.application.cmc.register_device(service.address, control_port=service.port)
 
         device = self.devices[device_key]
         device.update_last_seen()

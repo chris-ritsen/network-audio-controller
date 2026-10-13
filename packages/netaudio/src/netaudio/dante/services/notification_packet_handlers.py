@@ -415,13 +415,14 @@ class NotificationPacketHandlers:
             return
 
         notification_id = envelope["notification_id"]
+        device = self._lookup_device(source_ip, envelope.get("device_id"))
 
         if envelope["is_conmon"] and self._handle_conmon_response(
-            data, source_ip, notification_id, envelope["response_kind"]
+            data, source_ip, notification_id, envelope["response_kind"], device
         ):
             return
 
-        self._emit_notification(data, source_ip, notification_id, envelope["notification_name"])
+        self._emit_notification(data, source_ip, notification_id, envelope["notification_name"], device)
 
     def _log_dissected(self, data: bytes, source_ip: str, source_port: int) -> None:
         from netaudio.common.app_config import settings as app_settings
@@ -449,9 +450,8 @@ class NotificationPacketHandlers:
         )
 
     def _emit_notification(
-        self, data: bytes, source_ip: str, notification_id: int, notification_name: str | None
+        self, data: bytes, source_ip: str, notification_id: int, notification_name: str | None, device
     ) -> None:
-        device = self._lookup_device(source_ip)
         notification_name = notification_name or "Unknown notification"
         self.notify_waiters("notification", source_ip, notification_id)
         logger.debug(
@@ -472,7 +472,9 @@ class NotificationPacketHandlers:
             )
         )
 
-    def _handle_conmon_response(self, data: bytes, source_ip: str, opcode: int, response_kind: str | None) -> bool:
+    def _handle_conmon_response(
+        self, data: bytes, source_ip: str, opcode: int, response_kind: str | None, device
+    ) -> bool:
         if response_kind == "conmon_export_fragment":
             return self._handle_conmon_export_fragment(data, source_ip)
 
@@ -480,7 +482,7 @@ class NotificationPacketHandlers:
         if parse is None:
             return False
 
-        parsed = parse(data, source_ip, self._lookup_device(source_ip))
+        parsed = parse(data, source_ip, device)
         self.notify_waiters("notification", source_ip, opcode)
         if parsed is None:
             return True
@@ -500,7 +502,6 @@ class NotificationPacketHandlers:
             self.notify_waiters(WAITER_KIND_PREFERRED_LEADER, source_ip, parsed.status.get("preferred_leader"))
         self.notify_conmon_response(source_ip, opcode)
 
-        device = self._lookup_device(source_ip)
         self._dispatcher.emit_nowait(
             DanteEvent(
                 type=EventType.DEVICE_STATUS_RECEIVED,
@@ -533,7 +534,7 @@ class NotificationPacketHandlers:
             handled = handled or waiter.collector.matched
         return handled
 
-    def _lookup_device(self, ip_str: str):
+    def _lookup_device(self, ip_str: str, device_id: str | None = None):
         if self._device_lookup:
-            return self._device_lookup(ip_str)
+            return self._device_lookup(ip_str, device_id)
         return None

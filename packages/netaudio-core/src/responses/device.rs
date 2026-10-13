@@ -743,6 +743,8 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
     valid.then_some(envelope.result_code)
 }
 
+const CMC_REGISTRATION_SETTINGS_PORT_OFFSET: usize = 28;
+
 pub fn parse_cmc_registration_response(response: &[u8]) -> Option<CmcRegistrationResponse> {
     if response.len() < 10
         || read_u16(response, 0)? != PROTOCOL_CMC
@@ -754,5 +756,7 @@ pub fn parse_cmc_registration_response(response: &[u8]) -> Option<CmcRegistratio
     Some(CmcRegistrationResponse {
         sequence: read_u16(response, 4)?,
         accepted: read_u16(response, 8)? == RESULT_CODE_SUCCESS,
+        settings_port: read_u16(response, CMC_REGISTRATION_SETTINGS_PORT_OFFSET)
+            .filter(|port| *port != 0),
     })
 }

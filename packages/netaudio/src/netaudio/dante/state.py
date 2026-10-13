@@ -378,7 +378,9 @@ class DanteStateService:
         if superseded_status(source_ip, kind, event.data.get("received_order")):
             logger.debug(f"Skipped a queued {kind} status from {source_ip}; a newer one has been received")
             return
-        device = self.application._device_by_control_key(source_ip)
+        device = self.devices.get(event.server_name) if event.server_name else None
+        if device is None:
+            device = self.application._device_by_control_key(source_ip)
         if device is None:
             self._pending_status.setdefault(source_ip, []).append((kind, status))
             return
@@ -685,7 +687,7 @@ class DanteStateService:
 
         logger.info(f"Device rebooted: {server_name}")
         if device.ipv4 and not device.requires_managed_control:
-            await self.application.cmc.register_device(str(device.ipv4))
+            await self.application.cmc.register_device(device)
         await self.refetch_device_controls(server_name)
 
     async def _on_aes67_status(self, event: DanteEvent) -> None:

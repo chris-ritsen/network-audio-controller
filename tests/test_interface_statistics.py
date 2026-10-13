@@ -157,7 +157,7 @@ def test_notification_waiter_returns_typed_interface_statistics_with_local_basel
     device_ip_address = "192.0.2.10"
     service = DanteNotificationService(
         dispatcher=DanteEventDispatcher(),
-        device_lookup=lambda address: _device(address),
+        device_lookup=lambda address, _device_id: _device(address),
     )
     waiter = service.register_waiter("interface_statistics", device_ip_address)
 
@@ -175,7 +175,7 @@ def test_notification_waiter_ignores_interface_statistics_from_another_source():
     device_ip_address = "192.0.2.10"
     service = DanteNotificationService(
         dispatcher=DanteEventDispatcher(),
-        device_lookup=lambda address: _device(address),
+        device_lookup=lambda address, _device_id: _device(address),
     )
     waiter = service.register_waiter("interface_statistics", device_ip_address)
 

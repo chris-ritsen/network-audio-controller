@@ -202,7 +202,7 @@ def test_clock_equal_advancing_and_older_observations_through_heartbeat_handler(
         server_name="clock", online=True, clock_frequency_offset_parts_per_billion=None, update_last_seen=MagicMock()
     )
     changed = MagicMock()
-    service = DanteHeartbeatService(device_by_ip=lambda _: device, on_device_updated=changed)
+    service = DanteHeartbeatService(device_by_ip=lambda _source_ip, _device_id: device, on_device_updated=changed)
     service._on_packet(TREATMENT_PACKET, ("192.0.2.1", 1030))
     advancing = bytearray(TREATMENT_PACKET)
     advancing[-8:-6] = (6685).to_bytes(2, "big")
@@ -227,7 +227,7 @@ async def test_diagnostics_export_and_local_reset_send_no_commands_or_journal_re
     device.receiver_telemetry_capacity = TOPOLOGY["capacity"]
     device.receiver_flow_completeness = "complete"
     device.receiver_flows = TOPOLOGY["flows"]
-    service = DanteHeartbeatService(device_by_ip=lambda _: device, monotonic_clock=lambda: 100.0)
+    service = DanteHeartbeatService(device_by_ip=lambda _source_ip, _device_id: device, monotonic_clock=lambda: 100.0)
     service._on_packet(heartbeat_packet(latency_sequence=1), ("192.0.2.1", 1030))
     server = make_http_server({device.server_name: device})
     server.diagnostics = service
@@ -259,7 +259,7 @@ async def test_diagnostics_can_omit_receiver_history():
     device.receiver_telemetry_capacity = TOPOLOGY["capacity"]
     device.receiver_flow_completeness = "complete"
     device.receiver_flows = TOPOLOGY["flows"]
-    service = DanteHeartbeatService(device_by_ip=lambda _: device, monotonic_clock=lambda: 100.0)
+    service = DanteHeartbeatService(device_by_ip=lambda _source_ip, _device_id: device, monotonic_clock=lambda: 100.0)
     service._on_packet(heartbeat_packet(latency_sequence=1), ("192.0.2.1", 1030))
     server = make_http_server({device.server_name: device})
     server.diagnostics = service
@@ -287,7 +287,9 @@ def test_latency_telemetry_requests_missing_flow_inventory():
     device.receiver_flows = []
     requested = []
     service = DanteHeartbeatService(
-        device_by_ip=lambda _: device, monotonic_clock=lambda: 100.0, on_receiver_flows_needed=requested.append
+        device_by_ip=lambda _source_ip, _device_id: device,
+        monotonic_clock=lambda: 100.0,
+        on_receiver_flows_needed=requested.append,
     )
     service._on_packet(heartbeat_packet(latency_sequence=1), ("192.0.2.1", 1030))
     assert requested == [device]
