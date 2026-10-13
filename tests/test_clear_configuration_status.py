@@ -76,7 +76,9 @@ def test_parser_preserves_authentic_action_masks_and_result_codes():
 
 def test_state_service_applies_and_serializes_clear_configuration_status_once():
     device_ip_address = "10.0.2.15"
-    application, device = application_with_device("virtual-a32.local.", device_ip_address)
+    application, device = application_with_device(
+        "virtual-a32.local.", device_ip_address, advertised_from=MODE_ONE_STATUS
+    )
     expected = core.parse_response("clear_configuration_status", MODE_ONE_STATUS)
 
     events = receive_packets(application, [MODE_ONE_STATUS, MODE_ONE_STATUS], (device_ip_address, 8702))

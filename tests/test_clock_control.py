@@ -7,7 +7,7 @@ import pytest
 from netaudio import core
 from netaudio.dante.clock_control import preview_clock_configuration
 from netaudio.monitoring import IssueEngine, IssueKind
-from tests.status_test_support import application_with_device, receive_packets
+from tests.status_test_support import advertise_conmon_identity, application_with_device, receive_packets
 
 
 def status(**overrides):
@@ -276,6 +276,7 @@ def test_auxiliary_diagnostics_never_update_clock_or_confirm_a_write():
     packet = bytes.fromhex(
         "ffff0030001a00000200000000010000417564696e617465072400240000000000010008001000000000000000030000"
     )
+    advertise_conmon_identity(app, device, packet)
     receive_packets(app, [packet], (str(device.ipv4), 8700))
     assert device.clock_status == previous
     assert device.clock_diagnostics["clock_unicast_status"]["raw_words"] == [0x10008, 0x100000, 0, 0x30000]
@@ -290,6 +291,7 @@ def test_framed_but_malformed_clock_observation_invalidates_freshness():
     app, device = device_and_app()
     truncated = CLOCK_STATUS_PACKET[:-1]
     packet = truncated[:2] + len(truncated).to_bytes(2, "big") + truncated[4:]
+    advertise_conmon_identity(app, device, packet)
     receive_packets(app, [packet], (str(device.ipv4), 8700))
     assert device.clock_status["status_supported"] is False
     assert device.clock_observed_at is None

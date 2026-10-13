@@ -16,6 +16,8 @@ def server():
     device = DanteDevice("device.local.")
     device.name = "Desk"
     device.ipv4 = "192.0.2.10"
+    device.cmc_process = 1
+    device.cmc_process_state = "advertised"
     device.rx_count = device.tx_count = 0
     device.fetch_device_name = AsyncMock(return_value="Desk")
     device.get_rx_channels = AsyncMock()
@@ -184,7 +186,7 @@ async def test_save_routing_excludes_unselected_categories(server):
         "Desk": {
             "name": "Desk",
             "device_name": "Desk",
-            "device_identity": {"server_name": "device.local."},
+            "device_identity": {"cmc_process": 1, "server_name": "device.local."},
         }
     }
     server.application.get_device_settings.assert_not_called()

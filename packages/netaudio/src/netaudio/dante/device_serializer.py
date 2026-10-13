@@ -95,6 +95,8 @@ DEVICE_SCALAR_FIELDS = (
     "manufacturer_firmware_version",
     "manufacturer_versions_record",
     "cmc_server_version",
+    "cmc_txt_id_raw",
+    "cmc_txt_process_raw",
     "router_protocol_version",
     "ddm_product_version",
     "ddm_product_software_version",
@@ -286,7 +288,12 @@ class DanteDeviceSerializer:
         }
 
         as_json = {
+            "association_generation": device.association_generation,
+            "association_state": device.association_state,
             "channels": {"receivers": rx_channels, "transmitters": tx_channels},
+            "cmc_process": device.cmc_process,
+            "cmc_process_state": device.cmc_process_state,
+            "cmc_source_identifier": device.cmc_source_identifier,
             "ipv4": str(device.ipv4),
             "kind": device.kind,
             "name": device.name,
@@ -373,6 +380,9 @@ class DanteDeviceSerializer:
         device.name = data.get("name", "")
         device.online = data.get("online", True)
         device.services = data.get("services") or {}
+        for field_name in ("cmc_process", "cmc_process_state", "cmc_source_identifier"):
+            if field_name in data:
+                setattr(device, field_name, data[field_name])
 
         for field_name in DEVICE_SCALAR_FIELDS:
             json_field_name = device_json_field_name(field_name)

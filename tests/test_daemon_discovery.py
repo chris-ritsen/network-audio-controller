@@ -173,8 +173,7 @@ async def test_new_cmc_service_registers_identity_metadata_and_queries(monkeypat
     assert daemon.spawned == ["retry-conmon:rack.local."]
     assert daemon.published == [device]
     notify.assert_called_once_with("STATUS=1 device(s) online")
-    daemon.application.dispatcher.emit_nowait.assert_called_once()
-    event = daemon.application.dispatcher.emit_nowait.call_args.args[0]
+    event = daemon.application.dispatcher.emit_nowait.call_args_list[0].args[0]
     assert event.type == EventType.DEVICE_DISCOVERED
     assert event.server_name == "rack.local."
 
@@ -343,6 +342,10 @@ async def test_rename_reconciliation_requires_fresh_name_and_matching_identity(o
         device.update_last_seen()
         devices[device.server_name] = device
     daemon = _DiscoveryHarness(devices)
+    for device in devices.values():
+        daemon.application.apply_cmc_observation(
+            device, {"id": device.mac_address.replace(":", "") + "0000", "process": "1"}
+        )
     await daemon._reconcile_renamed_device(devices["new.local."])
     expected = {"old.local.", "new.local.", "other.local.", "logical.local."}
     if observed_name in ("old", "new"):

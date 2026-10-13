@@ -96,7 +96,6 @@ async def test_managed_publications_are_applied_to_the_exact_server_scope():
     assert east_device.sample_rate is None
     assert west_device.sample_rate == 48000
     assert server._serialized_devices()[west_device.server_name]["supported_sample_rates_hz"] == [48000, 96000]
-    assert app.state._pending_status == {}
 
 
 def test_reassigned_context_discards_the_old_control_object():

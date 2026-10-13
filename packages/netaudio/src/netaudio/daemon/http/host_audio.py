@@ -147,10 +147,14 @@ class DaemonHostAudioHandlers:
         except ValueError as exception:
             logger.warning("Unable to read Shure correlations: %s", exception)
             correlations = {}
+        records_by_mac: dict[str, dict] = {}
+        for server_name, record in records.items():
+            if isinstance(record, dict) and record.get("mac_address"):
+                records_by_mac.setdefault(_hexadecimal(record.get("mac_address")), {})[server_name] = record
         by_mac = {
-            _hexadecimal(record.get("mac_address")): record.get("name")
-            for record in records.values()
-            if isinstance(record, dict) and record.get("mac_address")
+            mac: next(iter(matches.values())).get("name")
+            for mac, matches in records_by_mac.items()
+            if len(matches) == 1
         }
         links = {}
         for mac, device in wireless.items():
@@ -207,11 +211,10 @@ class DaemonHostAudioHandlers:
             return {}
         live = [record for record in records.values() if isinstance(record, dict)]
         names = {str(record.get("name")).casefold() for record in live if record.get("name")}
-        addresses = {record.get("mac_address") for record in live if record.get("mac_address")}
         remembered = {}
         for identity, (seen_at, record) in journal.last_known().items():
             name = record.get("name")
-            if not name or str(name).casefold() in names or record.get("mac_address") in addresses - {None}:
+            if not name or str(name).casefold() in names:
                 continue
             remembered[f"remembered:{identity}"] = {**record, "online": False, "remembered_last_seen": seen_at}
         return remembered

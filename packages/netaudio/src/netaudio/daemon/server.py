@@ -467,12 +467,21 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if not dante_mac:
             return None
 
-        normalized_target = self._normalize_mac(dante_mac)
-        for device in self.application.devices.values():
-            if device.mac_address and self._normalize_mac(device.mac_address) == normalized_target:
-                return device
+        matches = self._dante_devices_with_mac(dante_mac)
+        if len(matches) > 1:
+            logger.debug(
+                f"Shure {shure_device.mac} correlates with several Dante devices: "
+                f"{', '.join(sorted(device.server_name for device in matches))}"
+            )
+        return matches[0] if len(matches) == 1 else None
 
-        return None
+    def _dante_devices_with_mac(self, mac: str) -> list:
+        normalized_target = self._normalize_mac(mac)
+        return [
+            device
+            for device in self.application.devices.values()
+            if device.mac_address and self._normalize_mac(device.mac_address) == normalized_target
+        ]
 
     def _dante_device_to_dict(self, device):
         return dante_device_correlation_view(device)
@@ -593,6 +602,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         correlations = self._load_shure_correlations()
         dante_mac = dante_device.mac_address or ""
         if not dante_mac:
+            return
+        if self._dante_devices_with_mac(dante_mac) != [dante_device]:
             return
         normalized_dante = self._normalize_mac(dante_mac)
         for shure_mac, corr_dante_mac in correlations.items():

@@ -55,6 +55,7 @@ class DanteDiscoveryMixin:
         if app_settings.interface and not interface_address:
             raise RuntimeError("configured discovery interface has no IPv4 address")
         interfaces = [interface_address] if interface_address else multicast_ipv4_addresses()
+        self.application.notifications.reset_unattributed_conmon_counts()
         self.zeroconf = AsyncZeroconf(interfaces=interfaces) if interfaces else AsyncZeroconf()
         self.browser = AsyncServiceBrowser(
             self.zeroconf.zeroconf,
@@ -116,6 +117,9 @@ class DanteDiscoveryMixin:
         for server_name in list(self.devices.keys()):
             device = self.devices[server_name]
             if name in device.services:
+                if service_type == SERVICE_CMC:
+                    device.services.pop(name, None)
+                    self.application.apply_cmc_observation(device, None)
                 logger.info(f"Device offline candidate (mDNS removed): {server_name}")
                 self.mark_device_offline(server_name)
                 return
@@ -232,7 +236,10 @@ class DanteDiscoveryMixin:
             device.latency = nanoseconds_to_milliseconds(properties["latency_ns"])
 
     async def _apply_cmc_identity(self, device, service):
-        if service.service_type != SERVICE_CMC or "id" not in service.properties:
+        if service.service_type != SERVICE_CMC:
+            return
+        self.application.apply_cmc_observation(device, service.properties)
+        if "id" not in service.properties:
             return
 
         device.mac_address = service.properties["id"]
@@ -269,24 +276,36 @@ class DanteDiscoveryMixin:
         return device_changed
 
     async def _reconcile_renamed_device(self, device):
-        if device.requires_managed_control or not device.mac_address or not self.application.get_arc_port(device):
+        if (
+            device.requires_managed_control
+            or device.cmc_source_identifier is None
+            or device.cmc_process_state != "advertised"
+            or not self.application.get_arc_port(device)
+        ):
             return
-        identity = device.mac_address.replace(":", "").lower()
         matches = [
             candidate
             for candidate in self.devices.values()
             if not candidate.requires_managed_control
-            and candidate.mac_address
-            and candidate.mac_address.replace(":", "").lower() == identity
+            and candidate.cmc_source_identifier == device.cmc_source_identifier
+            and candidate.cmc_process_state == "advertised"
+            and candidate.cmc_process == device.cmc_process
             and candidate.ipv4 == device.ipv4
             and self.application.get_arc_port(candidate) == self.application.get_arc_port(device)
         ]
         if len(matches) < 2:
             return
+        generations = {candidate.server_name: candidate.association_generation for candidate in matches}
         # An address answering probes cannot establish that an old mDNS name
         # still exists. Confirm the current name before retiring its old entry.
         name = await device.fetch_device_name()
         if not name:
+            return
+        if any(
+            self.devices.get(candidate.server_name) is not candidate
+            or candidate.association_generation != generations[candidate.server_name]
+            for candidate in matches
+        ):
             return
         canonical = [
             candidate for candidate in matches if candidate.server_name.casefold() == f"{name}.local.".casefold()
@@ -303,6 +322,7 @@ class DanteDiscoveryMixin:
             self.clear_offline_candidate(key)
             self.application.mark_device_offline(key)
             self.devices.pop(key, None)
+        self.application.refresh_conmon_associations()
 
     def _emit_device_updated(self, device, server_name):
         self.application.dispatcher.emit_nowait(

@@ -96,7 +96,7 @@ def synthetic_peer(app, d, values, *, delayed=0, wrong=False, revoke=False):
             }
             if delayed and reads <= delayed and category == "bluetooth_discovery":
                 status["observations"][0]["value"] = 2
-            app.notifications.notify_waiters("panel_status", app._control_key(d), status)
+            app.notifications.notify_waiters("panel_status", app._waiter_key(d), status)
         elif op == "bluetooth_discovery":
             values[op] = 1 if request["discoverable"] else 2
         elif op == "bluetooth_identification":

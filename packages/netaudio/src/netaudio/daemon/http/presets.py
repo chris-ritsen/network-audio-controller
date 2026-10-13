@@ -121,11 +121,15 @@ def _config_matches_record(config, identifier, record):
     identity = config.get("device_identity")
     if isinstance(identity, dict):
         comparisons = {
-            "server_name": identifier,
+            "cmc_process": record.get("cmc_process"),
+            "cmc_source_identifier": record.get("cmc_source_identifier"),
             "inventory_id": record.get("inventory_id", identifier),
             "mac_address": record.get("mac_address"),
+            "server_name": identifier,
         }
-        specified = [(key, value) for key, value in identity.items() if key in comparisons and value]
+        specified = [
+            (key, value) for key, value in identity.items() if key in comparisons and value is not None and value != ""
+        ]
         if specified:
             return all(comparisons[key] == value for key, value in specified)
     return record.get("name") == config["name"]

@@ -70,7 +70,7 @@ def test_daemon_discovery_honors_configured_interface(monkeypatch, address):
     browser = Mock()
     monkeypatch.setattr(daemon_discovery, "AsyncZeroconf", transport)
     monkeypatch.setattr(daemon_discovery, "AsyncServiceBrowser", browser)
-    daemon = SimpleNamespace(on_service_state_change=Mock())
+    daemon = SimpleNamespace(application=Mock(), on_service_state_change=Mock())
     DanteDiscoveryMixin._start_discovery(daemon)
     transport.assert_called_once_with(**({"interfaces": [address]} if address else {}))
     browser.assert_called_once_with(daemon.zeroconf.zeroconf, SERVICES, handlers=[daemon.on_service_state_change])

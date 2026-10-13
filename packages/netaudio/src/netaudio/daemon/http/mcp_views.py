@@ -1242,11 +1242,11 @@ def _mac(value: Any) -> str | None:
 
 
 def renamed_devices(devices: dict, journal: Any) -> dict[str, dict]:
-    names_by_mac = {
-        _mac(device.get("mac_address")): device.get("name")
-        for device in devices.values()
-        if isinstance(device, dict) and _mac(device.get("mac_address")) and device.get("online")
-    }
+    names_for_mac: dict[str, set] = {}
+    for device in devices.values():
+        if isinstance(device, dict) and _mac(device.get("mac_address")) and device.get("online"):
+            names_for_mac.setdefault(_mac(device.get("mac_address")), set()).add(device.get("name"))
+    names_by_mac = {mac: next(iter(names)) for mac, names in names_for_mac.items() if len(names) == 1}
     renamed: dict[str, dict] = {}
     events = journal.get("events") if isinstance(journal, dict) else None
     for event in events or []:

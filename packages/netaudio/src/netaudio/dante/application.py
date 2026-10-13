@@ -119,6 +119,10 @@ class CapabilityProbeTimeout(RuntimeError):
     pass
 
 
+class StaleDeviceAssociationError(RuntimeError):
+    pass
+
+
 def _clock_status_snapshot(device) -> dict:
     return {
         **(getattr(device, "clock_status", None) or {}),
@@ -158,7 +162,7 @@ class DanteApplication:
         self.cmc = DanteCMCService(self.transport)
         self.notifications = DanteNotificationService(
             dispatcher=self.dispatcher,
-            device_lookup=self._device_by_source,
+            device_lookup=self._device_by_notification_source,
             waiter_key_lookup=self._source_waiter_key,
             packet_store=packet_store,
             interface_name=app_settings.interface,
@@ -243,6 +247,11 @@ class DanteApplication:
             self.register_device(server_name, device)
 
         device.services = dict(sorted(device_services.items()))
+        cmc_service = next(
+            (service for service in device_services.values() if service["type"] == SERVICE_CMC),
+            None,
+        )
+        self.apply_cmc_observation(device, cmc_service.get("properties", {}) if cmc_service is not None else None)
         arc_service = next(
             (service for service in device_services.values() if service["type"] == SERVICE_ARC),
             None,
@@ -345,6 +354,10 @@ class DanteApplication:
         return str(target)
 
     def _device_by_control_key(self, key: str):
+        managed = self._managed_device_by_control_key(key)
+        return managed if managed is not None else self._device_by_ip(key)
+
+    def _managed_device_by_control_key(self, key: str):
         for device in self.devices.values():
             if not device.requires_managed_control:
                 continue
@@ -353,7 +366,94 @@ class DanteApplication:
                     return device
             except RuntimeError:
                 continue
-        return self._device_by_ip(key)
+        return None
+
+    def _device_by_conmon_tuple(self, source_identifier: str | None, process: int | None):
+        if source_identifier is None or process is None:
+            return None
+        source_identifier = source_identifier.lower()
+        matches = [
+            device
+            for device in self.devices.values()
+            if getattr(device, "association_state", None) == "current"
+            and device.cmc_source_identifier == source_identifier
+            and device.cmc_process == process
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def _device_by_notification_source(self, source_ip: str, envelope: dict | None = None):
+        managed = self._managed_device_by_control_key(source_ip)
+        if managed is not None:
+            return managed
+        if envelope is not None and envelope.get("is_conmon"):
+            return self._device_by_conmon_tuple(envelope.get("device_id"), envelope.get("process"))
+        return self._device_by_ip(source_ip)
+
+    @staticmethod
+    def _advertised_conmon_tuple(device) -> tuple[str, int] | None:
+        source_identifier = getattr(device, "cmc_source_identifier", None)
+        if (
+            source_identifier is None
+            or getattr(device, "cmc_process_state", None) != "advertised"
+            or getattr(device, "requires_managed_control", False)
+        ):
+            return None
+        return source_identifier, device.cmc_process
+
+    def apply_cmc_observation(self, device, properties: dict | None) -> None:
+        from netaudio.dante.device import cmc_txt_identity
+
+        for field_name, value in cmc_txt_identity(properties).items():
+            setattr(device, field_name, value)
+        self.refresh_conmon_associations()
+
+    @staticmethod
+    def _cmc_endpoints(device) -> tuple:
+        return tuple(
+            sorted(
+                (str(service.get("ipv4")), service.get("port"), name)
+                for name, service in (getattr(device, "services", None) or {}).items()
+                if isinstance(service, dict) and service.get("type") == SERVICE_CMC
+            )
+        )
+
+    def refresh_conmon_associations(self) -> None:
+        from netaudio.dante.device import ASSOCIATION_GENERATIONS
+
+        holders: dict[tuple[str, int], int] = {}
+        for device in self.devices.values():
+            conmon_tuple = self._advertised_conmon_tuple(device)
+            if conmon_tuple is not None:
+                holders[conmon_tuple] = holders.get(conmon_tuple, 0) + 1
+        for server_name, device in list(self.devices.items()):
+            if not hasattr(device, "association_generation"):
+                continue
+            conmon_tuple = self._advertised_conmon_tuple(device)
+            if conmon_tuple is None:
+                state = "none"
+            elif holders[conmon_tuple] == 1:
+                state = "current"
+            else:
+                state = "conflicting"
+            signature = (
+                state,
+                device.cmc_source_identifier,
+                device.cmc_process,
+                device.cmc_process_state,
+                self._cmc_endpoints(device),
+            )
+            if signature == device.association_signature:
+                continue
+            device.association_signature = signature
+            device.association_state = state
+            device.association_generation = next(ASSOCIATION_GENERATIONS)
+            self.dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.DEVICE_UPDATED,
+                    device_name=device.name,
+                    server_name=server_name,
+                )
+            )
 
     def _device_by_source(self, source_ip: str, device_id: str | None = None):
         """The device that sent a packet: by address, or by the device ID it carries when devices share one."""
@@ -402,10 +502,14 @@ class DanteApplication:
         key = self._control_key(device)
         if not hasattr(device, "requires_managed_control") or device.requires_managed_control:
             return key
-        device_id = self._device_id(device)
-        if device_id is None or len(self._device_ids(self._devices_by_ip(key))) < 2:
-            return key
-        return f"{key}#{device_id}"
+        generation = device.association_generation
+        if getattr(device, "association_state", None) == "current":
+            return f"{key}#{device.cmc_source_identifier}:{device.cmc_process}@{generation}"
+        return f"{key}#{device.server_name}@{generation}"
+
+    def _require_current_waiter_key(self, target, key: str) -> None:
+        if self._waiter_key(target) != key:
+            raise StaleDeviceAssociationError(f"the device association changed while waiting on {key}")
 
     def _source_waiter_key(self, source_ip: str, device) -> str:
         return source_ip if device is None else self._waiter_key(device)
@@ -464,6 +568,7 @@ class DanteApplication:
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:
                 logger.debug(f"{kind} write verification timeout for {key}")
+            self._require_current_waiter_key(target, key)
             return waiter.latest_result
         finally:
             self.notifications.unregister_waiter(waiter)
@@ -679,6 +784,7 @@ class DanteApplication:
                         raise CapabilityProbeTimeout(f"{description} readback timed out for {key}") from None
                 if waiter.latest_result is None:
                     raise RuntimeError(f"{description} readback was unavailable for {key}")
+                self._require_current_waiter_key(target, key)
                 return _probe_result(waiter.latest_result, result_type)
             finally:
                 self.notifications.unregister_waiter(waiter)
@@ -745,10 +851,12 @@ class DanteApplication:
                     except asyncio.TimeoutError:
                         continue
                     if waiter.latest_result is not None:
+                        self._require_current_waiter_key(target, key)
                         return _probe_result(waiter.latest_result, dict)
                     waiter.clear()
                 if waiter.latest_result is None:
                     raise CapabilityProbeTimeout(f"{description} readback timed out for {key}")
+                self._require_current_waiter_key(target, key)
                 return _probe_result(waiter.latest_result, dict)
             finally:
                 self.notifications.unregister_waiter(waiter)
@@ -1584,6 +1692,7 @@ class DanteApplication:
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:
                 logger.debug(f"No mutation notification from {key} within {timeout}s")
+            self._require_current_waiter_key(device, key)
             return response
         finally:
             self.notifications.unregister_waiter(waiter)
@@ -1787,6 +1896,7 @@ class DanteApplication:
                 self.notifications.unregister_waiter(waiter)
         if waiter.latest_result is None:
             raise RuntimeError(f"clock status readback was unavailable for {key}")
+        self._require_current_waiter_key(device, key)
         if changed := apply_device_status(device, STATUS_KIND_CLOCK, waiter.latest_result):
             self.state._emit_status_change(device, changed)
         status = _clock_status_snapshot(device)
@@ -2056,7 +2166,6 @@ class DanteApplication:
                     existing.services = device.services
 
             self.devices[server_name] = existing
-            self.state.apply_pending_for_device(existing)
             self.dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.DEVICE_UPDATED,
@@ -2068,7 +2177,6 @@ class DanteApplication:
             device._app = self
             device.update_last_seen()
             self.devices[server_name] = device
-            self.state.apply_pending_for_device(device)
             self.dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.DEVICE_DISCOVERED,
@@ -2799,6 +2907,7 @@ class DanteApplication:
     def unregister_device(self, server_name: str) -> None:
         device = self.devices.pop(server_name, None)
         if device:
+            self.refresh_conmon_associations()
             self.dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.DEVICE_REMOVED,

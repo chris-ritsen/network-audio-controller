@@ -5,11 +5,12 @@ from unittest.mock import AsyncMock
 
 from netaudio.dante.state import apply_device_status
 from tests.test_device_controls import device as panel_device
-from tests.status_test_support import receive_packets
+from tests.status_test_support import advertise_conmon_identity, receive_packets
 
 
 def test_unsolicited_bluetooth_fixture_preserves_state_without_confirming_request(load_fixture):
     app, device = panel_device()
+    advertise_conmon_identity(app, device, load_fixture("avio-bt-1_bluetooth_status_connected.bin"))
     receive_packets(
         app, [b"unrelated", load_fixture("avio-bt-1_bluetooth_status_connected.bin")], (str(device.ipv4), 8702)
     )
@@ -21,6 +22,7 @@ def test_unsolicited_bluetooth_fixture_preserves_state_without_confirming_reques
 
 def test_disconnected_fixture_does_not_invent_connected_name(load_fixture):
     app, device = panel_device()
+    advertise_conmon_identity(app, device, load_fixture("avio-bt-1_bluetooth_status_disconnected.bin"))
     receive_packets(app, [load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")], (str(device.ipv4), 8702))
     assert device.bluetooth_connected is False
     assert device.bluetooth_device == ""
@@ -28,6 +30,7 @@ def test_disconnected_fixture_does_not_invent_connected_name(load_fixture):
 
 def test_refresh_timeout_marks_prior_observation_unavailable(load_fixture):
     app, device = panel_device()
+    advertise_conmon_identity(app, device, load_fixture("avio-bt-1_bluetooth_status_connected.bin"))
     receive_packets(app, [load_fixture("avio-bt-1_bluetooth_status_connected.bin")], (str(device.ipv4), 8702))
     app._send_settings = AsyncMock()
     status = asyncio.run(app.inspect_device_controls(device, timeout=0.001))

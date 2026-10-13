@@ -10,7 +10,7 @@ class ApiFeature:
     description: str
 
 
-API_VERSION = 2
+API_VERSION = 3
 
 API_FEATURES = (
     ApiFeature(
@@ -62,6 +62,13 @@ API_FEATURES = (
         2,
         "Bluetooth custom names are limited to 32 bytes of UTF-8. A stored name that is not valid UTF-8 is reported "
         "with custom_name_raw_hexadecimal.",
+    ),
+    ApiFeature(
+        "conmon_association",
+        3,
+        "Device records always carry cmc_source_identifier, cmc_process, cmc_process_state, association_state and "
+        "association_generation. Control and monitoring updates apply only to the one device whose advertised "
+        "identifier and process match the packet; address the device by server_name.",
     ),
 )
 

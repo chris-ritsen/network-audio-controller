@@ -15,6 +15,7 @@ from netaudio.dante.interface_statistics import (
     InterfaceStatisticsObservation,
 )
 from netaudio.dante.services.notification import DanteNotificationService
+from tests.status_test_support import advertise_conmon_identity
 
 
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures" / "interface_statistics"
@@ -192,6 +193,7 @@ async def test_application_probe_waits_for_interface_statistics_publication():
     device_ip_address = "192.0.2.10"
     device = _device(device_ip_address)
     application.devices[device.server_name] = device
+    advertise_conmon_identity(application, device, A32_PACKET)
     application.send_probe_interface_statistics = AsyncMock(
         side_effect=lambda address: application.notifications._on_packet(A32_PACKET, (address, 8702))
     )

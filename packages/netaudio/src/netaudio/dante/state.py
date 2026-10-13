@@ -265,7 +265,6 @@ class DanteStateService:
     def __init__(self, application):
         self.application = application
         self._device_locks: dict[str, asyncio.Lock] = {}
-        self._pending_status: dict[str, list[tuple[str, object]]] = {}
         self._populating: set[str] = set()
         self._capabilities_awaiting_model: set[str] = set()
         self._deferred_capability_tasks: set[asyncio.Task] = set()
@@ -312,7 +311,16 @@ class DanteStateService:
         self.application.dispatcher.on(EventType.NOTIFICATION_RECEIVED, self._on_notification)
         self._refetching = True
 
+    @staticmethod
+    def _current_generation(device, event: DanteEvent) -> bool:
+        generation = event.data.get("association_generation")
+        return generation is None or getattr(device, "association_generation", None) == generation
+
     async def _on_notification(self, event: DanteEvent) -> None:
+        device = self.devices.get(event.server_name) if event.server_name else None
+        if device is not None and not self._current_generation(device, event):
+            logger.debug(f"Dropped a notification for {event.server_name}: the device association changed")
+            return
         handler = self._notification_handlers.get(event.data.get("notification_id"))
         if handler is None:
             logger.debug(f"Unhandled notification: {event.data.get('notification_name')} from {event.server_name}")
@@ -361,16 +369,6 @@ class DanteStateService:
     def _has_control_path(self, device) -> bool:
         return device.requires_managed_control or bool(self.application.get_arc_port(device))
 
-    def apply_pending_for_device(self, device) -> None:
-        if not device.ipv4:
-            return
-        pending = self._pending_status.pop(str(device.ipv4), None)
-        if not pending:
-            return
-        for kind, status in pending:
-            apply_device_status(device, kind, status)
-        logger.debug(f"Applied pending status for {device.ipv4}: {sorted({kind for kind, _ in pending})}")
-
     async def on_device_status(self, event: DanteEvent) -> None:
         kind = event.data["kind"]
         status = event.data["status"]
@@ -380,9 +378,12 @@ class DanteStateService:
             return
         device = self.devices.get(event.server_name) if event.server_name else None
         if device is None:
-            device = self.application._device_by_control_key(source_ip)
+            device = self.application._managed_device_by_control_key(source_ip)
         if device is None:
-            self._pending_status.setdefault(source_ip, []).append((kind, status))
+            logger.debug(f"Dropped {kind} status from {source_ip}: no current device association")
+            return
+        if not self._current_generation(device, event):
+            logger.debug(f"Dropped {kind} status from {source_ip}: the device association changed")
             return
         if not device.online and kind not in (STATUS_KIND_DANTE_MODEL, STATUS_KIND_MAKE_MODEL):
             return

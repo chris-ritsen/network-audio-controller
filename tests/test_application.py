@@ -142,7 +142,7 @@ class TestDanteApplication:
         application.devices[device.server_name] = device
 
         async def reply(target):
-            application.notifications.notify_waiters("aes67", application._control_key(target), status)
+            application.notifications.notify_waiters("aes67", application._waiter_key(target), status)
 
         application.send_probe_aes67 = AsyncMock(side_effect=reply)
         application.send_enable_aes67 = AsyncMock()
@@ -507,7 +507,7 @@ class TestDanteApplication:
 
         def respond_to_probe(target):
             application.notifications.notify_waiters(
-                "sample_rate", application._control_key(target), configurable_status(48_000, [44_100, 48_000])
+                "sample_rate", application._waiter_key(target), configurable_status(48_000, [44_100, 48_000])
             )
 
         application.send_probe_sample_rate = AsyncMock(side_effect=respond_to_probe)
@@ -623,7 +623,7 @@ class TestDanteApplication:
 
         def respond_to_probe(target):
             application.notifications.notify_waiters(
-                "encoding", application._control_key(target), configurable_status(24, [24, 16, 32])
+                "encoding", application._waiter_key(target), configurable_status(24, [24, 16, 32])
             )
 
         application.send_probe_encoding = AsyncMock(side_effect=respond_to_probe)
@@ -694,7 +694,7 @@ class TestDanteApplication:
 
         def respond_to_probe(target):
             application.notifications.notify_waiters(
-                "codec", application._control_key(target), codec_status(1, 2, [5, 1])
+                "codec", application._waiter_key(target), codec_status(1, 2, [5, 1])
             )
 
         application.send_probe_codec_status = AsyncMock(side_effect=respond_to_probe)

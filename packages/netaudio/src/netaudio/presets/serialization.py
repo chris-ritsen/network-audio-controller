@@ -127,6 +127,10 @@ def device_preset_config(
             if value
         },
     }
+    if getattr(device, "cmc_source_identifier", None) is not None:
+        config["device_identity"]["cmc_source_identifier"] = device.cmc_source_identifier
+    if getattr(device, "cmc_process_state", None) == "advertised":
+        config["device_identity"]["cmc_process"] = device.cmc_process
     if "device_controls" in sections and getattr(device, "device_controls", None):
         from netaudio.presets.device_controls import capture_device_controls
 
@@ -268,7 +272,10 @@ def _append_preset_identity(element: ET.Element, config: Mapping[str, Any], devi
         if len(mac) == 12:
             mac = mac[:6] + "FFFE" + mac[6:]
         _sub_text(instance_id, "device_id", mac)
-    _sub_text(instance_id, "process_id", "0")
+    if device is not None:
+        if getattr(device, "cmc_process_state", None) != "advertised":
+            raise ValueError(f"{name} advertises no process, so its preset instance ID cannot be written")
+        _sub_text(instance_id, "process_id", str(device.cmc_process))
     if device is not None and device.manufacturer:
         _sub_text(element, "manufacturer_id", _hex_encode(device.manufacturer))
         _sub_text(element, "manufacturer_name", device.manufacturer)
