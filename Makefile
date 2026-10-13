@@ -54,7 +54,11 @@ install:
 	uv tool install '.[redis]' --force --reinstall-package netaudio
 
 restart:
-	launchctl kickstart -k gui/$$(id -u)/com.netaudio.daemon
+	@if [ "$$(uname)" = Darwin ]; then \
+		launchctl kickstart -k gui/$$(id -u)/com.netaudio.daemon; \
+	else \
+		systemctl --user restart netaudio; \
+	fi
 
 deploy: install restart
 
