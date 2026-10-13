@@ -428,8 +428,7 @@ class VirtualDevice(VirtualDeviceRequestHandler):
             ip_version=IPVersion.V4Only,
         )
 
-        for info in self._service_infos:
-            await self._zeroconf.async_register_service(info)
+        await asyncio.gather(*(self._zeroconf.async_register_service(info) for info in self._service_infos))
 
         logger.info(f"mDNS services registered for '{self._config.name}' ({len(self._service_infos)} services)")
 

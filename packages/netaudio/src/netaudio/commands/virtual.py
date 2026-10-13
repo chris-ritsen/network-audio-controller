@@ -520,9 +520,8 @@ async def _run_virtual_device(
     readiness_reported = False
 
     try:
-        for device in devices:
-            started.append(device)
-            await device.start()
+        started.extend(devices)
+        await asyncio.gather(*(device.start() for device in devices))
         summaries = [
             {
                 "name": device.config.name,
