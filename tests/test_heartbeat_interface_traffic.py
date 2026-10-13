@@ -52,7 +52,7 @@ def test_each_sample_exposes_wire_rates_without_local_arrival_time_calculation()
         update_last_seen=MagicMock(),
     )
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
     )
 
     service._on_packet(BASELINE_PACKET, ("192.168.1.247", 8700))
@@ -78,7 +78,7 @@ def test_sequence_gap_still_preserves_the_reported_rate():
         update_last_seen=MagicMock(),
     )
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
     )
 
     service._on_packet(BASELINE_PACKET, ("192.168.1.247", 8700))
@@ -100,7 +100,7 @@ def test_duplicate_sequence_is_ignored_and_next_sequence_replaces_state():
         update_last_seen=MagicMock(),
     )
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
     )
 
     service._on_packet(BASELINE_PACKET, ("192.168.1.247", 8700))
@@ -119,7 +119,7 @@ def test_malformed_packet_does_not_replace_live_state():
         network_interface_traffic={"sequence": 41958},
         update_last_seen=MagicMock(),
     )
-    service = DanteHeartbeatService(device_by_ip=lambda _source_ip: device)
+    service = DanteHeartbeatService(device_by_ip=lambda _source_ip, _device_id: device)
 
     service._on_packet(TREATMENT_PACKET[:-1], ("192.168.1.247", 8700))
 

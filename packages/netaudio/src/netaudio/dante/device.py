@@ -9,7 +9,7 @@ from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.arc_protocol import ArcProtocolError, arc_protocol_for_device
 from netaudio.dante.channel import DanteChannel, channels_by_number
 from netaudio.dante.channel_capability import CHANNEL_CAPABILITY_FIELDS, channel_capability_fields
-from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
+from netaudio.dante.const import DEVICE_ARC_PORT, DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, SERVICE_ARC, SERVICE_CMC
 from netaudio.dante.core_transport import (
     DEFAULT_REQUEST_ATTEMPTS,
     DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
@@ -237,6 +237,7 @@ class DanteDevice:
         self.inventory_sources: list[str] | None = None
         self.management_state: str | None = None
         self.managed_operation_permissions: dict[str, bool] | None = None
+        self.settings_port: int | None = None
 
         self._app = app
         self._own_transport: CoreTransport | None = None
@@ -350,6 +351,14 @@ class DanteDevice:
             return service["port"]
         return DEVICE_ARC_PORT
 
+    def _service_ports(self) -> dict[str, int]:
+        cmc_service = self.get_service(SERVICE_CMC)
+        return {
+            "arc_port": self._arc_port(),
+            "control_port": (cmc_service or {}).get("port") or DEVICE_CONTROL_PORT,
+            "settings_port": self.settings_port or DEVICE_SETTINGS_PORT,
+        }
+
     @property
     def application(self):
         return self._app
@@ -383,7 +392,7 @@ class DanteDevice:
     async def execute(self, specification: dict) -> bytes | None:
         if self.requires_managed_control:
             return await self._require_application().execute_managed(self, specification)
-        return await self.transport.execute(self._require_address(), specification, arc_port=self._arc_port())
+        return await self.transport.execute(self._require_address(), specification, **self._service_ports())
 
     async def call_core(
         self,
@@ -398,7 +407,7 @@ class DanteDevice:
         return await self.transport.call(
             self._require_address(),
             operation,
-            arc_port=self._arc_port(),
+            **self._service_ports(),
             timeout_milliseconds=(
                 DEFAULT_REQUEST_TIMEOUT_MILLISECONDS
                 if request_timeout_milliseconds is None

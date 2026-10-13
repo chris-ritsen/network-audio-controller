@@ -404,6 +404,26 @@ fn cmc_registration_response_parser_validates_envelope_and_fields() {
         Some(CmcRegistrationResponse {
             sequence: 0,
             accepted: true,
+            settings_port: Some(8700),
+        })
+    );
+
+    // Inferno with ALT_PORT=10200 reports its settings (info request) port as ALT_PORT+3.
+    let inferno =
+        decode_hexadecimal("1200002000071001000100020000ac130005000200010000ac13000527db0000");
+    assert_eq!(
+        parse_cmc_registration_response(&inferno).and_then(|reply| reply.settings_port),
+        Some(10203)
+    );
+
+    let mut header_only = response[..10].to_vec();
+    header_only[2..4].copy_from_slice(&10u16.to_be_bytes());
+    assert_eq!(
+        parse_cmc_registration_response(&header_only),
+        Some(CmcRegistrationResponse {
+            sequence: 0,
+            accepted: true,
+            settings_port: None,
         })
     );
 

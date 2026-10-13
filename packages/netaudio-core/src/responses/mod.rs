@@ -245,6 +245,8 @@ pub struct PlatformVersions {
 pub struct CmcRegistrationResponse {
     pub sequence: u16,
     pub accepted: bool,
+    /// The settings (ConMon) port the device reports for itself, when the reply carries one.
+    pub settings_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

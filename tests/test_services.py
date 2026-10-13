@@ -252,7 +252,11 @@ class TestDanteCMCService:
         response = bytearray.fromhex("120000200000100100010000020000000001000000010000c0a8013d21fc0000")
         response[8:10] = status.to_bytes(2, "big")
 
-        assert core.parse_response("cmc_registration", bytes(response)) == {"sequence": 0, "accepted": accepted}
+        assert core.parse_response("cmc_registration", bytes(response)) == {
+            "sequence": 0,
+            "accepted": accepted,
+            "settings_port": 8700,
+        }
 
     def test_controller_identity_uses_the_target_path(self, monkeypatch):
         from netaudio import core
@@ -831,7 +835,7 @@ class TestDanteNotificationService:
 
     def test_output_codec_status_notifies_only_matching_device_waiters(self):
         device = SimpleNamespace(model_id="avio-dao2", name="AVIO Output", server_name="avio-output.local.")
-        service = DanteNotificationService(dispatcher=MagicMock(), device_lookup=lambda _source_ip: device)
+        service = DanteNotificationService(dispatcher=MagicMock(), device_lookup=lambda _source_ip, _device_id: device)
         matching_waiter = service.register_waiter(
             "codec",
             "192.168.1.108",
@@ -851,7 +855,7 @@ class TestDanteNotificationService:
 
     def test_gain_write_waiter_ignores_nonmatching_level_but_retains_readback(self):
         device = SimpleNamespace(model_id="avio-dai2", name="AVIO Input", server_name="avio-input.local.")
-        service = DanteNotificationService(dispatcher=MagicMock(), device_lookup=lambda _source_ip: device)
+        service = DanteNotificationService(dispatcher=MagicMock(), device_lookup=lambda _source_ip, _device_id: device)
         waiter = service.register_waiter("codec", "192.168.1.108", accept=_gain_adapter_accepts(device, None, 1, 3))
 
         service._on_packet(INPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))
@@ -861,7 +865,7 @@ class TestDanteNotificationService:
 
     def test_gain_write_waiter_ignores_nonmatching_direction(self):
         device = SimpleNamespace(model_id="avio-dai2", name="AVIO Input", server_name="avio-input.local.")
-        service = DanteNotificationService(dispatcher=MagicMock(), device_lookup=lambda _source_ip: device)
+        service = DanteNotificationService(dispatcher=MagicMock(), device_lookup=lambda _source_ip, _device_id: device)
         waiter = service.register_waiter("codec", "192.168.1.108", accept=_gain_adapter_accepts(device, "output", 1, 5))
 
         service._on_packet(INPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))

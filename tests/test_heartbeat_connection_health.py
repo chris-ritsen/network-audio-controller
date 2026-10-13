@@ -160,7 +160,7 @@ async def test_service_reschedules_expiry_for_the_second_stream():
             fully_expired.set()
 
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
         on_device_updated=on_device_updated,
         connection_health_freshness_seconds=0.3,
     )
@@ -178,7 +178,7 @@ def test_source_port_does_not_gate_connection_health_or_signal_presence():
     on_device_updated = MagicMock()
     on_signal_presence = MagicMock()
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
         on_device_updated=on_device_updated,
         on_signal_presence=on_signal_presence,
     )
@@ -188,7 +188,7 @@ def test_source_port_does_not_gate_connection_health_or_signal_presence():
     on_device_updated.assert_called_once_with(device)
 
     signal_service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device_state(),
+        device_by_ip=lambda _source_ip, _device_id: device_state(),
         on_signal_presence=on_signal_presence,
     )
     signal_service._on_packet(SIGNAL_PRESENCE_FIXTURE_PATH.read_bytes(), ("192.168.1.61", 49153))

@@ -87,6 +87,9 @@ class RecordingDevice:
     def _require_address(self):
         return str(self.ipv4)
 
+    def _service_ports(self):
+        return {}
+
     async def execute(self, specification):
         self.executed.append(specification)
         if self.responses:
@@ -163,7 +166,7 @@ async def test_transport_executes_specifications_through_one_cached_client(monke
     created = []
 
     class FakeClient:
-        def __init__(self, device_ip, arc_port=4440, timeout_ms=1000, attempts=3, *, local_ip=None):
+        def __init__(self, device_ip, arc_port=4440, timeout_ms=1000, attempts=3, *, local_ip=None, **_service_ports):
             self.device_ip = device_ip
             self.arc_port = arc_port
             self.executed = []
@@ -311,7 +314,7 @@ async def test_reboot_operation_registers_with_active_application_before_sending
 
     await application.reboot(device, host_mac=b"\x01\x02\x03\x04\x05\x06")
 
-    assert calls == [("registration", "192.168.1.61", b"\x01\x02\x03\x04\x05\x06")]
+    assert calls == [("registration", device, b"\x01\x02\x03\x04\x05\x06")]
     assert device.executed == [{"command": "reboot", "host_mac": "010203040506"}]
 
 
@@ -328,7 +331,7 @@ async def test_factory_reset_operation_registers_before_sending():
 
     await application.factory_reset(device, host_mac=b"\x01\x02\x03\x04\x05\x06")
 
-    assert calls == [("registration", "192.168.1.61", b"\x01\x02\x03\x04\x05\x06")]
+    assert calls == [("registration", device, b"\x01\x02\x03\x04\x05\x06")]
     assert device.executed == [{"command": "factory_reset", "host_mac": "010203040506"}]
 
 

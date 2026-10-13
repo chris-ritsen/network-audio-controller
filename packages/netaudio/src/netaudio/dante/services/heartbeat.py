@@ -214,7 +214,7 @@ class DanteHeartbeatService(DanteMulticastService):
         if device_extended_unique_identifier is None:
             return
         source_ip = addr[0]
-        device = self._device_by_ip(source_ip) if self._device_by_ip else None
+        device = self._device_by_ip(source_ip, device_extended_unique_identifier) if self._device_by_ip else None
         if device:
             observed_monotonic = self._monotonic_clock()
             observed_wall_time = self._wall_clock()

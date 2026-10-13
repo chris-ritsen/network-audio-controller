@@ -312,6 +312,13 @@ NetaudioStatus netaudio_client_get_wire_captures_json(NetaudioClient *client,
 
 NetaudioStatus netaudio_client_set_host_mac(NetaudioClient *client, const uint8_t *host_mac);
 
+/**
+ * Send CMC (control) and settings commands to these ports instead of the well-known 8800 and 8700.
+ */
+NetaudioStatus netaudio_client_set_service_ports(NetaudioClient *client,
+                                                 uint16_t control_port,
+                                                 uint16_t settings_port);
+
 NetaudioStatus netaudio_host_mac(uint8_t *out_mac);
 
 NetaudioStatus netaudio_host_mac_for_ipv4(const char *local_ip, uint8_t *out_mac);

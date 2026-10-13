@@ -892,3 +892,29 @@ fn aes67_status_maps_state_byte() {
     assert_eq!(parsed.aes67_current, Some(true));
     assert_eq!(parsed.aes67_configured, Some(true));
 }
+
+#[test]
+fn conmon_packets_from_a_non_zero_process_are_parsed_with_their_device_id() {
+    // Inferno puts its PROCESS_ID at offset 6 and its device ID (0000, IPv4, process) at offset 8.
+    let mut packet = decode_hexadecimal(
+        "ffff002812870000001dc10812580000417564696e61746507240100000000000101000000800080",
+    );
+    assert_eq!(
+        parse_notification_envelope(&packet)
+            .unwrap()
+            .device_id
+            .as_deref(),
+        Some("001dc10812580000")
+    );
+
+    packet[6..8].copy_from_slice(&2u16.to_be_bytes());
+    packet[8..16].copy_from_slice(&[0, 0, 172, 19, 0, 5, 0, 2]);
+
+    let envelope = parse_notification_envelope(&packet).unwrap();
+    assert_eq!(envelope.response_kind, Some("routing_capacity_status"));
+    assert_eq!(envelope.device_id.as_deref(), Some("0000ac1300050002"));
+    assert!(parse_routing_capacity_status(&packet).is_some());
+
+    packet[14..16].copy_from_slice(&3u16.to_be_bytes());
+    assert_eq!(parse_notification_envelope(&packet), None);
+}

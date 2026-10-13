@@ -73,7 +73,7 @@ def test_authentic_non_8700_heartbeat_families_parse_and_update_devices(
     monotonic_times = iter([100.0, 101.0])
     wall_times = iter([1786471789.768030, 1786471789.768914])
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
         on_device_updated=on_device_updated,
         monotonic_clock=lambda: next(monotonic_times),
         wall_clock=lambda: next(wall_times),
@@ -128,7 +128,7 @@ def test_interface_traffic_alone_emits_one_device_update():
     device.clock_frequency_offset_parts_per_billion = 0
     on_device_updated = MagicMock()
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
         on_device_updated=on_device_updated,
         monotonic_clock=lambda: 100.0,
     )
@@ -147,7 +147,7 @@ def test_removed_device_identity_discards_connection_and_interface_history():
     devices = {device.server_name: device}
     monotonic_times = iter([100.0, 101.0])
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: device,
+        device_by_ip=lambda _source_ip, _device_id: device,
         get_devices=lambda: devices,
         monotonic_clock=lambda: next(monotonic_times),
     )
@@ -175,7 +175,7 @@ def test_replaced_device_object_starts_new_identity_owned_history():
     current_device = first_device
     monotonic_times = iter([100.0, 101.0])
     service = DanteHeartbeatService(
-        device_by_ip=lambda _source_ip: current_device,
+        device_by_ip=lambda _source_ip, _device_id: current_device,
         monotonic_clock=lambda: next(monotonic_times),
     )
     source_address = (fixture["source_ipv4"], fixture["source_udp_port"])
