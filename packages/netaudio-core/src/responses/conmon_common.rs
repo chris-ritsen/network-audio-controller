@@ -123,11 +123,13 @@ pub(crate) fn conmon_response_kind(opcode: u16) -> Option<&'static str> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConmonOpcode {
     pub opcode: Option<u16>,
+    pub source_eui64: String,
 }
 
 pub fn parse_conmon_opcode(data: &[u8]) -> Option<ConmonOpcode> {
     Some(ConmonOpcode {
         opcode: Some(conmon_opcode(data)?),
+        source_eui64: bytes_to_hex(data.get(8..16)?),
     })
 }
 
