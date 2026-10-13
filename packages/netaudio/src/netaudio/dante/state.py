@@ -835,13 +835,6 @@ class DanteStateService:
                 if panel_family(device) and not device.device_controls:
                     await self.application.inspect_device_controls(device)
 
-                if probe_supported(device, "aes67"):
-                    await self._probe_with_retries(
-                        device,
-                        "AES67",
-                        lambda: self.application.probe_aes67_state(device),
-                    )
-
                 if self._dante_model_pending(device):
                     self._defer_capabilities(device)
                 else:
@@ -920,6 +913,13 @@ class DanteStateService:
         await self._refresh_deferred_capabilities(device, "Dante model not received")
 
     async def _refresh_discovered_capabilities(self, device) -> None:
+        if probe_supported(device, "aes67"):
+            await self._probe_with_retries(
+                device,
+                "AES67",
+                lambda: self.application.probe_aes67_state(device),
+            )
+
         capability_tasks = []
         if (device.requires_managed_control or device.supported_sample_rates is None) and probe_supported(
             device, "sample_rate"

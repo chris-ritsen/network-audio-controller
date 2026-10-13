@@ -529,6 +529,7 @@ class TestFetchDeviceControls:
         from netaudio.dante.application import CapabilityProbeTimeout
 
         device = make_device()
+        device.platform_versions_record = {"platform_model_identifier": "DAI2"}
         application = make_application({"dev1.local.": device})
         application.probe_aes67_state.side_effect = CapabilityProbeTimeout("AES67 status readback timed out")
         application.probe_preferred_leader_state.side_effect = CapabilityProbeTimeout("timed out")
