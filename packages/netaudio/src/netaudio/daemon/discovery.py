@@ -90,6 +90,8 @@ class DanteDiscoveryMixin:
 
             device, is_new = await self._device_for_service(service)
             device_changed = self._attach_service(device, service)
+            if service.address and service.service_type == SERVICE_CMC:
+                await self.application.cmc.register_device(device)
             await self._apply_service_properties(device, service)
 
             await self._publish_device_to_redis(device)
@@ -189,9 +191,6 @@ class DanteDiscoveryMixin:
             notify_systemd(f"STATUS={online} device(s) online")
             if was_offline and self.metering:
                 self.metering.reactivate_device(device_key)
-
-        if service.address and service.service_type == SERVICE_CMC:
-            await self.application.cmc.register_device(service.address, control_port=service.port)
 
         device = self.devices[device_key]
         device.update_last_seen()

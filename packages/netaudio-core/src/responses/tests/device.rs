@@ -54,7 +54,7 @@ fn metering_v3_ignores_the_reserved_byte() {
 #[test]
 fn metering_frame_rejects_invalid_envelope_and_truncated_declared_levels() {
     let original = metering_frame(&[0xFE, 0x7D], &[0x88]);
-    for (offset, value) in [(0, 0x12), (6, 0x01), (16, b'X'), (24, 0x07)] {
+    for (offset, value) in [(0, 0x12), (16, b'X'), (24, 0x07)] {
         let mut data = original.clone();
         data[offset] = value;
         assert_eq!(parse_metering_frame(&data), None);
@@ -402,9 +402,15 @@ fn cmc_registration_response_parser_validates_envelope_and_fields() {
     assert_eq!(
         parse_cmc_registration_response(&response),
         Some(CmcRegistrationResponse {
-            sequence: 0,
             accepted: true,
-            settings_port: Some(8700),
+            control_addresses: Some(vec![CmcControlAddress {
+                ipv4: "192.168.1.61".to_owned(),
+                port: 8700,
+                usable: true,
+            }]),
+            responder_instance: Some("0200000000010000".to_owned()),
+            responder_process: Some(0),
+            sequence: 0,
         })
     );
 
@@ -412,7 +418,9 @@ fn cmc_registration_response_parser_validates_envelope_and_fields() {
     let inferno =
         decode_hexadecimal("1200002000071001000100020000ac130005000200010000ac13000527db0000");
     assert_eq!(
-        parse_cmc_registration_response(&inferno).and_then(|reply| reply.settings_port),
+        parse_cmc_registration_response(&inferno)
+            .and_then(|reply| reply.control_addresses)
+            .map(|addresses| addresses[0].port),
         Some(10203)
     );
 
@@ -421,9 +429,11 @@ fn cmc_registration_response_parser_validates_envelope_and_fields() {
     assert_eq!(
         parse_cmc_registration_response(&header_only),
         Some(CmcRegistrationResponse {
-            sequence: 0,
             accepted: true,
-            settings_port: None,
+            control_addresses: None,
+            responder_instance: None,
+            responder_process: None,
+            sequence: 0,
         })
     );
 

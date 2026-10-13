@@ -40,7 +40,11 @@ class DanteCMCService:
         return frozenset(self._registered_devices)
 
     @staticmethod
-    def _accepted_registration(message_id: int, response: bytes | None) -> dict | None:
+    def _accepted_registration(
+        message_id: int,
+        response: bytes | None,
+        expected_instance: str | None = None,
+    ) -> dict | None:
         if response is None:
             return None
         from netaudio import core
@@ -49,7 +53,38 @@ class DanteCMCService:
             parsed = core.parse_response("cmc_registration", response)
         except core.NetaudioCoreError:
             return None
-        return parsed if parsed["sequence"] == message_id and parsed["accepted"] else None
+        if parsed["sequence"] != message_id or not parsed["accepted"]:
+            return None
+        responder_instance = parsed.get("responder_instance")
+        if expected_instance and responder_instance and responder_instance != expected_instance.casefold():
+            return None
+        return parsed
+
+    @staticmethod
+    def _expected_instance(target) -> str | None:
+        identifier = str(getattr(target, "mac_address", None) or "").replace(":", "").casefold()
+        return identifier if len(identifier) == 16 else None
+
+    @staticmethod
+    def _apply_control_addresses(device, registration: dict) -> None:
+        addresses = registration.get("control_addresses")
+        if addresses is None:
+            return
+        changed = addresses != device.control_addresses
+        device.control_addresses = addresses
+        device.settings_port = None
+        name = device.server_name or device.name
+        if len(addresses) > 2:
+            if changed:
+                logger.warning(f"{name} advertised {len(addresses)} control addresses; at most two are supported")
+            return
+        device_address = str(device.ipv4)
+        ports = [address["port"] for address in addresses if address["usable"] and address["ipv4"] == device_address]
+        if ports:
+            device.settings_port = ports[0]
+        elif addresses and changed:
+            advertised = ", ".join(f"{address['ipv4']}:{address['port']}" for address in addresses)
+            logger.warning(f"{name} advertised no control address on {device_address} (advertised: {advertised})")
 
     async def register_device(
         self,
@@ -82,11 +117,12 @@ class DanteCMCService:
             logger.debug(f"CMC registration request failed for {registration_key}: {exception}")
             response = None
 
-        registration = self._accepted_registration(message_id, response)
+        expected_instance = self._expected_instance(target) if is_device else None
+        registration = self._accepted_registration(message_id, response, expected_instance)
         if registration is not None:
             self._registered_devices.add(registration_key)
-            if is_device and registration.get("settings_port"):
-                target.settings_port = registration["settings_port"]
+            if is_device:
+                self._apply_control_addresses(target, registration)
             logger.debug(f"CMC registered with {registration_key}")
             return response
 

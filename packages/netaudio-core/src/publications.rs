@@ -50,6 +50,8 @@ enum ArcResponseBody {
     },
     CmcRegistration {
         device_ip: Ipv4Addr,
+        #[serde(default)]
+        instance: Option<u64>,
         settings_port: std::num::NonZeroU16,
     },
     PropertyDirectory,
@@ -179,11 +181,13 @@ impl ArcResponse {
             }
             ArcResponseBody::CmcRegistration {
                 device_ip,
+                instance,
                 settings_port,
             } => {
-                let mut body = vec![0; 4];
-                body.extend_from_slice(&device_ip.octets());
-                body.extend_from_slice(&[0, 0, 0, 1, 0, 0]);
+                let instance = instance.unwrap_or_else(|| u64::from(device_ip.to_bits()) << 16);
+                let mut body = vec![0; 2];
+                body.extend_from_slice(&instance.to_be_bytes());
+                body.extend_from_slice(&[0, 1, 0, 0]);
                 body.extend_from_slice(&device_ip.octets());
                 body.extend_from_slice(&settings_port.get().to_be_bytes());
                 body.extend_from_slice(&[0, 0]);

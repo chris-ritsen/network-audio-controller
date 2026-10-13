@@ -335,19 +335,11 @@ pub fn conmon_opcode(data: &[u8]) -> Option<u16> {
     if data.len() < CONMON_MINIMUM_SIZE
         || crate::bytes::read_u16(data, 0)? != PROTOCOL_SETTINGS
         || usize::from(crate::bytes::read_u16(data, 2)?) != data.len()
-        || !conmon_process_matches_device_id(data)?
         || data.get(CONMON_MAGIC_OFFSET..CONMON_MAGIC_OFFSET + 8)? != b"Audinate"
     {
         return None;
     }
     crate::bytes::read_u16(data, CONMON_OPCODE_OFFSET)
-}
-
-/// The word at offset 6 is zero, or (for a device that is one of several processes on a host, as Inferno is)
-/// the process ID that also ends the device ID at offsets 8..16.
-fn conmon_process_matches_device_id(data: &[u8]) -> Option<bool> {
-    let process = crate::bytes::read_u16(data, 6)?;
-    Some(process == 0 || process == crate::bytes::read_u16(data, 14)?)
 }
 
 #[derive(serde::Serialize)]

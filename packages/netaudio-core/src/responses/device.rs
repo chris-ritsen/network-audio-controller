@@ -4,7 +4,6 @@ pub fn parse_metering_frame(data: &[u8]) -> Option<MeteringFrame> {
     if data.len() < METERING_V2_HEADER_SIZE
         || read_u16(data, 0)? != 0xFFFF
         || usize::from(read_u16(data, 2)?) != data.len()
-        || read_u16(data, 6)? != 0
         || data.get(16..24)? != b"Audinate"
     {
         return None;
@@ -743,7 +742,11 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
     valid.then_some(envelope.result_code)
 }
 
-const CMC_REGISTRATION_SETTINGS_PORT_OFFSET: usize = 28;
+const CMC_RESPONDER_PROCESS_OFFSET: usize = 10;
+const CMC_RESPONDER_INSTANCE_OFFSET: usize = 12;
+const CMC_CONTROL_ADDRESS_COUNT_OFFSET: usize = 20;
+const CMC_CONTROL_ADDRESS_RECORDS_OFFSET: usize = 24;
+const CMC_CONTROL_ADDRESS_RECORD_SIZE: usize = 8;
 
 pub fn parse_cmc_registration_response(response: &[u8]) -> Option<CmcRegistrationResponse> {
     if response.len() < 10
@@ -753,10 +756,40 @@ pub fn parse_cmc_registration_response(response: &[u8]) -> Option<CmcRegistratio
     {
         return None;
     }
+    let accepted = read_u16(response, 8)? == RESULT_CODE_SUCCESS;
+    let control_addresses = if accepted && response.len() >= CMC_CONTROL_ADDRESS_RECORDS_OFFSET {
+        Some(parse_cmc_control_addresses(response)?)
+    } else {
+        None
+    };
     Some(CmcRegistrationResponse {
+        accepted,
+        control_addresses,
+        responder_instance: response
+            .get(CMC_RESPONDER_INSTANCE_OFFSET..CMC_CONTROL_ADDRESS_COUNT_OFFSET)
+            .map(crate::bytes::hexadecimal),
+        responder_process: read_u16(response, CMC_RESPONDER_PROCESS_OFFSET)
+            .filter(|_| response.len() >= CMC_CONTROL_ADDRESS_COUNT_OFFSET),
         sequence: read_u16(response, 4)?,
-        accepted: read_u16(response, 8)? == RESULT_CODE_SUCCESS,
-        settings_port: read_u16(response, CMC_REGISTRATION_SETTINGS_PORT_OFFSET)
-            .filter(|port| *port != 0),
     })
+}
+
+fn parse_cmc_control_addresses(response: &[u8]) -> Option<Vec<CmcControlAddress>> {
+    let count = usize::from(read_u16(response, CMC_CONTROL_ADDRESS_COUNT_OFFSET)?);
+    let end = CMC_CONTROL_ADDRESS_RECORDS_OFFSET + count * CMC_CONTROL_ADDRESS_RECORD_SIZE;
+    let records = response.get(CMC_CONTROL_ADDRESS_RECORDS_OFFSET..end)?;
+    Some(
+        records
+            .chunks_exact(CMC_CONTROL_ADDRESS_RECORD_SIZE)
+            .map(|record| {
+                let ipv4 = std::net::Ipv4Addr::new(record[0], record[1], record[2], record[3]);
+                let port = u16::from_be_bytes([record[4], record[5]]);
+                CmcControlAddress {
+                    ipv4: ipv4.to_string(),
+                    port,
+                    usable: !ipv4.is_unspecified() && port != 0,
+                }
+            })
+            .collect(),
+    )
 }

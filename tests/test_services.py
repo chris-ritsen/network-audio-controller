@@ -253,9 +253,11 @@ class TestDanteCMCService:
         response[8:10] = status.to_bytes(2, "big")
 
         assert core.parse_response("cmc_registration", bytes(response)) == {
-            "sequence": 0,
             "accepted": accepted,
-            "settings_port": 8700,
+            "control_addresses": [{"ipv4": "192.168.1.61", "port": 8700, "usable": True}] if accepted else None,
+            "responder_instance": "0200000000010000",
+            "responder_process": 0,
+            "sequence": 0,
         }
 
     def test_controller_identity_uses_the_target_path(self, monkeypatch):

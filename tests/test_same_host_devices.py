@@ -37,7 +37,12 @@ class _HostedProcess(VirtualDevice):
         return super()._handle_request(data, addr, settings_only=settings_only)
 
     def _handle_cmc_registration(self, transaction_id: int) -> bytes:
-        response = {"kind": "cmc_registration", "device_ip": HOST, "settings_port": self.port}
+        response = {
+            "kind": "cmc_registration",
+            "device_ip": HOST,
+            "instance": int(self.device_id, 16),
+            "settings_port": self.port,
+        }
         return self._build_response(transaction_id, response, PROTOCOL_CMC)
 
 

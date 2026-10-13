@@ -164,7 +164,7 @@ async def test_new_cmc_service_registers_identity_metadata_and_queries(monkeypat
         "type": SERVICE_CMC,
     }
     daemon.application.register_device.assert_called_once()
-    daemon.application.cmc.register_device.assert_awaited_once_with("192.0.2.10", control_port=8800)
+    daemon.application.cmc.register_device.assert_awaited_once_with(device)
     assert daemon.application._send_conmon_query_for_device.call_args_list == [
         call(device, daemon.application.send_make_model_request),
         call(device, daemon.application.send_dante_model_request),
@@ -205,7 +205,7 @@ async def test_offline_device_reuses_authoritative_object_and_stale_state(monkey
     assert instance_name in device.services
     assert list(device.tx_channels) == [1]
     daemon.metering.reactivate_device.assert_called_once_with("rack.local.")
-    daemon.application.cmc.register_device.assert_awaited_once_with("192.0.2.20", control_port=8800)
+    daemon.application.cmc.register_device.assert_awaited_once_with(device)
     assert daemon.published == [device]
 
 
@@ -300,7 +300,7 @@ async def test_services_with_different_srv_targets_join_the_same_logical_device(
         f"{instance_name}.{SERVICE_CMC}",
         f"{instance_name}.{SERVICE_ARC}",
     }
-    daemon.application.cmc.register_device.assert_awaited_once_with("192.0.2.107", control_port=8802)
+    daemon.application.cmc.register_device.assert_awaited_once_with(device)
 
 
 @pytest.mark.asyncio

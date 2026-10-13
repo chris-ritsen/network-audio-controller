@@ -242,11 +242,19 @@ pub struct PlatformVersions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CmcControlAddress {
+    pub ipv4: String,
+    pub port: u16,
+    pub usable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CmcRegistrationResponse {
-    pub sequence: u16,
     pub accepted: bool,
-    /// The settings (ConMon) port the device reports for itself, when the reply carries one.
-    pub settings_port: Option<u16>,
+    pub control_addresses: Option<Vec<CmcControlAddress>>,
+    pub responder_instance: Option<String>,
+    pub responder_process: Option<u16>,
+    pub sequence: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

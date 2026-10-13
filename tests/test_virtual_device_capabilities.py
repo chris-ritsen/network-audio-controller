@@ -313,9 +313,11 @@ def test_virtual_cmc_registration_reply_uses_native_codec_and_preserves_address(
     assert device._handle_request(request, ("192.0.2.20", 8800)) == expected
     assert core.build_response(specification) == expected
     assert core.parse_response("cmc_registration", expected) == {
-        "sequence": 66,
         "accepted": True,
-        "settings_port": 8700,
+        "control_addresses": [{"ipv4": "192.0.2.10", "port": 8700, "usable": True}],
+        "responder_instance": "0000c000020a0000",
+        "responder_process": 0,
+        "sequence": 66,
     }
 
     with pytest.raises(core.NetaudioCoreError):

@@ -213,6 +213,7 @@ class DanteDevice:
         self.failed_queries: set[str] = set()
 
         self.availability_state: str | None = None
+        self.control_addresses: list[dict] | None = None
         self.control_transports: list[str] | None = None
         self.ddm_capabilities: dict | None = None
         self.ddm_clock_preferences: dict | None = None

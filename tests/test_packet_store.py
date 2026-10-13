@@ -103,7 +103,7 @@ class TestParseHeader:
             == expected
         )
 
-    @pytest.mark.parametrize("damage", ["length", "magic", "reserved", "truncated"])
+    @pytest.mark.parametrize("damage", ["length", "magic", "truncated"])
     def test_rejected_settings_envelope_is_not_reinterpreted_as_a_header(self, damage, store):
         from netaudio import core
 
@@ -118,8 +118,6 @@ class TestParseHeader:
             packet[2:4] = (len(packet) + 1).to_bytes(2, "big")
         elif damage == "magic":
             packet[16] = 0
-        elif damage == "reserved":
-            packet[7] = 1
         else:
             packet = packet[:16]
 

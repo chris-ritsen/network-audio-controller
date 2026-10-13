@@ -914,7 +914,4 @@ fn conmon_packets_from_a_non_zero_process_are_parsed_with_their_device_id() {
     assert_eq!(envelope.response_kind, Some("routing_capacity_status"));
     assert_eq!(envelope.device_id.as_deref(), Some("0000ac1300050002"));
     assert!(parse_routing_capacity_status(&packet).is_some());
-
-    packet[14..16].copy_from_slice(&3u16.to_be_bytes());
-    assert_eq!(parse_notification_envelope(&packet), None);
 }
