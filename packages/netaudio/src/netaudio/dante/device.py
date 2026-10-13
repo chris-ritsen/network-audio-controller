@@ -96,6 +96,7 @@ def cmc_membership_identity(memberships: list[dict]) -> dict:
 
 class DanteDevice:
     def __init__(self, server_name="", dump_payloads=False, debug=False, app=None):
+        self.association_detached = False
         self.association_generation = next(ASSOCIATION_GENERATIONS)
         self.association_signature = ("none", None, None, "none", ())
         self.association_state = "none"

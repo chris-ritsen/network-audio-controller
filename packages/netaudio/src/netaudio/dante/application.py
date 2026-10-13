@@ -422,6 +422,7 @@ class DanteApplication:
 
         if not hasattr(device, "association_generation"):
             return
+        device.association_detached = True
         device.association_signature = None
         device.association_state = "none"
         device.association_generation = next(ASSOCIATION_GENERATIONS)
@@ -529,13 +530,12 @@ class DanteApplication:
         return f"{key}#{device.server_name}@{generation}"
 
     def _is_current_waiter_key(self, target, key: str) -> bool:
-        server_name = getattr(target, "server_name", None)
-        if (
-            hasattr(target, "requires_managed_control")
-            and server_name
-            and self.devices.get(server_name, target) is not target
-        ):
-            return False
+        if hasattr(target, "requires_managed_control"):
+            if getattr(target, "association_detached", False):
+                return False
+            server_name = getattr(target, "server_name", None)
+            if server_name and self.devices.get(server_name, target) is not target:
+                return False
         return self._waiter_key(target) == key
 
     def _require_current_waiter_key(self, target, key: str) -> None:
@@ -1218,7 +1218,11 @@ class DanteApplication:
 
     def attach_devices(self, devices: dict) -> None:
         for server_name, device in devices.items():
+            replaced = self.devices.get(server_name)
+            if replaced is not None and replaced is not device:
+                self._detach_association(replaced)
             device._app = self
+            device.association_detached = False
             self.devices[server_name] = device
 
     async def clear_configuration(
@@ -2210,6 +2214,7 @@ class DanteApplication:
             )
         else:
             device._app = self
+            device.association_detached = False
             device.update_last_seen()
             self.devices[server_name] = device
             self.dispatcher.emit_nowait(
@@ -2939,11 +2944,18 @@ class DanteApplication:
             raise RuntimeError("device has no control address")
         return await core_unlock_device(str(device.ipv4), pin, key, ports=device._service_ports())
 
+    def detach_device(self, server_name: str, device=None):
+        current = self.devices.get(server_name)
+        if current is None or (device is not None and current is not device):
+            return None
+        self.devices.pop(server_name)
+        self._detach_association(current)
+        self.refresh_conmon_associations()
+        return current
+
     def unregister_device(self, server_name: str) -> None:
-        device = self.devices.pop(server_name, None)
+        device = self.detach_device(server_name)
         if device:
-            self._detach_association(device)
-            self.refresh_conmon_associations()
             self.dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.DEVICE_REMOVED,

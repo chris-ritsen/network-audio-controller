@@ -321,7 +321,7 @@ class DanteDiscoveryMixin:
                 continue
             self.clear_offline_candidate(key)
             self.application.mark_device_offline(key)
-            self.devices.pop(key, None)
+            self.application.detach_device(key, candidate)
         self.application.refresh_conmon_associations()
 
     def _emit_device_updated(self, device, server_name):

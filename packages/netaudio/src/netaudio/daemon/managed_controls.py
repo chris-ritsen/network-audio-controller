@@ -39,8 +39,7 @@ class ManagedDeviceControls:
             device = self._owned.pop(key, None)
             if device is not None:
                 device.online = False
-                if self.application.devices.get(key) is device:
-                    self.application.devices.pop(key)
+                self.application.detach_device(key, device)
             else:
                 device = self.application.devices.get(key)
                 if device is not None:
