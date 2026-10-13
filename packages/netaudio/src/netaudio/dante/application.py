@@ -335,21 +335,11 @@ class DanteApplication:
             raise RuntimeError(f"{device.name or device.server_name} is managed but has no {fields}")
         return f"ddm:{server}:{context}:{domain}:{device_id}"
 
-    @staticmethod
-    def _device_id(device) -> str | None:
-        mac_address = getattr(device, "mac_address", None)
-        return str(mac_address).replace(":", "").casefold() if mac_address else None
-
     def _control_key(self, target) -> str:
         if getattr(target, "requires_managed_control", False):
             return self._managed_control_key(target)
         if hasattr(target, "_require_address"):
-            address = target._require_address()
-            device_id = self._device_id(target)
-            # Devices sharing an address are told apart by the device ID their ConMon packets carry.
-            if device_id and len(self._devices_by_ip(address)) > 1:
-                return f"{address}#{device_id}"
-            return address
+            return target._require_address()
         if getattr(target, "ipv4", None) is not None:
             return str(target.ipv4)
         return str(target)
@@ -363,8 +353,6 @@ class DanteApplication:
                     return device
             except RuntimeError:
                 continue
-        if "#" in key:
-            return self._device_by_source(*key.split("#", 1))
         return self._device_by_ip(key)
 
     def _device_by_source(self, source_ip: str, device_id: str | None = None):
@@ -811,8 +799,8 @@ class DanteApplication:
             incomplete_devices = await self._retry_conmon_query(incomplete_devices, deadline, retry)
 
     async def _query_conmon_for_device(self, device, deadline: float) -> bool:
-        device_ip = self._waiter_key(device)
-        waiter = self.notifications.register_conmon_waiter(device_ip)
+        key = self._waiter_key(device)
+        waiter = self.notifications.register_conmon_waiter(key)
         try:
             await self._send_conmon_query_for_device(device, self.send_make_model_request)
             await self._send_conmon_query_for_device(device, self.send_dante_model_request)
@@ -834,13 +822,12 @@ class DanteApplication:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            device_ip = self._waiter_key(device)
             needs_make_model = device.manufacturer_versions_record is None
             needs_dante_model = device.platform_versions_record is None
             expected_count = int(needs_make_model) + int(needs_dante_model)
             if expected_count == 0:
                 continue
-            waiter = self.notifications.register_conmon_waiter(self._control_key(device), expected_count=expected_count)
+            waiter = self.notifications.register_conmon_waiter(self._waiter_key(device), expected_count=expected_count)
             try:
                 if needs_make_model:
                     await self._send_conmon_query_for_device(device, self.send_make_model_request)
@@ -1570,8 +1557,8 @@ class DanteApplication:
     ) -> Result:
         if getattr(device, "requires_managed_control", False) or not self.verify_mutations:
             return await mutate()
-        device_ip_address = self._waiter_key(device)
-        waiter = self.notifications.register_notification_waiter(device_ip_address, notification_ids)
+        key = self._waiter_key(device)
+        waiter = self.notifications.register_notification_waiter(key, notification_ids)
         try:
             response = await mutate()
             try:

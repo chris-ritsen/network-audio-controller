@@ -277,7 +277,7 @@ def test_queued_statuses_from_devices_sharing_an_ip_do_not_supersede_each_other(
 )
 def test_a_siblings_publication_does_not_complete_a_cohosted_devices_waiter(register, packet):
     application, devices = _cohosted_application()
-    waiter = register(application.notifications, application._control_key(devices["player"]))
+    waiter = register(application.notifications, application._waiter_key(devices["player"]))
 
     receive_packets(application, [_from_process(packet, 2)], (COHOSTED_IP, 10203))
     assert not waiter.is_set()
@@ -311,7 +311,7 @@ async def test_a_probe_of_a_cohosted_device_ignores_its_siblings_answer():
 def test_waiters_for_a_device_alone_on_its_ip_and_for_a_bare_host_address_still_hear_it():
     application, devices = _cohosted_application()
     devices["recorder"].ipv4 = "172.19.0.6"
-    alone = application._control_key(devices["recorder"])
+    alone = application._waiter_key(devices["recorder"])
     assert alone == "172.19.0.6"
     device_waiter = application.notifications.register_waiter("sample_rate", alone)
     host_waiter = application.notifications.register_waiter("sample_rate", COHOSTED_IP)
