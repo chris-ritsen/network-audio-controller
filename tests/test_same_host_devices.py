@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 
 from netaudio import core
-from netaudio.dante.application import DanteApplication
+from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.const import PROTOCOL_CMC, SERVICE_ARC, SERVICE_CMC
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import EventType
@@ -256,3 +256,73 @@ def test_heartbeat_from_a_shared_ip_marks_the_device_named_in_the_packet():
 
     assert devices["recorder"].last_seen is not None
     assert devices["player"].last_seen is None
+
+
+def test_queued_statuses_from_devices_sharing_an_ip_do_not_supersede_each_other():
+    application, devices = _cohosted_application()
+
+    receive_packets(
+        application,
+        [_from_process(SAMPLE_RATE_STATUS_PACKET, 2), _from_process(SAMPLE_RATE_STATUS_PACKET, 1)],
+        (COHOSTED_IP, 10203),
+    )
+
+    assert devices["recorder"].sample_rate == 44_100
+    assert devices["player"].sample_rate == 44_100
+
+
+@pytest.mark.parametrize(
+    "register,packet",
+    [
+        (lambda service, key: service.register_waiter("sample_rate", key), SAMPLE_RATE_STATUS_PACKET),
+        (lambda service, key: service.register_notification_waiter(key, {128}), SAMPLE_RATE_STATUS_PACKET),
+        (lambda service, key: service.register_conmon_waiter(key, expected_count=1), SAMPLE_RATE_STATUS_PACKET),
+        (lambda service, key: service.register_notification_waiter(key, {258}), RX_CHANNEL_CHANGE_PACKET),
+    ],
+    ids=["status", "status-notification", "conmon", "channel-notification"],
+)
+def test_a_siblings_publication_does_not_complete_a_cohosted_devices_waiter(register, packet):
+    application, devices = _cohosted_application()
+    waiter = register(application.notifications, application._control_key(devices["player"]))
+
+    receive_packets(application, [_from_process(packet, 2)], (COHOSTED_IP, 10203))
+    assert not waiter.is_set()
+
+    receive_packets(application, [_from_process(packet, 1)], (COHOSTED_IP, 10103))
+    assert waiter.is_set()
+
+
+@pytest.mark.asyncio
+async def test_a_probe_of_a_cohosted_device_ignores_its_siblings_answer():
+    application, devices = _cohosted_application()
+    answers = {
+        "player": _from_process(SAMPLE_RATE_STATUS_PACKET, 1),
+        "recorder": _from_process(SAMPLE_RATE_STATUS_PACKET, 2),
+    }
+
+    async def sibling_answers(target, host_mac=None):
+        application.notifications._on_packet(answers["recorder"], (COHOSTED_IP, 10203))
+
+    application.send_probe_sample_rate = sibling_answers
+    with pytest.raises(CapabilityProbeTimeout):
+        await application.probe_sample_rate_status(devices["player"], timeout=0.05)
+
+    async def own_answer(target, host_mac=None):
+        application.notifications._on_packet(answers["player"], (COHOSTED_IP, 10103))
+
+    application.send_probe_sample_rate = own_answer
+    assert (await application.probe_sample_rate_status(devices["player"], timeout=0.5))["current_value"] == 44_100
+
+
+def test_waiters_for_a_device_alone_on_its_ip_and_for_a_bare_host_address_still_hear_it():
+    application, devices = _cohosted_application()
+    devices["recorder"].ipv4 = "172.19.0.6"
+    alone = application._control_key(devices["recorder"])
+    assert alone == "172.19.0.6"
+    device_waiter = application.notifications.register_waiter("sample_rate", alone)
+    host_waiter = application.notifications.register_waiter("sample_rate", COHOSTED_IP)
+
+    receive_packets(application, [_from_process(SAMPLE_RATE_STATUS_PACKET, 2)], ("172.19.0.6", 10203))
+    receive_packets(application, [_from_process(SAMPLE_RATE_STATUS_PACKET, 1)], (COHOSTED_IP, 10103))
+
+    assert device_waiter.is_set() and host_waiter.is_set()

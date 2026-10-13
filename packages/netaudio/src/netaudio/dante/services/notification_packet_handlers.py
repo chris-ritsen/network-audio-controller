@@ -50,11 +50,11 @@ _reported_parse_failures: set[tuple[str, str, str]] = set()
 
 
 _status_receive_order = itertools.count(1)
-_latest_status_orders: dict[tuple[str, str], int] = {}
+_latest_status_orders: dict[tuple[str, str, str], int] = {}
 
 
-def superseded_status(source_ip: str, kind: str, received_order: int | None) -> bool:
-    latest = _latest_status_orders.get((source_ip, kind))
+def superseded_status(source_ip: str, kind: str, received_order: int | None, server_name: str = "") -> bool:
+    latest = _latest_status_orders.get((source_ip, server_name, kind))
     return received_order is not None and latest is not None and received_order < latest
 
 
@@ -416,13 +416,14 @@ class NotificationPacketHandlers:
 
         notification_id = envelope["notification_id"]
         device = self._lookup_device(source_ip, envelope.get("device_id"))
+        waiter_keys = self._waiter_keys(source_ip, device)
 
         if envelope["is_conmon"] and self._handle_conmon_response(
-            data, source_ip, notification_id, envelope["response_kind"], device
+            data, source_ip, notification_id, envelope["response_kind"], device, waiter_keys
         ):
             return
 
-        self._emit_notification(data, source_ip, notification_id, envelope["notification_name"], device)
+        self._emit_notification(data, source_ip, notification_id, envelope["notification_name"], device, waiter_keys)
 
     def _log_dissected(self, data: bytes, source_ip: str, source_port: int) -> None:
         from netaudio.common.app_config import settings as app_settings
@@ -450,10 +451,17 @@ class NotificationPacketHandlers:
         )
 
     def _emit_notification(
-        self, data: bytes, source_ip: str, notification_id: int, notification_name: str | None, device
+        self,
+        data: bytes,
+        source_ip: str,
+        notification_id: int,
+        notification_name: str | None,
+        device,
+        waiter_keys: tuple[str, ...],
     ) -> None:
         notification_name = notification_name or "Unknown notification"
-        self.notify_waiters("notification", source_ip, notification_id)
+        for key in waiter_keys:
+            self.notify_waiters("notification", key, notification_id)
         logger.debug(
             f"Notification from {source_ip} ({device.name if device else ''}): "
             f"{notification_name} (id={notification_id})"
@@ -473,7 +481,13 @@ class NotificationPacketHandlers:
         )
 
     def _handle_conmon_response(
-        self, data: bytes, source_ip: str, opcode: int, response_kind: str | None, device
+        self,
+        data: bytes,
+        source_ip: str,
+        opcode: int,
+        response_kind: str | None,
+        device,
+        waiter_keys: tuple[str, ...],
     ) -> bool:
         if response_kind == "conmon_export_fragment":
             return self._handle_conmon_export_fragment(data, source_ip)
@@ -483,7 +497,8 @@ class NotificationPacketHandlers:
             return False
 
         parsed = parse(data, source_ip, device)
-        self.notify_waiters("notification", source_ip, opcode)
+        for key in waiter_keys:
+            self.notify_waiters("notification", key, opcode)
         if parsed is None:
             return True
         if parsed.kind == STATUS_KIND_INTERFACE_STATISTICS:
@@ -491,16 +506,18 @@ class NotificationPacketHandlers:
             parsed = ParsedStatus(parsed.kind, observation, observation)
 
         received_order = next(_status_receive_order)
-        _latest_status_orders[(source_ip, parsed.kind)] = received_order
+        _latest_status_orders[(source_ip, device.server_name if device else "", parsed.kind)] = received_order
         if parsed.kind == "panel_status":
             parsed.status["correlated"] = any(
                 waiter.accept is not None and waiter.accept(parsed.status)
-                for waiter in self.waiters_for("panel_status", source_ip)
+                for key in waiter_keys
+                for waiter in self.waiters_for("panel_status", key)
             )
-        self.notify_waiters(parsed.kind, source_ip, parsed.waiter_result)
-        if parsed.kind == STATUS_KIND_CLOCK:
-            self.notify_waiters(WAITER_KIND_PREFERRED_LEADER, source_ip, parsed.status.get("preferred_leader"))
-        self.notify_conmon_response(source_ip, opcode)
+        for key in waiter_keys:
+            self.notify_waiters(parsed.kind, key, parsed.waiter_result)
+            if parsed.kind == STATUS_KIND_CLOCK:
+                self.notify_waiters(WAITER_KIND_PREFERRED_LEADER, key, parsed.status.get("preferred_leader"))
+            self.notify_conmon_response(key, opcode)
 
         self._dispatcher.emit_nowait(
             DanteEvent(
@@ -533,6 +550,11 @@ class NotificationPacketHandlers:
             waiter.observe(fragment)
             handled = handled or waiter.collector.matched
         return handled
+
+    def _waiter_keys(self, source_ip: str, device) -> tuple[str, ...]:
+        """Waiters for the bare address hear every device there; waiters for one device hear only that device."""
+        device_key = self._control_key(device) if device is not None and self._control_key else source_ip
+        return (source_ip,) if device_key == source_ip else (source_ip, device_key)
 
     def _lookup_device(self, ip_str: str, device_id: str | None = None):
         if self._device_lookup:

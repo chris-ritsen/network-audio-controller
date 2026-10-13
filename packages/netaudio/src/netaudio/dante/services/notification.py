@@ -96,6 +96,7 @@ class DanteNotificationService(NotificationPacketHandlers, DanteMulticastService
         self,
         dispatcher: DanteEventDispatcher,
         device_lookup=None,
+        control_key=None,
         packet_store=None,
         interface_name: str | None = None,
         dissect: bool = False,
@@ -110,6 +111,7 @@ class DanteNotificationService(NotificationPacketHandlers, DanteMulticastService
         self._conmon_expected_count: dict[str, int] = {}
         self._conmon_received: dict[str, set[int]] = {}
         self._device_lookup = device_lookup
+        self._control_key = control_key
         self._dispatcher = dispatcher
         self._pending_conmon: dict[str, dict] = {}
         self._waiters: dict[tuple[str, str], set[Waiter]] = {}

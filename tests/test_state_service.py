@@ -33,6 +33,7 @@ def make_application(devices):
         apply_modern_arc_status_pages=AsyncMock(),
         _device_by_ip=device_by_ip,
         _device_by_control_key=device_by_ip,
+        _control_key=lambda device: str(device.ipv4),
         _send_conmon_query_for_device=AsyncMock(),
         cmc=SimpleNamespace(register_device=AsyncMock()),
         devices=devices,

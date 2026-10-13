@@ -375,7 +375,7 @@ class DanteStateService:
         kind = event.data["kind"]
         status = event.data["status"]
         source_ip = event.data["source_ip"]
-        if superseded_status(source_ip, kind, event.data.get("received_order")):
+        if superseded_status(source_ip, kind, event.data.get("received_order"), event.server_name):
             logger.debug(f"Skipped a queued {kind} status from {source_ip}; a newer one has been received")
             return
         device = self.devices.get(event.server_name) if event.server_name else None
@@ -960,7 +960,7 @@ class DanteStateService:
             if device.requires_managed_control or not device.ipv4 or not device.mac_address:
                 return
 
-            waiter = notifications.register_waiter(STATUS_KIND_DANTE_MODEL, str(device.ipv4))
+            waiter = notifications.register_waiter(STATUS_KIND_DANTE_MODEL, self.application._control_key(device))
 
             try:
                 logger.debug(f"Conmon retry {attempt} for {server_name}")
