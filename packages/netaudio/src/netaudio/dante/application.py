@@ -335,11 +335,21 @@ class DanteApplication:
             raise RuntimeError(f"{device.name or device.server_name} is managed but has no {fields}")
         return f"ddm:{server}:{context}:{domain}:{device_id}"
 
+    @staticmethod
+    def _device_id(device) -> str | None:
+        mac_address = getattr(device, "mac_address", None)
+        return str(mac_address).replace(":", "").casefold() if mac_address else None
+
     def _control_key(self, target) -> str:
         if getattr(target, "requires_managed_control", False):
             return self._managed_control_key(target)
         if hasattr(target, "_require_address"):
-            return target._require_address()
+            address = target._require_address()
+            device_id = self._device_id(target)
+            # Devices sharing an address are told apart by the device ID their ConMon packets carry.
+            if device_id and len(self._devices_by_ip(address)) > 1:
+                return f"{address}#{device_id}"
+            return address
         if getattr(target, "ipv4", None) is not None:
             return str(target.ipv4)
         return str(target)
@@ -353,6 +363,8 @@ class DanteApplication:
                     return device
             except RuntimeError:
                 continue
+        if "#" in key:
+            return self._device_by_source(*key.split("#", 1))
         return self._device_by_ip(key)
 
     def _device_by_source(self, source_ip: str, device_id: str | None = None):
@@ -810,7 +822,7 @@ class DanteApplication:
                 logger.debug(f"Conmon responses received for {device.server_name}")
             except asyncio.TimeoutError:
                 logger.debug(f"Conmon query partial/timeout for {device.server_name}")
-                received = self.notifications._conmon_received.get(device_ip, set())
+                received = self.notifications._conmon_received.get(key, set())
                 return len(received) >= 2
         finally:
             self.notifications.unregister_waiter(waiter)
@@ -828,7 +840,7 @@ class DanteApplication:
             expected_count = int(needs_make_model) + int(needs_dante_model)
             if expected_count == 0:
                 continue
-            waiter = self.notifications.register_conmon_waiter(device_ip, expected_count=expected_count)
+            waiter = self.notifications.register_conmon_waiter(self._control_key(device), expected_count=expected_count)
             try:
                 if needs_make_model:
                     await self._send_conmon_query_for_device(device, self.send_make_model_request)
@@ -1565,7 +1577,7 @@ class DanteApplication:
             try:
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:
-                logger.debug(f"No mutation notification from {device_ip_address} within {timeout}s")
+                logger.debug(f"No mutation notification from {key} within {timeout}s")
             return response
         finally:
             self.notifications.unregister_waiter(waiter)

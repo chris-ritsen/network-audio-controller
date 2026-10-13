@@ -960,7 +960,7 @@ class DanteStateService:
             if device.requires_managed_control or not device.ipv4 or not device.mac_address:
                 return
 
-            waiter = notifications.register_waiter(STATUS_KIND_DANTE_MODEL, str(device.ipv4))
+            waiter = notifications.register_waiter(STATUS_KIND_DANTE_MODEL, self.application._control_key(device))
 
             try:
                 logger.debug(f"Conmon retry {attempt} for {server_name}")

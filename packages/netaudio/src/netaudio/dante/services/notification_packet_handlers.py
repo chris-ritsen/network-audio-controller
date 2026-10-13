@@ -416,13 +416,14 @@ class NotificationPacketHandlers:
 
         notification_id = envelope["notification_id"]
         device = self._lookup_device(source_ip, envelope.get("device_id"))
+        waiter_keys = self._waiter_keys(source_ip, device)
 
         if envelope["is_conmon"] and self._handle_conmon_response(
-            data, source_ip, notification_id, envelope["response_kind"], device
+            data, source_ip, notification_id, envelope["response_kind"], device, waiter_keys
         ):
             return
 
-        self._emit_notification(data, source_ip, notification_id, envelope["notification_name"], device)
+        self._emit_notification(data, source_ip, notification_id, envelope["notification_name"], device, waiter_keys)
 
     def _log_dissected(self, data: bytes, source_ip: str, source_port: int) -> None:
         from netaudio.common.app_config import settings as app_settings
@@ -450,7 +451,13 @@ class NotificationPacketHandlers:
         )
 
     def _emit_notification(
-        self, data: bytes, source_ip: str, notification_id: int, notification_name: str | None, device
+        self,
+        data: bytes,
+        source_ip: str,
+        notification_id: int,
+        notification_name: str | None,
+        device,
+        waiter_keys: tuple[str, ...],
     ) -> None:
         notification_name = notification_name or "Unknown notification"
         self.notify_waiters("notification", self._waiter_key(source_ip, device), notification_id)
@@ -473,7 +480,13 @@ class NotificationPacketHandlers:
         )
 
     def _handle_conmon_response(
-        self, data: bytes, source_ip: str, opcode: int, response_kind: str | None, device
+        self,
+        data: bytes,
+        source_ip: str,
+        opcode: int,
+        response_kind: str | None,
+        device,
+        waiter_keys: tuple[str, ...],
     ) -> bool:
         if response_kind == "conmon_export_fragment":
             return self._handle_conmon_export_fragment(data, self._waiter_key(source_ip, device))
@@ -534,6 +547,11 @@ class NotificationPacketHandlers:
             waiter.observe(fragment)
             handled = handled or waiter.collector.matched
         return handled
+
+    def _waiter_keys(self, source_ip: str, device) -> tuple[str, ...]:
+        """Waiters for the bare address hear every device there; waiters for one device hear only that device."""
+        device_key = self._control_key(device) if device is not None and self._control_key else source_ip
+        return (source_ip,) if device_key == source_ip else (source_ip, device_key)
 
     def _lookup_device(self, ip_str: str, device_id: str | None = None):
         if self._device_lookup:
