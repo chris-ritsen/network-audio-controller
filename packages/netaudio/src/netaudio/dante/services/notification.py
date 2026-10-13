@@ -96,6 +96,7 @@ class DanteNotificationService(NotificationPacketHandlers, DanteMulticastService
         self,
         dispatcher: DanteEventDispatcher,
         device_lookup=None,
+        waiter_key_lookup=None,
         packet_store=None,
         interface_name: str | None = None,
         dissect: bool = False,
@@ -113,6 +114,7 @@ class DanteNotificationService(NotificationPacketHandlers, DanteMulticastService
         self._dispatcher = dispatcher
         self._pending_conmon: dict[str, dict] = {}
         self._waiters: dict[tuple[str, str], set[Waiter]] = {}
+        self._waiter_key_lookup = waiter_key_lookup
         self._interface_statistics_error_baselines = InterfaceStatisticsErrorBaselines()
 
     def set_device_lookup(self, lookup_func):

@@ -87,7 +87,7 @@ async def _resolve_lock_state(application, device, timeout) -> None:
 
 
 async def apply_analog(application, device, channel, level, direction=None, timeout=2.0, verify=True):
-    async with application._capability_probe_lock("analog_write", application._control_key(device)):
+    async with application._capability_probe_lock("analog_write", application._waiter_key(device)):
         plan = await plan_analog(application, device, channel, level, direction, timeout=min(timeout, 1.0))
         result = {
             "plan": plan,

@@ -57,7 +57,7 @@ class PanelTransport:
         sequence = self.next_sequence()
         self.pending.add(sequence)
         requester = 0  # Only the established direct transport is supported here.
-        key = self.application._control_key(device)
+        key = self.application._waiter_key(device)
 
         def accepts(status):
             return (
@@ -159,7 +159,7 @@ class PanelTransport:
                     return {**result, "reason": reason or "Panel identity changed during the operation."}
                 sequence = self.next_sequence()
                 self.pending.add(sequence)
-                key = self.application._control_key(device)
+                key = self.application._waiter_key(device)
                 waiter = self.application.notifications.register_waiter(
                     "panel_status",
                     key,

@@ -178,17 +178,6 @@ async def test_status_probes_reach_each_device_at_its_reported_settings_port(sam
 
 
 @pytest.mark.asyncio
-async def test_settings_message_to_a_host_shared_by_direct_devices_goes_to_that_host(same_host_devices):
-    application, _, _ = same_host_devices
-    application.transport.execute = AsyncMock(return_value=None)
-
-    await application.send_probe_sample_rate(HOST)
-
-    application.transport.execute.assert_awaited_once()
-    assert application.transport.execute.await_args.args[0] == HOST
-
-
-@pytest.mark.asyncio
 async def test_raw_arc_request_to_a_shared_ip_is_rejected_because_the_device_is_ambiguous(same_host_devices):
     application, _, _ = same_host_devices
     application.transport.execute = AsyncMock()

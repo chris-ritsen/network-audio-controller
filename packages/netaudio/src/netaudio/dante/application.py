@@ -159,6 +159,7 @@ class DanteApplication:
         self.notifications = DanteNotificationService(
             dispatcher=self.dispatcher,
             device_lookup=self._device_by_source,
+            waiter_key_lookup=self._source_waiter_key,
             packet_store=packet_store,
             interface_name=app_settings.interface,
             dissect=dissect,
@@ -377,11 +378,28 @@ class DanteApplication:
         matches = self._devices_by_ip(str(target))
         if len(matches) == 1:
             return matches[0]
-        # A bare address names a host. Several directly controlled devices may share one (each with its own
-        # advertised ARC port); host-scoped settings messages still have a single destination there.
-        if any(device.requires_managed_control for device in matches):
-            raise self._ambiguous_control_address(target, matches)
-        return target
+        if not matches:
+            return target
+        online = [device for device in matches if device.online] or matches
+        if len(online) == 1:
+            return online[0]
+        endpoints = {tuple(sorted(device._service_ports().items())) for device in online}
+        if len(endpoints) > 1 or any(device.requires_managed_control for device in online):
+            raise self._ambiguous_control_address(target, online)
+        return online[0]
+
+    def _waiter_key(self, target) -> str:
+        device = self._control_target(target)
+        key = self._control_key(device)
+        if not hasattr(device, "requires_managed_control") or device.requires_managed_control:
+            return key
+        settings_port = device._service_ports()["settings_port"]
+        if all(other._service_ports()["settings_port"] == settings_port for other in self._devices_by_ip(key)):
+            return key
+        return f"{key}:{settings_port}"
+
+    def _source_waiter_key(self, source_ip: str, device) -> str:
+        return source_ip if device is None else self._waiter_key(device)
 
     def _settings_endpoint(self, device) -> tuple[str, int | None]:
         # Devices that share an address but report their own settings port are probed separately.
@@ -406,10 +424,11 @@ class DanteApplication:
         timeout: float,
         operation_name: str,
     ) -> ConmonExport:
-        async with self._capability_probe_lock("conmon_export", device_ip_address):
+        key = self._waiter_key(device_ip_address)
+        async with self._capability_probe_lock("conmon_export", key):
             result = await request_and_wait_for_conmon_export(
                 self.notifications,
-                device_ip_address,
+                key,
                 kind,
                 request,
                 timeout,
@@ -428,7 +447,7 @@ class DanteApplication:
         if not self.verify_mutations:
             await mutate()
             return None
-        key = self._control_key(target)
+        key = self._waiter_key(target)
         waiter = self.notifications.register_waiter(kind, key)
         try:
             await mutate()
@@ -639,7 +658,7 @@ class DanteApplication:
         *,
         result_type: type[Result],
     ) -> Result:
-        key = self._control_key(target)
+        key = self._waiter_key(target)
         async with self._capability_probe_lock(capability_name, key):
             waiter = self.notifications.register_waiter(capability_name, key)
             try:
@@ -696,7 +715,7 @@ class DanteApplication:
         timeout: float,
         description: str,
     ) -> dict:
-        key = self._control_key(target)
+        key = self._waiter_key(target)
         async with self._capability_probe_lock(capability_name, key):
             waiter = self.notifications.register_waiter(capability_name, key)
             try:
@@ -771,7 +790,7 @@ class DanteApplication:
             incomplete_devices = await self._retry_conmon_query(incomplete_devices, deadline, retry)
 
     async def _query_conmon_for_device(self, device, deadline: float) -> bool:
-        device_ip = str(device.ipv4)
+        device_ip = self._waiter_key(device)
         waiter = self.notifications.register_conmon_waiter(device_ip)
         try:
             await self._send_conmon_query_for_device(device, self.send_make_model_request)
@@ -794,7 +813,7 @@ class DanteApplication:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            device_ip = str(device.ipv4)
+            device_ip = self._waiter_key(device)
             needs_make_model = device.manufacturer_versions_record is None
             needs_dante_model = device.platform_versions_record is None
             expected_count = int(needs_make_model) + int(needs_dante_model)
@@ -1041,7 +1060,7 @@ class DanteApplication:
         preserve_internet_protocol_settings: bool,
         timeout: float = 2.0,
     ) -> dict:
-        key = self._control_key(target)
+        key = self._waiter_key(target)
         action = (
             "clear_all_configuration_preserving_internet_protocol_settings"
             if preserve_internet_protocol_settings
@@ -1066,8 +1085,8 @@ class DanteApplication:
         if status["executed_action"] != action:
             raise RuntimeError(f"clear-configuration did not confirm the requested action for {key}")
 
-        device = target if hasattr(target, "server_name") else self._device_by_control_key(key)
-        if device is not None:
+        device = self._control_target(target)
+        if hasattr(device, "server_name"):
             await self.state.refresh_after_configuration_clear(device, f"{action} acknowledged")
         return status
 
@@ -1506,7 +1525,7 @@ class DanteApplication:
         if not self.verify_mutations:
             await mutate()
             return None
-        key = self._control_key(device)
+        key = self._waiter_key(device)
 
         async def mutate_without_result() -> None:
             await mutate()
@@ -1530,7 +1549,7 @@ class DanteApplication:
     ) -> Result:
         if getattr(device, "requires_managed_control", False) or not self.verify_mutations:
             return await mutate()
-        device_ip_address = str(device.ipv4)
+        device_ip_address = self._waiter_key(device)
         waiter = self.notifications.register_notification_waiter(device_ip_address, notification_ids)
         try:
             response = await mutate()
@@ -1723,7 +1742,7 @@ class DanteApplication:
         )
 
     async def probe_clocking_status(self, device, timeout: float = 3.0, control_profile=None) -> dict:
-        key = self._control_key(device)
+        key = self._waiter_key(device)
         async with self._capability_probe_lock("clock_status", key):
             waiter = self.notifications.register_waiter(STATUS_KIND_CLOCK, key)
             try:

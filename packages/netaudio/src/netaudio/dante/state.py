@@ -375,7 +375,7 @@ class DanteStateService:
         kind = event.data["kind"]
         status = event.data["status"]
         source_ip = event.data["source_ip"]
-        if superseded_status(source_ip, kind, event.data.get("received_order")):
+        if superseded_status(source_ip, event.server_name or "", kind, event.data.get("received_order")):
             logger.debug(f"Skipped a queued {kind} status from {source_ip}; a newer one has been received")
             return
         device = self.devices.get(event.server_name) if event.server_name else None
