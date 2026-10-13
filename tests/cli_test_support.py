@@ -112,6 +112,9 @@ class FakeDevice:
         self._name_reads = name_reads
         self.name_read_calls = 0
 
+    def _service_ports(self):
+        return {"arc_port": 4440, "control_port": 8800, "settings_port": 8700}
+
     async def fetch_device_name(self):
         self.name_read_calls += 1
         return next_value(self._name_reads)

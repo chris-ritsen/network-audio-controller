@@ -78,16 +78,16 @@ def _report_lock_failure(action: str, result: dict) -> None:
     raise typer.Exit(code=1)
 
 
-async def _standalone_lock_operation(application, device_ip: str, pin: str, lock_key: bytes, *, locking: bool) -> dict:
+async def _standalone_lock_operation(application, device, pin: str, lock_key: bytes, *, locking: bool) -> dict:
     operation = core_lock_device if locking else core_unlock_device
-    result = await operation(device_ip, pin, lock_key)
+    result = await operation(str(device.ipv4), pin, lock_key, ports=device._service_ports())
     if result.get("success") is not True:
         return result
 
     try:
-        observation = await application.probe_lock_status(device_ip, timeout=app_settings.lock_state_timeout)
+        observation = await application.probe_lock_status(device, timeout=app_settings.lock_state_timeout)
     except (RuntimeError, OSError) as exception:
-        logger.debug(f"Lock status unavailable for {device_ip}: {exception}")
+        logger.debug(f"Lock status unavailable for {device.server_name or device.ipv4}: {exception}")
         observation = None
     if observation is None:
         return {
@@ -142,7 +142,7 @@ async def run_lock_operation(application, devices, pin: str, *, locking: bool) -
         typer.echo(f"Error: {device_name} has no control address.", err=True)
         raise typer.Exit(code=1)
 
-    result = await _standalone_lock_operation(application, str(device.ipv4), pin, lock_key, locking=locking)
+    result = await _standalone_lock_operation(application, device, pin, lock_key, locking=locking)
 
     if not result["success"]:
         _report_lock_failure(action, result)

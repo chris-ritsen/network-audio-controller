@@ -895,7 +895,7 @@ class DanteStateService:
         before = (device.is_locked, device.lock_reset_status)
         try:
             await self.application.probe_lock_status(
-                str(device.ipv4),
+                device,
                 timeout=app_settings.lock_state_timeout,
             )
         except (RuntimeError, OSError) as exception:

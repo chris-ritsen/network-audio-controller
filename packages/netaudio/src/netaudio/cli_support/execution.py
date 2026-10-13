@@ -446,7 +446,7 @@ async def _enrich_lock_states(
     results = await asyncio.gather(
         *[
             application.probe_lock_status(
-                str(device.ipv4),
+                device,
                 timeout=settings.lock_state_timeout,
             )
             for device in candidates.values()

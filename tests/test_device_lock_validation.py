@@ -55,7 +55,7 @@ async def test_core_lock_device_rejects_bad_key_length_before_client(monkeypatch
 
 @pytest.mark.asyncio
 async def test_lock_device_uses_core_helper_without_trusting_acknowledgement_state(monkeypatch):
-    async def fake_core_lock_device(device_ip, pin, key):
+    async def fake_core_lock_device(device_ip, pin, key, *, ports):
         assert device_ip == "192.0.2.10"
         assert pin == "1234"
         assert key == b"x" * 32
@@ -63,7 +63,13 @@ async def test_lock_device_uses_core_helper_without_trusting_acknowledgement_sta
 
     monkeypatch.setattr("netaudio.dante.application.core_lock_device", fake_core_lock_device)
 
-    device = SimpleNamespace(ipv4="192.0.2.10", _app=None, is_locked=False, device_locking_supported=True)
+    device = SimpleNamespace(
+        ipv4="192.0.2.10",
+        _app=None,
+        is_locked=False,
+        device_locking_supported=True,
+        _service_ports=lambda: {"arc_port": 4440, "control_port": 8800, "settings_port": 8700},
+    )
     result = await DanteApplication().lock_device(device, "1234", b"x" * 32)
 
     assert result["success"] is True
@@ -72,7 +78,7 @@ async def test_lock_device_uses_core_helper_without_trusting_acknowledgement_sta
 
 @pytest.mark.asyncio
 async def test_unlock_device_uses_core_helper_without_trusting_acknowledgement_state(monkeypatch):
-    async def fake_core_unlock_device(device_ip, pin, key):
+    async def fake_core_unlock_device(device_ip, pin, key, *, ports):
         assert device_ip == "192.0.2.10"
         assert pin == "1234"
         assert key == b"x" * 32
@@ -80,7 +86,13 @@ async def test_unlock_device_uses_core_helper_without_trusting_acknowledgement_s
 
     monkeypatch.setattr("netaudio.dante.application.core_unlock_device", fake_core_unlock_device)
 
-    device = SimpleNamespace(ipv4="192.0.2.10", _app=None, is_locked=True, device_locking_supported=True)
+    device = SimpleNamespace(
+        ipv4="192.0.2.10",
+        _app=None,
+        is_locked=True,
+        device_locking_supported=True,
+        _service_ports=lambda: {"arc_port": 4440, "control_port": 8800, "settings_port": 8700},
+    )
     result = await DanteApplication().unlock_device(device, "1234", b"x" * 32)
 
     assert result["success"] is True

@@ -13,7 +13,12 @@ from netaudio.dante.const import (
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
 from netaudio.dante.events import DanteEvent, EventType
-from netaudio.dante.metering import classify_signal_presence, normalize_metering_value, parse_metering_levels
+from netaudio.dante.metering import (
+    classify_signal_presence,
+    metering_source_instance,
+    normalize_metering_value,
+    parse_metering_levels,
+)
 from netaudio.dante.service import DanteMulticastService
 
 logger = logging.getLogger("netaudio")
@@ -122,6 +127,22 @@ class MeteringManager:
             return passive
         return None
 
+    def _server_name_for_source(self, ip: str, data: bytes) -> str | None:
+        sharing = [
+            (getattr(device, "server_name", None) or server_name, device)
+            for server_name, device in self._application.devices.items()
+            if device.ipv4 and str(device.ipv4) == ip
+        ]
+        if len(sharing) < 2:
+            return self._server_name_for_ip(ip)
+        instance = metering_source_instance(data)
+        matches = [
+            server_name
+            for server_name, device in sharing
+            if instance and str(device.mac_address or "").replace(":", "").casefold() == instance
+        ]
+        return matches[0] if len(matches) == 1 else None
+
     def _server_name_for_ip(self, ip: str) -> str | None:
         fallback = None
         for server_name, device in self._application.devices.items():
@@ -171,6 +192,7 @@ class MeteringManager:
                 return
             device_ip = str(device.ipv4)
             device_name = device.name
+            ports = device._service_ports()
             if not device_name:
                 self._failed_starts[server_name] = now
                 return
@@ -183,13 +205,14 @@ class MeteringManager:
                     host_ip,
                     host_mac,
                     self._active_port,
+                    ports=ports,
                 )
             except (RuntimeError, OSError) as error:
                 logger.warning(f"Metering start failed for {device_name}: {error}")
                 self._failed_starts[server_name] = now
                 return
             self._failed_starts.pop(server_name, None)
-            self._started[server_name] = (device_ip, device_name, host_ip, host_mac, now)
+            self._started[server_name] = (device_ip, device_name, host_ip, host_mac, now, ports)
 
     async def _send_stop(self, server_name: str, *, changing_port: bool = False):
         async with self._stream_lock(server_name):
@@ -199,7 +222,7 @@ class MeteringManager:
             started = self._started.pop(server_name, None)
             if started is None:
                 return
-            device_ip, device_name, host_ip, host_mac, _ = started
+            device_ip, device_name, host_ip, host_mac, _, ports = started
             logger.debug(f"Sending metering stop to {device_name} ({device_ip})")
             try:
                 await self._application.cmc.stop_metering(
@@ -208,6 +231,7 @@ class MeteringManager:
                     host_ip,
                     host_mac,
                     self._active_port,
+                    ports=ports,
                 )
             except (RuntimeError, OSError) as error:
                 logger.warning(f"Metering stop failed for {device_name}: {error}")
@@ -447,7 +471,7 @@ class MeteringManager:
 
     def _on_metering_packet(self, data: bytes, source_address: tuple):
         source_ip = source_address[0]
-        server_name = self._server_name_for_ip(source_ip)
+        server_name = self._server_name_for_source(source_ip, data)
         if not server_name:
             return
 

@@ -105,7 +105,7 @@ class TestDaemonLockStatus:
         assert device.is_locked is requested_is_locked
         assert device.lock_reset_status["lock_state_code"] == lock_state_code
         getattr(http_server.application, operation_name).assert_awaited_once_with(device, "1234", b"key")
-        http_server.application.probe_lock_status.assert_awaited_once_with("192.168.1.50", timeout=4.0)
+        http_server.application.probe_lock_status.assert_awaited_once_with(device, timeout=4.0)
 
     @pytest.mark.asyncio
     async def test_lock_operation_reports_mismatched_post_request_observation(self, monkeypatch):
@@ -168,7 +168,7 @@ class TestDaemonLockStatus:
         }
         assert device.is_locked is False
         assert device.lock_reset_status["lock_state_code"] == 0
-        http_server.application.probe_lock_status.assert_awaited_once_with("192.168.1.50", timeout=4.0)
+        http_server.application.probe_lock_status.assert_awaited_once_with(device, timeout=4.0)
 
     @pytest.mark.asyncio
     async def test_lock_status_timeout_does_not_return_cached_state(self):

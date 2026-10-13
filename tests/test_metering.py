@@ -94,6 +94,7 @@ def make_manager():
         name="AVIO Bluetooth",
         online=True,
         update_last_seen=MagicMock(),
+        _service_ports=lambda: {"arc_port": 4440, "control_port": 8800, "settings_port": 8700},
     )
     application = SimpleNamespace(
         devices={"avio-bt-1": device},

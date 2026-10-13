@@ -316,8 +316,9 @@ async def run_measure_timeout(application, devices, gap: float, max_wait: float)
             device_names[device_ip] = device_name
             host_ip, host_mac = application.cmc.controller_identity(device_ip)
             typer.echo(f"Sending single metering start to {device_name} ({device_ip})")
-            await application.cmc.start_metering(device_ip, device_name, host_ip, host_mac, metering_port)
-            started.append((device_ip, device_name, host_ip, host_mac))
+            ports = device._service_ports()
+            await application.cmc.start_metering(device_ip, device_name, host_ip, host_mac, metering_port, ports=ports)
+            started.append((device_ip, device_name, host_ip, host_mac, ports))
 
         start_time = time.monotonic()
         last_any_packet = start_time
@@ -353,8 +354,8 @@ async def run_measure_timeout(application, devices, gap: float, max_wait: float)
     finally:
         await asyncio.gather(
             *(
-                application.cmc.stop_metering(device_ip, device_name, host_ip, host_mac, metering_port)
-                for device_ip, device_name, host_ip, host_mac in started
+                application.cmc.stop_metering(device_ip, device_name, host_ip, host_mac, metering_port, ports=ports)
+                for device_ip, device_name, host_ip, host_mac, ports in started
             ),
             return_exceptions=True,
         )

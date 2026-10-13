@@ -56,25 +56,27 @@ def _validate_lock_key(key: bytes) -> dict | None:
     return None
 
 
-async def core_lock_device(device_ip: str, pin: str, key: bytes) -> dict:
+async def core_lock_device(device_ip: str, pin: str, key: bytes, *, ports: dict[str, int] | None = None) -> dict:
     key_error = _validate_lock_key(key)
 
     if key_error:
         return key_error
 
-    return await _device_lock_operation(device_ip, pin, key, LOCK_OPERATION_LOCK)
+    return await _device_lock_operation(device_ip, pin, key, LOCK_OPERATION_LOCK, ports)
 
 
-async def core_unlock_device(device_ip: str, pin: str, key: bytes) -> dict:
+async def core_unlock_device(device_ip: str, pin: str, key: bytes, *, ports: dict[str, int] | None = None) -> dict:
     key_error = _validate_lock_key(key)
 
     if key_error:
         return key_error
 
-    return await _device_lock_operation(device_ip, pin, key, LOCK_OPERATION_UNLOCK)
+    return await _device_lock_operation(device_ip, pin, key, LOCK_OPERATION_UNLOCK, ports)
 
 
-async def _device_lock_operation(device_ip: str, pin: str, key: bytes, operation: int) -> dict:
+async def _device_lock_operation(
+    device_ip: str, pin: str, key: bytes, operation: int, ports: dict[str, int] | None = None
+) -> dict:
     from netaudio import core
 
     if operation not in (LOCK_OPERATION_LOCK, LOCK_OPERATION_UNLOCK):
@@ -82,7 +84,7 @@ async def _device_lock_operation(device_ip: str, pin: str, key: bytes, operation
 
     def _run():
         local_ip = source_address_for(device_ip, app_settings.interface)
-        with core.CoreClient(device_ip, local_ip=local_ip) as client:
+        with core.CoreClient(device_ip, local_ip=local_ip, **(ports or {})) as client:
             if operation == LOCK_OPERATION_LOCK:
                 return client.lock(pin, key)
 

@@ -197,7 +197,7 @@ async def test_enrich_lock_states_clears_cached_state_without_fresh_observation(
     assert device.is_locked is None
     assert "is_locked" in device.failed_queries
     assert list(failures) == [device.server_name]
-    application.probe_lock_status.assert_awaited_once_with("192.0.2.10", timeout=4.0)
+    application.probe_lock_status.assert_awaited_once_with(device, timeout=4.0)
 
 
 @pytest.mark.asyncio

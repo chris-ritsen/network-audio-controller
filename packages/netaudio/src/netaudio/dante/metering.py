@@ -33,6 +33,13 @@ def classify_signal_presence(value: int, source: str | None) -> str:
     return normalize_metering_value(value, source)["state"]
 
 
+def metering_source_instance(data: bytes) -> str | None:
+    try:
+        return core.parse_response("metering", data)["source_eui64"]
+    except core.NetaudioCoreError:
+        return None
+
+
 def parse_metering_levels(data: bytes) -> dict:
     parsed = core.parse_response("metering", data)
     return {

@@ -762,8 +762,8 @@ def test_standalone_lock_fallback_requires_matching_post_request_observation(
         calls.append(("daemon", action))
         return None
 
-    async def operation(device_ip, pin, key):
-        calls.append(("operation", operation_name, device_ip, pin, key))
+    async def operation(device_ip, pin, key, ports=None):
+        calls.append(("operation", operation_name, device_ip, pin, key, ports))
         return {
             "success": True,
             "already": False,
@@ -771,21 +771,29 @@ def test_standalone_lock_fallback_requires_matching_post_request_observation(
             "lock_state": 1 if locking else 0,
         }
 
-    async def probe(device_ip, timeout=None):
-        calls.append(("probe", device_ip))
+    async def probe(device, timeout=None):
+        calls.append(("probe", device))
         return _lock_observation(locking)
 
     monkeypatch.setattr(lock_commands, "_lock_via_daemon", unavailable_daemon)
     monkeypatch.setattr(lock_commands, "_get_lock_key", lambda: b"x" * 32)
     monkeypatch.setattr(lock_commands, operation_name, operation)
 
-    result = _lock(SimpleNamespace(probe_lock_status=probe), locking)
+    device = FakeDevice("AVIO")
+    result = _lock(SimpleNamespace(probe_lock_status=probe), locking, device)
 
     assert result.exit_code == 0, result.output
     assert calls == [
         ("daemon", "lock" if locking else "unlock"),
-        ("operation", operation_name, "192.0.2.10", "1234", b"x" * 32),
-        ("probe", "192.0.2.10"),
+        (
+            "operation",
+            operation_name,
+            "192.0.2.10",
+            "1234",
+            b"x" * 32,
+            {"arc_port": 4440, "control_port": 8800, "settings_port": 8700},
+        ),
+        ("probe", device),
     ]
 
 
@@ -800,10 +808,10 @@ def test_standalone_lock_fallback_fails_closed_when_readback_is_missing(
     operation_name,
     action,
 ):
-    async def operation(device_ip, pin, key):
+    async def operation(device_ip, pin, key, ports=None):
         return {"success": True, "already": False, "status": 0, "lock_state": 1}
 
-    async def probe(device_ip, timeout=None):
+    async def probe(device, timeout=None):
         raise CapabilityProbeTimeout("lock status readback timed out")
 
     monkeypatch.setattr(lock_commands, "_lock_via_daemon", lambda device_name, pin, action: _async_value(None))
@@ -817,7 +825,7 @@ def test_standalone_lock_fallback_fails_closed_when_readback_is_missing(
 
 
 def test_standalone_lock_fallback_rejects_opposite_observation(monkeypatch, reset_cli_state):
-    async def operation(device_ip, pin, key):
+    async def operation(device_ip, pin, key, ports=None):
         return {"success": True, "already": True, "status": 0x1102, "lock_state": 1}
 
     async def probe(device_ip, timeout=None):
@@ -837,7 +845,7 @@ def test_standalone_lock_fallback_rejects_opposite_observation(monkeypatch, rese
 def test_standalone_already_result_is_reported_only_after_matching_observation(monkeypatch, reset_cli_state):
     probed = False
 
-    async def operation(device_ip, pin, key):
+    async def operation(device_ip, pin, key, ports=None):
         return {"success": True, "already": True, "status": 0x1102, "lock_state": 1}
 
     async def probe(device_ip, timeout=None):

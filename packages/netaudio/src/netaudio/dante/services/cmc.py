@@ -174,6 +174,8 @@ class DanteCMCService:
         ipv4,
         mac,
         port: int,
+        *,
+        ports: dict[str, int] | None = None,
     ) -> None:
         await self._transport.execute(
             str(device_ip),
@@ -184,6 +186,7 @@ class DanteCMCService:
                 "mac": mac.hex() if isinstance(mac, bytes) else mac,
                 "port": port,
             },
+            **(ports or {}),
         )
 
     async def stop_metering(
@@ -193,6 +196,8 @@ class DanteCMCService:
         ipv4,
         mac,
         port: int,
+        *,
+        ports: dict[str, int] | None = None,
     ) -> None:
         await self._transport.execute(
             str(device_ip),
@@ -202,4 +207,5 @@ class DanteCMCService:
                 "device_name": device_name,
                 "mac": mac.hex() if isinstance(mac, bytes) else mac,
             },
+            **(ports or {}),
         )

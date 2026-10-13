@@ -1432,7 +1432,7 @@ class DanteApplication:
             raise RuntimeError("device lock has no verified DDM operation and was not sent")
         if getattr(device, "ipv4", None) is None:
             raise RuntimeError("device has no control address")
-        return await core_lock_device(str(device.ipv4), pin, key)
+        return await core_lock_device(str(device.ipv4), pin, key, ports=device._service_ports())
 
     def mark_device_offline(self, server_name: str) -> None:
         device = self.devices.get(server_name)
@@ -2767,7 +2767,7 @@ class DanteApplication:
             raise RuntimeError("device unlock has no verified DDM operation and was not sent")
         if getattr(device, "ipv4", None) is None:
             raise RuntimeError("device has no control address")
-        return await core_unlock_device(str(device.ipv4), pin, key)
+        return await core_unlock_device(str(device.ipv4), pin, key, ports=device._service_ports())
 
     def unregister_device(self, server_name: str) -> None:
         device = self.devices.pop(server_name, None)

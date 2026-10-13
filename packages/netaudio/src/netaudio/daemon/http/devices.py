@@ -295,7 +295,7 @@ class DaemonDeviceHandlers:
             return
 
         observation = await self.application.probe_lock_status(
-            str(device.ipv4),
+            device,
             timeout=app_settings.lock_state_timeout,
         )
         if observation is None:
@@ -745,8 +745,7 @@ class DaemonDeviceHandlers:
             await self._send_json(writer, {"error": error}, 400)
             return
 
-        device_ip_address = str(device.ipv4)
-        async with self._device_lock_operation_lock(device_ip_address):
+        async with self._device_lock_operation_lock(device.server_name):
             if locking:
                 result = await self.application.lock_device(device, pin, lock_key)
             else:
@@ -768,7 +767,7 @@ class DaemonDeviceHandlers:
             # make the cached state known again.
             self._invalidate_cached_lock_status(device)
             observation = await self.application.probe_lock_status(
-                device_ip_address,
+                device,
                 timeout=app_settings.lock_state_timeout,
             )
             if observation is None:
@@ -801,11 +800,11 @@ class DaemonDeviceHandlers:
 
             await self._send_json(writer, {**result, **lock_status})
 
-    def _device_lock_operation_lock(self, device_ip_address: str) -> asyncio.Lock:
-        lock = self._device_lock_operation_locks.get(device_ip_address)
+    def _device_lock_operation_lock(self, server_name: str) -> asyncio.Lock:
+        lock = self._device_lock_operation_locks.get(server_name)
         if lock is None:
             lock = asyncio.Lock()
-            self._device_lock_operation_locks[device_ip_address] = lock
+            self._device_lock_operation_locks[server_name] = lock
         return lock
 
     def _invalidate_cached_lock_status(self, device) -> None:
