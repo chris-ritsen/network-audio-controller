@@ -317,8 +317,11 @@ def test_nonzero_first_channel_indexes_map_to_existing_one_based_interface():
 
 
 def test_heartbeat_channel_blocks_reach_meter_cache_without_losing_earlier_channels():
-    manager, _, _ = make_manager()
-    service = DanteHeartbeatService(on_signal_presence=manager.record_signal_presence)
+    manager, _, device = make_manager()
+    service = DanteHeartbeatService(
+        device_by_ip=lambda source_ip, _identifier: device if source_ip == device.ipv4 else None,
+        on_signal_presence=manager.record_signal_presence,
+    )
     # Synthetic multi-block packet using the existing signal-record layout.
     first = bytes.fromhex("001c80020004001000010000000200000001000000180000283cff00")
     second = bytes.fromhex("001c80020004001000010000000200040001000800180000fec15000")
