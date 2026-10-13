@@ -280,7 +280,7 @@ def run_command(
 
 def _explicit_selection() -> bool:
     state = _get_state()
-    return bool(state.names or state.hosts or state.server_names or state.macs or state.ddm_context)
+    return bool(state.names or state.hosts or state.server_names or state.macs)
 
 
 def selected_device_identifiers() -> tuple[str, ...]:
@@ -467,15 +467,13 @@ async def _enrich_lock_states(
     return failures
 
 
-async def _load_display_devices(
-    application: DanteApplication,
-    include_channels: bool = False,
-) -> dict[str, DanteDevice]:
+async def _load_display_devices(application: DanteApplication) -> dict[str, DanteDevice]:
+    daemon_devices = None if _explicit_selection() else await get_devices_from_daemon()
+    if daemon_devices is not None:
+        application.attach_devices(daemon_devices)
+        return filter_devices(daemon_devices)
     devices = filter_devices(await _discover_with_application(application))
     await _populate_controls(devices, application)
-    if include_channels:
-        for device in devices.values():
-            await _populate_show_details(application, device, include_channels=True)
     unreachable = await _enrich_clock_fields(application, devices)
     for server_name, reason in (await _enrich_lock_states(application, devices, only_unknown=True)).items():
         unreachable.setdefault(server_name, reason)

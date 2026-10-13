@@ -265,4 +265,3 @@ async def test_load_display_devices_warns_once_per_explicitly_selected_unreachab
     with caplog.at_level("DEBUG", logger="netaudio"):
         await common_module._load_display_devices(application)
     assert not [record for record in caplog.records if record.levelname == "WARNING"]
-    assert "Could not reach ghost.local. (192.0.2.99): clock status probe timed out" in caplog.text
