@@ -14,11 +14,6 @@ pub fn include_remembered(
         .filter_map(|record| record["name"].as_str())
         .map(fold)
         .collect();
-    let mut addresses: BTreeSet<_> = records
-        .values()
-        .filter_map(|record| record["mac_address"].as_str())
-        .filter_map(canonical_address)
-        .collect();
     let mut remembered: Vec<_> = remembered.into_iter().collect();
     remembered.sort_by_cached_key(|(identity, device)| {
         (
@@ -39,39 +34,31 @@ pub fn include_remembered(
         else {
             continue;
         };
-        let address = device.record["mac_address"]
-            .as_str()
-            .and_then(canonical_address);
-        if records.contains_key(&identity)
-            || names.contains(&fold(name))
-            || address
-                .as_ref()
-                .is_some_and(|address| addresses.contains(address))
-        {
+        if records.contains_key(&identity) || names.contains(&fold(name)) {
             continue;
         }
 
         let mut record = device.record.as_ref().clone();
         record["online"] = json!(false);
+        if record.get("cmc_process_state").is_none() {
+            for (field, value) in
+                serde_json::to_value(netaudio_core::conmon_identity::Identity::default())
+                    .expect("monitoring identity is serializable")
+                    .as_object()
+                    .expect("monitoring identity is an object")
+            {
+                record[field] = value.clone();
+            }
+        }
+        record["association_state"] = json!("none");
+        record["association_generation"] = Value::Null;
         record["remembered_last_seen"] = json!(device.seen_at);
         record["last_seen"] = json!(device.seen_at);
         names.insert(fold(name));
-        if let Some(address) = address {
-            addresses.insert(address);
-        }
         records.insert(format!("remembered:{identity}"), Arc::new(record));
     }
 }
 
 fn fold(value: &str) -> String {
     value.chars().default_case_fold().collect()
-}
-
-fn canonical_address(value: &str) -> Option<String> {
-    const ADDRESS_HEX_DIGITS: usize = 12;
-    let value = value.replace([':', '-'], "").to_lowercase();
-    (value.len() == ADDRESS_HEX_DIGITS
-        && value.bytes().all(|digit| digit.is_ascii_hexdigit())
-        && value.bytes().any(|digit| digit != b'0'))
-    .then_some(value)
 }

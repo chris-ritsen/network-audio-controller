@@ -126,6 +126,8 @@ pub fn identity(record: &Value) -> CapturedDevice {
     let mut identity = Map::from_iter([("server_name".into(), record["server_name"].clone())]);
 
     for field in [
+        "cmc_source_identifier",
+        "cmc_process",
         "mac_address",
         "inventory_id",
         "product_name",

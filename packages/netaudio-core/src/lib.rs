@@ -8,6 +8,7 @@ pub mod clock_configuration;
 pub mod commands;
 pub mod configuration;
 pub mod conmon_export;
+pub mod conmon_identity;
 pub mod controller_api;
 pub mod dapi;
 pub mod device_controls;

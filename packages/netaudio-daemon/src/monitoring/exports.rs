@@ -59,6 +59,17 @@ impl Default for Exports {
 }
 
 impl Exports {
+    pub fn invalidate(&self, key: &str) -> Result<()> {
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| anyhow::anyhow!("diagnostic export lock poisoned"))?;
+        if pending.as_ref().is_some_and(|pending| pending.key == key) {
+            *pending = None;
+        }
+        Ok(())
+    }
+
     pub fn observe(&self, key: &str, packet: &ReceivedPacket) -> Result<()> {
         let mut pending = self
             .pending

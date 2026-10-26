@@ -13,7 +13,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context as TaskContext, Poll};
 
-pub const API_VERSION: u32 = 2;
+pub const API_VERSION: u32 = 3;
 
 struct Subscriber {
     sender: EventSender,

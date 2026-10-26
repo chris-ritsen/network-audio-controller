@@ -32,6 +32,7 @@ const MAXIMUM_CONCURRENT_REFRESHES: usize = 16;
 const MAXIMUM_PENDING_OPERATIONS: usize = 128;
 const CLOCK_FRESHNESS: Duration = Duration::from_secs(5);
 
+mod association;
 mod audio;
 mod external_subscription;
 mod flow_authoring;
@@ -59,6 +60,8 @@ use refresh_queue::{RefreshQueue, ScheduledRefresh};
 struct DeviceState {
     generation: u64,
     identity_generation: u64,
+    association: Option<association::Signature>,
+    associated_at: Instant,
     field_observed_at: BTreeMap<String, Instant>,
     record: DeviceRecord,
     diagnostics: Diagnostics,
@@ -108,6 +111,7 @@ pub struct DeviceRegistry {
     model: Arc<ReadModel>,
     journal: Arc<Journal>,
     devices: RwLock<BTreeMap<String, Arc<Device>>>,
+    association_generation: std::sync::atomic::AtomicU64,
     media: RwLock<BTreeMap<String, DiscoveredService>>,
     local_address: Option<Ipv4Addr>,
     refreshes: Arc<Semaphore>,
@@ -137,6 +141,7 @@ impl DeviceRegistry {
             model,
             journal,
             devices: RwLock::new(BTreeMap::new()),
+            association_generation: std::sync::atomic::AtomicU64::new(1),
             media: RwLock::new(BTreeMap::new()),
             local_address,
             refreshes: Arc::new(Semaphore::new(MAXIMUM_CONCURRENT_REFRESHES)),
@@ -234,9 +239,12 @@ impl DeviceRegistry {
                     .write()
                     .map_err(|_| anyhow::anyhow!("media inventory lock poisoned"))?
                     .remove(&name);
-                let devices = self.entries()?;
+                let devices = self
+                    .devices
+                    .write()
+                    .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
 
-                for device in devices {
+                for device in devices.values() {
                     let mut state = device
                         .state
                         .lock()
@@ -250,9 +258,9 @@ impl DeviceRegistry {
                         if !state.record.online {
                             self.metering.invalidate_direct(&state.record.key)?;
                         }
-                        self.publish(&state.record)?;
                     }
                 }
+                self.refresh_associations(&devices)?;
             }
             DiscoveryEvent::NetworkChanged => {
                 self.media
@@ -260,7 +268,11 @@ impl DeviceRegistry {
                     .map_err(|_| anyhow::anyhow!("media inventory lock poisoned"))?
                     .clear();
 
-                for device in self.entries()? {
+                let devices = self
+                    .devices
+                    .write()
+                    .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
+                for device in devices.values() {
                     let mut state = device
                         .state
                         .lock()
@@ -270,8 +282,8 @@ impl DeviceRegistry {
                     state.record.services.clear();
                     state.record.online = false;
                     self.metering.invalidate_direct(&state.record.key)?;
-                    self.publish(&state.record)?;
                 }
+                self.refresh_associations(&devices)?;
             }
         }
 
@@ -286,7 +298,7 @@ impl DeviceRegistry {
                 .write()
                 .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
 
-            if let Some(device) = devices.get(&key) {
+            let result = if let Some(device) = devices.get(&key) {
                 let mut state = device
                     .state
                     .lock()
@@ -306,15 +318,15 @@ impl DeviceRegistry {
                     state.identity_generation += 1;
                 }
 
-                self.publish(&state.record)?;
                 (Arc::clone(device), changed)
             } else {
                 let record = DeviceRecord::discovered(&service)?;
-                self.publish(&record)?;
                 let device = Arc::new(Device {
                     state: Mutex::new(DeviceState {
                         generation: 1,
                         identity_generation: 1,
+                        association: None,
+                        associated_at: Instant::now(),
                         field_observed_at: BTreeMap::new(),
                         record,
                         diagnostics: Diagnostics::default(),
@@ -325,7 +337,9 @@ impl DeviceRegistry {
                 });
                 devices.insert(key.clone(), Arc::clone(&device));
                 (device, true)
-            }
+            };
+            self.refresh_associations(&devices)?;
+            result
         };
 
         if changed {
@@ -1549,12 +1563,14 @@ impl DeviceRegistry {
         packet: &ReceivedPacket,
     ) -> Result<Option<PacketObservation>> {
         if packet.payload.is_empty() {
-            if let Some(device) = self.observation_device(packet, None)? {
+            if let Some((device, generation)) = self.observation_device(packet, None)? {
                 let state = device
                     .state
                     .lock()
                     .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-                self.exports.observe(&state.record.key, packet)?;
+                if state.identity_generation == generation && !state.record.retired {
+                    self.exports.observe(&state.record.key, packet)?;
+                }
             }
 
             return Ok(None);
@@ -1563,8 +1579,12 @@ impl DeviceRegistry {
         let Some(envelope) = parse_notification_envelope(&packet.payload) else {
             return Ok(None);
         };
-        let device = self.observation_device(packet, envelope.device_id.as_deref())?;
-        let Some(device) = device else {
+        let device = if envelope.is_conmon {
+            self.conmon_device(envelope.device_id.as_deref(), envelope.process)?
+        } else {
+            self.observation_device(packet, None)?
+        };
+        let Some((device, generation)) = device else {
             return Ok(None);
         };
         let mut refresh = None;
@@ -1576,7 +1596,10 @@ impl DeviceRegistry {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
             key = state.record.key.clone();
-            if state.record.retired {
+            if state.record.retired
+                || state.identity_generation != generation
+                || packet.received_monotonic < state.associated_at
+            {
                 return Ok(None);
             }
 
@@ -1727,16 +1750,6 @@ impl DeviceRegistry {
         self.cancellation.cancel();
         self.tasks.close();
         self.tasks.wait().await;
-    }
-
-    fn entries(&self) -> Result<Vec<Arc<Device>>> {
-        Ok(self
-            .devices
-            .read()
-            .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?
-            .values()
-            .cloned()
-            .collect())
     }
 
     fn publish(&self, record: &DeviceRecord) -> Result<()> {

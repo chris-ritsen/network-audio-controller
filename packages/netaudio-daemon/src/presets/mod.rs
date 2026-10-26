@@ -11,7 +11,7 @@ pub mod storage;
 pub use error::Error;
 
 use netaudio_core::presets::{Document, MAXIMUM_BYTES, MAXIMUM_DEVICES};
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -189,23 +189,27 @@ pub fn matches_record(
         .and_then(Value::as_object)
     {
         for (field, current) in [
-            ("server_name", Some(identifier)),
+            ("server_name", json!(identifier)),
             (
                 "inventory_id",
                 record
                     .get("inventory_id")
-                    .map_or(Some(identifier), Value::as_str),
+                    .cloned()
+                    .unwrap_or_else(|| json!(identifier)),
             ),
-            ("mac_address", record["mac_address"].as_str()),
+            ("mac_address", record["mac_address"].clone()),
+            (
+                "cmc_source_identifier",
+                record["cmc_source_identifier"].clone(),
+            ),
+            ("cmc_process", record["cmc_process"].clone()),
         ] {
             if let Some(value) = identity
                 .get(field)
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
+                .filter(|value| !value.is_null() && **value != "")
             {
                 specified = true;
-
-                if current != Some(value) {
+                if &current != value {
                     return false;
                 }
             }

@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "features": {
     "events.patches": {
       "since": 1,
@@ -16,6 +16,10 @@
     "events.opt_out": {
       "since": 2,
       "description": "GET /events?meters=0 leaves out meter_values and shure_meter_values; telemetry=none leaves out telemetry fields and their notices. The server skips building events no connected client wants."
+    },
+    "conmon_association": {
+      "since": 3,
+      "description": "Device records carry cmc_source_identifier, cmc_process, cmc_process_state, association_state and association_generation. ConMon updates require one current advertised source identifier and process owner. Address devices by server_name. Managed sources without direct CMC discovery have no ConMon association."
     }
   },
   "documentation": {

@@ -57,6 +57,14 @@ impl PanelObservation {
         let deadline = Instant::now() + duration;
         let mut latest = None;
         loop {
+            ensure!(
+                self.pending
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("panel request lock poisoned"))?
+                    .requests
+                    .contains_key(&self.sequence),
+                "device association changed during panel observation"
+            );
             if let Some(status) = self.receiver.borrow_and_update().clone() {
                 ensure!(
                     status.diagnostic_error.is_none(),
@@ -88,6 +96,15 @@ impl PanelObservation {
 }
 
 impl PanelRequests {
+    pub fn invalidate(&self, device: &str) -> Result<()> {
+        self.pending
+            .lock()
+            .map_err(|_| anyhow::anyhow!("panel request lock poisoned"))?
+            .requests
+            .retain(|_, pending| pending.device != device);
+        Ok(())
+    }
+
     pub fn subscribe(&self, device: &str) -> Result<PanelObservation> {
         let mut pending = self
             .pending
