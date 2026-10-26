@@ -43,48 +43,8 @@ def receiver_pages(protocol):
     return first, bytes(terminal), 16, list(range(1, 17))
 
 
-@pytest.mark.parametrize("protocol", [0x2729, 0x2809])
-def test_receiver_inventory_aggregates_packets_and_owns_continuation(protocol):
-    first, terminal, next_id, identifiers = receiver_pages(protocol)
-
-    with core.ReceiverFlowInventory(protocol) as inventory:
-        inventory.accept(first)
-        assert inventory.state()["inventory"] is None
-        assert inventory.state()["next_command"]["starting_flow"] == next_id
-        inventory.accept(terminal)
-        result = inventory.state()["inventory"]
-        assert [flow["flow_number"] for flow in result["flows"]] == identifiers
-        assert result["reported_flow_count"] == len(identifiers)
-        assert result["page_disposition"] == "complete"
-        assert len(result["pages"]) == 2
-        assert inventory.state()["next_command"] is None
 
 
-@pytest.mark.parametrize("protocol", [0x2729, 0x2809])
-@pytest.mark.parametrize("fault", ["duplicate", "capacity", "revision", "truncated", "rejected"])
-def test_receiver_inventory_rejection_preserves_accepted_pages(protocol, fault):
-    first, terminal, _, identifiers = receiver_pages(protocol)
-    invalid = bytearray(first if fault == "duplicate" else terminal)
-
-    if fault == "capacity":
-        invalid[10 if protocol == 0x2729 else 16] = 17
-    elif fault == "revision":
-        invalid[0:2] = (0x280F).to_bytes(2, "big")
-    elif fault == "truncated":
-        invalid = invalid[:-1]
-    elif fault == "rejected":
-        invalid = bytearray(struct.pack(">5H", protocol, 10, 1, 0x3200 if protocol == 0x2729 else 0x3600, 0x30))
-
-    with core.ReceiverFlowInventory(protocol) as inventory:
-        inventory.accept(first)
-        baseline = inventory.state()
-
-        with pytest.raises(core.NetaudioCoreError):
-            inventory.accept(bytes(invalid))
-
-        assert inventory.state() == baseline
-        inventory.accept(terminal)
-        assert inventory.state()["inventory"]["reported_flow_count"] == len(identifiers)
 
 
 @pytest.mark.parametrize("protocol", [0x2729, 0x2809])

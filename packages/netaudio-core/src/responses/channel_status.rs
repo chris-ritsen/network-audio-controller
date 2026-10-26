@@ -208,12 +208,17 @@ fn parse_modern_arc_channel_status_record_prefix(
     let name_pointer = read_u16(record, CHANNEL_STATUS_RECORD_NAME_POINTER)?;
     let name = required_status_string_at_pointer(response, name_pointer, minimum_pointer)?;
     let format_pointer = read_u16(record, CHANNEL_STATUS_RECORD_FORMAT_POINTER)?;
-    let format_offset = usize::from(format_pointer);
-    if format_offset < minimum_pointer {
-        return None;
-    }
-    let format_descriptor =
-        response.get(format_offset..format_offset.checked_add(CHANNEL_STATUS_FORMAT_SIZE)?)?;
+    let format_descriptor = if media_type_code == MEDIA_TYPE_VIDEO && format_pointer == 0 {
+        &[][..]
+    } else {
+        let format_offset = usize::from(format_pointer);
+
+        if format_offset < minimum_pointer {
+            return None;
+        }
+
+        response.get(format_offset..format_offset.checked_add(CHANNEL_STATUS_FORMAT_SIZE)?)?
+    };
     let (sample_rate, encoding) = if media_type_code == MEDIA_TYPE_AUDIO {
         let sample_rate = read_u32(format_descriptor, 0)?;
         let encoding = read_u16(format_descriptor, 6)?;
@@ -337,6 +342,10 @@ fn parse_modern_arc_receiver_channel_status_record(
     const RECEIVER_CAPABILITY_FLAGS_OFFSET: usize = 0x0c;
     const CAN_SUBSCRIBE_SELF_MASK: u32 = 0x0000_0008;
     const RENAME_PROHIBITED_MASK: u32 = 0x0000_0400;
+    const EXTERNAL_STATUS_OFFSET: usize = 28;
+    const PROCESSING_STATUS_OFFSET: usize = 32;
+    const AVAILABLE_INTERFACES_OFFSET: usize = 54;
+    const ASSERTED_INTERFACES_OFFSET: usize = 55;
 
     let record_type_code = read_u16(response, usize::from(record_pointer))?;
     let (
@@ -403,6 +412,16 @@ fn parse_modern_arc_receiver_channel_status_record(
             Some(offset) => Some(read_u16(record, offset)?),
             None => None,
         },
+        reported_state: match record_type_code {
+            0x161C | 0x161E => Some(ReceiverReportedState {
+                external_status: read_u16(record, EXTERNAL_STATUS_OFFSET)?,
+                processing_status: read_u16(record, PROCESSING_STATUS_OFFSET)?,
+                aggregate_status: subscription_status_code,
+                available_interfaces: *record.get(AVAILABLE_INTERFACES_OFFSET)?,
+                asserted_interfaces: *record.get(ASSERTED_INTERFACES_OFFSET)?,
+            }),
+            _ => None,
+        },
         raw_record_hexadecimal: bytes_to_hex(record),
     })
 }
@@ -445,7 +464,7 @@ pub fn parse_modern_arc_receiver_flow_status_page(
 
     let maximum_flow_slots = *body.get(6)?;
     let reported_flow_count = *body.get(7)?;
-    if maximum_flow_slots == 0 || reported_flow_count > maximum_flow_slots {
+    if reported_flow_count > maximum_flow_slots {
         return None;
     }
     if reported_flow_count == 0 && envelope.result_code != RESULT_CODE_SUCCESS {
@@ -453,25 +472,36 @@ pub fn parse_modern_arc_receiver_flow_status_page(
     }
 
     let protocol_id = envelope.protocol_id;
+    let response = response.get(..RESPONSE_HEADER_SIZE.checked_add(body.len())?)?;
+    let directory_end = MODERN_ARC_POINTER_TABLE_OFFSET
+        .checked_add(usize::from(maximum_flow_slots).checked_mul(2)?)?;
+    response.get(..directory_end)?;
     let flows = parse_pointer_table_page(
         response,
         MODERN_ARC_POINTER_TABLE_OFFSET,
         reported_flow_count,
         |flow: &ModernArcReceiverFlowStatus| usize::from(flow.record_length_bytes),
-        |response, record_pointer, minimum_pointer| {
+        |response, record_pointer, _| {
+            if usize::from(record_pointer) < directory_end {
+                return None;
+            }
+
             parse_receiver_flow_status_record_2809(
                 response,
                 record_pointer,
-                minimum_pointer,
+                directory_end,
                 protocol_id,
             )
         },
     )?;
     let mut flow_numbers = HashSet::with_capacity(flows.len());
+
+    if !super::receiver_flow_status::pointed_objects_outside_rows(&flows) {
+        return None;
+    }
+
     for flow in &flows {
-        if flow.flow_number > u16::from(maximum_flow_slots)
-            || !flow_numbers.insert(flow.flow_number)
-        {
+        if !flow_numbers.insert(flow.flow_number) {
             return None;
         }
     }
@@ -495,6 +525,14 @@ fn parse_receiver_flow_status_record_2809(
     minimum_pointer: usize,
     protocol_id: u16,
 ) -> Option<ModernArcReceiverFlowStatus> {
+    if super::receiver_flow_status::is_video_segmented(response, record_pointer) {
+        return super::receiver_flow_status::parse_video_segmented(
+            response,
+            record_pointer,
+            minimum_pointer,
+        );
+    }
+
     let (
         record_size,
         local_receiver_count_offset,
@@ -595,7 +633,7 @@ fn parse_receiver_flow_status_record_2809(
         flow_type: None,
         media_type_code,
         media_local_flow_id,
-        flow_type_code: read_u16(record, RECEIVER_FLOW_STATUS_RECORD_FLOW_TYPE)?,
+        flow_type_code: Some(read_u16(record, RECEIVER_FLOW_STATUS_RECORD_FLOW_TYPE)?),
         flow_name_pointer,
         flow_name,
         format_pointer,
@@ -606,11 +644,12 @@ fn parse_receiver_flow_status_record_2809(
         local_receiver_channel_count,
         receiver_mapping_descriptor_pointer,
         receiver_mapping_descriptor_hexadecimal: bytes_to_hex(receiver_mapping_descriptor),
-        status_flags: read_u16(record, status_flags_offset)?,
-        status_code: read_u16(record, status_code_offset)?,
+        status_flags: Some(read_u16(record, status_flags_offset)?),
+        status_code: Some(read_u16(record, status_code_offset)?),
         endpoint_descriptor_hexadecimal: bytes_to_hex(endpoint_descriptor),
         destination_user_datagram_port,
         destination_internet_protocol_version_four_address: destination_address,
         raw_record_hexadecimal: bytes_to_hex(record),
+        segmented: None,
     })
 }

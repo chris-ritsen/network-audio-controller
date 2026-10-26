@@ -127,6 +127,9 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
             serialize_optional(kind, crate::dapi::parse_settings_publication(bytes))
         }
         "device_info" => serialize_optional(kind, responses::parse_device_info(bytes)),
+        "structured_device_identity" => {
+            serialize_optional(kind, responses::parse_structured_device_identity(bytes))
+        }
         "device_name" => serialize_optional(kind, responses::parse_device_name(bytes)),
         "device_settings" => serialize_optional(kind, responses::parse_device_settings(bytes)),
         "encoding_status" => serialize_optional(kind, responses::parse_encoding_status(bytes)),
@@ -167,6 +170,9 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
         ),
         "receiver_port_ranges" => {
             serialize_optional(kind, responses::parse_receiver_port_ranges(bytes))
+        }
+        "directional_audio_availability" => {
+            serialize_optional(kind, responses::parse_directional_audio_availability(bytes))
         }
         "result_code" => serialize_optional(kind, responses::parse_result_code(bytes)),
         "receiver_channel_name_protocol" => {

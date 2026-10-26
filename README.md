@@ -47,6 +47,51 @@ three platforms, including native libraries and installed Python packages.
 - **Audio flows:** inspect receive and transmit flows, plan and manage supported
   native Dante multicast transmit flows, discover advertised AES67 audio
   streams, and subscribe compatible receivers to them.
+- **Native audio reception:** record an existing native-v2 multicast PCM flow
+  with `netaudio audio receive`. Supply its established sender, multicast
+  destination, local interface address and format. Recordings preserve raw
+  datagrams and sample timestamps alongside PCM WAVE files; discontinuities
+  start separate files. This receives audio without changing device routes or
+  playing it through local speakers. See `netaudio audio receive --help`.
+  `netaudio audio inspect` reads the current packetization, latency and named
+  clock-domain properties from an explicit device ARC endpoint.
+  `netaudio audio receive-unicast` allocates one source flow using an explicit
+  admitted session context, records it, and attempts one owned STOP. It preserves
+  allocation outcomes and uncertain cleanup without retrying mutations. See
+  `netaudio audio receive-unicast --help` for the required session fields.
+  On Linux, `netaudio audio serve --configuration endpoint.json` runs the
+  virtual source in the foreground, publishing two 48 kHz/24-bit channels
+  from a finite stereo WAVE file. See `serve --help` for the explicit interface
+  and clock configuration. The process needs permission to bind PTP ports 319
+  and 320, such as Linux `CAP_NET_BIND_SERVICE`. Receiver acquisition is still being implemented;
+  actual Dante Controller and device compatibility is not yet qualified.
+- **Desktop video adapters (Linux X11):** `netaudio video share --desktop`
+  captures a desktop or, with `--window`, one application window. A receiving
+  `netaudio video listen` can display it fullscreen or feed an existing
+  V4L2 loopback camera for OBS. Both commands use explicit peer addresses;
+  see their `--help` for the connection options. These direct sessions are
+  video-only. Dante Controller and NetAudio routing-inventory integration is
+  still pending. The video build also requires SDL2; camera output requires
+  an installed V4L2 loopback device. Press F to toggle fullscreen and Escape
+  to close the viewer and session.
+- **Configured H.264 reception:** `netaudio video receive --configuration
+  session.json --output recording --duration 10` records a current, explicitly
+  configured Studio-compatible stream as NV12 frames with source identities and
+  local arrival/deadline metadata. Supply exact endpoints, RTP identity,
+  compatible SPS/PPS, image format, authority expiry and finite limits. Supports
+  progressive eight-bit 4:2:0 I/P pictures; automatic stream acquisition and
+  synchronized display are not implemented. On Linux, build with `NETAUDIO_VIDEO=1` and
+  GStreamer development libraries; runtime plugins must provide `h264parse`,
+  `avdec_h264` and `videoconvert`. `netaudio video session-schema` prints the
+  required JSON structure; see `netaudio video receive --help` for usage.
+- **Configured H.264 transmission:** `netaudio video transmit --configuration
+  source.json --input frames.bgra --output transmission --duration 10` encodes
+  finite, tightly packed 1920×1080 BGRA frames at 30 fps and sends RTP to one
+  explicitly configured unicast receiver. `netaudio video transmit-schema`
+  describes the source configuration. Use `--prepare-only` first to obtain
+  actual SPS/PPS in `parameters.json` without sending media. The video build
+  also needs `openh264enc` and `rtph264pay`. Stream allocation, discovery and
+  remote decoding/display verification remain separate.
 - **Device metering and monitoring:** live signal levels, clock status, interface
   statistics and errors, device diagnostics, monitoring issues, and event
   history through the CLI, API, and browser.

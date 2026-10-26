@@ -4,14 +4,13 @@ import json
 import urllib.error
 import urllib.request
 
-from netaudio.daemon.http.mcp_apps import APP_MIME_TYPE, UI_EXTENSION
-from netaudio.daemon.http.mcp_protocol import (
-    META_CLIENT_CAPABILITIES,
-    META_PROTOCOL_VERSION,
-    MODERN_PROTOCOL_VERSION,
-)
 from netaudio.daemon.mcp_access import ensure_mcp_token
 
+UI_EXTENSION = "io.modelcontextprotocol/ui"
+APP_MIME_TYPE = "text/html;profile=mcp-app"
+META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
+META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
+MODERN_PROTOCOL_VERSION = "2026-07-28"
 DAEMON_HOST = "127.0.0.1"
 META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
 CLIENT_INFO = {"name": "netaudio daemon mcp-call", "version": "1"}

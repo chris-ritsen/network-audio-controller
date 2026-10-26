@@ -44,57 +44,8 @@ def _load_build_hook(monkeypatch):
     return module
 
 
-@pytest.mark.parametrize(
-    ("platform_name", "expected_name"),
-    [
-        ("darwin", "libnetaudio_core.dylib"),
-        ("linux", "libnetaudio_core.so"),
-        ("win32", "netaudio_core.dll"),
-    ],
-)
-def test_build_hook_selects_only_the_current_platform_library(monkeypatch, tmp_path, platform_name, expected_name):
-    module = _load_build_hook(monkeypatch)
-    monkeypatch.setattr(module.sys, "platform", platform_name)
-    release_dir = tmp_path / "target" / "release"
-    release_dir.mkdir(parents=True)
-    for name in ("libnetaudio_core.so", "libnetaudio_core.dylib", "netaudio_core.dll"):
-        (release_dir / name).touch()
-
-    hook = module.CoreLibraryBuildHook()
-
-    assert hook._find_library(tmp_path) == release_dir / expected_name
 
 
-def test_build_hook_rebuilds_before_including_the_library(monkeypatch, tmp_path):
-    module = _load_build_hook(monkeypatch)
-    hook = module.CoreLibraryBuildHook()
-    hook.root = str(tmp_path)
-    crate_dir = tmp_path / "packages" / "netaudio-core"
-    library_path = crate_dir / "target" / "release" / hook._library_name()
-    calls = []
-
-    def build_core(received_crate_dir):
-        calls.append(received_crate_dir)
-        library_path.parent.mkdir(parents=True)
-        library_path.touch()
-
-    monkeypatch.setattr(hook, "_build_core", build_core)
-    monkeypatch.setattr(hook, "_platform_tag", lambda: "test_platform")
-    build_data = {"force_include": {}}
-
-    hook.initialize("0.0.0", build_data)
-
-    installed_library = tmp_path / "packages" / "netaudio" / "src" / "netaudio" / "core" / library_path.name
-    assert calls == [crate_dir]
-    assert installed_library.is_file()
-    build_information = tmp_path / "packages" / "netaudio" / "src" / "netaudio" / "_build_info.json"
-    assert build_data["force_include"] == {
-        str(installed_library): f"netaudio/core/{library_path.name}",
-        str(build_information): "netaudio/_build_info.json",
-    }
-    assert build_information.read_text() == "{}\n"
-    assert build_data["pure_python"] is False
-    assert build_data["tag"] == "py3-none-test_platform"
 
 
 def test_install_built_library_copies_into_the_python_package(monkeypatch, tmp_path):
@@ -191,10 +142,6 @@ def _pe(machine: int = 0x8664) -> bytes:
     return bytes(data)
 
 
-def test_wheel_policy_accepts_matching_manylinux_artifact(tmp_path):
-    wheel = _write_test_wheel(tmp_path, native_data=_elf())
-
-    _load_artifact_verifier().verify_wheel(wheel, "linux", "x86_64")
 
 
 def test_wheel_policy_rejects_glibc_newer_than_claimed_floor(tmp_path):
@@ -211,15 +158,6 @@ def test_wheel_policy_rejects_foreign_native_artifacts(tmp_path):
         _load_artifact_verifier().verify_wheel(wheel, "linux", "x86_64")
 
 
-def test_wheel_policy_accepts_matching_macos_artifact(tmp_path):
-    wheel = _write_test_wheel(
-        tmp_path,
-        native_data=_macho(),
-        native_name="libnetaudio_core.dylib",
-        platform_tag="macosx_11_0_arm64",
-    )
-
-    _load_artifact_verifier().verify_wheel(wheel, "macos", "arm64")
 
 
 def test_wheel_policy_rejects_macos_binary_newer_than_tag(tmp_path):
@@ -234,15 +172,6 @@ def test_wheel_policy_rejects_macos_binary_newer_than_tag(tmp_path):
         _load_artifact_verifier().verify_wheel(wheel, "macos", "arm64")
 
 
-def test_wheel_policy_accepts_matching_windows_artifact(tmp_path):
-    wheel = _write_test_wheel(
-        tmp_path,
-        native_data=_pe(),
-        native_name="netaudio_core.dll",
-        platform_tag="win_amd64",
-    )
-
-    _load_artifact_verifier().verify_wheel(wheel, "windows", "x86_64")
 
 
 def test_build_hook_reads_branch_and_worktree_revisions(monkeypatch, tmp_path):

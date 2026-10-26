@@ -144,6 +144,33 @@ pub fn parse_lock_result(auth_response: &[u8]) -> Option<LockResult> {
     })
 }
 
+pub fn parse_challenge_response(response: &[u8], sequence: u16) -> Option<Vec<u8>> {
+    correlated_response(response, sequence, 0x2FFE)?;
+    if crate::bytes::read_u16(response, 20)? < 16 {
+        return None;
+    }
+    parse_nonce(response)
+}
+
+pub fn parse_authentication_response(response: &[u8], sequence: u16) -> Option<LockResult> {
+    correlated_response(response, sequence, 0x2FFF)?;
+    parse_lock_result(response)
+}
+
+fn correlated_response(response: &[u8], sequence: u16, operation: u16) -> Option<()> {
+    let header = crate::protocol::diagnostic_packet_header(response)?;
+    let message_length = usize::from(crate::bytes::read_u16(response, 8)?);
+    if header.family != "ddp_lock"
+        || header.transaction_id != Some(sequence)
+        || header.opcode != operation
+        || message_length < 12
+        || message_length.checked_add(8)? != response.len()
+    {
+        return None;
+    }
+    Some(())
+}
+
 pub fn lock_operation(
     device_ip: IpAddr,
     local_ip: IpAddr,

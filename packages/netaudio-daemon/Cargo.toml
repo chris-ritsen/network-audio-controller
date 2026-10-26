@@ -1,0 +1,80 @@
+[package]
+name = "netaudio-daemon"
+version = "0.4.2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum = { version = "0.8.9", features = ["http1", "http2", "json", "query", "tokio"] }
+base64 = "0.22"
+bytes.workspace = true
+caseless = "0.2.2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+if-addrs = "0.15"
+fs4 = "1"
+flate2 = "1"
+futures-core = "0.3"
+futures-util = "0.3"
+hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
+hostname = "0.4"
+hex = "0.4"
+if-watch = { version = "3.2.2", default-features = false, features = ["tokio"] }
+jsonschema = { version = "0.59", default-features = false }
+mdns-sd = "=0.21.5"
+netaudio-core = { path = "../netaudio-core", features = ["schema"] }
+notify = "8.2"
+pbkdf2 = "0.12"
+percent-encoding = "2"
+rand = "0.8"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-manual-roots"] }
+redis = { version = "=1.7.1", default-features = false, features = ["tokio-rustls-comp"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+rustls-pemfile = "2"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+schemars = "=1.2.1"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+socket2 = { version = "0.6", features = ["all"] }
+strsim = "0.11"
+subtle = "2"
+tar = "0.4.45"
+tempfile = "3"
+time = "0.3"
+tokio.workspace = true
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+tokio-util = { version = "0.7", features = ["rt", "time"] }
+toml = { version = "0.9", features = ["preserve_order"] }
+toml_edit = "0.25"
+tower = "0.5"
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+x509-parser = "0.18"
+
+[build-dependencies]
+anyhow = "1"
+flate2 = "1"
+serde_json = "1"
+sha2 = "0.10"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+netlink-packet-core = "0.8.2"
+netlink-packet-route = "0.28"
+netlink-sys = "0.8.8"
+sd-notify = "0.5"
+tracing-journald = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+blake2 = "0.10.6"
+nix = { version = "0.30", features = ["net", "socket", "uio"] }
+zbus = { version = "=5.19.0", default-features = false, features = ["tokio"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock", "Win32_System_IO"] }

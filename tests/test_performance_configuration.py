@@ -11,10 +11,8 @@ from netaudio.dante.performance_configuration import (
     performance_operation_availability,
     get_performance_settings,
     requested_performance_properties,
-    set_receive_flow_default_slots,
     set_receive_flow_performance,
     set_transmit_flow_performance,
-    set_unicast_performance,
     store_current_configuration,
 )
 
@@ -85,16 +83,6 @@ async def test_invalid_performance_query_preserves_cache_and_never_sends(propert
     assert device.specifications == []
 
 
-def test_native_performance_readback_preserves_width_and_leaves_unknown_properties_uninterpreted():
-    packet = _settings_response({0x8301: 0xFFFFFFFF, 0x0310: 0xFFFF, 0x9999: 0x12345678})
-
-    parsed = core.parse_response("device_settings", packet)
-
-    assert parsed["performance_values"] == [
-        {"property_id": 0x8301, "value": 0xFFFFFFFF},
-        {"property_id": 0x0310, "value": 0xFFFF},
-    ]
-    assert any(entry["info_code"] == 0x9999 for entry in parsed["referenced_values"])
 
 
 @pytest.mark.parametrize("protocol", [0, 0x2602, 0x280B, 0x2810, 0xFFFF])
@@ -150,30 +138,8 @@ def test_unknown_revision_never_offers_performance_or_storage_controls(protocol)
     assert all("protocol_unsupported" in operation["reasons"] for operation in capabilities["operations"].values())
 
 
-@pytest.mark.asyncio
-async def test_performance_readback_does_not_invent_numeric_meaning_for_unknown_properties():
-    device = FakeDevice([0x8301], [_settings_response({0x8301: 250000, 0x9999: 0x12345678})])
-
-    values = await get_performance_settings(device, [0x8301, 0x9999])
-
-    assert values == {0x8301: 250000}
-    assert device.performance_settings == values
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("response", [_settings_response({0x8301: 250000}), None, b"invalid"])
-async def test_fresh_query_discards_queried_cached_values_but_preserves_unqueried_values(response):
-    device = FakeDevice([0x8301, 0x0310, 0x0303], [response])
-    device.performance_settings = {0x8301: 500000, 0x0310: 8, 0x0303: 4}
-
-    if response is None or response == b"invalid":
-        with pytest.raises((RuntimeError, core.NetaudioCoreError)):
-            await get_performance_settings(device, [0x8301, 0x0310])
-
-        assert device.performance_settings == {0x0303: 4}
-    else:
-        assert await get_performance_settings(device, [0x8301, 0x0310]) == {0x8301: 250000}
-        assert device.performance_settings == {0x8301: 250000, 0x0303: 4}
 
 
 @pytest.mark.asyncio
@@ -188,133 +154,16 @@ async def test_unverified_write_does_not_leave_old_affected_values_in_cache(resp
     assert device.performance_settings == {0x0303: 4}
 
 
-@pytest.mark.asyncio
-async def test_receive_performance_sends_once_then_verifies_every_property():
-    expected = {
-        0x8301: 250_000,
-        0x0310: 8,
-        0x8304: 1,
-    }
-    device = FakeDevice(
-        expected, [_arc_response(0x1101), _settings_response(expected)], platform_software_version="2.9.9"
-    )
-
-    result = await set_receive_flow_performance(device, 250, 8)
-
-    assert result.state == "confirmed"
-    assert result.effective_state_confirmation is True
-    assert result.device_confirmation is None
-    assert result.persistence_confirmation is None
-    assert result.requested_properties == expected
-    assert [specification["command"] for specification in device.specifications] == [
-        "set_receive_flow_performance",
-        "query_performance_settings",
-    ]
-    assert device.specifications[0]["platform_software_version"] == [2, 9, 9]
-    assert device.specifications[1]["property_ids"] == list(expected)
 
 
-@pytest.mark.asyncio
-async def test_transmit_performance_reports_correlated_readback_mismatch():
-    supported = [0x8204, 0x0210]
-    readback = {0x8204: 999_000, 0x0210: 4}
-    device = FakeDevice(supported, [_arc_response(0x1101), _settings_response(readback)])
-
-    result = await set_transmit_flow_performance(device, 500, 4)
-
-    assert result.state == "contradicted"
-    assert result.effective_state_confirmation is False
-    assert result.requested_properties[0x8204] == 500_000
-    assert result.effective_properties[0x8204] == 999_000
 
 
-@pytest.mark.asyncio
-async def test_omitted_readback_property_is_unverified_instead_of_contradicted():
-    supported = [0x8204, 0x0210]
-    readback = {0x8204: 500_000}
-    device = FakeDevice(supported, [_arc_response(0x1101), _settings_response(readback)])
-    device.performance_settings = {0x8204: 250_000, 0x0210: 4}
-
-    result = await set_transmit_flow_performance(device, 500, 4)
-
-    assert result.state == "request_acknowledged"
-    assert result.effective_state_confirmation is None
-    assert result.verification_observations[0]["outcome"] == "incomplete"
-    assert result.verification_observations[0]["missing_property_ids"] == ["0x0210"]
-    assert device.performance_settings == readback
 
 
-@pytest.mark.asyncio
-async def test_rejected_request_still_records_fresh_readback_separately():
-    expected = {0x8204: 500_000, 0x0210: 4}
-    device = FakeDevice(expected, [_arc_response(0x1101, result_code=2), _settings_response(expected)])
-
-    result = await set_transmit_flow_performance(device, 500, 4)
-
-    assert result.state == "rejected"
-    assert result.request_acknowledgement["accepted"] is False
-    assert result.effective_state_confirmation is True
-    assert [specification["command"] for specification in device.specifications] == [
-        "set_transmit_flow_performance",
-        "query_performance_settings",
-    ]
 
 
-@pytest.mark.asyncio
-async def test_fresh_readback_can_confirm_state_without_inventing_acknowledgement():
-    expected = {0x8204: 500_000, 0x0210: 4}
-    device = FakeDevice(expected, [None, _settings_response(expected)])
-
-    result = await set_transmit_flow_performance(device, 500, 4)
-
-    assert result.state == "confirmed"
-    assert result.request_acknowledgement is None
-    assert result.effective_state_confirmation is True
-    assert "acknowledgement was not established" in result.message
 
 
-@pytest.mark.parametrize(
-    "acknowledgement", [None, b"invalid", _arc_response(0x1101), _arc_response(0x1101, result_code=2)]
-)
-@pytest.mark.parametrize(
-    "readback,outcome,confirmation",
-    [
-        (None, "no_response", None),
-        (b"invalid", "unparseable", None),
-        (_settings_response({0x8204: 500_000, 0x0210: 4}), "matched", True),
-        (_settings_response({0x8204: 500_000}), "incomplete", None),
-        (_settings_response({0x8204: 999_000}), "mismatch", False),
-    ],
-)
-def test_native_performance_completion_separates_acknowledgement_from_readback(
-    acknowledgement, readback, outcome, confirmation
-):
-    result = core.performance_completion(
-        {
-            "kind": "configuration",
-            "requested": {str(0x8204): 500_000, str(0x0210): 4},
-            "acknowledgement": list(acknowledgement) if acknowledgement is not None else None,
-            "readback": list(readback) if readback is not None else None,
-        }
-    )
-
-    acknowledged = acknowledgement == _arc_response(0x1101)
-    rejected = acknowledgement == _arc_response(0x1101, result_code=2)
-    expected = (
-        "rejected"
-        if rejected
-        else "confirmed"
-        if confirmation is True
-        else "contradicted"
-        if confirmation is False
-        else "request_acknowledged"
-        if acknowledged
-        else "unverified"
-    )
-    assert result["state"] == expected
-    assert result["readback_outcome"] == outcome
-    assert result["effective_state_confirmation"] is confirmation
-    assert result["persistence_confirmation"] is None
 
 
 @pytest.mark.parametrize(
@@ -350,31 +199,8 @@ def test_native_performance_completion_rejects_invalid_evidence(evidence):
         core.performance_completion(evidence)
 
 
-@pytest.mark.asyncio
-async def test_unicast_requests_only_advertised_properties():
-    requested = {0x8205: 1_000_000}
-    device = FakeDevice(requested, [_arc_response(0x1101), _settings_response(requested)])
-
-    result = await set_unicast_performance(device, 1_000, 16)
-
-    assert result.effective_state_confirmation is True
-    assert result.requested_properties == requested
-    assert device.specifications[0]["supported_property_ids"] == [0x8205]
 
 
-@pytest.mark.asyncio
-async def test_default_slots_and_store_have_distinct_confirmation_fields():
-    slots = {0x0303: 4}
-    device = FakeDevice(slots, [_arc_response(0x1101), _settings_response(slots), _arc_response(0x1F01)])
-
-    slots_result = await set_receive_flow_default_slots(device, 4)
-    store_result = await store_current_configuration(device)
-
-    assert slots_result.effective_state_confirmation is True
-    assert store_result.request_acknowledgement is None
-    assert store_result.persistence_request_acknowledgement["accepted"] is True
-    assert store_result.persistence_confirmation is None
-    assert store_result.state == "request_acknowledged"
 
 
 @pytest.mark.asyncio

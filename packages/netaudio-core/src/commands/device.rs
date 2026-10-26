@@ -11,8 +11,26 @@ pub fn build_device_info_for_protocol(
     build_common_device_query(protocol_id, OPCODE_DEVICE_INFO, &[0x00, 0x00], message_id)
 }
 
+pub fn build_structured_device_identity_query(
+    protocol_id: u16,
+    message_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    if !crate::protocol::is_supported_arc_protocol(protocol_id) {
+        return Err(NetaudioError::UnsupportedProtocolOperation);
+    }
+
+    arc_packet_with_reserved_word(protocol_id, OPCODE_DEVICE_INFO, &[], message_id)
+}
+
 pub fn build_device_name(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_control_packet(OPCODE_DEVICE_NAME, &[0x00, 0x00], message_id)
+    build_device_name_for_protocol(crate::protocol::PROTOCOL_ID, message_id)
+}
+
+pub fn build_device_name_for_protocol(
+    protocol_id: u16,
+    message_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    build_common_device_query(protocol_id, OPCODE_DEVICE_NAME, &[0x00, 0x00], message_id)
 }
 
 pub fn build_channel_count(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
@@ -52,10 +70,7 @@ fn build_common_device_query(
     body: &[u8],
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    if !matches!(
-        protocol_id,
-        crate::protocol::PROTOCOL_ID | crate::protocol::PROTOCOL_ARC_2809
-    ) {
+    if !crate::protocol::COMMON_ARC_PROTOCOL_IDS.contains(&protocol_id) {
         return Err(NetaudioError::UnsupportedProtocolOperation);
     }
     build_control_packet_for_protocol(protocol_id, opcode, body, message_id)
@@ -104,12 +119,36 @@ pub fn build_transmitters_from(
     starting_channel: u16,
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    if starting_channel == 0 {
+    build_transmitters_range(starting_channel, 0, message_id)
+}
+
+pub fn build_transmitters_range(
+    first_channel: u16,
+    last_channel: u16,
+    message_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    build_transmitters_range_for_protocol(
+        crate::protocol::PROTOCOL_ID,
+        first_channel,
+        last_channel,
+        message_id,
+    )
+}
+
+pub fn build_transmitters_range_for_protocol(
+    protocol_id: u16,
+    first_channel: u16,
+    last_channel: u16,
+    message_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    if first_channel == 0 || (last_channel != 0 && last_channel < first_channel) {
         return Err(NetaudioError::InvalidChannel);
     }
-    build_control_packet(
+
+    build_common_device_query(
+        protocol_id,
         OPCODE_TX_CHANNEL_INFO,
-        &channel_query_payload(starting_channel),
+        &channel_range_query_payload(first_channel, last_channel),
         message_id,
     )
 }

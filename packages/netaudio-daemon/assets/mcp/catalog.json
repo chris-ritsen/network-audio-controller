@@ -1,0 +1,5745 @@
+{
+  "tools": [
+    {
+      "name": "apply_device_control",
+      "path": "/device-controls",
+      "description": "Apply a device panel change: an AVIO Bluetooth name, discoverability or clearing remembered phones, AVIO analog levels, or Dante AV video settings. Takes the same arguments as plan_device_control; clearing remembered phones also needs confirm_clear=true.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "category": {
+            "type": "string",
+            "description": "Setting from inspect_device_controls."
+          },
+          "requested": {
+            "description": "New value, in the same forms plan_device_control accepts."
+          },
+          "confirm_clear": {
+            "type": "boolean",
+            "default": false,
+            "description": "Required to clear remembered Bluetooth phones, which cannot be undone."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "category",
+          "requested"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {
+        "action": "apply"
+      },
+      "meta": {}
+    },
+    {
+      "name": "apply_preset",
+      "path": "/presets/load",
+      "description": "Apply a Dante Controller or netaudio preset. Each preset device goes to the network device with the same name unless targets says otherwise; preset devices with no match are skipped. Writes routing, audio settings and network configuration; network changes may require a reboot.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "preset": {
+            "type": "string",
+            "description": "Name of a preset saved on the server (list_presets)."
+          },
+          "xml": {
+            "type": "string",
+            "description": "Preset XML as exported by Dante Controller, instead of preset."
+          },
+          "targets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Preset device name to the network device it should be applied to."
+          },
+          "skip": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Preset device names to leave out."
+          },
+          "digest": {
+            "type": "string",
+            "description": "Digest from preview_preset, to make sure the XML is unchanged."
+          },
+          "confirm_destructive": {
+            "type": "boolean",
+            "description": "Set true only after the user accepted that a sample-rate change may remove transmit flow channels."
+          },
+          "store_current_configuration": {
+            "type": "boolean",
+            "description": "Also store the result as each device's saved configuration."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "apply_to_devices",
+      "path": "",
+      "description": "Run one write operation on every device matching a filter, such as locking all unmanaged devices with one PIN. Call without token to preview which devices match and why others are skipped; then call again with the preview's token and confirmed=true. Each device reports its own result.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "description": "A write operation that takes a device argument, such as lock_device or set_latency."
+          },
+          "where": {
+            "type": "object",
+            "description": "Devices to include; every given condition must match.",
+            "properties": {
+              "devices": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "management": {
+                "type": "string",
+                "enum": [
+                  "managed",
+                  "unmanaged"
+                ]
+              },
+              "model": {
+                "type": "string",
+                "description": "Text found in the model or product name, ignoring case, such as avio or AD4D."
+              },
+              "manufacturer": {
+                "type": "string"
+              },
+              "online": {
+                "type": "boolean"
+              },
+              "locked": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "arguments": {
+            "type": "object",
+            "description": "The operation's arguments other than device."
+          },
+          "token": {
+            "type": "string",
+            "description": "Token returned by the preview; required to apply."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          }
+        },
+        "required": [
+          "operation",
+          "where"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": false,
+      "confirmable": false,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "clear_configuration",
+      "path": "/clear-configuration",
+      "description": "Clear a device's stored configuration: everything, or everything except its network settings. Some devices apply the clear only when they reboot, so set reboot to apply it now.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "keep_network"
+            ]
+          },
+          "reboot": {
+            "type": "boolean",
+            "default": false
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "configure_clock",
+      "path": "/set-clock-configuration",
+      "description": "Set advertised clock controls with readback: source, preferred leader, subdomain, or delay requests. Inspect clock status first.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "changes": {
+            "type": "object",
+            "minProperties": 1,
+            "description": "Clock control fields and values supported by this device."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "changes"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "configure_flow_performance",
+      "path": "/set-receive-flow-performance",
+      "description": "Set receive, transmit, or unicast flow latency and frames per packet on a device.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "receive",
+              "transmit",
+              "unicast"
+            ]
+          },
+          "latency_microseconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "frames_per_packet": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "kind",
+          "latency_microseconds",
+          "frames_per_packet"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "configure_monitoring_port",
+      "path": "/settings/monitoring",
+      "description": "Change the daemon's monitoring port; requires an available port and persists the setting.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "port"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "connect_audio_ports",
+      "path": "/host-audio/jack/connect",
+      "description": "Connect a JACK output port to an input port on this computer, such as a sound card capture channel to an application or a PulseAudio input. Ports accept names or aliases. The result reads the graph back and says if another JACK client undid the change.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Output port, such as system:capture_1."
+          },
+          "destination": {
+            "type": "string",
+            "description": "Input port, such as jack_in:front-left."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "create_ddm_domain",
+      "path": "/ddm/domains",
+      "description": "Create a domain on a logged-in DDM server.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "server",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "create_transmit_flow",
+      "path": "/transmit-flows/create",
+      "description": "Create a multicast transmit flow. The specification is the same as plan_transmit_flow's; call without confirmed to see the plan.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "specification": {
+            "type": "object",
+            "description": "Transmit flow specification (see plan_transmit_flow)."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "specification"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "delete_transmit_flow",
+      "path": "/transmit-flows/delete",
+      "description": "Delete a multicast transmit flow by its global flow identifier.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "flow_id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "flow_id"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "disconnect_audio_ports",
+      "path": "/host-audio/jack/disconnect",
+      "description": "Disconnect a JACK output port from an input port on this computer.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Output port."
+          },
+          "destination": {
+            "type": "string",
+            "description": "Input port."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "discover_tools",
+      "path": "",
+      "description": "Find NetAudio operations by name or purpose. Use include_schema for exact arguments before invoking one.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Words in an operation name or description, a category name, or an exact operation name; omit to list every operation by category."
+          },
+          "include_schema": {
+            "type": "boolean",
+            "default": false
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "edit_ddm_profile",
+      "path": "/ddm/profile",
+      "description": "Edit or remove a saved DDM server profile. Login credentials are managed separately.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "edit",
+              "remove"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "server",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "factory_reset",
+      "path": "/factory-reset",
+      "description": "Return a device to factory settings. It reboots and loses its name, routes and network settings.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "find_channels",
+      "path": "/devices",
+      "description": "Find anything that carries audio by name, such as 'tv speakers', 'vrroom' or 'chromium': Dante channels across the network, plus Shure wireless channels and the JACK ports, PulseAudio inputs, outputs and application streams on every computer running netaudio. Each match shows what feeds it, where it goes and whether it has signal right now; a channel on an offline device says so.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Words in a channel label or device name."
+          },
+          "channel_type": {
+            "type": "string",
+            "enum": [
+              "any",
+              "rx",
+              "tx"
+            ],
+            "default": "any"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "forget_device",
+      "path": "/devices/{device}",
+      "description": "Forget a device that is off the network so it no longer appears in the device list. Use it when the user, or you, decide the device no longer matters, such as gear that was attached for a while and then removed. A forgotten device comes back by itself if it returns to the network. Routes on other devices that point at it stay as they are, and the reply lists them. every_device_off forgets every device that is off, including ones enrolled in Dante Domain Manager.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "every_device_off": {
+            "type": "boolean",
+            "description": "Forget every device that is off the network instead of one."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "DELETE",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_clock_status",
+      "path": "/devices",
+      "description": "Clock synchronisation across the whole network in one call: every device's role, leader, lock state, preferred-leader flag and frequency offset, grouped by clock domain (each Dante Domain Manager domain and the unmanaged devices form separate domains with their own leader).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "debug"
+            ],
+            "default": "compact",
+            "description": "Use debug only when raw clock records are needed."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_ddm_connections",
+      "path": "/ddm/connections",
+      "description": "Configured DDM server profiles, contexts, and default context without credentials.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_ddm_domains",
+      "path": "/ddm/domains",
+      "description": "Dante Domain Manager domains with their health and enrolled devices: each device's product, enrollment, connection and any alert. Debug returns the raw DDM records.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "debug"
+            ],
+            "default": "compact"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_ddm_status",
+      "path": "/ddm/status",
+      "description": "Connection state of configured Dante Domain Manager servers and their domains.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_device",
+      "path": "/devices/{device}",
+      "description": "Details for one device. Pick sections to keep the answer small: summary (identity, address, rate, latency, clock, subscription problems), channels (custom rx and tx channel names by number; channels still on factory names are listed as number ranges), subscriptions (only receive channels that have a route, with its status; a receive channel absent here is unsubscribed), network (interfaces and redundancy), availability (which operations are writable and why not), flows (transmit and receive flows), or full for the raw record.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "availability",
+                "channels",
+                "flows",
+                "full",
+                "network",
+                "subscriptions",
+                "summary"
+              ]
+            },
+            "default": [
+              "summary"
+            ]
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {
+        "sections": [
+          "summary"
+        ]
+      },
+      "meta": {}
+    },
+    {
+      "name": "get_device_diagnostics",
+      "path": "/diagnostics/{device}",
+      "description": "Measured receive-flow latency against its budget, late packets, and clock state and offset, from what the server has observed since it started. Give a device for its flows, or leave it out for one line per device across the network. Counters are not reset.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "debug"
+            ],
+            "default": "compact"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_device_record",
+      "path": "/devices/{device}",
+      "description": "Raw fields of one device's record, such as receiver_flow_connection_health or clock_observations. Use it for fields get_device full lists as omitted, or to read a few raw fields without the rest.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Top-level field names from get_device full."
+          }
+        },
+        "required": [
+          "device",
+          "fields"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_event_journal",
+      "path": "/event-journal",
+      "description": "Recent monitoring events, newest first. Repeated observations are grouped by default; filter by device or kind, page with before_sequence, or request debug detail.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "before_sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Return older events with sequence below this value."
+          },
+          "collapse_repeats": {
+            "type": "boolean",
+            "default": true,
+            "description": "Group repeated observations of the same event target; set false for every event."
+          },
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "debug"
+            ],
+            "default": "compact",
+            "description": "Debug includes complete forensic event records."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Only events of this kind, for example receiver_flow_latency_high."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 20
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_external_flows",
+      "path": "/external-flows",
+      "description": "AES67 and RTP streams announced on the network by SAP.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_host_audio",
+      "path": "/host-audio",
+      "description": "A computer's audio: the JACK server (rate, buffer, xruns, clients, ports and connections), PulseAudio outputs, inputs and application streams, sound cards and which Dante device each card is, and recent changes. It reads this server's computer unless host names another one, such as studio-pc. Pick a section; client narrows connections and ports to one JACK client.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "connections",
+              "ports",
+              "pulse",
+              "cards",
+              "changes"
+            ],
+            "default": "summary"
+          },
+          "client": {
+            "type": "string",
+            "description": "A JACK client name, such as system or jack_out."
+          },
+          "host": {
+            "type": "string",
+            "description": "Another computer running netaudio, such as studio-pc; defaults to this server's computer."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_issues",
+      "path": "/issues",
+      "description": "Problems detected on the network, grouped by kind and device, worst first. A failing route group names the transmitting device behind each channel. Devices that are off the network and routes waiting for them are not problems and are left out; get_routing with status waiting lists those routes, and naming an off device here shows its last report. Defaults to open issues; set state to resolved or all for history. Filter by device and page with limit; debug lists every issue separately.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "debug"
+            ],
+            "default": "compact"
+          },
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 50
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "all",
+              "open",
+              "resolved"
+            ],
+            "default": "open"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_metering_status",
+      "path": "/metering/status",
+      "description": "Whether detailed metering is available and which devices are being metered.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_network_overview",
+      "path": "/devices",
+      "description": "One compact snapshot of the devices on the network, clock leaders, problems and Dante Domain Manager state. Devices that are off the network are not problems and are left out; list_devices shows them with when they were last seen. Its answer field is a one-sentence reply to say first. Use focused tools for channels, routes or forensic detail.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_routing",
+      "path": "/devices",
+      "description": "All configured receive routes across the network, including unresolved ones, grouped by receiving device. Each line reads 'rx number rx label \u2190 tx channel on tx device'; multicast and self routes are marked, and failing routes give the reason. Channel numbers and labels both work in routing calls. Filter by receiving device, receive channel, or status.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "rx_channel": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer",
+                "minimum": 1
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "all",
+              "ok",
+              "problem",
+              "waiting"
+            ],
+            "default": "all",
+            "description": "waiting selects routes whose transmitting device is off the network; those are not problems."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_server_info",
+      "path": "/server-info",
+      "description": "This netaudio server's host, version and start time.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_signal_levels",
+      "path": "/metering/cache",
+      "description": "Whether audio is present. Without a device: for each device, the channels carrying signal with their dBFS level and how many are silent. With a device: the rx and tx channels with signal and their level, and the silent ones by name or number range. Devices with detailed metering are sampled on request. points measures named places anywhere in the chain instead: JACK ports, PulseAudio inputs, outputs and applications, Shure channels or Dante channels. Debug includes every channel and the raw meter codes. over_last_seconds, ending_at or listen_seconds report the recorded levels over a period instead of one sample, which is what to use for sound that comes and goes.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Places to measure, such as system:capture_1, default input, Discord or Wireless receiver ch1; put another computer's name first for its points, such as studio-pc default input."
+          },
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "debug"
+            ],
+            "default": "compact"
+          },
+          "over_last_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400,
+            "description": "Summarize the levels recorded over this many seconds instead of sampling once: how many seconds had signal, the loudest moment, when signal was last heard and a peak timeline. Use it for sound that comes and goes, such as someone talking on a call. Levels are kept per second for 15 minutes and per minute for 24 hours."
+          },
+          "ending_at": {
+            "type": "string",
+            "description": "End of that period as an ISO time, such as 2026-10-02T23:00 for last night (local time unless it has an offset or Z); defaults to now."
+          },
+          "listen_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Wait this many seconds, then summarize what was heard during them."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_transmit_flows",
+      "path": "/transmit-flows/{device}",
+      "description": "One device's transmit flows: each flow's ID, unicast or multicast, where it goes and which channels it carries, plus the next free flow ID. Debug returns the raw inventory.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "debug"
+            ],
+            "default": "compact"
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "get_wireless_devices",
+      "path": "/shure/devices",
+      "description": "Shure wireless receivers and transmitters the server tracks: each channel's name, whether a transmitter is being received, frequency, level, and for receivers with one matching Dante device, the Dante output it appears on and what that feeds. Settings use the names and values set_wireless_value takes; AD4D levels are dBFS, while the P10T reports its input meter in its own units.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "identify",
+      "path": "/identify",
+      "description": "Flash the device's identify LED so someone can find it physically.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "inspect_device_controls",
+      "path": "/device-controls",
+      "description": "A device's own control panel, such as AVIO Bluetooth pairing and name or Dante AV video settings: current values and what can be changed. Devices without a panel say so.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "debug"
+            ],
+            "default": "compact"
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {
+        "action": "inspect"
+      },
+      "meta": {}
+    },
+    {
+      "name": "invoke_tool",
+      "path": "",
+      "description": "Run an operation found with discover_tools. The selected operation's write scope and confirmation rules apply.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Exact operation name from discover_tools."
+          },
+          "arguments": {
+            "type": "object",
+            "description": "Arguments matching that operation's input schema."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": false,
+      "confirmable": false,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "link_audio_card",
+      "path": "/host-audio/cards",
+      "description": "Record which Dante device a sound card on this computer is, such as a Dante PCIe card or an AVIO USB adapter, so traces continue from the card's channels into Dante. Leave device empty to remove the link. Saved in the server's configuration.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "card": {
+            "type": "string",
+            "description": "ALSA card ID from get_host_audio section=cards."
+          },
+          "device": {
+            "type": "string",
+            "description": "Dante device name; empty removes the link."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "card"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "list_devices",
+      "path": "/devices",
+      "description": "Every known device keyed by its name: product, address, online state, management (and DDM domain), sample rate, latency, channel counts, route count and any failing routes. A device that is off the network shows only its product and when it was last seen; forget_device removes ones that no longer matter. Any tool's device argument takes these names. Use get_device for channels, routes, network and operation availability.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "GET",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "list_presets",
+      "path": "/presets",
+      "description": "Presets saved on the server: name, devices and when each was saved.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "lock_device",
+      "path": "/lock",
+      "description": "Lock a device against configuration changes with a four digit PIN. Requires a device lock key on the server.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "pin": {
+            "type": "string",
+            "pattern": "^[0-9]{4}$"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "pin"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "login_ddm",
+      "path": "/ddm/login",
+      "description": "Log in to a DDM server and save the login under a profile name. An API key is the usual method; a password login needs the DDM user's email address, not a plain username. A failed login keeps the previously saved one.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string",
+            "description": "Profile name, such as lab."
+          },
+          "url": {
+            "type": "string",
+            "description": "Managed API URL, such as http://host/graphql; needed for a new profile."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "saved",
+              "password",
+              "api_key"
+            ]
+          },
+          "username": {
+            "type": "string",
+            "description": "The DDM user's email address."
+          },
+          "password": {
+            "type": "string"
+          },
+          "api_key": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "server",
+          "method"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "logout_ddm",
+      "path": "/ddm/logout",
+      "description": "Remove a DDM server's saved login and disconnect its managed inventory.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "server"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "move_audio_stream",
+      "path": "/host-audio/pulse/move",
+      "description": "Move an application's playback stream to another PulseAudio output, or a recording stream to another input.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "stream": {
+            "type": "string",
+            "description": "Application name or stream number."
+          },
+          "destination": {
+            "type": "string",
+            "description": "PulseAudio output or input name."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "stream",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "plan_device_control",
+      "path": "/device-controls",
+      "description": "Check a device panel change without applying it: an AVIO Bluetooth name, discoverability or clearing remembered phones, AVIO analog levels (category analog_level), or Dante AV video settings. inspect_device_controls lists each setting and what it accepts.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "category": {
+            "type": "string",
+            "description": "Setting from inspect_device_controls, such as bluetooth_identification, bluetooth_discovery, bluetooth_pairing or analog_level."
+          },
+          "requested": {
+            "description": "New value, for example \"Studio BT\" or \"Dante device name\" for the Bluetooth name, \"discoverable\" or \"not discoverable\", \"clear\", or {\"channel\": 1, \"level\": 3}."
+          }
+        },
+        "required": [
+          "device",
+          "category",
+          "requested"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {
+        "action": "plan"
+      },
+      "meta": {}
+    },
+    {
+      "name": "plan_transmit_flow",
+      "path": "/transmit-flows/plan",
+      "description": "Check whether a multicast transmit flow can be created on a device and how, without changing anything. The specification needs channels, a list of transmit channel numbers or labels, or channel_slots, a list of {slot, transmitter_channel} objects. media_mode defaults to native_dante, flow_type to multicast, and devices that need a flow ID get the lowest free one unless identity.global_flow_id is given.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "specification": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "device",
+          "specification"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "preview_preset",
+      "path": "/presets/preview",
+      "description": "List a preset's devices, the settings it holds for each, and which network devices match them.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Network devices to match against; all devices when omitted."
+          },
+          "preset": {
+            "type": "string",
+            "description": "Name of a preset saved on the server (list_presets)."
+          },
+          "xml": {
+            "type": "string",
+            "description": "Preset XML as exported by Dante Controller, instead of preset."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "reboot",
+      "path": "/reboot",
+      "description": "Reboot a device. Audio stops while it restarts and it may come back with a different address.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "refresh",
+      "path": "/refresh",
+      "description": "Re-read one device, or every device when no device is given.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "refresh_ddm",
+      "path": "/ddm/refresh",
+      "description": "Refresh a DDM context or the managed inventory without changing devices.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "refresh_discovery",
+      "path": "/discovery/refresh",
+      "description": "Request a fresh mDNS discovery scan, optionally targeting one address.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "rename_channel",
+      "path": "/rename-channel",
+      "description": "Set a transmit or receive channel's label. An empty name resets it to the device default. Renaming a transmit channel breaks routes on other devices that subscribe to it by its old label.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "description": "Channel number or unique label."
+          },
+          "channel_type": {
+            "type": "string",
+            "enum": [
+              "rx",
+              "tx"
+            ]
+          },
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 31
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "channel",
+          "channel_type",
+          "device",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "rename_device",
+      "path": "/rename-device",
+      "description": "Set a device's name. Other devices route to it by name, so renaming can break their subscriptions.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 31
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "report_unresponsive",
+      "path": "/report-unresponsive",
+      "description": "Mark an online device as an offline candidate after an independent failed reachability check.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "reset_device_diagnostics",
+      "path": "/diagnostics/reset",
+      "description": "Reset the daemon's diagnostic counters for one device.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "save_preset",
+      "path": "/presets/save",
+      "description": "Read devices' current configuration and save it as a named preset on the server, in the same preset directory the netaudio CLI uses. apply_preset restores it by name.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Device names."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "audio",
+                "device_controls",
+                "network",
+                "routing"
+              ]
+            },
+            "minItems": 1,
+            "default": [
+              "audio",
+              "routing"
+            ]
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "Overwrite a saved preset with the same name."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "devices",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "select_ddm_context",
+      "path": "/ddm/context",
+      "description": "Select a saved DDM context, or create and select one for a domain.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "string",
+            "description": "Saved context name."
+          },
+          "domain": {
+            "type": "string",
+            "description": "Domain name or ID, to create a context for it."
+          },
+          "server": {
+            "type": "string"
+          },
+          "domain_id": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_aes67",
+      "path": "/set-aes67",
+      "description": "Enable or disable AES67 mode on a device. Takes effect after a reboot.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_aes67_multicast_prefix",
+      "path": "/set-aes67-multicast-prefix",
+      "description": "Set the advertised AES67 multicast IPv4 prefix on a supporting device.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "prefix"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_audio_mute",
+      "path": "/host-audio/pulse/mute",
+      "description": "Mute or unmute a PulseAudio output, input or application stream on this computer.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "A PulseAudio output or input by name (jack_out, default output, default input), or an application's playback or recording stream by application name or stream number."
+          },
+          "mute": {
+            "type": "boolean"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "target",
+          "mute"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_audio_volume",
+      "path": "/host-audio/pulse/volume",
+      "description": "Set the volume of a PulseAudio output, input or application stream on this computer.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "A PulseAudio output or input by name (jack_out, default output, default input), or an application's playback or recording stream by application name or stream number."
+          },
+          "volume_percent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 150
+          },
+          "volume_db": {
+            "type": "number",
+            "maximum": 11
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_clock_source",
+      "path": "/set-clock-source",
+      "description": "Select an advertised clock source by its numeric code with readback.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "clock_source": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "clock_source"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_clock_subdomain",
+      "path": "/set-clock-subdomain",
+      "description": "Set a clock subdomain to an ASCII name, hex bytes, or 'unset' with readback.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "subdomain": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "subdomain"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_clock_warning_policy",
+      "path": "/diagnostics/policy",
+      "description": "Enable or disable clock variation warnings for one device.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "clock_variation_warnings": {
+            "type": "boolean"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "clock_variation_warnings"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_ddm_enrollment",
+      "path": "/ddm/enrollment",
+      "description": "Enroll a device in a Dante Domain Manager domain, or unenroll it. Name the device and domain; the server finds the DDM server, device ID and domain ID.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name as returned by list_devices."
+          },
+          "domain": {
+            "type": "string",
+            "description": "Domain name or ID; needed to enroll."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "enroll",
+              "unenroll"
+            ]
+          },
+          "server": {
+            "type": "string",
+            "description": "DDM server profile, when the device alone is ambiguous."
+          },
+          "device_id": {
+            "type": "string",
+            "description": "DDM device ID, instead of device."
+          },
+          "domain_id": {
+            "type": "string",
+            "description": "DDM domain ID, instead of domain."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_default_audio_device",
+      "path": "/host-audio/pulse/default",
+      "description": "Make a PulseAudio output or input the default for new application streams on this computer.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "A PulseAudio output or input name."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_encoding",
+      "path": "/set-encoding",
+      "description": "Set a device's audio encoding in bits: 16, 24 or 32. Only values in the device's supported_encodings are accepted.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "encoding": {
+            "type": "integer",
+            "enum": [
+              16,
+              24,
+              32
+            ]
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "encoding"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_gain",
+      "path": "/set-gain",
+      "description": "Set the analog gain level of an AVIO input or output channel. Levels 1 through 5 map to the labels in the device's gain_level_choices. An input adapter's channels are its transmit channels; an output adapter's are its receive channels.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "description": "Channel number or unique label."
+          },
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "device_type": {
+            "type": "string",
+            "enum": [
+              "input",
+              "output"
+            ]
+          },
+          "gain_level": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "channel",
+          "device",
+          "device_type",
+          "gain_level"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_interface",
+      "path": "/interface",
+      "description": "Configure a network interface for DHCP or a static address. Takes effect after a reboot; a wrong static address can make the device unreachable.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "dns": {
+            "type": "string"
+          },
+          "gateway": {
+            "type": "string"
+          },
+          "interface": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary"
+            ]
+          },
+          "ip": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "dhcp",
+              "static"
+            ]
+          },
+          "netmask": {
+            "type": "string"
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "interface",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_latency",
+      "path": "/set-latency",
+      "description": "Set a device's receive latency in milliseconds. Use one of the device's standard_latency_choices_ms.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "latency": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "latency"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_preferred_leader",
+      "path": "/set-preferred-leader",
+      "description": "Mark a device as preferred clock leader or clear that preference.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "preferred": {
+            "type": "boolean"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "preferred"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_receive_flow_default_slots",
+      "path": "/set-receive-flow-default-slots",
+      "description": "Set the default receive flow slot count supported by the device.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "default_slots": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "default_slots"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_redundancy",
+      "path": "/redundancy",
+      "description": "Set a device's Dante redundancy mode. Only modes listed in the device's network_redundancy.available_modes are accepted; takes effect after a reboot.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "redundant",
+              "split_redundant",
+              "switched"
+            ]
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_sample_rate",
+      "path": "/set-sample-rate",
+      "description": "Set a device's sample rate in hertz. Only values in the device's supported_sample_rates_hz are accepted. Devices subscribed to each other must share a sample rate, so changing one may break routes on others.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "sample_rate": {
+            "type": "integer",
+            "enum": [
+              44100,
+              48000,
+              88200,
+              96000,
+              176400,
+              192000
+            ]
+          },
+          "confirm_destructive": {
+            "type": "boolean",
+            "description": "Set true only after the user accepted that the device's transmit flows may lose channels at the new rate. Without it, the server refuses a change whose effect on those flows it cannot predict."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "sample_rate"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_sample_rate_pullup",
+      "path": "/set-sample-rate-pullup",
+      "description": "Set sample rate pull-up or pull-down. Use a value advertised by the device.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "value": {
+            "type": "string",
+            "enum": [
+              "none",
+              "+4.1667%",
+              "+0.1%",
+              "-0.1%",
+              "-4.0%"
+            ]
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_subscriptions",
+      "path": "/subscriptions/apply",
+      "description": "Set or clear any number of routes across any number of devices in one call. The server groups routes by receiving device and sends them in the largest batches each device accepts (16 per request for direct Dante control, 32 for newer firmware and managed devices), running devices in parallel. Give tx_device and tx_channel to route audio, or omit both to clear the receive channel. Prefer this over subscribe and unsubscribe for more than one route. The reply lists every route with ok true or an error.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "routes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "rx_channel": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "rx_device": {
+                  "type": "string"
+                },
+                "tx_channel": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  ]
+                },
+                "tx_device": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "rx_channel",
+                "rx_device"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "routes"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "set_wireless_value",
+      "path": "/shure/set",
+      "description": "Change a Shure wireless setting and read it back: channel name, gain (AD4D 0-60, where 18 is 0 dB), mute, frequency in MHz, group and channel, identify; on a P10T also rf_mute, rf_power, input_level and transmit_mode; device_name renames the unit.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Shure device name, IP or MAC, from get_wireless_devices."
+          },
+          "channel": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Channel number or name; omit for device settings."
+          },
+          "setting": {
+            "type": "string",
+            "description": "name, gain, mute, frequency, group_channel, identify, rf_mute, rf_power, input_level, transmit_mode, device_name, or a Shure command key. AD4D also supports network and transmitter slot settings."
+          },
+          "value": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "object"
+            ],
+            "description": "The requested value. Network settings use an object with interface SC, D1 or D2 and mode AUTO or MANUAL; MANUAL also requires address, subnet_mask and gateway."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "Transmitter slot for slot settings."
+          }
+        },
+        "required": [
+          "device",
+          "setting",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "show_routing_matrix",
+      "path": "",
+      "description": "Show the user the interactive routing matrix of every Dante device, where they can see and change subscriptions themselves, in apps that display MCP Apps views. Use it when the user wants to see or edit routing visually; it also returns the current routes as text. receivers and transmitters narrow the matrix to devices or channels whose names contain the text.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "receivers": {
+            "type": "string",
+            "description": "Show only receivers whose names contain this text."
+          },
+          "transmitters": {
+            "type": "string",
+            "description": "Show only transmitters whose names contain this text."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {
+        "ui": {
+          "resourceUri": "ui://netaudio/routing"
+        }
+      }
+    },
+    {
+      "name": "start_metering",
+      "path": "/metering/start",
+      "description": "Start detailed metering for one device for this MCP client; then read get_signal_levels.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "stop_metering",
+      "path": "/metering/stop",
+      "description": "Stop detailed metering started by this MCP client for one device.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "store_current_configuration",
+      "path": "/store-current-configuration",
+      "description": "Store the device's current settings in its persistent configuration.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "subscribe",
+      "path": "/subscribe",
+      "description": "Route (patch) a transmit channel from one device into a receive channel on another, replacing any route already feeding that receive channel. Channels accept a label or number; get_device with the channels section lists them.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "rx_channel": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Receive channel number or unique label on rx_device."
+          },
+          "rx_device": {
+            "type": "string",
+            "description": "Receiving device name."
+          },
+          "tx_channel": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer",
+                "minimum": 1
+              }
+            ],
+            "description": "Transmit channel name or number on tx_device."
+          },
+          "tx_device": {
+            "type": "string",
+            "description": "Transmitting device name."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "rx_channel",
+          "rx_device",
+          "tx_channel",
+          "tx_device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "subscribe_external_flow",
+      "path": "/external-flows/subscribe",
+      "description": "Subscribe a receiver to a fresh SAP-announced AES67 flow. Use get_external_flows for its source, session, and content digest.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "rx_device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "source_ipv4": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "content_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "receiver_channel_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "flow_slot_assignments": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "rx_device",
+          "source_ipv4",
+          "session_id",
+          "content_sha256"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "trace_signal",
+      "path": "/host-audio/trace",
+      "description": "Follow audio through the whole chain from any point: Shure wireless channels, Dante channels and routes, this computer's sound cards, JACK ports and connections, and PulseAudio inputs, outputs and application streams, on this computer and on other computers running netaudio. Lists upstream and downstream steps with bounded level observations and identifies measured transitions to silence. Internal application routing is labeled as inferred. Separate hosts and batches have separate capture windows; unavailable levels remain unknown. Use it to answer why something can't be heard. Its answer field is a one-sentence reply to say first; the rest is detail.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "point": {
+            "type": "string",
+            "description": "Where to start: a Shure channel (Wireless receiver ch1), a Dante device (every routed channel, such as Stagebox), a Dante channel (Soundcard rx 1), a JACK port or alias (system:capture_1), a PulseAudio input or output (jack_in, default input), an application (Discord), or a TV, which traces the output of the computer the TV is showing when that is known. The user's own words work too (studio laptop, wireless mic), matching names loosely, including devices that are off the network. Points on this server's computer need no prefix; put another computer's name first for its points, such as studio-pc default input."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "both",
+              "upstream",
+              "downstream"
+            ],
+            "default": "both"
+          },
+          "levels": {
+            "type": "boolean",
+            "default": true,
+            "description": "Measure levels at each step; about one second."
+          }
+        },
+        "required": [
+          "point"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": false,
+      "read_only": true,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "unlock_device",
+      "path": "/unlock",
+      "description": "Unlock a locked device using its PIN.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "pin": {
+            "type": "string",
+            "pattern": "^[0-9]{4}$"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "pin"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "unsubscribe",
+      "path": "/unsubscribe",
+      "description": "Remove the route feeding a receive channel, leaving it unsubscribed.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "rx_channel": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Receive channel number or unique label on rx_device."
+          },
+          "rx_device": {
+            "type": "string",
+            "description": "Receiving device name."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "rx_channel",
+          "rx_device"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    },
+    {
+      "name": "update_ddm_domain",
+      "path": "/ddm/domains/update",
+      "description": "Rename or remove a Dante Domain Manager domain, named by its name or ID.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "Domain name or ID."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "rename",
+              "remove"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "New name; needed to rename."
+          },
+          "server": {
+            "type": "string",
+            "description": "DDM server profile, when the domain name is ambiguous."
+          },
+          "domain_id": {
+            "type": "string",
+            "description": "Domain ID, instead of domain."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": true,
+      "method": "POST",
+      "requires_confirmation": true,
+      "read_only": false,
+      "confirmable": true,
+      "defaults": {},
+      "meta": {}
+    }
+  ],
+  "public_names": [
+    "discover_tools",
+    "find_channels",
+    "get_clock_status",
+    "get_device",
+    "get_device_diagnostics",
+    "get_event_journal",
+    "get_issues",
+    "get_network_overview",
+    "get_routing",
+    "get_server_info",
+    "get_signal_levels",
+    "invoke_tool",
+    "list_devices",
+    "set_subscriptions",
+    "show_routing_matrix",
+    "trace_signal"
+  ],
+  "resources": [
+    {
+      "uri": "netaudio://ddm/connections",
+      "path": "/ddm/connections",
+      "name": "Dante Domain Manager connections",
+      "description": "Configured DDM server profiles, contexts, and default context without credentials.",
+      "tool_name": "get_ddm_connections",
+      "tool_description": null,
+      "tool_properties": {}
+    },
+    {
+      "uri": "netaudio://ddm/domains",
+      "path": "/ddm/domains",
+      "name": "Dante Domain Manager domains",
+      "description": "Discovered managed domains and their identifiers.",
+      "tool_name": "get_ddm_domains",
+      "tool_description": "Dante Domain Manager domains with their health and enrolled devices: each device's product, enrollment, connection and any alert. Debug returns the raw DDM records.",
+      "tool_properties": {
+        "detail": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "debug"
+          ],
+          "default": "compact"
+        }
+      }
+    },
+    {
+      "uri": "netaudio://ddm/status",
+      "path": "/ddm/status",
+      "name": "Dante Domain Manager status",
+      "description": "Connection state of configured Dante Domain Manager servers and their domains.",
+      "tool_name": "get_ddm_status",
+      "tool_description": null,
+      "tool_properties": {}
+    },
+    {
+      "uri": "netaudio://devices",
+      "path": "/devices",
+      "name": "Devices",
+      "description": "Every known Dante device keyed by server name: online state, channels, subscriptions with their status, sample rate, latency, encoding, clock role, network interfaces, redundancy, and operation_availability which says which settings can currently be changed and why not.",
+      "tool_name": "list_devices",
+      "tool_description": "Every known device keyed by its name: product, address, online state, management (and DDM domain), sample rate, latency, channel counts, route count and any failing routes. A device that is off the network shows only its product and when it was last seen; forget_device removes ones that no longer matter. Any tool's device argument takes these names. Use get_device for channels, routes, network and operation availability.",
+      "tool_properties": {}
+    },
+    {
+      "uri": "netaudio://event-journal",
+      "path": "/event-journal",
+      "name": "Event journal",
+      "description": "Recent monitoring events: latency, late packets, issue lifecycle and configuration changes.",
+      "tool_name": "get_event_journal",
+      "tool_description": "Recent monitoring events, newest first. Repeated observations are grouped by default; filter by device or kind, page with before_sequence, or request debug detail.",
+      "tool_properties": {
+        "before_sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Return older events with sequence below this value."
+        },
+        "collapse_repeats": {
+          "type": "boolean",
+          "default": true,
+          "description": "Group repeated observations of the same event target; set false for every event."
+        },
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "detail": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "debug"
+          ],
+          "default": "compact",
+          "description": "Debug includes complete forensic event records."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Only events of this kind, for example receiver_flow_latency_high."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 20
+        }
+      }
+    },
+    {
+      "uri": "netaudio://external-flows",
+      "path": "/external-flows",
+      "name": "External AES67 streams",
+      "description": "AES67 and RTP streams announced on the network by SAP.",
+      "tool_name": "get_external_flows",
+      "tool_description": null,
+      "tool_properties": {}
+    },
+    {
+      "uri": "netaudio://issues",
+      "path": "/issues",
+      "name": "Issues",
+      "description": "Open and recently resolved problems detected on the network, with suggested remediation.",
+      "tool_name": "get_issues",
+      "tool_description": "Problems detected on the network, grouped by kind and device, worst first. A failing route group names the transmitting device behind each channel. Devices that are off the network and routes waiting for them are not problems and are left out; get_routing with status waiting lists those routes, and naming an off device here shows its last report. Defaults to open issues; set state to resolved or all for history. Filter by device and page with limit; debug lists every issue separately.",
+      "tool_properties": {
+        "detail": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "debug"
+          ],
+          "default": "compact"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 50
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "all",
+            "open",
+            "resolved"
+          ],
+          "default": "open"
+        }
+      }
+    },
+    {
+      "uri": "netaudio://metering",
+      "path": "/metering/cache",
+      "name": "Signal levels",
+      "description": "Latest signal level per channel for devices that are being metered.",
+      "tool_name": "get_signal_levels",
+      "tool_description": "Whether audio is present. Without a device: for each device, the channels carrying signal with their dBFS level and how many are silent. With a device: the rx and tx channels with signal and their level, and the silent ones by name or number range. Devices with detailed metering are sampled on request. points measures named places anywhere in the chain instead: JACK ports, PulseAudio inputs, outputs and applications, Shure channels or Dante channels. Debug includes every channel and the raw meter codes. over_last_seconds, ending_at or listen_seconds report the recorded levels over a period instead of one sample, which is what to use for sound that comes and goes.",
+      "tool_properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Places to measure, such as system:capture_1, default input, Discord or Wireless receiver ch1; put another computer's name first for its points, such as studio-pc default input."
+        },
+        "detail": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "debug"
+          ],
+          "default": "compact"
+        },
+        "over_last_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400,
+          "description": "Summarize the levels recorded over this many seconds instead of sampling once: how many seconds had signal, the loudest moment, when signal was last heard and a peak timeline. Use it for sound that comes and goes, such as someone talking on a call. Levels are kept per second for 15 minutes and per minute for 24 hours."
+        },
+        "ending_at": {
+          "type": "string",
+          "description": "End of that period as an ISO time, such as 2026-10-02T23:00 for last night (local time unless it has an offset or Z); defaults to now."
+        },
+        "listen_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "description": "Wait this many seconds, then summarize what was heard during them."
+        }
+      }
+    },
+    {
+      "uri": "netaudio://metering/status",
+      "path": "/metering/status",
+      "name": "Metering status",
+      "description": "Whether detailed metering is available and which devices are being metered.",
+      "tool_name": "get_metering_status",
+      "tool_description": null,
+      "tool_properties": {}
+    },
+    {
+      "uri": "netaudio://server",
+      "path": "/server-info",
+      "name": "Server",
+      "description": "This netaudio server's host, version and start time.",
+      "tool_name": "get_server_info",
+      "tool_description": null,
+      "tool_properties": {}
+    }
+  ],
+  "device_resource_template": {
+    "uriTemplate": "netaudio://devices/{name}",
+    "name": "Device",
+    "description": "One device by name, with the same fields as the devices resource.",
+    "mimeType": "application/json"
+  },
+  "planned": [
+    {
+      "name": "preview_lock",
+      "description": "Show what locking a device would affect before locking it: connections that would remain and receivers that would lose audio.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        }
+      },
+      "required": [
+        "device"
+      ],
+      "features": [
+        "NA-IDENT-LOCKPREFLIGHT"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "The read-only residual-connection assessment has not been written.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "recover_locked_device",
+      "description": "Recover a locked device whose PIN is unknown, using the manufacturer's supported recovery workflow.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        }
+      },
+      "required": [
+        "device"
+      ],
+      "features": [
+        "NA-IDENT-LOCKRECOVERY"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The authorized recovery action and the devices it supports are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_channel_mute",
+      "description": "Mute or unmute one transmit or receive channel on a device.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "channel_type": {
+          "type": "string",
+          "enum": [
+            "rx",
+            "tx"
+          ]
+        },
+        "channel": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Channel number or unique label."
+        },
+        "muted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "device",
+        "channel_type",
+        "channel",
+        "muted"
+      ],
+      "features": [
+        "NA-ROUTE-CHANNELMUTE"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The channel-addressed mute request layout and its readback are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "channel_type": {
+            "type": "string",
+            "enum": [
+              "rx",
+              "tx"
+            ]
+          },
+          "channel": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Channel number or unique label."
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "channel_type",
+          "channel",
+          "muted"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_transmit_channel_enabled",
+      "description": "Enable or disable one transmit channel on a device.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "channel": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Channel number or unique label."
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "device",
+        "channel",
+        "enabled"
+      ],
+      "features": [
+        "NA-ROUTE-TXENABLE"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The request layout and exact enable/disable effects are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "channel": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Channel number or unique label."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "channel",
+          "enabled"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_channel_read_only",
+      "description": "Make a channel or transmit flow read-only so other controllers cannot change it, or writable again.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "target_type": {
+          "type": "string",
+          "enum": [
+            "rx_channel",
+            "tx_channel",
+            "tx_flow"
+          ]
+        },
+        "target": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Channel number or unique label."
+        },
+        "read_only": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "device",
+        "target_type",
+        "target",
+        "read_only"
+      ],
+      "features": [
+        "NA-ROUTE-READONLY"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The selector layout, response and precedence with domain permissions are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "target_type": {
+            "type": "string",
+            "enum": [
+              "rx_channel",
+              "tx_channel",
+              "tx_flow"
+            ]
+          },
+          "target": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Channel number or unique label."
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "target_type",
+          "target",
+          "read_only"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_device_groups",
+      "description": "Channel display groups that devices supply, with the channels in each group.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        }
+      },
+      "required": [],
+      "features": [
+        "NA-ROUTE-DEVICEGROUPS"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "Typed device-group decoding has not been written.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_receive_templates",
+      "description": "Receiver flow and channel templates stored on a device.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        }
+      },
+      "required": [
+        "device"
+      ],
+      "features": [
+        "NA-ROUTE-RXTEMPLATES"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The template record layouts and query semantics are not yet established.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_unicast_transmit_flow",
+      "description": "Create an explicit unicast transmit flow from a device to one receiver.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "receiver": {
+          "type": "string",
+          "description": "Receiving device name."
+        },
+        "channels": {
+          "type": "array",
+          "items": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Channel number or unique label."
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "device",
+        "receiver",
+        "channels"
+      ],
+      "features": [
+        "NA-FLOW-UNICAST"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The create/remove request, receiver association and flow lifetime are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "receiver": {
+            "type": "string",
+            "description": "Receiving device name."
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "description": "Channel number or unique label."
+            },
+            "minItems": 1
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "receiver",
+          "channels"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_video_transmit_flow",
+      "description": "Create a video transmit flow on a Dante AV device.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "specification": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "device",
+        "specification"
+      ],
+      "features": [
+        "NA-FLOW-VIDEO"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The video flow create/delete layout, format constraints and readback are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "specification": {
+            "type": "object"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "specification"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delete_receive_flow",
+      "description": "Delete a receive flow on a device, separately from unsubscribing its channels.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "flow_id": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "device",
+        "flow_id"
+      ],
+      "features": [
+        "NA-FLOW-RXDELETE"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The receive-flow selector encoding and its effect on subscriptions are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "flow_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "flow_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_switch_vlan",
+      "description": "Select one of the switch VLAN configurations a device advertises.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "configuration": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device",
+        "configuration"
+      ],
+      "features": [
+        "NA-CONFIG-VLAN"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "The variable-mask configuration parser and selection have not been written.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "configuration": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "configuration"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_audio_sync_delay",
+      "description": "Set a device's additional audio synchronization delay.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "delay_nanoseconds": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "device",
+        "delay_nanoseconds"
+      ],
+      "features": [
+        "NA-CONFIG-AUDIOSYNC"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "Typed current and maximum delay handling has not been written.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "delay_nanoseconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "delay_nanoseconds"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_igmp_version",
+      "description": "Set the IGMP version a device uses for multicast membership.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "device",
+        "version"
+      ],
+      "features": [
+        "NA-CONFIG-IGMP"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The IGMP record fields, accepted values and device applicability are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "version": {
+            "type": "integer"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "version"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_rtp_defaults",
+      "description": "Change a device's RTP defaults, such as the default receive latency for RTP streams.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "changes": {
+          "type": "object",
+          "minProperties": 1
+        }
+      },
+      "required": [
+        "device",
+        "changes"
+      ],
+      "features": [
+        "NA-CONFIG-RTPDEFAULTS"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "Accepted value ranges, permission gates and persistence are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "changes": {
+            "type": "object",
+            "minProperties": 1
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "changes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_advertisement_scope",
+      "description": "Set how widely a device or one of its transmitters is advertised on the network.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "scope": {
+          "type": "string"
+        },
+        "transmitter": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Channel number or unique label."
+        }
+      },
+      "required": [
+        "device",
+        "scope"
+      ],
+      "features": [
+        "NA-CONFIG-ADVERTSCOPE"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The meaning of each scope value and its write gates are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "scope": {
+            "type": "string"
+          },
+          "transmitter": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Channel number or unique label."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "scope"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_network_loopback",
+      "description": "Turn a device's network loopback setting on or off.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "device",
+        "enabled"
+      ],
+      "features": [
+        "NA-CONFIG-LOOPBACK"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "Permission gates, effects and persistence are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "enabled"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_signal_reference",
+      "description": "Set the signal reference level metadata for one transmit channel.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "channel": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Channel number or unique label."
+        },
+        "reference": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "device",
+        "channel",
+        "reference"
+      ],
+      "features": [
+        "NA-CONFIG-SIGNALREFERENCE"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The physical scale and accepted write range are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "channel": {
+            "type": [
+              "integer",
+              "string"
+            ],
+            "description": "Channel number or unique label."
+          },
+          "reference": {
+            "type": "number"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "channel",
+          "reference"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_multicast_bandwidth",
+      "description": "Estimated multicast audio bandwidth per device and flow, compared with what the network can carry.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        }
+      },
+      "required": [],
+      "features": [
+        "NA-MON-MULTICASTBW"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "The shared multicast bandwidth estimator has not been written.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_receive_errors",
+      "description": "Receiver error reports for a device: dropped, late and out-of-order packets per flow.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        }
+      },
+      "required": [
+        "device"
+      ],
+      "features": [
+        "NA-MON-RXERRORS"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "The side effects of the error query and the capability bit meanings are not yet established.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_latency_history",
+      "description": "Receive latency history and distribution per network for a device, against its configured latency.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        }
+      },
+      "required": [
+        "device"
+      ],
+      "features": [
+        "NA-MON-LATENCY",
+        "NA-MON-HISTOGRAM"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "Latency history is collected but not yet presented per device.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_ddm_user_role",
+      "description": "Grant or change a user's role in a Dante Domain Manager domain.",
+      "properties": {
+        "server": {
+          "type": "string",
+          "description": "DDM server profile name."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Domain name or ID."
+        },
+        "user": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "user",
+        "role"
+      ],
+      "features": [
+        "NA-MANAGED-ADMIN"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "Human-role administration and permission mappings are not established by the Managed API.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string",
+            "description": "DDM server profile name."
+          },
+          "domain": {
+            "type": "string",
+            "description": "Domain name or ID."
+          },
+          "user": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "server",
+          "user",
+          "role"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_director_sites",
+      "description": "Dante Director accounts and remote sites linked to the configured DDM servers.",
+      "properties": {},
+      "required": [],
+      "features": [
+        "NA-MANAGED-DIRECTOR"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "Account enumeration and the Director service contract are not yet established.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_discovery_interfaces",
+      "description": "Choose which network interfaces the server uses to discover and control devices.",
+      "properties": {
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "interfaces"
+      ],
+      "features": [
+        "NA-DISC-OVERRIDES"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "Typed interface override policy has not been written.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "interfaces"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_recovery_devices",
+      "description": "Devices advertising safe mode or recovery mode, with why they are in it.",
+      "properties": {},
+      "required": [],
+      "features": [
+        "NA-DISC-SAFEMODE"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "Dedicated safe-mode service discovery has not been written.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "export_diagnostic_report",
+      "description": "Collect a diagnostic report for some or all devices at a chosen privacy level.",
+      "properties": {
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "privacy": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "features": [
+        "NA-TOOLS-REPORT"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "The CLI creates reports; the daemon has no endpoint for them yet.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "privacy": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_firmware_update_status",
+      "description": "A device's firmware update state and last update error.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        }
+      },
+      "required": [
+        "device"
+      ],
+      "features": [
+        "NA-TOOLS-UPDATE"
+      ],
+      "blocker": "implementation",
+      "blocked_by": "Read-only update-state observation has not been written.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_firmware",
+      "description": "Update a device's firmware from an image file.",
+      "properties": {
+        "device": {
+          "type": "string",
+          "description": "Device name, server name, or inventory ID as returned by list_devices."
+        },
+        "image": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device",
+        "image"
+      ],
+      "features": [
+        "NA-TOOLS-UPDATE"
+      ],
+      "blocker": "protocol_research",
+      "blocked_by": "Image eligibility, transfer and recovery are not yet established.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "Device name, server name, or inventory ID as returned by list_devices."
+          },
+          "image": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "device",
+          "image"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_virtual_device_status",
+      "description": "Whether netaudio's virtual Dante device is running, with its name and channels.",
+      "properties": {},
+      "required": [],
+      "features": [],
+      "blocker": "implementation",
+      "blocked_by": "The CLI manages the virtual device; the daemon has no endpoint for it yet.",
+      "read_only": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_virtual_device_running",
+      "description": "Start or stop netaudio's virtual Dante device.",
+      "properties": {
+        "running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "running"
+      ],
+      "features": [],
+      "blocker": "implementation",
+      "blocked_by": "The CLI manages the virtual device; the daemon has no endpoint for it yet.",
+      "read_only": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "description": "Set true only after the user agreed to the change a preview showed, together with that preview's preview_token. Leave it out to see what would change without changing anything."
+          },
+          "preview_token": {
+            "type": "string",
+            "description": "The preview_token from the preview of this exact change; required with confirmed=true."
+          }
+        },
+        "required": [
+          "running"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "discovery": {
+    "terms": {
+      "blink": "identify",
+      "broken": "issue",
+      "change": "set",
+      "channels": "channel",
+      "connect": "route",
+      "devices": "device",
+      "disconnect": "unsubscribe",
+      "feed": "route",
+      "flows": "flow",
+      "label": "name",
+      "patch": "route",
+      "receiver": "receive",
+      "rx": "receive",
+      "send": "route",
+      "subscriptions": "subscription",
+      "tx": "transmit",
+      "unpatch": "unsubscribe",
+      "unroute": "unsubscribe",
+      "enrol": "enroll",
+      "enrolled": "enroll",
+      "enrollment": "enroll",
+      "flash": "identify",
+      "join": "enroll",
+      "locked": "lock",
+      "pin": "lock",
+      "restart": "reboot",
+      "errors": "issue",
+      "failed": "issue",
+      "failure": "issue",
+      "failures": "issue",
+      "issues": "issue",
+      "late": "latency",
+      "levels": "level",
+      "meters": "level",
+      "missing": "issue",
+      "modify": "set",
+      "problems": "issue",
+      "recent": "event",
+      "recently": "event",
+      "routed": "route",
+      "routes": "route",
+      "routing": "route",
+      "transmitter": "subscription",
+      "transmitters": "subscription",
+      "unenrollment": "unenroll",
+      "unlocked": "unlock",
+      "unresolved": "issue",
+      "wrong": "issue",
+      "backup": "preset",
+      "recall": "apply",
+      "restore": "apply",
+      "snapshot": "preset",
+      "snapshots": "preset"
+    },
+    "stop_words": [
+      "a",
+      "all",
+      "an",
+      "anything",
+      "are",
+      "can",
+      "for",
+      "i",
+      "is",
+      "me",
+      "my",
+      "of",
+      "on",
+      "show",
+      "the",
+      "to",
+      "what",
+      "why"
+    ],
+    "write_words": [
+      "apply",
+      "change",
+      "clear",
+      "configure",
+      "connect",
+      "create",
+      "delete",
+      "disable",
+      "disconnect",
+      "enable",
+      "enroll",
+      "feed",
+      "identify",
+      "lock",
+      "login",
+      "logout",
+      "make",
+      "modify",
+      "mute",
+      "patch",
+      "reboot",
+      "remove",
+      "rename",
+      "reset",
+      "route",
+      "send",
+      "set",
+      "start",
+      "stop",
+      "subscribe",
+      "unenroll",
+      "unlock",
+      "unmute",
+      "unpatch",
+      "unroute",
+      "unsubscribe"
+    ],
+    "hints": {
+      "get_issues": [
+        "audio",
+        "latency",
+        "sound",
+        "subscription"
+      ],
+      "get_event_journal": [
+        "issue",
+        "latency"
+      ],
+      "get_network_overview": [
+        "health",
+        "network",
+        "status"
+      ],
+      "list_devices": [
+        "network",
+        "offline",
+        "online"
+      ],
+      "forget_device": [
+        "clean",
+        "dismiss",
+        "forget",
+        "gone",
+        "inventory",
+        "off",
+        "offline",
+        "old",
+        "remove",
+        "stale"
+      ],
+      "get_routing": [
+        "subscription"
+      ],
+      "show_routing_matrix": [
+        "app",
+        "display",
+        "grid",
+        "interactive",
+        "patchbay",
+        "render",
+        "ui",
+        "view",
+        "visual"
+      ],
+      "rename_device": [
+        "device",
+        "name"
+      ],
+      "set_subscriptions": [
+        "bulk",
+        "many",
+        "route",
+        "several",
+        "subscription"
+      ],
+      "subscribe": [
+        "receive",
+        "subscription",
+        "transmit"
+      ],
+      "unsubscribe": [
+        "clear",
+        "remove",
+        "route",
+        "subscription"
+      ],
+      "get_device_diagnostics": [
+        "drop",
+        "dropped",
+        "health",
+        "jitter",
+        "latency",
+        "packet",
+        "packets",
+        "stream",
+        "streams"
+      ],
+      "get_signal_levels": [
+        "audio",
+        "coming",
+        "hear",
+        "history",
+        "hour",
+        "last",
+        "loudest",
+        "minute",
+        "night",
+        "period",
+        "recorded",
+        "signal",
+        "silence",
+        "silent",
+        "sound",
+        "talking",
+        "through"
+      ],
+      "apply_preset": [
+        "back",
+        "preset",
+        "restore"
+      ],
+      "save_preset": [
+        "keep",
+        "preset",
+        "save"
+      ],
+      "list_presets": [
+        "preset",
+        "saved"
+      ],
+      "create_transmit_flow": [
+        "multicast",
+        "stream"
+      ],
+      "get_wireless_devices": [
+        "battery",
+        "mic",
+        "microphone",
+        "receiver",
+        "transmitter",
+        "wireless"
+      ],
+      "trace_signal": [
+        "application",
+        "audio",
+        "chain",
+        "discord",
+        "follow",
+        "hear",
+        "jack",
+        "mic",
+        "microphone",
+        "path",
+        "pulse",
+        "pulseaudio",
+        "silence",
+        "silent",
+        "sound",
+        "trace",
+        "where"
+      ],
+      "get_host_audio": [
+        "alsa",
+        "card",
+        "computer",
+        "host",
+        "jack",
+        "linux",
+        "pulse",
+        "pulseaudio",
+        "xrun",
+        "xruns"
+      ],
+      "connect_audio_ports": [
+        "computer",
+        "connect",
+        "jack",
+        "patch",
+        "port",
+        "route"
+      ],
+      "disconnect_audio_ports": [
+        "computer",
+        "disconnect",
+        "jack",
+        "port",
+        "unpatch"
+      ],
+      "set_audio_volume": [
+        "application",
+        "computer",
+        "louder",
+        "pulse",
+        "pulseaudio",
+        "quieter",
+        "volume"
+      ],
+      "set_audio_mute": [
+        "application",
+        "computer",
+        "mute",
+        "pulse",
+        "pulseaudio",
+        "unmute"
+      ],
+      "set_default_audio_device": [
+        "default",
+        "input",
+        "microphone",
+        "output",
+        "pulseaudio",
+        "speakers"
+      ],
+      "move_audio_stream": [
+        "application",
+        "input",
+        "move",
+        "output",
+        "pulseaudio",
+        "stream"
+      ],
+      "link_audio_card": [
+        "alsa",
+        "card",
+        "computer",
+        "link",
+        "pcie",
+        "usb"
+      ],
+      "set_wireless_value": [
+        "frequency",
+        "gain",
+        "mic",
+        "mute",
+        "name",
+        "shure",
+        "transmitter",
+        "wireless"
+      ],
+      "inspect_device_controls": [
+        "analog",
+        "bluetooth",
+        "hdmi",
+        "paired",
+        "pairing",
+        "panel",
+        "settings",
+        "video"
+      ],
+      "plan_device_control": [
+        "analog",
+        "bluetooth",
+        "discoverable",
+        "discovery",
+        "forget",
+        "level",
+        "name",
+        "pairing"
+      ],
+      "apply_device_control": [
+        "analog",
+        "bluetooth",
+        "clear",
+        "discoverable",
+        "discovery",
+        "forget",
+        "hdcp",
+        "level",
+        "name",
+        "pair",
+        "pairing",
+        "rename",
+        "video"
+      ]
+    },
+    "aliases": {
+      "subscribe": [
+        "route"
+      ]
+    },
+    "categories": [
+      [
+        "this computer's audio",
+        [
+          "host_audio",
+          "audio_ports",
+          "audio_volume",
+          "audio_mute",
+          "audio_device",
+          "audio_stream",
+          "audio_card",
+          "trace_signal"
+        ]
+      ],
+      [
+        "Dante Domain Manager",
+        [
+          "ddm"
+        ]
+      ],
+      [
+        "presets",
+        [
+          "preset"
+        ]
+      ],
+      [
+        "clock",
+        [
+          "clock",
+          "leader",
+          "signal_reference"
+        ]
+      ],
+      [
+        "routing and flows",
+        [
+          "subscri",
+          "route",
+          "routing",
+          "flow",
+          "template",
+          "multicast",
+          "advertisement",
+          "rtp",
+          "igmp"
+        ]
+      ],
+      [
+        "monitoring",
+        [
+          "issue",
+          "event",
+          "signal",
+          "meter",
+          "metering",
+          "latency_history",
+          "diagnostic",
+          "errors",
+          "unresponsive"
+        ]
+      ],
+      [
+        "maintenance and security",
+        [
+          "reboot",
+          "identify",
+          "reset",
+          "clear_configuration",
+          "lock",
+          "firmware",
+          "recover",
+          "store_current"
+        ]
+      ],
+      [
+        "wireless and virtual devices",
+        [
+          "wireless",
+          "virtual"
+        ]
+      ],
+      [
+        "bulk changes",
+        [
+          "apply_to_devices"
+        ]
+      ],
+      [
+        "device settings",
+        [
+          "set_",
+          "rename",
+          "configure",
+          "device_control",
+          "channel",
+          "interface"
+        ]
+      ]
+    ],
+    "category_overrides": {
+      "configure_monitoring_port": "devices and server",
+      "get_director_sites": "Dante Domain Manager",
+      "set_discovery_interfaces": "devices and server"
+    },
+    "default_category": "devices and server",
+    "schema_limit": 6
+  },
+  "device_record_fields": [
+    "active_latency",
+    "aes67_configured",
+    "aes67_configured_property_advertised",
+    "aes67_current",
+    "aes67_multicast_prefix",
+    "aes67_configuration_supported",
+    "availability_state",
+    "bit_depth",
+    "device_controls",
+    "virtual_panel_supported",
+    "video_transmission_supported",
+    "video_reception_supported",
+    "codec_status",
+    "codec_observed_at",
+    "bluetooth_connected",
+    "bluetooth_device",
+    "platform_model_name",
+    "platform_model_identifier",
+    "platform_versions_record",
+    "clear_configuration_status",
+    "clock_frequency_offset_parts_per_billion",
+    "ptpv1_device_uuid",
+    "clock_monitoring_supported",
+    "clock_port_records",
+    "clock_status",
+    "clock_diagnostics",
+    "supported_clock_sources",
+    "clock_observed_at",
+    "ptpv1_grandmaster_uuid",
+    "clock_port_state_code",
+    "clock_role",
+    "clock_source_code",
+    "clock_subdomain",
+    "configured_latency",
+    "control_addresses",
+    "control_transports",
+    "dante_model",
+    "dante_model_record_protocol_version",
+    "dante_model_primary_capabilities",
+    "dante_model_read_only_capabilities",
+    "dante_model_id",
+    "dante_model_monitoring_capabilities",
+    "dante_model_secondary_capabilities",
+    "dante_model_domain_capability_values",
+    "dante_model_domain_capability_validity",
+    "identify_supported",
+    "sample_rate_configuration_supported",
+    "encoding_configuration_supported",
+    "sample_rate_pullup_configuration_supported",
+    "switch_redundancy_supported",
+    "redundancy_advertised_support_source",
+    "static_ipv4_configuration_supported",
+    "device_locking_supported",
+    "external_word_clock_read_only",
+    "switch_redundancy_read_only",
+    "redundancy_read_only_source",
+    "static_ipv4_configuration_read_only",
+    "generic_codec_control_supported",
+    "ddm_capabilities",
+    "ddm_clock_preferences",
+    "ddm_clocking_state",
+    "ddm_connection_last_changed",
+    "ddm_connection_state",
+    "ddm_context",
+    "ddm_device_id",
+    "ddm_domain_id",
+    "ddm_domain_name",
+    "ddm_enrolment_state",
+    "ddm_identity",
+    "ddm_inputs",
+    "ddm_last_sync",
+    "ddm_outputs",
+    "ddm_parameters",
+    "ddm_server_profile",
+    "ddm_status",
+    "default_latency",
+    "detailed_metering_supported",
+    "diagnostic_log_export_supported",
+    "direct_control_available",
+    "encoding",
+    "requested_encoding",
+    "encoding_update_mode",
+    "field_sources",
+    "friendly_product_version",
+    "platform_software_version",
+    "platform_hardware_version",
+    "platform_api_version",
+    "rom_boot_version",
+    "manufacturer_software_version",
+    "manufacturer_firmware_version",
+    "manufacturer_versions_record",
+    "cmc_server_version",
+    "router_protocol_version",
+    "ddm_product_version",
+    "ddm_product_software_version",
+    "ddm_dante_version",
+    "ddm_dante_hardware_version",
+    "gain_device_type",
+    "gain_levels",
+    "gain_adapter",
+    "codec_parameters",
+    "interface_status_protocol",
+    "interface_statistics_supported",
+    "interface_statistics",
+    "dante_redundancy",
+    "redundancy_probe_outcomes",
+    "interfaces",
+    "inventory_id",
+    "inventory_sources",
+    "is_locked",
+    "last_seen",
+    "latency",
+    "ptpv1_master_uuid",
+    "license_signature_length_bytes",
+    "licensed_receive_channel_count",
+    "licensed_redundancy_enabled",
+    "licensed_transmit_channel_count",
+    "link_speed_mbps",
+    "lock_reset_status",
+    "mac_address",
+    "management_state",
+    "managed_operation_permissions",
+    "manufacturer",
+    "media_types",
+    "max_latency",
+    "maximum_receive_flow_channel_slots",
+    "maximum_receive_flows",
+    "maximum_transmit_flow_channel_slots",
+    "maximum_transmit_flows",
+    "min_latency",
+    "model",
+    "model_id",
+    "network_interface_traffic",
+    "num_networks",
+    "per_channel_signal_presence_supported",
+    "performance_settings",
+    "preferred_leader",
+    "product_version",
+    "product_name",
+    "receiver_flow_connection_health",
+    "receiver_telemetry_capacity",
+    "clock_observations",
+    "channel_capability_observed_at",
+    "receiver_flow_completeness",
+    "receiver_flow_latency_nanoseconds",
+    "receiver_flow_status_page",
+    "receiver_flow_partial_inventory",
+    "receiver_flows",
+    "receiver_flow_inventory_family",
+    "receiver_flow_query_family",
+    "requested_sample_rate_pullup_raw_value",
+    "routing_capacity_receive_channel_count",
+    "routing_capacity_transmit_channel_count",
+    "routing_ready",
+    "routing_ready_code",
+    "routing_link_status",
+    "rx_count",
+    "rx_count_raw",
+    "rx_flow_count",
+    "rx_flow_late_packet_monitoring_supported",
+    "rx_flow_maximum_latency_monitoring_supported",
+    "sample_rate",
+    "requested_sample_rate",
+    "sample_rate_update_mode",
+    "sample_rate_channel_capacities",
+    "sample_rate_pullup_raw_value",
+    "sample_rate_pullup_update_mode",
+    "sample_rate_pullup_flags",
+    "sample_rate_pullup_host_disabled",
+    "settings_port",
+    "settings_properties",
+    "supported_encodings",
+    "supported_gain_levels",
+    "supported_sample_rate_pullup_raw_values",
+    "supported_sample_rates",
+    "transmitter_flows",
+    "transmit_flow_authoring_capability_word",
+    "transmit_flow_authoring",
+    "tx_count",
+    "tx_count_raw",
+    "tx_flow_count"
+  ],
+  "app_tools": [
+    {
+      "name": "app_events",
+      "path": "",
+      "description": "Used by netaudio's routing view, not for direct use: device events for the open view. Without a session it opens one and returns a snapshot; with one it waits up to wait_seconds for the next changes.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": "string"
+          },
+          "wait_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 25
+          }
+        },
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "read_only": true,
+      "requires_confirmation": false,
+      "method": "POST",
+      "defaults": {},
+      "meta": {
+        "ui": {
+          "visibility": [
+            "app"
+          ]
+        }
+      }
+    },
+    {
+      "name": "app_request",
+      "path": "",
+      "description": "Used by netaudio's routing view, not for direct use: sends a route change the user made in the view. To change routes yourself, use set_subscriptions.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "POST"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "enum": [
+              "/external-flows/subscribe",
+              "/subscribe",
+              "/unsubscribe"
+            ]
+          },
+          "body": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "method",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "read_only": false,
+      "requires_confirmation": false,
+      "method": "POST",
+      "defaults": {},
+      "meta": {
+        "ui": {
+          "visibility": [
+            "app"
+          ]
+        }
+      }
+    },
+    {
+      "name": "app_translations",
+      "path": "",
+      "description": "Used by netaudio's routing view, not for direct use: its text in one language.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "language": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "language"
+        ],
+        "additionalProperties": false
+      },
+      "destructive": false,
+      "read_only": true,
+      "requires_confirmation": false,
+      "method": "POST",
+      "defaults": {},
+      "meta": {
+        "ui": {
+          "visibility": [
+            "app"
+          ]
+        }
+      }
+    }
+  ]
+}

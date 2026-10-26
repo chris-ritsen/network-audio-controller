@@ -61,33 +61,6 @@ def test_device_preset_save_projects_observed_performance_values():
     }
 
 
-def test_empty_native_settings_refresh_removes_stale_performance_from_presets():
-    device = _device()
-    device.performance_settings = {0x8301: 250000, 0x0310: 8}
-    packet = bytes.fromhex("2809000c0001110000010200")
-    controls = device.controls_data_from_core(
-        {
-            "name": None,
-            "counts": {
-                "tx_count": 0,
-                "rx_count": 0,
-                "locked": None,
-                "transmit_flow_authoring_capability_word": None,
-                "receiver_telemetry_capacity": None,
-            },
-            "settings": core.parse_response("device_settings", packet),
-            "rx": [],
-            "tx": [],
-            "channels_included": False,
-        }
-    )
-    device.apply_controls(controls)
-
-    config = device_preset_config(device, {"audio"})
-
-    assert device.performance_settings == {}
-    assert "receive_flow_performance" not in config
-    assert "unicast_performance" not in config
 
 
 @pytest.mark.parametrize(

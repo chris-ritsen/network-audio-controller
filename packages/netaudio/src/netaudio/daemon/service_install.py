@@ -82,6 +82,7 @@ def generate_systemd_unit(executable: str) -> str:
         "\n"
         "[Service]\n"
         "Type=notify\n"
+        "KillMode=mixed\n"
         f"ExecStart={_systemd_exec_arg(executable)} daemon run\n"
         "Restart=on-failure\n"
         "RestartMaxDelaySec=5min\n"

@@ -51,18 +51,35 @@ pub fn parse_metering_frame(data: &[u8]) -> Option<MeteringFrame> {
     })
 }
 
-pub fn parse_device_name(response: &[u8]) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeviceNameObservation {
+    pub name_bytes: Vec<u8>,
+    pub trailing_bytes: Vec<u8>,
+}
+
+pub fn parse_device_name_observation(response: &[u8]) -> Option<DeviceNameObservation> {
     let body = validate_response_envelope(
         response,
         &common_arc_protocol_opcodes(OPCODE_DEVICE_NAME),
         &[RESULT_CODE_SUCCESS],
     )?
     .body;
-    let (&terminator, name) = body.split_last()?;
-    if terminator != 0 || name.contains(&0) {
+    let terminator = body.iter().position(|byte| *byte == 0)?;
+
+    Some(DeviceNameObservation {
+        name_bytes: body[..terminator].to_vec(),
+        trailing_bytes: body[terminator + 1..].to_vec(),
+    })
+}
+
+pub fn parse_device_name(response: &[u8]) -> Option<String> {
+    let observation = parse_device_name_observation(response)?;
+
+    if !observation.trailing_bytes.is_empty() {
         return None;
     }
-    std::str::from_utf8(name).ok().map(str::to_owned)
+
+    String::from_utf8(observation.name_bytes).ok()
 }
 
 pub fn parse_device_info(response: &[u8]) -> Option<DeviceInfo> {
@@ -118,11 +135,21 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
     )?
     .body;
 
-    let record_count = usize::from(*body.get(1)?);
-    let record_bytes = record_count.checked_mul(4)?;
+    let capacity = *body.first()?;
+    let live_count = *body.get(1)?;
+    if live_count > capacity {
+        return None;
+    }
+    let record_count = usize::from(live_count);
+    let record_bytes = usize::from(capacity).checked_mul(4)?;
     let values_offset = 2usize.checked_add(record_bytes)?;
     body.get(..values_offset)?;
     let mut settings = DeviceSettings {
+        capacity,
+        live_count,
+        raw_values: Vec::with_capacity(record_count),
+        property_statuses: Vec::new(),
+        raw_record_hexadecimal: bytes_to_hex(response),
         sample_rate: None,
         configured_latency_ns: None,
         active_latency_ns: None,
@@ -134,6 +161,7 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
         referenced_values: Vec::new(),
         performance_values: Vec::new(),
         unavailable_property_ids: Vec::new(),
+        ambiguous_property_ids: Vec::new(),
     };
     let mut info_codes = HashSet::with_capacity(record_count);
     let mut records = Vec::with_capacity(record_count);
@@ -142,44 +170,55 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
         let offset = 2 + index * 4;
         let info_code = u16_at(body, offset);
         let value_pointer = u16_at(body, offset + 2);
-        if info_code == 0 {
-            records.push((info_code, value_pointer));
-            continue;
+        let identity = if info_code <= 2 {
+            value_pointer
+        } else {
+            info_code
+        };
+        if !info_codes.insert(identity) && !settings.ambiguous_property_ids.contains(&identity) {
+            settings.ambiguous_property_ids.push(identity);
         }
-        if !info_codes.insert(info_code) {
-            return None;
-        }
+        settings.raw_values.push(DeviceSettingsRawValue {
+            property_key: info_code,
+            raw_word: value_pointer,
+        });
         records.push((info_code, value_pointer));
     }
 
     let minimum_value_pointer = RESPONSE_HEADER_SIZE.checked_add(values_offset)?;
-    let mut distinct_value_pointers = records
-        .iter()
-        .filter_map(|(info_code, value_pointer)| {
-            (info_code & 0x8000 != 0).then_some(usize::from(*value_pointer))
-        })
-        .collect::<Vec<_>>();
-    distinct_value_pointers.sort_unstable();
-    distinct_value_pointers.dedup();
-    if distinct_value_pointers.iter().any(|value_pointer| {
-        *value_pointer < minimum_value_pointer
-            || value_pointer
-                .checked_add(4)
-                .is_none_or(|value_end| value_end > response.len())
-    }) {
-        return None;
-    }
-
     for (info_code, value_pointer) in records {
-        if info_code == 0 {
-            settings.unavailable_property_ids.push(value_pointer);
+        let identity = if info_code <= 2 {
+            value_pointer
+        } else {
+            info_code
+        };
+
+        if settings.ambiguous_property_ids.contains(&identity) {
+            continue;
+        }
+
+        if info_code <= 2 {
+            settings
+                .property_statuses
+                .push(DeviceSettingsPropertyStatus {
+                    property_id: value_pointer,
+                    status_code: info_code,
+                });
+            if info_code == 0 {
+                settings.unavailable_property_ids.push(value_pointer);
+            }
             continue;
         }
         if info_code & 0x8000 == 0 {
-            settings.inline_values.push(DeviceSettingsInlineValue {
-                info_code,
-                value: value_pointer,
-            });
+            if matches!(info_code, 0x0210 | 0x0211 | 0x0213 | 0x0214 | 0x0310)
+                || crate::commands::PERFORMANCE_PROPERTY_IDS.contains(&info_code)
+                || info_code == DEVICE_SETTINGS_INFO_AES67_CONFIGURED
+            {
+                settings.inline_values.push(DeviceSettingsInlineValue {
+                    info_code,
+                    value: value_pointer,
+                });
+            }
 
             if crate::commands::PERFORMANCE_PROPERTY_IDS.contains(&info_code) {
                 settings
@@ -192,15 +231,39 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
 
             continue;
         }
+        let width = if info_code == 0x8021 {
+            16
+        } else if matches!(
+            info_code,
+            DEVICE_SETTINGS_INFO_SAMPLE_RATE
+                | DEVICE_SETTINGS_INFO_DEFAULT_LATENCY_NS
+                | DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS
+                | DEVICE_SETTINGS_INFO_ACTIVE_LATENCY_NS
+                | DEVICE_SETTINGS_INFO_MIN_LATENCY_NS
+                | DEVICE_SETTINGS_INFO_MAX_LATENCY_NS
+                | DEVICE_SETTINGS_INFO_AES67_MULTICAST_PREFIX
+        ) || crate::commands::PERFORMANCE_PROPERTY_IDS.contains(&info_code)
+        {
+            4
+        } else {
+            continue;
+        };
         let value_pointer_offset = usize::from(value_pointer);
-        let value_end = distinct_value_pointers
-            .iter()
-            .copied()
-            .find(|candidate| *candidate > value_pointer_offset)
-            .unwrap_or(response.len());
-        let value_bytes = response.get(value_pointer_offset..value_end)?;
-        if value_bytes.len() < 4 {
+        if value_pointer_offset < minimum_value_pointer || value_pointer_offset % 2 != 0 {
             return None;
+        }
+        let value_end = value_pointer_offset.checked_add(width)?;
+        let value_bytes = response.get(value_pointer_offset..value_end)?;
+
+        settings
+            .referenced_values
+            .push(DeviceSettingsReferencedValue {
+                info_code,
+                pointer: value_pointer,
+                value_hexadecimal: bytes_to_hex(value_bytes),
+            });
+        if width != 4 {
+            continue;
         }
         let value = read_u32(value_bytes, 0)?;
 
@@ -213,13 +276,6 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
                 });
         }
 
-        settings
-            .referenced_values
-            .push(DeviceSettingsReferencedValue {
-                info_code,
-                pointer: value_pointer,
-                value_hexadecimal: bytes_to_hex(value_bytes),
-            });
         match info_code {
             DEVICE_SETTINGS_INFO_SAMPLE_RATE => settings.sample_rate = Some(value),
             DEVICE_SETTINGS_INFO_DEFAULT_LATENCY_NS => settings.default_latency_ns = Some(value),
@@ -247,9 +303,10 @@ pub fn parse_property_directory(response: &[u8]) -> Option<PropertyDirectory> {
         &[RESULT_CODE_SUCCESS],
     )?
     .body;
-    let property_count = usize::from(read_u16(body, 0)?);
+    let raw_prefix_byte = *body.first()?;
+    let property_count = usize::from(*body.get(1)?);
     let expected_length = 2usize.checked_add(property_count.checked_mul(4)?)?;
-    if body.len() != expected_length {
+    if body.len() < expected_length {
         return None;
     }
 
@@ -266,6 +323,8 @@ pub fn parse_property_directory(response: &[u8]) -> Option<PropertyDirectory> {
     }
 
     Some(PropertyDirectory {
+        raw_prefix_byte,
+        trailing_bytes_hexadecimal: bytes_to_hex(&body[expected_length..]),
         aes67_configured_property_advertised: property_ids
             .contains(&DEVICE_SETTINGS_INFO_AES67_CONFIGURED),
         properties,

@@ -28,6 +28,17 @@ pub const OPCODE_QUERY_TX_FLOW_LABELS: u16 = 0x2204;
 pub const OPCODE_QUERY_TRANSMIT_CHANNEL_CAPABILITIES: u16 = 0x2032;
 pub const OPCODE_QUERY_RECEIVER_FLOWS: u16 = 0x3200;
 pub const OPCODE_QUERY_RECEIVER_PORT_RANGES: u16 = 0x3300;
+pub const OPCODE_QUERY_TRANSMIT_AVAILABILITY: u16 = 0x2320;
+pub const OPCODE_QUERY_RECEIVE_AVAILABILITY: u16 = 0x3320;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AudioDirection {
+    Transmit,
+    Receive,
+}
+
 pub const OPCODE_CREATE_TX_FLOW: u16 = 0x2201;
 pub const OPCODE_DELETE_TX_FLOW: u16 = 0x2202;
 pub const OPCODE_QUERY_TX_FLOWS_2809: u16 = 0x2600;

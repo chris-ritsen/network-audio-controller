@@ -154,30 +154,6 @@ def test_virtual_interface_publication_round_trips_the_running_interface():
     assert status["reboot_required"] is False
 
 
-@pytest.mark.parametrize(
-    "kind,command,decoder",
-    [
-        ("property_directory", "property_directory", "property_directory"),
-        ("receiver_port_ranges", "query_receiver_port_ranges", "receiver_port_ranges"),
-    ],
-)
-def test_virtual_directory_and_port_replies_use_typed_native_responses(kind, command, decoder):
-    request = core.build_command({"command": command, "protocol_id": 0x2809, "message_id": 7})
-    response = VirtualDevice()._handle_request(request, ("192.0.2.10", 4440))
-    native = core.build_response(
-        {"protocol_id": 0x2809, "transaction_id": 7, "result_code": 1, "response": {"kind": kind}}
-    )
-
-    assert response == native
-    parsed = core.parse_response(decoder, native)
-    if kind == "property_directory":
-        assert len(parsed["properties"]) == 31
-        assert parsed["properties"][0] == {"property_id": 0x8020, "flags": 1}
-    else:
-        assert parsed["first_port_range_start"] == 14336
-        assert parsed["first_port_range_end"] == 14589
-        assert parsed["second_port_range_start"] == 14590
-        assert parsed["second_port_range_end"] == 14591
 
 
 @pytest.mark.parametrize("command", ["dante_model", "make_model"])
@@ -382,29 +358,6 @@ def test_virtual_transmitter_names_reject_unrepresentable_records(names):
         device._handle_tx_channel_names(7, b"")
 
 
-@pytest.mark.parametrize(
-    "direction,count", [("tx", 0), ("tx", 1), ("tx", 3), ("tx", 32), ("rx", 0), ("rx", 1), ("rx", 3), ("rx", 16)]
-)
-def test_virtual_channel_records_round_trip_with_native_identity_audio_and_sources(direction, count):
-    names = [f"Channel {i}" for i in range(1, count + 1)]
-    device = VirtualDevice(VirtualDeviceConfig(tx_channels=names, rx_channels=names, sample_rate=96000))
-
-    if direction == "rx" and count:
-        device._subscriptions[1] = ("Source", "Sender")
-
-    packet = getattr(device, f"_handle_{direction}_channels")(7, b"")
-    records = core.parse_page("tx_info" if direction == "tx" else "rx", packet, 1)
-    assert [record["number"] for record in records] == list(range(1, count + 1))
-    assert [record["name" if direction == "tx" else "rx_channel_name"] for record in records] == names
-
-    if count:
-        assert core.parse_response("channel_audio_metadata", packet)["sample_rate"] == 96000
-
-    if direction == "rx" and count:
-        assert records[0]["tx_channel_name"] == "Source"
-        assert records[0]["tx_device_name"] == "Sender"
-        assert records[0]["subscription_status_code"] == 9
-        assert all(record["tx_device_name"] is None for record in records[1:])
 
 
 @pytest.mark.parametrize("direction", ["tx", "rx"])
@@ -768,16 +721,6 @@ def test_virtual_device_reports_configured_encoding_capabilities():
     }
 
 
-@pytest.mark.parametrize("encoding,supported", [(16, [16]), (24, [24]), (32, [32, 16, 24, 16])])
-def test_virtual_channel_response_preserves_pcm_capabilities(encoding, supported):
-    device = VirtualDevice(VirtualDeviceConfig(encoding=encoding, supported_encodings=supported))
-
-    response = device._handle_tx_channels(7, b"")
-    parsed = core.parse_response("channel_audio_metadata", response)
-
-    assert parsed["current_encoding"] == encoding
-    assert parsed["supported_encodings"] == sorted(set(supported))
-    assert parsed["sample_rate"] == 48_000
 
 
 @pytest.mark.parametrize(

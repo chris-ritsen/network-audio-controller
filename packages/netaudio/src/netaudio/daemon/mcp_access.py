@@ -3,7 +3,7 @@ from __future__ import annotations
 import hmac
 import secrets
 
-from netaudio.common.preferences import read_preferences, save_preference
+from netaudio.common.preferences import read_preferences, save_preference, update_preferences
 
 TOKEN_PREFERENCE = "mcp_token"
 
@@ -14,10 +14,16 @@ def read_mcp_token() -> str | None:
 
 
 def ensure_mcp_token() -> str:
-    token = read_mcp_token()
-    if token is None:
-        token = rotate_mcp_token()
-    return token
+    def ensure(preferences: dict) -> str:
+        token = preferences.get(TOKEN_PREFERENCE)
+
+        if not isinstance(token, str) or not token:
+            token = secrets.token_urlsafe(32)
+            preferences[TOKEN_PREFERENCE] = token
+
+        return token
+
+    return update_preferences(ensure)
 
 
 def rotate_mcp_token() -> str:

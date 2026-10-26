@@ -568,7 +568,23 @@ async def query_receiver_port_ranges(device_ip: str, arc_port: int, *, device=No
         return None
 
     port_ranges = _parsed_response("receiver_port_ranges", response)
-    return port_ranges if isinstance(port_ranges, dict) else None
+    if not isinstance(port_ranges, dict):
+        return None
+    outcome = port_ranges["outcome"]
+    if outcome["state"] != "reported":
+        return None
+    ranges = outcome["value"]
+    first = ranges["first"]
+    second = ranges["native_manual"]
+    if first["state"] != "usable" or second["state"] not in {"usable", "unavailable"}:
+        return None
+    return {
+        "first_port_range_start": first["lower"],
+        "first_port_range_end": first["upper"],
+        "second_port_range_start": second["lower"],
+        "second_port_range_end": second["upper"],
+        "second_port_range_available": second["state"] == "usable",
+    }
 
 
 async def query_transmit_channel_capabilities(

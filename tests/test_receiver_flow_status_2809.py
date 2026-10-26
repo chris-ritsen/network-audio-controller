@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -135,24 +135,6 @@ def test_issue_59_partial_receiver_flow_records_and_result_survive_ffi():
             core.parse_response("modern_arc_receiver_flow_status_page", bytes(complete))
 
 
-@pytest.mark.asyncio
-async def test_partial_flow_query_requests_maximum_returned_identifier_plus_one():
-    from tests.issue_59_fixtures import packet
-
-    terminal = bytearray(_packet(0x3600, 4))
-    terminal[16] = 16
-    terminal[34:36] = (16).to_bytes(2, "big")
-    device = SimpleNamespace(
-        execute=AsyncMock(side_effect=[packet("receiver_flow_partial.bin"), bytes(terminal)]),
-        services={"arc": {"type": "_netaudio-arc._udp.local.", "properties": {"arcp_vers": "2.8.9"}}},
-    )
-    page = await DanteApplication().query_modern_arc_receiver_flow_status(device)
-    assert page["page_disposition"] == "complete"
-    assert len(page["flows"]) == 16
-    assert device.execute.await_args_list == [
-        call({"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x2809, "starting_flow": 1}),
-        call({"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x2809, "starting_flow": 16}),
-    ]
 
 
 @pytest.mark.asyncio

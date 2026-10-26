@@ -130,6 +130,11 @@ pub struct DeviceInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DeviceSettings {
+    pub capacity: u8,
+    pub live_count: u8,
+    pub raw_values: Vec<DeviceSettingsRawValue>,
+    pub property_statuses: Vec<DeviceSettingsPropertyStatus>,
+    pub raw_record_hexadecimal: String,
     pub sample_rate: Option<u32>,
     pub configured_latency_ns: Option<u32>,
     pub active_latency_ns: Option<u32>,
@@ -141,6 +146,19 @@ pub struct DeviceSettings {
     pub referenced_values: Vec<DeviceSettingsReferencedValue>,
     pub performance_values: Vec<crate::commands::PerformanceProperty>,
     pub unavailable_property_ids: Vec<u16>,
+    pub ambiguous_property_ids: Vec<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeviceSettingsRawValue {
+    pub property_key: u16,
+    pub raw_word: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeviceSettingsPropertyStatus {
+    pub property_id: u16,
+    pub status_code: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -164,6 +182,8 @@ pub struct PropertyDirectoryEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PropertyDirectory {
+    pub raw_prefix_byte: u8,
+    pub trailing_bytes_hexadecimal: String,
     pub properties: Vec<PropertyDirectoryEntry>,
     pub aes67_configured_property_advertised: bool,
 }
@@ -419,7 +439,17 @@ pub struct ModernArcReceiverChannelStatus {
     pub can_subscribe_self: bool,
     pub can_rename: bool,
     pub status_flags: Option<u16>,
+    pub reported_state: Option<ReceiverReportedState>,
     pub raw_record_hexadecimal: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReceiverReportedState {
+    pub external_status: u16,
+    pub processing_status: u16,
+    pub aggregate_status: u16,
+    pub available_interfaces: u8,
+    pub asserted_interfaces: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -444,7 +474,7 @@ pub struct ModernArcReceiverFlowStatus {
     pub flow_type: Option<String>,
     pub media_type_code: u16,
     pub media_local_flow_id: u16,
-    pub flow_type_code: u16,
+    pub flow_type_code: Option<u16>,
     pub flow_name_pointer: u16,
     pub flow_name: String,
     pub format_pointer: u16,
@@ -455,12 +485,46 @@ pub struct ModernArcReceiverFlowStatus {
     pub local_receiver_channel_count: u16,
     pub receiver_mapping_descriptor_pointer: u16,
     pub receiver_mapping_descriptor_hexadecimal: String,
-    pub status_flags: u16,
-    pub status_code: u16,
+    pub status_flags: Option<u16>,
+    pub status_code: Option<u16>,
     pub endpoint_descriptor_hexadecimal: String,
     pub destination_user_datagram_port: Option<u16>,
     pub destination_internet_protocol_version_four_address: Option<String>,
     pub raw_record_hexadecimal: String,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub segmented: Option<SegmentedReceiverFlowStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SegmentedReceiverFlowStatus {
+    pub record_layout: &'static str,
+    pub media_type: &'static str,
+    pub raw_options: u32,
+    pub raw_current_scalar: u32,
+    pub raw_scheme: u8,
+    pub format_subtype: Option<u32>,
+    pub codec_identifier: Option<u32>,
+    pub transport_description_selector: u16,
+    pub transport_description_reference: u16,
+    pub flow_channel_slot_count: u16,
+    pub channel_map_slices: Vec<ReceiverFlowChannelMapSlice>,
+    pub receiver_channel_numbers_by_flow_channel: Vec<Vec<u16>>,
+    pub interface_endpoints: Vec<Option<SegmentedReceiverFlowEndpoint>>,
+    pub raw_indexed_endpoint_state: u8,
+    pub endpoint_decoding_complete: bool,
+    pub unsupported_fields: Vec<&'static str>,
+    #[serde(skip)]
+    pub(crate) referenced_ranges: Vec<std::ops::Range<usize>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SegmentedReceiverFlowEndpoint {
+    pub pointer: u16,
+    pub descriptor_length_bytes: u8,
+    pub kind: u8,
+    pub udp_port: Option<u16>,
+    pub ipv4_address: Option<String>,
+    pub raw_descriptor_hexadecimal: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -563,15 +627,6 @@ pub struct ReceiverFlowPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ReceiverPortRanges {
-    pub first_port_range_start: u16,
-    pub first_port_range_end: u16,
-    pub second_port_range_start: u16,
-    pub second_port_range_end: u16,
-    pub second_port_range_available: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TransmitChannelCapabilities {
     pub record_count: u8,
     pub ranges: Vec<TransmitChannelCapabilityRange>,
@@ -635,8 +690,11 @@ mod device;
 mod flow_setup;
 mod flows;
 mod gain;
+mod identity;
 mod network;
 mod pointer_table;
+mod receiver_flow_status;
+mod receiver_ranges;
 
 pub use channel_status::*;
 pub use clock::*;
@@ -647,8 +705,10 @@ pub use device::*;
 pub use flow_setup::*;
 pub use flows::*;
 pub use gain::*;
+pub use identity::*;
 pub use network::*;
 use pointer_table::parse_pointer_table_page;
+pub use receiver_ranges::*;
 
 #[cfg(test)]
 mod tests;

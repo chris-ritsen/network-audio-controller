@@ -2697,8 +2697,8 @@ class DanteApplication:
             except (CapabilityProbeTimeout, ConmonExportUnavailableError, ConmonExportError, OSError) as exception:
                 logger.info(f"Channel capacity table unavailable from {device.ipv4}: {exception}")
 
-        async with device.topology_mutation_lock:
-            return await change_sample_rate_topology_safe(
+        async with device.topology_mutation_lock, self.state._lock_for(device.server_name):
+            result = await change_sample_rate_topology_safe(
                 device,
                 sample_rate_hertz,
                 probe,
@@ -2706,6 +2706,11 @@ class DanteApplication:
                 confirm_destructive=confirm_destructive,
                 load_channel_capacities=load_channel_capacities,
             )
+            if result.changed:
+                # The probe can update the rate before its queued notification is handled.
+                # Publish the verified inventories without depending on that notification.
+                self.state._emit_device_updated(device)
+            return result
 
     async def set_sample_rate_pullup(
         self,

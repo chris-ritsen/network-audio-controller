@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from netaudio.common.preferences import read_preferences, save_preference
+from netaudio.common.preferences import read_preferences, save_preference, update_preferences
 from netaudio.daemon.mcp_access import authorization_matches
 
 ACCESS_TOKEN_LIFETIME = 60 * 60
@@ -274,10 +274,14 @@ class OAuthStore:
         )
 
     def revoke_all(self) -> int:
-        count = len(self.tokens())
-        save_preference(TOKENS_PREFERENCE, {})
-        save_preference(CLIENTS_PREFERENCE, {})
-        return count
+        def revoke(preferences: dict) -> int:
+            tokens = preferences.get(TOKENS_PREFERENCE)
+            count = len(tokens) if isinstance(tokens, dict) else 0
+            preferences[TOKENS_PREFERENCE] = {}
+            preferences[CLIENTS_PREFERENCE] = {}
+            return count
+
+        return update_preferences(revoke)
 
 
 def grant_for_authorization(header, static_token: str | None, store: OAuthStore | None) -> Grant | None:

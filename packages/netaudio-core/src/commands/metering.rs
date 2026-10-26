@@ -103,11 +103,7 @@ pub fn parse_metering_request(data: &[u8]) -> Option<MeteringRequest> {
             port,
         }),
         discriminator: layout.discriminator,
-        owner: data
-            .get(10..20)?
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
+        owner: crate::bytes::hexadecimal(data.get(10..20)?),
         transaction_id: read_u16(data, 4)?,
         transmitter_name: layout.transmitter_name,
     })

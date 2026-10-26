@@ -66,6 +66,7 @@ pub fn parse_tx_flow_page(response: &[u8]) -> Option<TxFlowPage> {
     let envelope = validate_response_envelope(
         response,
         &[
+            (crate::protocol::PROTOCOL_ID, OPCODE_QUERY_TX_FLOWS),
             (PROTOCOL_DANTE_FLOW, OPCODE_QUERY_TX_FLOWS),
             (PROTOCOL_DANTE_FLOW_2801, OPCODE_QUERY_TX_FLOWS),
             (PROTOCOL_ARC_2809, OPCODE_QUERY_TX_FLOWS),
@@ -799,45 +800,6 @@ fn effective_subscription_identities(
         }
     }
     Some(identities)
-}
-
-pub fn parse_receiver_port_ranges(response: &[u8]) -> Option<ReceiverPortRanges> {
-    let envelope = validate_response_envelope(
-        response,
-        &[
-            (PROTOCOL_DANTE_FLOW, OPCODE_QUERY_RECEIVER_PORT_RANGES),
-            (PROTOCOL_ARC_2809, OPCODE_QUERY_RECEIVER_PORT_RANGES),
-        ],
-        &[RESULT_CODE_SUCCESS],
-    )?;
-    if envelope.body.len() != 8 {
-        return None;
-    }
-    let ranges = ReceiverPortRanges {
-        first_port_range_start: read_u16(envelope.body, 0)?,
-        first_port_range_end: read_u16(envelope.body, 2)?,
-        second_port_range_start: read_u16(envelope.body, 4)?,
-        second_port_range_end: read_u16(envelope.body, 6)?,
-        second_port_range_available: true,
-    };
-    if ranges.first_port_range_start > ranges.first_port_range_end {
-        return None;
-    }
-    let second_port_range_available = ranges.first_port_range_end < ranges.second_port_range_start
-        && ranges.second_port_range_start <= ranges.second_port_range_end;
-    let modern_empty_second_port_range = envelope.protocol_id == PROTOCOL_ARC_2809
-        && ranges.first_port_range_end == ranges.second_port_range_end
-        && ranges
-            .second_port_range_end
-            .checked_add(1)
-            .is_some_and(|next_port| next_port == ranges.second_port_range_start);
-    if !second_port_range_available && !modern_empty_second_port_range {
-        return None;
-    }
-    Some(ReceiverPortRanges {
-        second_port_range_available,
-        ..ranges
-    })
 }
 
 pub fn parse_transmit_channel_capabilities(response: &[u8]) -> Option<TransmitChannelCapabilities> {

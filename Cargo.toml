@@ -1,0 +1,29 @@
+[workspace]
+members = [
+    "packages/netaudio-core",
+    "packages/netaudio-daemon",
+    "packages/netaudio-endpoint",
+    "packages/netaudio-host-worker",
+    "packages/netaudio-host-jack",
+    "packages/netaudio-host-pulse",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+license = "Unlicense"
+
+[workspace.dependencies]
+anyhow = "1"
+bytes = "1"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "io-util", "fs", "process"] }
+tracing = "0.1"
+
+[profile.release]
+lto = "thin"
+strip = true
+panic = "unwind"
+overflow-checks = true

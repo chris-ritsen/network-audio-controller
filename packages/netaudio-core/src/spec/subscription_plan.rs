@@ -22,6 +22,20 @@ pub(crate) struct SubscriptionPlanRequest {
     pub records: Vec<SubscriptionPageEntry>,
 }
 
+pub struct SubscriptionCommand {
+    pub command: Value,
+    pub receiver_channels: Vec<u16>,
+}
+
+pub fn plan_subscription_command_groups(
+    input: &str,
+) -> Result<Vec<SubscriptionCommand>, SpecError> {
+    let request: SubscriptionPlanRequest =
+        serde_json::from_str(input).map_err(|error| SpecError::InvalidJson(error.to_string()))?;
+
+    plan_grouped_request(request)
+}
+
 pub fn plan_subscription_commands(input: &str) -> Result<Vec<Value>, SpecError> {
     let request: SubscriptionPlanRequest =
         serde_json::from_str(input).map_err(|error| SpecError::InvalidJson(error.to_string()))?;
@@ -32,6 +46,15 @@ pub fn plan_subscription_commands(input: &str) -> Result<Vec<Value>, SpecError> 
 pub(crate) fn plan_subscription_request(
     request: SubscriptionPlanRequest,
 ) -> Result<Vec<Value>, SpecError> {
+    Ok(plan_grouped_request(request)?
+        .into_iter()
+        .map(|group| group.command)
+        .collect())
+}
+
+fn plan_grouped_request(
+    request: SubscriptionPlanRequest,
+) -> Result<Vec<SubscriptionCommand>, SpecError> {
     let protocol = crate::protocol::arc_protocol_for_identifier(request.protocol_id, false)
         .map_err(|error| SpecError::InvalidJson(error.into()))?;
 
@@ -85,11 +108,14 @@ pub(crate) fn plan_subscription_request(
                     tx_channel,
                     tx_device,
                 } => {
-                    subscriptions.push(json!({
-                        "rx_channel": rx_channel,
-                        "tx_channel": tx_channel,
-                        "tx_device": tx_device,
-                    }));
+                    subscriptions.push((
+                        rx_channel,
+                        json!({
+                            "rx_channel": rx_channel,
+                            "tx_channel": tx_channel,
+                            "tx_device": tx_device,
+                        }),
+                    ));
                 }
             }
 
@@ -111,12 +137,24 @@ pub(crate) fn plan_subscription_request(
 
     let mut pages = Vec::new();
 
-    for chunk in clears.chunks(protocol.subscription_batch_limit) {
-        pages.push(json!({"command": "remove_subscriptions", "rx_channels": chunk}));
+    for receiver_channel in clears {
+        pages.push(SubscriptionCommand {
+            command: json!({
+                "command": "remove_subscriptions",
+                "rx_channels": [receiver_channel],
+            }),
+            receiver_channels: vec![receiver_channel],
+        });
     }
 
     for chunk in subscriptions.chunks(protocol.subscription_batch_limit) {
-        pages.push(json!({"command": "add_subscriptions", "subscriptions": chunk}));
+        pages.push(SubscriptionCommand {
+            command: json!({
+                "command": "add_subscriptions",
+                "subscriptions": chunk.iter().map(|(_, value)| value).collect::<Vec<_>>(),
+            }),
+            receiver_channels: chunk.iter().map(|(number, _)| *number).collect(),
+        });
     }
 
     for (media, records) in groups {
@@ -129,13 +167,22 @@ pub(crate) fn plan_subscription_request(
                 "records": chunk,
             });
 
-            pages.push(command);
+            pages.push(SubscriptionCommand {
+                command,
+                receiver_channels: chunk
+                    .iter()
+                    .map(|record| match record {
+                        SubscriptionPageEntry::Set { rx_channel, .. }
+                        | SubscriptionPageEntry::Clear { rx_channel } => *rx_channel,
+                    })
+                    .collect(),
+            });
         }
     }
 
     // No command escapes the planner until every page passes the actual encoder.
-    for command in &pages {
-        super::build_command_from_json(&command.to_string())?;
+    for group in &pages {
+        super::build_command_from_json(&group.command.to_string())?;
     }
 
     Ok(pages)

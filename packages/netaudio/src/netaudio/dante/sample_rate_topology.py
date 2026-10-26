@@ -239,6 +239,7 @@ async def capture_sample_rate_topology(
         if managed and capacity["receive_channel_count"] == 0:
             device.rx_channels = {}
             device.subscriptions = []
+            device.rx_count = 0
         else:
             await device.get_rx_channels()
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
@@ -249,6 +250,19 @@ async def capture_sample_rate_topology(
         core.verify_sample_rate_receiver_inventory(receiver_channel_numbers, capacity["receive_channel_count"])
     except NetaudioCoreError as exception:
         raise SampleRateTopologyVerificationError(str(exception)) from exception
+
+    try:
+        if managed and capacity["transmit_channel_count"] == 0:
+            device.tx_channels = {}
+            device.tx_count = 0
+        else:
+            await device.get_tx_channels()
+    except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
+        raise SampleRateTopologyReadbackError(f"fresh transmitter inventory failed: {exception}") from exception
+    if len(device.tx_channels) != capacity["transmit_channel_count"]:
+        raise SampleRateTopologyVerificationError(
+            "fresh transmitter inventory does not match the expected sample-rate capacity"
+        )
 
     if managed and capacity["transmit_channel_count"] == 0:
         from netaudio.dante.arc_protocol import modern_arc_protocol_identifier_for_device

@@ -6,6 +6,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
@@ -60,9 +61,16 @@ def write_build_information(root: Path) -> Path:
 
 def install_built_library(root: Path, built_library: Path) -> Path:
     destination = package_library_destination(root, built_library.name)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(built_library, destination)
+    install_built_artifact(built_library, destination)
     return destination
+
+
+def install_built_artifact(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".netaudio-native-", dir=destination.parent) as temporary:
+        staged = Path(temporary) / destination.name
+        shutil.copy2(source, staged)
+        os.replace(staged, destination)
 
 
 class CoreLibraryBuildHook(BuildHookInterface):
@@ -70,9 +78,28 @@ class CoreLibraryBuildHook(BuildHookInterface):
 
     def initialize(self, version, build_data):
         crate_dir = Path(self.root) / "packages" / "netaudio-core"
+        binaries = ["netaudio-endpoint", "netaudio-daemon", "netaudio-host-jack", "netaudio-host-pulse"]
         cargo = shutil.which("cargo")
+        video_requested = os.environ.get("NETAUDIO_VIDEO", "0")
+        if video_requested not in {"0", "1"}:
+            raise RuntimeError("NETAUDIO_VIDEO must be 0 or 1")
+        audio_backends = [value.strip() for value in os.environ.get("NETAUDIO_AUDIO_BACKENDS", "").split(",") if value.strip()]
+        unsupported_backends = set(audio_backends) - {"jack", "pulseaudio", "pipewire", "asio"}
+        if unsupported_backends:
+            raise RuntimeError(f"Unknown native audio build backends: {', '.join(sorted(unsupported_backends))}")
+        if (video_requested == "1" or audio_backends) and cargo is None:
+            raise RuntimeError("Building selected media backends requires Cargo and their development libraries")
         if cargo is not None:
-            self._build_core(crate_dir)
+            features = sorted(set(audio_backends) | ({"video"} if video_requested == "1" else set()))
+            command = [
+                cargo, "build", "--release", "--locked", "--manifest-path", str(Path(self.root) / "Cargo.toml"),
+                "--target-dir", str(self._target_dir()), "-p", "netaudio-core",
+            ]
+            for binary in binaries:
+                command.extend(["-p", binary])
+            if features:
+                command.extend(["--features", ",".join(f"netaudio-endpoint/{feature}" for feature in features)])
+            subprocess.run(command, check=True)
         library_path = self._find_library(crate_dir)
         if library_path is None:
             if cargo is None:
@@ -83,6 +110,14 @@ class CoreLibraryBuildHook(BuildHookInterface):
             raise RuntimeError(f"netaudio-core library not found in {self._release_dir(crate_dir)} after cargo build")
         installed_library = install_built_library(self.root, library_path)
         build_data["force_include"][str(installed_library)] = f"netaudio/core/{installed_library.name}"
+        for binary in binaries:
+            name = binary + (".exe" if sys.platform == "win32" else "")
+            source = self._release_dir(crate_dir) / name
+            if not source.is_file():
+                raise RuntimeError(f"native executable not found: {source}")
+            installed = Path(self.root) / "packages" / "netaudio" / "src" / "netaudio" / "bin" / name
+            install_built_artifact(source, installed)
+            build_data["force_include"][str(installed)] = f"netaudio/bin/{name}"
         build_data["force_include"][str(write_build_information(self.root))] = "netaudio/_build_info.json"
         build_data["pure_python"] = False
         build_data["tag"] = f"py3-none-{self._platform_tag()}"
@@ -98,8 +133,12 @@ class CoreLibraryBuildHook(BuildHookInterface):
     def _release_dir(self, crate_dir):
         target = self._cargo_target()
         if target:
-            return crate_dir / "target" / target / "release"
-        return crate_dir / "target" / "release"
+            return self._target_dir() / target / "release"
+        return self._target_dir() / "release"
+
+    def _target_dir(self):
+        configured = os.environ.get("CARGO_TARGET_DIR")
+        return Path(configured).resolve() if configured else Path(self.root) / "target"
 
     @staticmethod
     def _library_name():
@@ -108,15 +147,6 @@ class CoreLibraryBuildHook(BuildHookInterface):
         if sys.platform == "win32":
             return "netaudio_core.dll"
         return "libnetaudio_core.so"
-
-    def _build_core(self, crate_dir):
-        cargo = shutil.which("cargo")
-        if cargo is None:
-            raise RuntimeError(
-                "netaudio-core library is not built and cargo is not installed; "
-                "install Rust (https://rustup.rs) or use a prebuilt wheel"
-            )
-        subprocess.run([cargo, "build", "--release"], cwd=crate_dir, check=True)
 
     def _platform_tag(self):
         target = self._cargo_target()

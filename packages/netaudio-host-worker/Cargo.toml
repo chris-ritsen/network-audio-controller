@@ -1,0 +1,17 @@
+[package]
+name = "netaudio-host-worker"
+version = "0.4.2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+netaudio-core = { path = "../netaudio-core" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

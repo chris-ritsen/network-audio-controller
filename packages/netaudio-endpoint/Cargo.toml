@@ -1,0 +1,43 @@
+[package]
+name = "netaudio-endpoint"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Unlicense"
+
+[dependencies]
+anyhow = "1"
+cpal = "0.18.2"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+rtrb = "0.4"
+rubato = { version = "0.16.2", default-features = false }
+jack = { version = "0.13.5", default-features = false, features = ["dynamic_loading"], optional = true }
+hickory-proto = { version = "0.25.2", default-features = false, features = ["std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+mdns-sd = { version = "0.21", default-features = false, features = ["async"] }
+if-addrs = "0.15"
+clap = { version = "4", features = ["derive"] }
+netaudio-core = { path = "../netaudio-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+socket2 = { version = "0.6", features = ["all"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "signal", "sync", "time", "io-util"] }
+sdl2 = { version = "0.38", optional = true }
+gstreamer = { version = "0.24", features = ["v1_22"], optional = true }
+gstreamer-app = { version = "0.24", features = ["v1_22"], optional = true }
+gstreamer-video = { version = "0.24", features = ["v1_22"], optional = true }
+h264-reader = { version = "0.8", optional = true }
+uuid = { version = "1", features = ["v4", "serde"], optional = true }
+schemars = { version = "=1.2.1", features = ["chrono04"], optional = true }
+
+[features]
+default = []
+jack = ["dep:jack"]
+pulseaudio = ["cpal/pulseaudio"]
+pipewire = ["cpal/pipewire"]
+asio = ["cpal/asio"]
+video = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video", "dep:h264-reader", "dep:uuid", "dep:schemars", "dep:sdl2", "chrono/serde"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+netlink-sys = "0.9"

@@ -669,6 +669,7 @@ class DanteDevice:
 
         records = await self.call_core(lambda client: client.get_rx_channels())
         self.rx_channels, self.subscriptions = self._build_rx_from_records(records)
+        self.rx_count = len(self.rx_channels)
 
     async def get_tx_channels(self):
         protocol = arc_protocol_for_device(self)
@@ -683,6 +684,7 @@ class DanteDevice:
 
         records = await self.call_core(lambda client: client.get_tx_channels())
         self.tx_channels = self._build_tx_from_records(records)
+        self.tx_count = len(self.tx_channels)
 
     async def fetch_device_name(
         self,

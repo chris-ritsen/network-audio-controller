@@ -377,7 +377,7 @@ impl ArcResponse {
                     (DEVICE_SETTINGS_INFO_MAX_LATENCY_NS, maximum_latency_ns),
                     (DEVICE_SETTINGS_INFO_MIN_LATENCY_NS, minimum_latency_ns),
                 ];
-                let mut body = vec![2, settings.len() as u8];
+                let mut body = vec![settings.len() as u8, settings.len() as u8];
                 let first_value_offset = RESPONSE_HEADER_SIZE + 2 + settings.len() * 4;
 
                 for (index, (property, _)) in settings.iter().enumerate() {
