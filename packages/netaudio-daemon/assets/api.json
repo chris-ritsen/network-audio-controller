@@ -17,6 +17,10 @@
       "since": 2,
       "description": "GET /events?meters=0 leaves out meter_values and shure_meter_values; telemetry=none leaves out telemetry fields and their notices. The server skips building events no connected client wants."
     },
+    "device_controls.analog_level": {
+      "since": 2,
+      "description": "POST /device-controls plans and applies the analog_level category."
+    },
     "conmon_association": {
       "since": 3,
       "description": "Device records carry cmc_source_identifier, cmc_process, cmc_process_state, association_state and association_generation. ConMon updates require one current advertised source identifier and process owner. Address devices by server_name. Managed sources without direct CMC discovery have no ConMon association."
