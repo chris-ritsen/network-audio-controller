@@ -11,11 +11,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 const LAYOUT_KEY: &str = "issue_index_layout";
-const LAYOUT: &str = "1";
+const LAYOUT: &str = "2";
 const SCHEMA: &str = "
 CREATE TABLE native_monitoring_issues (
     identifier INTEGER PRIMARY KEY AUTOINCREMENT,
     issue_identity TEXT NOT NULL,
+    is_current INTEGER NOT NULL DEFAULT 0 CHECK (is_current IN (0, 1)),
     first_seen TEXT NOT NULL,
     last_seen INTEGER NOT NULL,
     resolved_at INTEGER,
@@ -24,7 +25,7 @@ CREATE TABLE native_monitoring_issues (
     severity TEXT NOT NULL,
     record TEXT NOT NULL
 );
-CREATE UNIQUE INDEX native_monitoring_active_issue ON native_monitoring_issues (issue_identity) WHERE state = 'open';
+CREATE UNIQUE INDEX native_monitoring_current_issue ON native_monitoring_issues (issue_identity) WHERE is_current = 1;
 CREATE INDEX native_monitoring_issue_episode ON native_monitoring_issues (issue_identity, first_seen, identifier);
 CREATE INDEX native_monitoring_issue_order ON native_monitoring_issues (last_seen, identifier);
 CREATE INDEX native_monitoring_issue_history ON native_monitoring_issues (state, resolved_at, identifier);
@@ -98,7 +99,23 @@ pub fn initialize(transaction: &Transaction<'_>) -> Result<()> {
         )
         .optional()?;
     if let Some(layout) = layout {
-        ensure!(layout == LAYOUT, "unsupported saved issue layout {layout}");
+        if layout == "1" {
+            transaction.execute_batch(
+                "DROP INDEX native_monitoring_active_issue;
+                 ALTER TABLE native_monitoring_issues ADD COLUMN is_current INTEGER NOT NULL DEFAULT 0 CHECK (is_current IN (0, 1));
+                 UPDATE native_monitoring_issues SET is_current = 1 WHERE identifier IN
+                    (SELECT MAX(identifier) FROM native_monitoring_issues GROUP BY issue_identity);
+                 UPDATE native_monitoring_issues SET record = json_set(record, '$.observation_state', 'unobservable')
+                    WHERE is_current = 0 AND state = 'open';
+                 CREATE UNIQUE INDEX native_monitoring_current_issue ON native_monitoring_issues (issue_identity) WHERE is_current = 1;",
+            )?;
+            transaction.execute(
+                "UPDATE native_journal_state SET value = ?1 WHERE key = ?2",
+                params![LAYOUT, LAYOUT_KEY],
+            )?;
+        } else {
+            ensure!(layout == LAYOUT, "unsupported saved issue layout {layout}");
+        }
         return Ok(());
     }
 
@@ -130,8 +147,9 @@ pub fn initialize(transaction: &Transaction<'_>) -> Result<()> {
 }
 
 pub fn restore(transaction: &Transaction<'_>) -> Result<Vec<Issue>> {
-    let mut statement =
-        transaction.prepare("SELECT record FROM native_monitoring_issues WHERE state = 'open'")?;
+    let mut statement = transaction.prepare(
+        "SELECT record FROM native_monitoring_issues WHERE is_current = 1 AND state = 'open'",
+    )?;
     let records = statement
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -204,13 +222,21 @@ fn save(transaction: &Transaction<'_>, issue: &Issue, opened: bool) -> Result<()
     };
     let identifier = if let Some(identifier) = identifier {
         transaction.execute(
-            "UPDATE native_monitoring_issues SET last_seen = ?1, state = ?2, kind = ?3, severity = ?4, record = ?5, resolved_at = ?6 WHERE identifier = ?7",
+            "UPDATE native_monitoring_issues SET last_seen = ?1, state = ?2, kind = ?3, severity = ?4,
+             record = CASE WHEN is_current = 0 AND ?2 = 'open' THEN json_set(?5, '$.observation_state', 'unobservable') ELSE ?5 END,
+             resolved_at = ?6 WHERE identifier = ?7",
             params![observed, state.as_str(), kind.as_str(), severity.as_str(), record, resolved, identifier],
         )?;
         identifier
     } else {
         transaction.execute(
-            "INSERT INTO native_monitoring_issues (issue_identity, first_seen, last_seen, state, kind, severity, record, resolved_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "UPDATE native_monitoring_issues SET is_current = 0,
+             record = CASE WHEN state = 'open' THEN json_set(record, '$.observation_state', 'unobservable') ELSE record END
+             WHERE issue_identity = ?1 AND is_current = 1",
+            [&issue.issue_id],
+        )?;
+        transaction.execute(
+            "INSERT INTO native_monitoring_issues (issue_identity, first_seen, last_seen, state, kind, severity, record, resolved_at, is_current) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
             params![issue.issue_id, issue.first_seen, observed, state.as_str(), kind.as_str(), severity.as_str(), record, resolved],
         )?;
         transaction.last_insert_rowid()
@@ -237,10 +263,11 @@ pub fn page(connection: &Connection, filter: &Filter, view_limit: usize) -> Resu
         Some(filter.limit.unwrap_or(view_limit))
     };
     let mut query =
-        "SELECT identifier, last_seen, record FROM native_monitoring_issues WHERE 1".to_owned();
+        "SELECT identifier, last_seen, record, is_current FROM native_monitoring_issues WHERE 1"
+            .to_owned();
     let mut parameters = Vec::new();
     if limit.is_none() {
-        query.push_str(" AND (state = 'open' OR identifier IN (SELECT identifier FROM native_monitoring_issues WHERE state = 'resolved' ORDER BY resolved_at DESC, identifier DESC LIMIT ?))");
+        query.push_str(" AND ((is_current = 1 AND state = 'open') OR identifier IN (SELECT identifier FROM native_monitoring_issues WHERE state = 'resolved' ORDER BY resolved_at DESC, identifier DESC LIMIT ?))");
         parameters.push(Parameter::Integer(i64::try_from(view_limit)?));
     }
     for (column, value) in [
@@ -281,6 +308,7 @@ pub fn page(connection: &Connection, filter: &Filter, view_limit: usize) -> Resu
     let mut statement = connection.prepare(&query)?;
     let mut rows = statement.query(params_from_iter(parameters))?;
     let mut issues = Vec::new();
+    let mut active_count = 0;
     let mut last = None;
     let mut more = false;
     while let Some(row) = rows.next()? {
@@ -289,17 +317,18 @@ pub fn page(connection: &Connection, filter: &Filter, view_limit: usize) -> Resu
             break;
         }
         let record: String = row.get(2)?;
-        issues.push(serde_json::from_str::<Issue>(&record)?);
+        let issue = serde_json::from_str::<Issue>(&record)?;
+        if row.get::<_, bool>(3)? && issue.state == Lifecycle::Open {
+            active_count += 1;
+        }
+        issues.push(issue);
         last = Some((row.get::<_, i64>(1)?, row.get::<_, i64>(0)?));
     }
     Ok(Page {
         schema_version: SCHEMA_VERSION,
         history_limit: view_limit,
         count: issues.len(),
-        active_count: issues
-            .iter()
-            .filter(|issue| issue.state == Lifecycle::Open)
-            .count(),
+        active_count,
         issues,
         next_cursor: if more {
             Some(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&json!(last))?))

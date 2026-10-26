@@ -70,3 +70,14 @@ The issue index adds writes while an issue's evidence changes and requires its
 own migration validation. Existing HTTP, MCP and Python CLI issue interfaces
 remain available. Host and wireless conditions still depend on their native
 service ports before the complete daemon can replace Python.
+
+## Legacy episode migration, 2026-10-26
+
+The workstation's Python journal contains repeated open episodes for one issue
+identity across daemon restarts, without recorded recovery between episodes.
+The issue index preserves each episode and separately identifies the current
+one. Superseded open episodes remain open and become unobservable; migration
+must not manufacture a recovery time. Only the current open episode is restored
+into the detector and counted active. Explicit paginated history retains access
+to superseded episodes, and the source journal records remain unchanged. The
+existing native index upgrades transactionally to the same ownership model.
