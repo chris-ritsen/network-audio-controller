@@ -11,7 +11,6 @@ use toml_edit::{DocumentMut, Item, Table, TableLike, value};
 #[derive(Clone)]
 pub struct Store {
     path: PathBuf,
-    profile: Option<String>,
 }
 
 #[derive(Clone)]
@@ -52,7 +51,6 @@ impl Store {
     pub fn new(configuration: &crate::configuration::Configuration) -> Self {
         Self {
             path: configuration.path.clone(),
-            profile: configuration.profile_name.clone(),
         }
     }
 
@@ -68,19 +66,8 @@ impl Store {
     fn parse(&self, text: &str) -> Result<Snapshot, Error> {
         let document: toml::Table = toml::from_str(text)
             .map_err(|_| Error::Invalid("Saved configuration is not valid TOML"))?;
-        let profile = match &self.profile {
-            Some(name) => document
-                .get("profiles")
-                .and_then(toml::Value::as_table)
-                .and_then(|profiles| profiles.get(name))
-                .and_then(toml::Value::as_table)
-                .ok_or(Error::Conflict(
-                    "The selected configuration profile no longer exists",
-                ))?,
-            None => &document,
-        };
         Ok(Snapshot {
-            settings: Settings::load(profile, self.directory()?)?,
+            settings: Settings::load(&document, self.directory()?)?,
             revision: Sha256::digest(text.as_bytes()).into(),
         })
     }
@@ -103,9 +90,8 @@ impl Store {
         let mut credential_file = None;
         let mut installed = false;
         let result = (|| {
-            let profile = self.profile_mut(&mut document)?;
             let settings = &snapshot.settings;
-            let managed = table_mut(profile, "ddm")?;
+            let managed = table_mut(document.as_table_mut(), "ddm")?;
             match change {
                 Change::Login {
                     name,
@@ -255,24 +241,6 @@ impl Store {
         self.path.parent().ok_or(Error::Persistence(
             "Configuration path has no parent directory",
         ))
-    }
-
-    fn profile_mut<'a>(
-        &self,
-        document: &'a mut DocumentMut,
-    ) -> Result<&'a mut dyn TableLike, Error> {
-        match &self.profile {
-            None => Ok(document.as_table_mut()),
-            Some(name) => {
-                let profiles = table_mut(document.as_table_mut(), "profiles")?;
-                profiles
-                    .get_mut(name)
-                    .and_then(Item::as_table_like_mut)
-                    .ok_or(Error::Conflict(
-                        "The selected configuration profile no longer exists",
-                    ))
-            }
-        }
     }
 }
 
