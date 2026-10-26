@@ -1,5 +1,5 @@
 use super::{ControlError, Device, DeviceRegistry, DeviceState, ReceivedPacket};
-use crate::monitoring::diagnostics::{self, HISTORY_LIMIT, PRESENCE_LIFETIME};
+use crate::monitoring::diagnostics::{self, PRESENCE_LIFETIME};
 use anyhow::Result;
 use netaudio_core::heartbeat::parse_heartbeat_device_extended_unique_identifier;
 use netaudio_core::heartbeat_connection_health::Topology;
@@ -236,6 +236,28 @@ impl DeviceRegistry {
         options: DiagnosticOptions,
         precondition: Option<&Value>,
     ) -> Result<Value, ControlError> {
+        self.present_diagnostics(reference, options, precondition, |snapshot| {
+            Ok(serde_json::to_value(snapshot)?)
+        })
+    }
+
+    pub fn diagnostics_encoded(
+        &self,
+        reference: &str,
+        options: DiagnosticOptions,
+    ) -> Result<bytes::Bytes, ControlError> {
+        self.present_diagnostics(reference, options, None, |snapshot| {
+            Ok(serde_json::to_vec(snapshot)?.into())
+        })
+    }
+
+    fn present_diagnostics<T>(
+        &self,
+        reference: &str,
+        options: DiagnosticOptions,
+        precondition: Option<&Value>,
+        present: impl FnOnce(&diagnostics::presentation::Snapshot<'_>) -> Result<T>,
+    ) -> Result<T, ControlError> {
         let device = self.controlled_device(reference)?;
         let mut state = device
             .state
@@ -257,27 +279,13 @@ impl DeviceRegistry {
             options.warning,
         )?;
         self.publish_diagnostics(&mut state, false)?;
-        let mut result = json!({
-            "device": state.record.key,
-            "device_identity": state.diagnostics.identity,
-            "receiver": state.diagnostics.receiver_snapshot(options.receiver_history || options.points)?,
-            "clock_state": state.record.properties.get("clock_status"),
-            "clock_state_observed_at": state.record.properties.get("clock_observed_at"),
-            "retention_limit": HISTORY_LIMIT,
-            "timestamp_provenance": "local_receive_time",
-        });
-
-        if options.include_clock {
-            result["clock"] = state
-                .diagnostics
-                .clock_snapshot(options.clock_history || options.points)?;
-        }
-
-        if options.points {
-            diagnostics::points(&mut result)?;
-        }
-
-        Ok(result)
+        let snapshot = state.diagnostics.snapshot(
+            &state.record.key,
+            state.record.properties.get("clock_status"),
+            state.record.properties.get("clock_observed_at"),
+            &options,
+        )?;
+        Ok(present(&snapshot)?)
     }
 }
 

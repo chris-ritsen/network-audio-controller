@@ -1,12 +1,12 @@
-use super::{ApiError, DeviceService, RequestBody, control_error, json_value, parameters, text};
+use super::{ApiError, DeviceService, RequestBody, control_error, parameters, text};
 use crate::devices::registry::DiagnosticOptions;
+use crate::http::inventory::json_bytes;
 use axum::Router;
 use axum::extract::{Extension, Path, RawQuery, State};
 use axum::response::Response;
 use axum::routing::{get, post};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 pub(super) fn routes(router: Router<DeviceService>) -> Router<DeviceService> {
     router
@@ -65,8 +65,8 @@ async fn update(
 }
 
 fn snapshot(service: &DeviceService, device: &str, options: DiagnosticOptions) -> Response {
-    match service.registry.diagnostics_snapshot(device, options) {
-        Ok(value) => json_value(Arc::new(value)),
+    match service.registry.diagnostics_encoded(device, options) {
+        Ok(value) => json_bytes(value),
         Err(error) => control_error(error),
     }
 }

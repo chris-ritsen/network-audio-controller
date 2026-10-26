@@ -1,5 +1,5 @@
 use super::multicast::ReceivedPacket;
-use anyhow::{Result, bail};
+use anyhow::Result;
 use netaudio_core::heartbeat_clock::{self, ClockObservationRequest, ClockObservations};
 use netaudio_core::heartbeat_connection_health::{
     self, ConnectionHealthUpdate, HeartbeatConnectionHealthRecords, Topology, UpdateRequest,
@@ -9,6 +9,8 @@ use netaudio_core::observation::Series;
 use serde_json::{Map, Value, json};
 use std::time::Duration;
 use tokio::time::Instant;
+
+pub mod presentation;
 
 pub const HISTORY_LIMIT: usize = 300;
 pub const FRESHNESS: Duration = Duration::from_secs(5);
@@ -311,64 +313,4 @@ fn clock_request(observed_at: String, observed_monotonic: f64) -> ClockObservati
         history_limit: HISTORY_LIMIT,
         reset: false,
     }
-}
-
-pub fn points(snapshot: &mut Value) -> Result<()> {
-    if let Some(paths) = snapshot
-        .get_mut("receiver")
-        .and_then(|receiver| receiver.get_mut("paths"))
-        .and_then(Value::as_array_mut)
-    {
-        for path in paths {
-            if let Some(late_packets) = path["late_packets"].as_object_mut() {
-                late_packets.remove("history");
-            }
-
-            series_points(&mut path["latency"])?;
-        }
-    }
-
-    if let Some(clock) = snapshot.get_mut("clock").and_then(Value::as_object_mut) {
-        for name in ["heartbeat", "conmon"] {
-            if let Some(series) = clock.get_mut(name) {
-                series_points(series)?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn series_points(value: &mut Value) -> Result<()> {
-    if value.is_null() {
-        return Ok(());
-    }
-
-    let series: Series = serde_json::from_value(value.clone())?;
-    let points: Vec<_> = series
-        .history
-        .iter()
-        .filter(|sample| sample.display_epoch == series.display_epoch)
-        .filter_map(|sample| {
-            sample.value.map(|value| {
-                json!([
-                    (sample.observed_monotonic * 10.0).round_ties_even() / 10.0,
-                    value,
-                ])
-            })
-        })
-        .collect();
-    let Some(fields) = value.as_object_mut() else {
-        bail!("diagnostic series is not an object");
-    };
-    fields.remove("history");
-
-    if points
-        .iter()
-        .any(|point| point[1].as_f64().is_some_and(|value| value != 0.0))
-    {
-        fields.insert("points".to_owned(), json!(points));
-    }
-
-    Ok(())
 }

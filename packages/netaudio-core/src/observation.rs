@@ -52,7 +52,7 @@ pub struct Observation {
     pub epoch: u64,
     pub display_epoch: u64,
     pub evidence: Arc<Value>,
-    pub clock_state_evidence: Option<Arc<Value>>,
+    pub clock_state_evidence: Option<Arc<serde_json::value::RawValue>>,
     #[serde(default, skip_serializing_if = "raw_record_is_empty")]
     pub raw_record: Arc<Vec<u8>>,
     pub value: Option<f64>,
@@ -171,10 +171,18 @@ pub fn validate_limits(now: f64, freshness: f64, limit: usize) -> Result<(), Str
 impl Series {
     /// Current state without walking or cloning retained observations.
     pub fn summary(&self) -> Self {
+        self.project(self.current.as_ref().map(Observation::summary))
+    }
+
+    pub fn without_history(&self) -> Self {
+        self.project(self.current.clone())
+    }
+
+    fn project(&self, current: Option<Observation>) -> Self {
         Self {
             fresh: self.fresh,
             history: Vec::new(),
-            current: self.current.as_ref().map(Observation::summary),
+            current,
             delta: self.delta,
             baseline: self.baseline,
             increase_since_baseline: self.increase_since_baseline,
