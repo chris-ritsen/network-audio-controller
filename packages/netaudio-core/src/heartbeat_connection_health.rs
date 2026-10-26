@@ -153,6 +153,22 @@ pub struct ReceiverPath {
 
 impl ReceiverPath {
     fn summary(&self) -> Self {
+        self.project(
+            Arc::new(compact_path_evidence(&self.evidence)),
+            self.series_summary(&self.latency),
+            self.series_summary(&self.late_packets),
+        )
+    }
+
+    fn without_history(&self) -> Self {
+        self.project(
+            self.evidence.clone(),
+            self.latency.without_history(),
+            self.late_packets.without_history(),
+        )
+    }
+
+    fn project(&self, evidence: Arc<Value>, latency: Series, late_packets: Series) -> Self {
         Self {
             attribution_epoch: self.attribution_epoch,
             telemetry_index: self.telemetry_index,
@@ -162,9 +178,9 @@ impl ReceiverPath {
             global_flow_id: self.global_flow_id,
             attribution_status: self.attribution_status.clone(),
             attribution_reason: self.attribution_reason.clone(),
-            evidence: Arc::new(compact_path_evidence(&self.evidence)),
-            latency: self.series_summary(&self.latency),
-            late_packets: self.series_summary(&self.late_packets),
+            evidence,
+            latency,
+            late_packets,
         }
     }
 
@@ -327,6 +343,21 @@ pub struct ConnectionHealthUpdate {
 }
 
 impl ConnectionHealthUpdate {
+    pub fn without_history(&self) -> Self {
+        Self {
+            device_extended_unique_identifier: self.device_extended_unique_identifier.clone(),
+            complete: self.complete,
+            fresh: self.fresh,
+            retention_limit: self.retention_limit,
+            paths: self
+                .paths
+                .iter()
+                .map(ReceiverPath::without_history)
+                .collect(),
+            diagnostics: self.diagnostics.clone(),
+        }
+    }
+
     pub fn summary(&self) -> Self {
         Self {
             device_extended_unique_identifier: self.device_extended_unique_identifier.clone(),

@@ -49,6 +49,22 @@ from this optimization requirement.
 
 ## Consequences
 
+On 2026-10-26 Chris required the daemon to be as lean as possible, with every
+retained megabyte justified, and described approximately 100 MB total as his
+expectation. This is an optimization target for the representative installation,
+not evidence of an achieved budget or a limit that may discard observations.
+Retained evidence must remain complete. Allocation profiles must distinguish
+useful retained data, temporary representations, and allocator retention. Avoid
+periodic allocator trimming or restarts as memory management. Implementation
+changes and measured savings remain subject to working-behavior acceptance.
+
+Clock history retains immutable evidence as serialized JSON, shared by its
+dependent observations. Reads decode it only when a consumer needs to inspect
+its fields; serialization passes the original evidence through. This preserves
+all evidence while avoiding a permanently allocated JSON tree per sample.
+Diagnostic responses should serialize from retained typed records instead of
+constructing a second expanded tree of the complete history.
+
 Ordinary HTTP users avoid initializing unused MCP services. MCP users enable
 the capability explicitly and retain its current routes and authentication.
 Performance changes must preserve device information, history, event ordering,

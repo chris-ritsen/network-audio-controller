@@ -168,8 +168,19 @@ pub fn observe_in_place(
             request.observed_monotonic,
             vec![],
         );
-        sample.clock_state_evidence =
-            Some(json!({"status": status, "observed_at": request.observed_at}).into());
+        #[derive(Serialize)]
+        struct ClockEvidence<'a> {
+            status: &'a serde_json::Value,
+            observed_at: &'a str,
+        }
+        sample.clock_state_evidence = Some(
+            serde_json::value::to_raw_value(&ClockEvidence {
+                status: &status,
+                observed_at: &request.observed_at,
+            })
+            .map_err(|error| error.to_string())?
+            .into(),
+        );
         changed |= state.conmon.accept(
             sample,
             request.freshness_seconds,
