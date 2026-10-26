@@ -29,9 +29,11 @@ class TestClockPortStateFromConmon0x0020:
         return bytes(packet)
 
     def test_device_gets_leader_from_0x0020(self):
-        application, device = application_with_device("test.local.", "192.168.1.108", name="test")
-
         packet = self._build_conmon_0020_packet(0x0006, preferred_leader_byte=0x01)
+        application, device = application_with_device(
+            "test.local.", "192.168.1.108", name="test", advertised_from=packet
+        )
+
         receive_packets(application, [packet], ("192.168.1.108", 1030))
         assert device.clock_frequency_offset_parts_per_billion == -25_473
         assert device.clock_port_state_code == 0x0006
@@ -40,9 +42,11 @@ class TestClockPortStateFromConmon0x0020:
         assert device.clock_source_code == 0
 
     def test_device_gets_follower_from_0x0020(self):
-        application, device = application_with_device("test.local.", "192.168.1.34", name="test")
-
         packet = self._build_conmon_0020_packet(0x0009, preferred_leader_byte=0x00)
+        application, device = application_with_device(
+            "test.local.", "192.168.1.34", name="test", advertised_from=packet
+        )
+
         receive_packets(application, [packet], ("192.168.1.34", 1030))
         assert device.clock_frequency_offset_parts_per_billion == -25_473
         assert device.clock_port_state_code == 0x0009
@@ -50,11 +54,11 @@ class TestClockPortStateFromConmon0x0020:
         assert device.preferred_leader is False
 
     def test_unknown_state_preserves_raw_code_and_clears_derived_role(self):
-        application, device = application_with_device("test.local.", "192.168.1.1", name="test")
+        packet = self._build_conmon_0020_packet(0x0001)
+        application, device = application_with_device("test.local.", "192.168.1.1", name="test", advertised_from=packet)
         device.clock_port_state_code = 0x0006
         device.clock_role = "Leader"
 
-        packet = self._build_conmon_0020_packet(0x0001)
         receive_packets(application, [packet], ("192.168.1.1", 1030))
         assert device.clock_port_state_code == 0x0001
         assert device.clock_role is None

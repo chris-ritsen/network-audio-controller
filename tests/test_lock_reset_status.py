@@ -131,13 +131,18 @@ def test_passive_lock_state_uses_presence_word_independently_of_status_code():
 
 def test_state_service_tracks_passive_lock_transitions():
     device_ip_address = "192.168.1.18"
-    application, device = application_with_device("avio-aes3.local.", device_ip_address)
+    application, device = application_with_device(
+        "avio-aes3.local.", device_ip_address, advertised_from=AVIO_UNLOCKED_LOCK_RESET_STATUS
+    )
+    status_code_zero_unlocked = (
+        A32_UNLOCKED_LOCK_RESET_STATUS[:6] + AVIO_UNLOCKED_LOCK_RESET_STATUS[6:16] + A32_UNLOCKED_LOCK_RESET_STATUS[16:]
+    )
 
     events = receive_packets(application, [AVIO_UNLOCKED_LOCK_RESET_STATUS], (device_ip_address, 8702))
     assert device.is_locked is False
     events += receive_packets(application, [AVIO_LOCKED_LOCK_RESET_STATUS], (device_ip_address, 8702))
     assert device.is_locked is True
-    events += receive_packets(application, [A32_UNLOCKED_LOCK_RESET_STATUS], (device_ip_address, 8702))
+    events += receive_packets(application, [status_code_zero_unlocked], (device_ip_address, 8702))
     assert device.is_locked is False
 
     assert count_events(events, EventType.DEVICE_UPDATED) == 3
@@ -145,8 +150,10 @@ def test_state_service_tracks_passive_lock_transitions():
 
 @pytest.mark.asyncio
 async def test_lock_status_probe_waits_for_publication_observed_after_request():
-    application = DanteApplication()
     device_ip_address = "10.0.2.15"
+    application, _device = application_with_device(
+        "a32.local.", device_ip_address, advertised_from=A32_UNLOCKED_LOCK_RESET_STATUS
+    )
     application.send_probe_lock_reset_status = AsyncMock(
         side_effect=lambda ip_address: application.notifications._on_packet(
             A32_UNLOCKED_LOCK_RESET_STATUS,
@@ -220,7 +227,9 @@ async def test_enrich_lock_states_applies_unknown_fresh_observation_without_pack
 
 def test_state_service_applies_lock_reset_status_once_and_serializes_it():
     device_ip_address = "192.168.1.18"
-    application, device = application_with_device("virtual-a32.local.", device_ip_address)
+    application, device = application_with_device(
+        "virtual-a32.local.", device_ip_address, advertised_from=LOCK_RESET_STATUS_FOUR
+    )
     response = LOCK_RESET_STATUS_FOUR
     expected = core.parse_response("lock_reset_status", response)
 
@@ -233,16 +242,3 @@ def test_state_service_applies_lock_reset_status_once_and_serializes_it():
     assert serialized["lock_reset_status"] == expected
     restored = DanteDeviceSerializer.device_from_json(json.loads(json.dumps(serialized)))
     assert restored.lock_reset_status == expected
-
-
-def test_state_service_applies_status_received_before_discovery():
-    device_ip_address = "10.0.2.15"
-    application = DanteApplication()
-    receive_packets(application, [LOCK_RESET_STATUS_ZERO], (device_ip_address, 8702))
-    device = DanteDevice(server_name="virtual-a32.local.")
-    device.ipv4 = device_ip_address
-
-    application.register_device(device.server_name, device)
-
-    assert device.lock_reset_status == core.parse_response("lock_reset_status", LOCK_RESET_STATUS_ZERO)
-    assert device.is_locked is False

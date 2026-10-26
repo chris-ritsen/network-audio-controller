@@ -280,11 +280,11 @@ class DanteHeartbeatService(DanteMulticastService):
             elif telemetry_fields:
                 self._notify_device_telemetry(device, (*telemetry_fields, "last_seen"))
 
-        if self._on_signal_presence:
+        if device and self._on_signal_presence:
             records = parse_signal_presence_records(data)
             if records:
                 try:
-                    self._on_signal_presence(records, addr, server_name=device.server_name if device else None)
+                    self._on_signal_presence(records, addr, server_name=device.server_name)
                 except Exception as exception:
                     logger.warning(f"Signal-presence callback failed for {source_ip}: {exception}", exc_info=True)
 

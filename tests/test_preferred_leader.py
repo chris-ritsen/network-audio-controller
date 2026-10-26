@@ -1,6 +1,7 @@
 import asyncio
 import struct
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -65,7 +66,10 @@ class TestPreferredLeaderFromConmon0x0020:
     @pytest.mark.asyncio
     async def test_preferred_leader_on(self):
         dispatcher = DanteEventDispatcher()
-        service = DanteNotificationService(dispatcher=dispatcher)
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="device", server_name="device.local."),
+        )
         device_ip = "192.168.1.34"
 
         waiter = service.register_waiter("preferred_leader", device_ip)
@@ -79,7 +83,10 @@ class TestPreferredLeaderFromConmon0x0020:
     @pytest.mark.asyncio
     async def test_preferred_leader_off(self):
         dispatcher = DanteEventDispatcher()
-        service = DanteNotificationService(dispatcher=dispatcher)
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="device", server_name="device.local."),
+        )
         device_ip = "192.168.1.34"
 
         waiter = service.register_waiter("preferred_leader", device_ip)
@@ -92,10 +99,10 @@ class TestPreferredLeaderFromConmon0x0020:
 
     @pytest.mark.asyncio
     async def test_probe_clocking_status_applies_the_paired_publication(self):
-        application, device = application_with_device("avio-bt-1.local.", "192.168.1.34")
         packet = (
             Path(__file__).parent / "fixtures" / "clock_leader_association" / "follower-domain-a-0020.bin"
         ).read_bytes()
+        application, device = application_with_device("avio-bt-1.local.", "192.168.1.34", advertised_from=packet)
         calls = []
 
         async def refresh(target, host_mac=None, sequence=0x0021, control_profile=None):
@@ -140,10 +147,12 @@ class TestPreferredLeaderFromConmon0x0020:
         assert len(parsed["clock_port_records"]) == 3
 
     def test_updates_device_through_the_state_service(self):
-        application, device = application_with_device("test.local.", "192.168.1.34", name="test")
+        packet = self._build_conmon_0020_packet(0x01)
+        application, device = application_with_device(
+            "test.local.", "192.168.1.34", name="test", advertised_from=packet
+        )
         device.preferred_leader = None
 
-        packet = self._build_conmon_0020_packet(0x01)
         receive_packets(application, [packet], ("192.168.1.34", 1030))
         assert device.preferred_leader is True
 

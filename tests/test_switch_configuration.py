@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,6 +10,7 @@ from netaudio.dante.application import DanteApplication
 from netaudio.dante.events import DanteEventDispatcher
 from netaudio.dante.services.notification import DanteNotificationService
 from netaudio.dante.network_configuration import switch_configuration_fields
+from tests.status_test_support import application_with_device
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "switch_configuration" / "ad4d-switched-0014.hex"
@@ -43,7 +45,10 @@ def test_native_choice_meaning_reaches_the_device_adapter_without_reinterpretati
 
 def test_notification_waiter_is_source_matched():
     device_ip_address = "192.0.2.10"
-    service = DanteNotificationService(dispatcher=DanteEventDispatcher())
+    service = DanteNotificationService(
+        dispatcher=DanteEventDispatcher(),
+        device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="device", server_name="device.local."),
+    )
     waiter = service.register_waiter("switch_configuration", device_ip_address)
 
     service._on_packet(PACKET, ("192.0.2.11", 8702))
@@ -60,8 +65,8 @@ def test_notification_waiter_is_source_matched():
 
 @pytest.mark.asyncio
 async def test_application_probe_waits_for_switch_configuration_publication():
-    application = DanteApplication()
     device_ip_address = "192.0.2.10"
+    application, _device = application_with_device("switch.local.", device_ip_address, advertised_from=PACKET)
     application.send_probe_switch_configuration = AsyncMock(
         side_effect=lambda address: application.notifications._on_packet(PACKET, (address, 8702))
     )

@@ -27,22 +27,26 @@ pub enum NetaudioNotification {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NotificationEnvelope {
-    pub notification_id: u16,
-    pub notification_name: Option<&'static str>,
-    pub is_conmon: bool,
-    pub response_kind: Option<&'static str>,
     /// The sender's device ID from a ConMon header, which tells apart devices that share one IP address.
     pub device_id: Option<String>,
+    pub is_conmon: bool,
+    pub notification_id: u16,
+    pub notification_name: Option<&'static str>,
+    pub process: Option<u16>,
+    pub response_kind: Option<&'static str>,
+    pub sequence: Option<u16>,
 }
 
 pub fn parse_notification_envelope(data: &[u8]) -> Option<NotificationEnvelope> {
     if let Some(opcode) = conmon_opcode(data) {
         return Some(NotificationEnvelope {
+            device_id: data.get(8..16).map(crate::bytes::hexadecimal),
+            is_conmon: true,
             notification_id: opcode,
             notification_name: None,
-            is_conmon: true,
+            process: read_u16(data, 6),
             response_kind: conmon_response_kind(opcode),
-            device_id: data.get(8..16).map(crate::bytes::hexadecimal),
+            sequence: read_u16(data, 4),
         });
     }
 
@@ -83,11 +87,13 @@ pub fn parse_notification_envelope(data: &[u8]) -> Option<NotificationEnvelope> 
     };
 
     Some(NotificationEnvelope {
+        device_id: None,
+        is_conmon: false,
         notification_id,
         notification_name,
-        is_conmon: false,
+        process: None,
         response_kind: None,
-        device_id: None,
+        sequence: None,
     })
 }
 
@@ -123,12 +129,16 @@ pub(crate) fn conmon_response_kind(opcode: u16) -> Option<&'static str> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConmonOpcode {
     pub opcode: Option<u16>,
+    pub process: u16,
+    pub sequence: u16,
     pub source_eui64: String,
 }
 
 pub fn parse_conmon_opcode(data: &[u8]) -> Option<ConmonOpcode> {
     Some(ConmonOpcode {
         opcode: Some(conmon_opcode(data)?),
+        process: read_u16(data, 6)?,
+        sequence: read_u16(data, 4)?,
         source_eui64: bytes_to_hex(data.get(8..16)?),
     })
 }

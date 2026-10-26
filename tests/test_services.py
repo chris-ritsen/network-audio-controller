@@ -15,10 +15,10 @@ from netaudio.dante.services.notification import (
     DanteNotificationService,
 )
 from netaudio.dante.application import DanteApplication
-from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEventDispatcher, EventType
 from netaudio.dante.virtual_device import VirtualDevice, VirtualDeviceConfig
 from tests.status_test_support import (
+    advertise_cmc_txt,
     application_with_device,
     count_events,
     deliver_status_events,
@@ -110,6 +110,9 @@ class TestApplicationSettingsCommands:
         application, device = application_with_device("receiver.local.", address)
         peer = VirtualDevice(VirtualDeviceConfig(supported_sample_rates=[48000, 96000]))
         peer._local_ip = address
+        advertise_cmc_txt(
+            application, device, {"id": peer._advertised_device_id(), "process": str(peer.config.process_id)}
+        )
         peer._mcast_transport = SimpleNamespace(
             sendto=lambda packet, destination: application.notifications._on_packet(packet, (address, 8702))
         )
@@ -395,7 +398,9 @@ class TestDanteNotificationService:
 
     def _parse_dual_interface_packet(self, secondary_mac):
         device_ip = "192.168.1.34"
-        application, device = application_with_device("device.local.", device_ip)
+        application, device = application_with_device(
+            "device.local.", device_ip, advertised_from=self._build_dual_interface_packet(secondary_mac)
+        )
         receive_packets(application, [self._build_dual_interface_packet(secondary_mac)], (device_ip, 1030))
         return device
 
@@ -422,7 +427,7 @@ class TestDanteNotificationService:
         assert envelope["response_kind"] == decoder["kind"] == "unmapped_0106_status"
         assert core.parse_response(decoder["kind"], packet) == {"unmapped_word_at_body_offset_0": 7}
 
-        application, _ = application_with_device("device.local.", "192.0.2.1")
+        application, _ = application_with_device("device.local.", "192.0.2.1", advertised_from=packet)
         [event] = receive_packets(application, [packet], ("192.0.2.1", 8702))
         assert event.type is EventType.NOTIFICATION_RECEIVED
         assert event.data["notification_name"] == "Unknown notification"
@@ -451,6 +456,7 @@ class TestDanteNotificationService:
         assert event.device_name == "Test Device"
         assert event.server_name == "device.local."
         assert event.data == {
+            "association_generation": device.association_generation,
             "notification_id": notification_id,
             "notification_name": name,
             "raw": packet,
@@ -485,7 +491,9 @@ class TestDanteNotificationService:
         service.notify_waiters.assert_not_called()
 
     def test_routing_capacity_ready_updates_capacity_and_active_counts(self):
-        application, device = application_with_device("lx-dante.local.", "192.168.1.108")
+        application, device = application_with_device(
+            "lx-dante.local.", "192.168.1.108", advertised_from=ROUTING_CAPACITY_READY_PACKET
+        )
 
         events = receive_packets(application, [ROUTING_CAPACITY_READY_PACKET], ("192.168.1.108", 8702))
 
@@ -502,7 +510,9 @@ class TestDanteNotificationService:
         assert status_event.data["kind"] == "routing_capacity"
 
     def test_routing_capacity_transition_preserves_active_counts(self):
-        application, device = application_with_device("a32.local.", "10.0.2.15", name="A32")
+        application, device = application_with_device(
+            "a32.local.", "10.0.2.15", name="A32", advertised_from=ROUTING_CAPACITY_TRANSITION_PACKET
+        )
         device.routing_ready = True
         device.routing_ready_code = 1
         device.routing_link_status = 1
@@ -523,7 +533,9 @@ class TestDanteNotificationService:
         assert count_events(events, EventType.DEVICE_UPDATED) == 1
 
     def test_routing_capacity_ready_preserves_inventory_counts(self):
-        application, device = application_with_device("ad4d.local.", "192.168.1.108")
+        application, device = application_with_device(
+            "ad4d.local.", "192.168.1.108", advertised_from=ROUTING_CAPACITY_READY_PACKET
+        )
         device.tx_count = 2
         device.tx_count_raw = 64
         device.rx_count = 1
@@ -578,7 +590,9 @@ class TestDanteNotificationService:
 
     def test_applied_dhcp_target_clears_stale_avio_flag(self):
         device_ip = "192.168.1.139"
-        application, device = application_with_device("AVIOAI2-50692e.local.", device_ip)
+        application, device = application_with_device(
+            "AVIOAI2-50692e.local.", device_ip, advertised_from=AVIO_APPLIED_DHCP_INTERFACE_STATUS_PACKET
+        )
 
         receive_packets(application, [AVIO_APPLIED_DHCP_INTERFACE_STATUS_PACKET], (device_ip, 8700))
 
@@ -588,7 +602,9 @@ class TestDanteNotificationService:
         assert device.interfaces[0]["configured"] == {"mode": "dynamic"}
 
     def test_sample_rate_status_updates_device_and_emits_once(self):
-        application, device = application_with_device("lx-dante.local.", "192.168.1.108")
+        application, device = application_with_device(
+            "lx-dante.local.", "192.168.1.108", advertised_from=SAMPLE_RATE_STATUS_PACKET
+        )
 
         events = receive_packets(application, [SAMPLE_RATE_STATUS_PACKET], ("192.168.1.108", 1032))
 
@@ -607,7 +623,9 @@ class TestDanteNotificationService:
 
     @pytest.mark.asyncio
     async def test_sample_rate_value_change_refreshes_controls_and_emits_once_when_refetching(self):
-        application, device = application_with_device("lx-dante.local.", "192.168.1.108")
+        application, device = application_with_device(
+            "lx-dante.local.", "192.168.1.108", advertised_from=SAMPLE_RATE_STATUS_PACKET
+        )
         device.sample_rate = 48_000
         device.supported_sample_rates = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
         device.fetch_controls_data = AsyncMock(return_value={"sample_rate": 44_100})
@@ -623,7 +641,9 @@ class TestDanteNotificationService:
         assert count_events(events, EventType.DEVICE_UPDATED) == 1
 
     def test_sample_rate_supported_list_change_emits_without_settings_refresh(self):
-        application, device = application_with_device("lx-dante.local.", "192.168.1.108")
+        application, device = application_with_device(
+            "lx-dante.local.", "192.168.1.108", advertised_from=SAMPLE_RATE_STATUS_PACKET
+        )
         device.sample_rate = 44_100
         device.supported_sample_rates = [44_100]
         device.fetch_controls_data = AsyncMock()
@@ -634,7 +654,10 @@ class TestDanteNotificationService:
         device.fetch_controls_data.assert_not_awaited()
 
     def test_sample_rate_status_notifies_registered_waiter(self):
-        service = DanteNotificationService(dispatcher=MagicMock())
+        service = DanteNotificationService(
+            dispatcher=MagicMock(),
+            device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="lx-dante", server_name="lx-dante.local."),
+        )
         waiter = service.register_notification_waiter("192.168.1.108", (128,))
 
         service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
@@ -643,7 +666,10 @@ class TestDanteNotificationService:
         assert waiter.latest_result == 128
 
     def test_sample_rate_status_returns_typed_probe_result(self):
-        service = DanteNotificationService(dispatcher=MagicMock())
+        service = DanteNotificationService(
+            dispatcher=MagicMock(),
+            device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="lx-dante", server_name="lx-dante.local."),
+        )
         waiter = service.register_waiter("sample_rate", "192.168.1.108")
 
         service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
@@ -669,21 +695,10 @@ class TestDanteNotificationService:
         assert device.sample_rate is None
         assert device.supported_sample_rates is None
 
-    def test_sample_rate_status_is_applied_when_device_appears(self):
-        application = DanteApplication()
-        events = receive_packets(application, [SAMPLE_RATE_STATUS_PACKET], ("192.168.1.108", 1032))
-        device = DanteDevice(server_name="lx-dante.local.")
-        device.ipv4 = "192.168.1.108"
-
-        application.register_device(device.server_name, device)
-
-        assert device.sample_rate == 44_100
-        assert device.supported_sample_rates == [44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
-        assert count_events(events, EventType.DEVICE_UPDATED) == 0
-        assert count_events(list(application.dispatcher._pending_events), EventType.DEVICE_UPDATED) == 0
-
     def test_encoding_status_updates_device_and_emits_once(self):
-        application, device = application_with_device("lx-dante.local.", "192.168.1.108")
+        application, device = application_with_device(
+            "lx-dante.local.", "192.168.1.108", advertised_from=ENCODING_STATUS_PACKET
+        )
 
         events = receive_packets(application, [ENCODING_STATUS_PACKET], ("192.168.1.108", 1034))
 
@@ -703,8 +718,10 @@ class TestDanteNotificationService:
         from netaudio.dante.operation_availability import operation_availability
         from netaudio.dante.state import apply_audio_capability
 
-        application, device = application_with_device("a32.local.", "10.0.2.15", name="A32")
-        waiter = application.notifications.register_waiter("sample_rate_pullup", "10.0.2.15")
+        application, device = application_with_device(
+            "a32.local.", "10.0.2.15", name="A32", advertised_from=SAMPLE_RATE_PULLUP_STATUS_PACKET
+        )
+        waiter = application.notifications.register_waiter("sample_rate_pullup", application._waiter_key(device))
         packet = bytearray(SAMPLE_RATE_PULLUP_STATUS_PACKET)
         struct.pack_into(">I", packet, 52, flags)
 
@@ -738,7 +755,10 @@ class TestDanteNotificationService:
         application.notifications.unregister_waiter(waiter)
 
     def test_encoding_status_returns_device_scoped_typed_probe_result(self):
-        service = DanteNotificationService(dispatcher=MagicMock())
+        service = DanteNotificationService(
+            dispatcher=MagicMock(),
+            device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="lx-dante", server_name="lx-dante.local."),
+        )
         matching_waiter = service.register_waiter("encoding", "192.168.1.108")
         unrelated_waiter = service.register_waiter("encoding", "192.168.1.109")
 
@@ -767,17 +787,6 @@ class TestDanteNotificationService:
         assert device.encoding is None
         assert device.supported_encodings is None
 
-    def test_encoding_status_is_applied_when_device_appears(self):
-        application = DanteApplication()
-        receive_packets(application, [ENCODING_STATUS_PACKET], ("192.168.1.108", 1034))
-        device = DanteDevice(server_name="lx-dante.local.")
-        device.ipv4 = "192.168.1.108"
-
-        application.register_device(device.server_name, device)
-
-        assert device.encoding == 24
-        assert device.supported_encodings == [24]
-
     def test_live_avio_codec_status_parses_when_unmapped_header_byte_changes(self):
         from netaudio import core
 
@@ -801,7 +810,9 @@ class TestDanteNotificationService:
         }
 
     def test_input_codec_status_applies_the_device_scoped_gain_adapter(self):
-        application, device = application_with_device("avio-input.local.", "192.168.1.108")
+        application, device = application_with_device(
+            "avio-input.local.", "192.168.1.108", advertised_from=INPUT_GAIN_STATUS_PACKET
+        )
         device.model_id = "avio-dai2"
 
         events = receive_packets(application, [INPUT_GAIN_STATUS_PACKET], ("192.168.1.108", 8700))
@@ -821,7 +832,9 @@ class TestDanteNotificationService:
         assert status_event.data["notification_id"] == NOTIFICATION_CODEC_STATUS
 
     def test_generic_codec_status_clears_a_stale_device_scoped_gain_adapter(self):
-        application, device = application_with_device("avio-input.local.", "192.168.1.108")
+        application, device = application_with_device(
+            "avio-input.local.", "192.168.1.108", advertised_from=INPUT_GAIN_STATUS_PACKET
+        )
         device.model_id = "avio-dai2"
         receive_packets(application, [INPUT_GAIN_STATUS_PACKET], ("192.168.1.108", 8700))
 
@@ -874,20 +887,6 @@ class TestDanteNotificationService:
 
         assert not waiter.is_set()
         assert waiter.latest_result["parameters"] == [{"parameter_type": 1, "mode": 2, "values": [5, 1]}]
-
-    def test_pending_codec_status_applies_gain_adapter_when_device_appears(self):
-        application = DanteApplication()
-        receive_packets(application, [INPUT_GAIN_STATUS_PACKET], ("192.168.1.108", 8700))
-        device = DanteDevice(server_name="avio-input.local.")
-        device.ipv4 = "192.168.1.108"
-        device.model_id = "avio-dai2"
-
-        application.register_device(device.server_name, device)
-
-        assert device.gain_device_type == "input"
-        assert device.gain_levels == [5, 1]
-        assert device.supported_gain_levels == [1, 2, 3, 4, 5]
-        assert device.codec_status == core.parse_response("codec_status", INPUT_GAIN_STATUS_PACKET)
 
 
 class TestKeyExtraction:

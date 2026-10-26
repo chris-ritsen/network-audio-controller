@@ -317,6 +317,8 @@ def test_explicit_unavailable_latency_fields_clear_stale_device_state():
 def test_dante_controller_preset_exports_microseconds_from_milliseconds():
     device = DanteDevice(server_name="device.local.")
     device.name = "device"
+    device.cmc_process = 1
+    device.cmc_process_state = "advertised"
     device.latency = 0.15
 
     xml = format_devices_xml({device.server_name: device})
@@ -327,6 +329,8 @@ def test_dante_controller_preset_exports_microseconds_from_milliseconds():
 def test_dante_controller_preset_exports_configured_not_active_latency():
     device = DanteDevice(server_name="device.local.")
     device.name = "device"
+    device.cmc_process = 1
+    device.cmc_process_state = "advertised"
     device.latency = 1.0
     device.active_latency = 1.0
     device.configured_latency = 0.25
@@ -339,6 +343,8 @@ def test_dante_controller_preset_exports_configured_not_active_latency():
 def test_dante_controller_preset_omits_latency_when_only_active_value_is_known():
     device = DanteDevice(server_name="device.local.")
     device.name = "device"
+    device.cmc_process = 1
+    device.cmc_process_state = "advertised"
     device.latency = 1.0
     device.active_latency = 1.0
     device.configured_latency = None

@@ -94,10 +94,12 @@ class ProbeAnswerCache:
         )
 
     def _entry(self, device) -> tuple[str | None, dict]:
-        identity = getattr(device, "mac_address", None)
+        mac_address = getattr(device, "mac_address", None)
+        server_name = getattr(device, "server_name", None)
         fingerprint = device_fingerprint(device)
-        if not identity or not fingerprint:
+        if not mac_address or not server_name or not fingerprint:
             return None, {}
+        identity = f"{mac_address}|{server_name}"
         entry = self.devices.get(identity)
         if not isinstance(entry, dict) or entry.get("fingerprint") != fingerprint:
             entry = {"fingerprint": fingerprint, "probes": {}}

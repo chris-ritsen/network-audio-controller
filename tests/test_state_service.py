@@ -138,22 +138,6 @@ class TestApplyDeviceStatus:
 
 class TestDeviceStatusEvents:
     @pytest.mark.asyncio
-    async def test_status_for_unknown_address_is_kept_until_the_device_appears(self):
-        application = make_application({})
-        state = DanteStateService(application)
-        await state.on_device_status(
-            status_event("encoding", {"encoding": 24, "supported_encodings": [24]}, source_ip="192.168.1.99")
-        )
-        device = make_device()
-        device.ipv4 = "192.168.1.99"
-
-        state.apply_pending_for_device(device)
-
-        assert device.encoding == 24
-        assert device.supported_encodings == [24]
-        assert emitted_events(application) == []
-
-    @pytest.mark.asyncio
     async def test_offline_device_ignores_capability_status_but_accepts_model_identity(self):
         device = make_device()
         device.online = False

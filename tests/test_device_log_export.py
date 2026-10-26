@@ -28,6 +28,7 @@ from netaudio.dante.diagnostic_logs import (
     write_device_log_archive,
 )
 from netaudio.dante.services.notification import DanteNotificationService
+from tests.status_test_support import application_with_device
 
 
 DEVICE_IP_ADDRESS = "10.0.2.15"
@@ -305,7 +306,10 @@ def test_unknown_diagnostic_audio_has_no_invented_capabilities(payload):
 
 
 def test_notification_service_matches_source_tag_and_selector():
-    notifications = DanteNotificationService(dispatcher=MagicMock())
+    notifications = DanteNotificationService(
+        dispatcher=MagicMock(),
+        device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="device", server_name="device.local."),
+    )
     waiter = notifications.register_conmon_export_waiter(DEVICE_IP_ADDRESS, "capability_partition")
     packets = _fragment_packets(
         echoed_tag=b"CAP1",
@@ -330,7 +334,9 @@ def test_notification_service_matches_source_tag_and_selector():
 
 @pytest.mark.asyncio
 async def test_export_operations_use_the_shared_transport():
-    application = DanteApplication()
+    application, _device = application_with_device(
+        "device.local.", DEVICE_IP_ADDRESS, advertised_from=_fragment_packets()[0]
+    )
     notifications = application.notifications
 
     log_packets = _fragment_packets()

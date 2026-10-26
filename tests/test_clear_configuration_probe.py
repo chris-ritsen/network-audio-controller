@@ -4,6 +4,7 @@ import pytest
 
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.application import CapabilityProbeTimeout
+from tests.status_test_support import application_with_device
 
 
 TREATMENT_STATUS = bytes.fromhex("ffff0028000e00000200000000010000417564696e61746507240078000000000000000300000000")
@@ -13,8 +14,8 @@ MODE_TWO_STATUS = bytes.fromhex("ffff0028001d00000200000000010000417564696e61746
 
 @pytest.mark.asyncio
 async def test_probe_clear_configuration_status_waits_for_the_matching_conmon_response():
-    application = DanteApplication()
     device_ip_address = "10.0.2.15"
+    application, _device = application_with_device("clear.local.", device_ip_address, advertised_from=TREATMENT_STATUS)
     expected_status = {
         "record_protocol_identifier": 0x0724,
         "unmapped_first_word": 0,
@@ -55,8 +56,8 @@ async def test_clear_configuration_waits_for_the_requested_action_result(
     expected_result_code,
     method_name,
 ):
-    application = DanteApplication()
     device_ip_address = "10.0.2.15"
+    application, _device = application_with_device("clear.local.", device_ip_address, advertised_from=TREATMENT_STATUS)
 
     def publish_status(ip_address):
         application.notifications._on_packet(TREATMENT_STATUS, (ip_address, 8702))
@@ -78,8 +79,8 @@ async def test_clear_configuration_waits_for_the_requested_action_result(
 
 @pytest.mark.asyncio
 async def test_clear_configuration_rejects_a_nonmatching_status_result():
-    application = DanteApplication()
     device_ip_address = "10.0.2.15"
+    application, _device = application_with_device("clear.local.", device_ip_address, advertised_from=TREATMENT_STATUS)
     application.send_clear_all_configuration = AsyncMock(
         side_effect=lambda ip_address: application.notifications._on_packet(
             TREATMENT_STATUS,

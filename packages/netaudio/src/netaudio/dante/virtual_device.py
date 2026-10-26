@@ -113,10 +113,11 @@ class VirtualDevice(VirtualDeviceRequestHandler):
     def _build_publication(self, publication: dict) -> bytes:
         packet = core.build_publication(
             {
-                "source_ip": self._local_ip or "0.0.0.0",
-                "message_id": self._mcast_seqnum,
                 "device_id": list(bytes.fromhex(self._advertised_device_id())),
+                "message_id": self._mcast_seqnum,
+                "process": self._config.process_id,
                 "publication": publication,
+                "source_ip": self._local_ip or "0.0.0.0",
             }
         )
         self._mcast_seqnum = core.next_publication_id(self._mcast_seqnum)

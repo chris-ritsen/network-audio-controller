@@ -8,7 +8,9 @@ IDENTITY_FIELDS = ("ptpv1_device_uuid", "ptpv1_master_uuid", "ptpv1_grandmaster_
 
 def test_clock_status_keeps_core_identity_bytes_while_device_fields_are_canonical():
     expected = core.parse_response("ptp_clock_status", CLOCK_STATUS_PACKET)
-    application, device = application_with_device("clock-identity-test", "192.168.1.108")
+    application, device = application_with_device(
+        "clock-identity-test", "192.168.1.108", advertised_from=CLOCK_STATUS_PACKET
+    )
 
     receive_packets(application, [CLOCK_STATUS_PACKET], ("192.168.1.108", 1034))
 

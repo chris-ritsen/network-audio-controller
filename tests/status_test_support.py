@@ -7,12 +7,32 @@ from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEvent, EventType
 
 
-def application_with_device(server_name: str, device_ip_address: str, name: str | None = None):
+def advertised_conmon_identity(packet: bytes) -> dict:
+    return {"id": bytes(packet[8:16]).hex(), "process": str(int.from_bytes(packet[6:8], "big"))}
+
+
+def advertise_cmc_txt(application: DanteApplication, device: DanteDevice, properties: dict) -> None:
+    application.apply_cmc_observation(device, properties)
+    application.dispatcher._pending_events.clear()
+
+
+def advertise_conmon_identity(application: DanteApplication, device: DanteDevice, packet: bytes) -> None:
+    advertise_cmc_txt(application, device, advertised_conmon_identity(packet))
+
+
+def application_with_device(
+    server_name: str,
+    device_ip_address: str,
+    name: str | None = None,
+    advertised_from: bytes | None = None,
+):
     application = DanteApplication()
     device = DanteDevice(server_name=server_name)
     device.name = name if name is not None else server_name.removesuffix(".local.")
     device.ipv4 = device_ip_address
     application.attach_devices({server_name: device})
+    if advertised_from is not None:
+        advertise_conmon_identity(application, device, advertised_from)
     return application, device
 
 

@@ -105,7 +105,9 @@ def test_clock_status_parser_preserves_every_port_record():
 
 def test_notification_and_device_serialization_preserve_every_clock_port_record():
     expected = core.parse_response("ptp_clock_status", CLOCK_STATUS_PACKET)["clock_port_records"]
-    application, device = application_with_device("clock-port-test", "192.168.1.108", name="clock-port-test")
+    application, device = application_with_device(
+        "clock-port-test", "192.168.1.108", name="clock-port-test", advertised_from=CLOCK_STATUS_PACKET
+    )
 
     receive_packets(application, [CLOCK_STATUS_PACKET], ("192.168.1.108", 1034))
 
@@ -116,7 +118,7 @@ def test_notification_and_device_serialization_preserve_every_clock_port_record(
 def test_avio_capture_updates_device_clock_ports():
     packet = bytes.fromhex((Path(__file__).parent / "fixtures/clock_status/avio-aes3.hex").read_text())
     assert hashlib.sha256(packet).hexdigest() == "321d937b413ace35bab9e5bd08d9ea53a64e2e334c47bcbf355266433a686b0d"
-    application, device = application_with_device("avio-aes3-1", "192.168.1.18")
+    application, device = application_with_device("avio-aes3-1", "192.168.1.18", advertised_from=packet)
     receive_packets(application, [packet], ("192.168.1.18", 8700))
     ports = device.to_json()["clock_port_records"]
     assert [(port["ptp_version"], port["transport_path"], port["state_code"]) for port in ports] == [

@@ -12,7 +12,7 @@ from netaudio.dante.ptpv1_uuid import canonical_ptpv1_uuid
 from netaudio.dante.device import DanteDevice
 from typer.testing import CliRunner
 
-from tests.status_test_support import receive_packets
+from tests.status_test_support import advertise_conmon_identity, receive_packets
 
 runner = CliRunner()
 clock_app = typer.Typer()
@@ -135,6 +135,7 @@ def test_notification_state_tracks_the_physical_follower_transition():
     device.ipv4 = "192.168.1.94"
     application = DanteApplication()
     application.attach_devices({device.server_name: device})
+    advertise_conmon_identity(application, device, (FIXTURE_DIRECTORY / "follower-domain-a-0020.bin").read_bytes())
 
     receive_packets(
         application,

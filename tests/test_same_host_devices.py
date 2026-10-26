@@ -13,7 +13,7 @@ from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import EventType
 from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from netaudio.dante.virtual_device import VirtualDevice, VirtualDeviceConfig, _ARCProtocol
-from tests.status_test_support import receive_packets, status_events
+from tests.status_test_support import advertise_conmon_identity, receive_packets, status_events
 
 HOST = "127.0.0.1"
 TEST_HOST_MAC = bytes.fromhex("020000000001")
@@ -210,6 +210,8 @@ def _cohosted_application():
         device.mac_address = f"0000ac130005{process_id:04x}"
         devices[name] = device
     application.attach_devices({device.server_name: device for device in devices.values()})
+    advertise_conmon_identity(application, devices["player"], _from_process(SAMPLE_RATE_STATUS_PACKET, 1))
+    advertise_conmon_identity(application, devices["recorder"], _from_process(SAMPLE_RATE_STATUS_PACKET, 2))
     return application, devices
 
 
@@ -311,13 +313,13 @@ async def test_a_probe_of_a_cohosted_device_ignores_its_siblings_answer():
     assert (await application.probe_sample_rate_status(devices["player"], timeout=0.5))["current_value"] == 44_100
 
 
-def test_waiters_for_a_device_alone_on_its_ip_and_for_a_bare_host_address_still_hear_it():
+def test_waiters_for_alone_and_cohosted_devices_hear_them():
     application, devices = _cohosted_application()
     devices["recorder"].ipv4 = "172.19.0.6"
-    alone = application._waiter_key(devices["recorder"])
-    assert alone == "172.19.0.6"
-    device_waiter = application.notifications.register_waiter("sample_rate", alone)
-    host_waiter = application.notifications.register_waiter("sample_rate", COHOSTED_IP)
+    device_waiter = application.notifications.register_waiter(
+        "sample_rate", application._waiter_key(devices["recorder"])
+    )
+    host_waiter = application.notifications.register_waiter("sample_rate", application._waiter_key(devices["player"]))
 
     receive_packets(application, [_from_process(SAMPLE_RATE_STATUS_PACKET, 2)], ("172.19.0.6", 10203))
     receive_packets(application, [_from_process(SAMPLE_RATE_STATUS_PACKET, 1)], (COHOSTED_IP, 10103))

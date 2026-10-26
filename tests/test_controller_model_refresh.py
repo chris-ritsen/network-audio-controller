@@ -31,7 +31,7 @@ def test_native_read_only_field_presence_controls_mutation_preflight(revision, a
     packet[24:26] = revision.to_bytes(2, "big")
     parsed = core.parse_response("dante_model", bytes(packet))
     assert (parsed["switch_redundancy_read_only"] is not None) is applicable
-    application, device = application_with_device("device.local.", "192.0.2.1")
+    application, device = application_with_device("device.local.", "192.0.2.1", advertised_from=bytes(packet))
     receive_packets(application, [bytes(packet)], ("192.0.2.1", 8702))
 
     source = device.redundancy_read_only_source
@@ -121,7 +121,7 @@ def test_board_model_monitoring_capability_bits_follow_the_pinned_masks():
 
 def test_state_service_applies_and_serializes_controller_visible_identity():
     device_ip_address = "10.0.2.15"
-    application, device = application_with_device("virtual-a32.local.", device_ip_address)
+    application, device = application_with_device("virtual-a32.local.", device_ip_address, advertised_from=_packet(10))
 
     receive_packets(application, [_packet(10), _packet(12)], (device_ip_address, 8702))
 
@@ -168,7 +168,7 @@ def test_state_service_applies_and_serializes_controller_visible_identity():
 
 def test_later_versions_response_overwrites_aes67_configuration_support_and_primary_capabilities():
     device_ip_address = "10.0.2.15"
-    application, device = application_with_device("virtual-a32.local.", device_ip_address)
+    application, device = application_with_device("virtual-a32.local.", device_ip_address, advertised_from=_packet(12))
 
     supported = _packet(12)
     receive_packets(application, [supported], (device_ip_address, 8702))
@@ -193,7 +193,7 @@ def test_later_versions_response_overwrites_aes67_configuration_support_and_prim
 
 def test_later_conmon_records_refresh_canonical_versions_without_erasing_other_namespaces():
     device_ip_address = "10.0.2.15"
-    application, device = application_with_device("virtual-a32.local.", device_ip_address)
+    application, device = application_with_device("virtual-a32.local.", device_ip_address, advertised_from=_packet(10))
     receive_packets(application, [_packet(10), _packet(12)], (device_ip_address, 8702))
     device.cmc_server_version = "dns-service"
     device.ddm_dante_version = "ddm-platform"
@@ -214,7 +214,7 @@ def test_later_conmon_records_refresh_canonical_versions_without_erasing_other_n
 
 def test_malformed_versions_response_leaves_existing_capability_unchanged():
     device_ip_address = "10.0.2.15"
-    application, device = application_with_device("virtual-a32.local.", device_ip_address)
+    application, device = application_with_device("virtual-a32.local.", device_ip_address, advertised_from=_packet(12))
 
     receive_packets(application, [_packet(12)], (device_ip_address, 8702))
     assert device.aes67_configuration_supported is True
