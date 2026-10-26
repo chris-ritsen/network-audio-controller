@@ -131,14 +131,19 @@ impl DeviceRegistry {
     pub(super) fn observe_metering(&self, packet: &ReceivedPacket) -> Result<Option<String>> {
         let frame =
             parse_metering_frame(&packet.payload).context("invalid detailed metering frame")?;
-        let Some(device) = self.observation_device(packet, Some(&frame.source_eui64))? else {
+        let Some((device, generation)) =
+            self.observation_device(packet, Some(&frame.source_eui64))?
+        else {
             return Ok(None);
         };
         let mut state = device
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-        if state.record.retired {
+        if state.record.retired
+            || state.identity_generation != generation
+            || packet.received_monotonic < state.associated_at
+        {
             return Ok(None);
         }
 

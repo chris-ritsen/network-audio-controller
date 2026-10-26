@@ -11112,6 +11112,47 @@
               "properties": {},
               "additionalProperties": true
             }
+          },
+          "cmc_source_identifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact advertised 64-bit ConMon source identifier, hexadecimal."
+          },
+          "cmc_process": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 65535
+          },
+          "cmc_process_state": {
+            "type": "string",
+            "enum": [
+              "none",
+              "missing",
+              "invalid",
+              "advertised",
+              "contradictory"
+            ]
+          },
+          "association_state": {
+            "type": "string",
+            "enum": [
+              "none",
+              "current",
+              "conflicting"
+            ]
+          },
+          "association_generation": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "Runtime-scoped association revision; unavailable without a direct association."
           }
         },
         "required": [
@@ -11123,7 +11164,12 @@
           "services",
           "channels",
           "subscriptions",
-          "is_locked"
+          "is_locked",
+          "cmc_source_identifier",
+          "cmc_process",
+          "cmc_process_state",
+          "association_state",
+          "association_generation"
         ],
         "additionalProperties": true,
         "description": "Observed inventory, including available device-specific capabilities and evidence. Fields are absent or null when unobserved or unsupported; false and zero retain their ordinary meanings. Do not turn absence into a fabricated live value. The first stable release will freeze its supported extension rules."
@@ -11702,7 +11748,8 @@
           },
           "api_version": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "const": 3
           },
           "devices": {
             "$ref": "#/components/schemas/Devices"
@@ -15157,7 +15204,7 @@
       "title": "Public API version 1 and compatibility",
       "paragraphs": [
         "This is stable public API major version 1, contract revision 1.0.0. The NetAudio-API-Version response header identifies the selected major. Send NetAudio-API-Version: 1 to pin a request; another value returns HTTP 406 before dispatch. Duplicate version headers return HTTP 400. Omission selects 1 on the existing routes and will continue to mean 1. Browser clients on another origin can read the exposed response header and /api descriptor without supplying a custom request header.",
-        "GET /api, GET /server-info and the initial event snapshot publish public_api metadata. Their existing version and api_version feature revision 2 fields keep their earlier meaning and are not the stable API major. Application version, source build identity, MCP protocol version and API contract revision are separate identifiers.",
+        "GET /api, GET /server-info and the initial event snapshot publish public_api metadata. Their existing version and api_version feature revision 3 fields keep their earlier meaning and are not the stable API major. Application version, source build identity, MCP protocol version and API contract revision are separate identifiers.",
         "Compatible additions and fixes stay within major 1. Clients must ignore unknown object fields and unknown event kinds, preserve unknown enum values where a schema explicitly permits extension, and inspect capabilities before commands. Closed enums, required fields, units, nullability, identifier meanings, errors, authentication and event recovery are compatibility boundaries. New required inputs, removals and changed meanings require a new major when incompatible.",
         "A future incompatible major requires an explicit selector, migration documentation and a declared support or retirement policy. It cannot silently change what these unqualified routes or header value 1 mean. An additive contract revision does not require a new major.",
         "The daemon, HTTP, MCP, OAuth, discovery, monitoring and host-audio workers are native Rust. The CLI remains Python and the existing browser assets remain JavaScript. The contract documents implemented behavior; hardware capabilities and real-device qualification remain distinct from API compatibility."

@@ -132,6 +132,10 @@ impl StatusObservation {
         let mut last_observed = None;
 
         loop {
+            ensure!(
+                self._guard.is_current()?,
+                "device association changed during status observation"
+            );
             if let Some(observed) = self.receiver.borrow_and_update().clone() {
                 if matches(&observed) {
                     return Ok(observed);
@@ -151,6 +155,17 @@ impl StatusObservation {
     }
 }
 
+impl ObservationGuard {
+    fn is_current(&self) -> Result<bool> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("status request lock poisoned"))?
+            .observations
+            .contains_key(&self.identifier))
+    }
+}
+
 impl Drop for ObservationGuard {
     fn drop(&mut self) {
         match self.state.lock() {
@@ -163,6 +178,15 @@ impl Drop for ObservationGuard {
 }
 
 impl StatusRequests {
+    pub fn invalidate(&self, device: &str) -> Result<()> {
+        self.state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("status request lock poisoned"))?
+            .observations
+            .retain(|_, pending| pending.key != device);
+        Ok(())
+    }
+
     pub async fn query(
         &self,
         transport: &mut DeviceTransport,

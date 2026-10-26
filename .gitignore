@@ -27,3 +27,5 @@ research/
 packages/netaudio/src/netaudio/_build_info.json
 
 containers/.env
+
+!packages/netaudio-daemon/src/capture/schema.sql

@@ -89,3 +89,15 @@ recovery always acquire a new coherent snapshot; durable history uses the journa
 The stable contract does not certify physical interoperability on untested
 hardware or accept a new UI on Chris's behalf. Real appliance and platform
 qualification remain explicit evidence boundaries.
+
+## Fleet WIP integration, 2026-10-26
+
+The WIP checkpoint incorporates the fleet's experimental feature revision 3.
+Direct monitoring associations use the complete advertised 64-bit CMC source
+identifier and process, including process zero. Missing, invalid, contradictory
+or competing ownership cannot accept ConMon observations. Discovery membership
+changes retire pending observations and advance the association generation;
+buffered packets from the prior association cannot update the replacement.
+The additive identity fields and feature marker preserve public API major 1.
+This integration remains a WIP and does not imply user acceptance or untested
+platform and appliance qualification.

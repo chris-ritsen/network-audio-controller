@@ -1,7 +1,6 @@
 use super::{ControlError, Device, DeviceRegistry, DeviceState, ReceivedPacket};
 use crate::monitoring::diagnostics::{self, HISTORY_LIMIT, PRESENCE_LIFETIME};
 use anyhow::Result;
-use netaudio_core::device_identity::canonical_device_mac;
 use netaudio_core::heartbeat::parse_heartbeat_device_extended_unique_identifier;
 use netaudio_core::heartbeat_connection_health::Topology;
 use serde_json::{Value, json};
@@ -37,46 +36,33 @@ impl DeviceRegistry {
         &self,
         packet: &ReceivedPacket,
         identity: Option<&str>,
-    ) -> Result<Option<Arc<Device>>> {
-        let identity = identity.and_then(canonical_device_mac);
-        let mut identified = Vec::new();
-        let mut unknown = Vec::new();
-
-        for device in self.entries()? {
+    ) -> Result<Option<(Arc<Device>, u64)>> {
+        let devices = self
+            .devices
+            .read()
+            .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
+        let mut matched = None;
+        for device in devices.values() {
             let state = device
                 .state
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-
             if state.record.retired
                 || std::net::IpAddr::V4(state.record.address) != packet.source.ip()
             {
                 continue;
             }
-
-            let advertised = state
-                .record
-                .properties
-                .get("mac_address")
-                .and_then(Value::as_str)
-                .and_then(canonical_device_mac);
-
-            match (&identity, advertised) {
-                (Some(identity), Some(advertised)) if *identity == advertised => {
-                    identified.push(Arc::clone(&device))
-                }
-                (None, _) | (_, None) => unknown.push(Arc::clone(&device)),
-                _ => {}
+            if let Some(identity) = identity
+                && state.record.properties["cmc_source_identifier"] != identity.to_ascii_lowercase()
+            {
+                continue;
             }
+            if matched.is_some() {
+                return Ok(None);
+            }
+            matched = Some((Arc::clone(device), state.identity_generation));
         }
-
-        if identified.len() == 1 {
-            Ok(identified.pop())
-        } else if identified.is_empty() && unknown.len() == 1 {
-            Ok(unknown.pop())
-        } else {
-            Ok(None)
-        }
+        Ok(matched)
     }
 
     pub(super) fn observe_heartbeat(&self, packet: &ReceivedPacket) -> Result<Option<String>> {
@@ -84,14 +70,17 @@ impl DeviceRegistry {
         else {
             return Ok(None);
         };
-        let Some(device) = self.observation_device(packet, Some(&identity))? else {
+        let Some((device, generation)) = self.observation_device(packet, Some(&identity))? else {
             return Ok(None);
         };
         let mut state = device
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-        if state.record.retired {
+        if state.record.retired
+            || state.identity_generation != generation
+            || packet.received_monotonic < state.associated_at
+        {
             return Ok(None);
         }
 

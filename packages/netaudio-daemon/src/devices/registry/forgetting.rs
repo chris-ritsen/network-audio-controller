@@ -140,11 +140,14 @@ impl DeviceRegistry {
 
             for key in targets.keys() {
                 devices.remove(key);
+                self.retire_association(key)?;
                 self.refresh_queue.remove(key)?;
                 self.metering.invalidate(key)?;
                 removed.push((key.clone(), self.model.remove_device(key)?));
             }
 
+            drop(states);
+            self.refresh_associations(&devices)?;
             let forgotten = targets
                 .values()
                 .map(|record| forgotten_record(record))
@@ -199,6 +202,8 @@ impl DeviceRegistry {
             state: Mutex::new(DeviceState {
                 generation: 1,
                 identity_generation: 1,
+                association: None,
+                associated_at: tokio::time::Instant::now(),
                 field_observed_at: BTreeMap::new(),
                 record,
                 diagnostics: Default::default(),
@@ -216,17 +221,16 @@ impl DeviceRegistry {
                 return Ok(());
             }
 
-            self.publish(
-                &device
-                    .state
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("device lock poisoned"))?
-                    .record,
-            )?;
             devices.insert(key.clone(), Arc::clone(&device));
+            self.refresh_associations(&devices)?;
         }
 
-        self.schedule_refresh(key, device, 1)
+        let generation = device
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("device lock poisoned"))?
+            .generation;
+        self.schedule_refresh(key, device, generation)
     }
 }
 

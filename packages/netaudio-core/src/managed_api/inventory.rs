@@ -3,7 +3,7 @@ use crate::device_identity::canonical_device_mac;
 use crate::receiver_capabilities::{self, Authority, Evidence, ReceiverCapabilityRequest};
 use crate::subscription_status::{self, ManagedStatusRequest};
 use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 use std::sync::{Arc, Weak};
@@ -87,6 +87,9 @@ impl Observation {
             "availability_state": availability, "server_name": self.identity(), "services": {},
             "self_connection_support": receiver_support, "subscriptions": subscriptions(device),
             "mac_address": mac_address,
+            "cmc_source_identifier": null, "cmc_process": null, "cmc_process_state": "none",
+            "cmc_txt_id_raw": null, "cmc_txt_process_raw": null,
+            "association_state": "none", "association_generation": null,
             "manufacturer": device.manufacturer.as_ref().map(|item| item.name.as_str()).unwrap_or(""),
             "model": identity.map(|item| item.product_model_name.as_deref()).unwrap_or_else(|| Some(device.product.as_ref().map(|item| item.name.as_str()).unwrap_or(""))),
             "model_id": identity.and_then(|item| item.product_model_id.as_deref()),
@@ -271,12 +274,10 @@ fn direct_record(key: &str, record: &Value) -> Value {
         record["availability_state"] = json!("unknown");
         record["control_transports"] = json!(["ddm"]);
     } else {
-        record["inventory_id"] = json!(
-            direct_macs(&record)
-                .first()
-                .cloned()
-                .unwrap_or_else(|| format!("direct:{key}"))
-        );
+        record["inventory_id"] = json!(direct_macs(&record)
+            .first()
+            .cloned()
+            .unwrap_or_else(|| format!("direct:{key}")));
         record["inventory_sources"] = json!(["direct"]);
         record["management_state"] = Value::Null;
         record["control_transports"] = json!(["direct"]);
