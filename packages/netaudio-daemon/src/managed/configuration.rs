@@ -37,8 +37,8 @@ pub struct Context {
 }
 
 impl Settings {
-    pub fn load(profile: &toml::Table, directory: &Path) -> Result<Self, Error> {
-        let Some(value) = profile.get("ddm") else {
+    pub fn load(document: &toml::Table, directory: &Path) -> Result<Self, Error> {
+        let Some(value) = document.get("ddm") else {
             return Ok(Self::default());
         };
         let mut settings: Self = value.clone().try_into().map_err(|_| {
