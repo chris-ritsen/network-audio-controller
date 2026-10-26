@@ -7,7 +7,10 @@ use std::sync::{Mutex, MutexGuard};
 use tokio::sync::Notify;
 
 mod legacy;
+mod ring;
 pub mod store;
+
+use ring::Ring;
 
 pub const SECOND_SLOTS: usize = 900;
 pub const MINUTE_SLOTS: usize = 1440;
@@ -56,8 +59,8 @@ impl Default for Minute {
 }
 
 struct Track {
-    seconds: Box<[Second]>,
-    minutes: Box<[Minute]>,
+    seconds: Ring<Second, SECOND_SLOTS>,
+    minutes: Ring<Minute, MINUTE_SLOTS>,
     first_second: i64,
     newest_second: i64,
     dirty_seconds: BTreeSet<usize>,
@@ -67,8 +70,8 @@ struct Track {
 impl Track {
     fn new(second: i64) -> Self {
         Self {
-            seconds: vec![Second::default(); SECOND_SLOTS].into_boxed_slice(),
-            minutes: vec![Minute::default(); MINUTE_SLOTS].into_boxed_slice(),
+            seconds: Ring::default(),
+            minutes: Ring::default(),
             first_second: second,
             newest_second: second,
             dirty_seconds: BTreeSet::new(),
