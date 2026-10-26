@@ -3,6 +3,7 @@ from __future__ import annotations
 import itertools
 import logging
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from netaudio import core
@@ -36,6 +37,7 @@ STATUS_KIND_ROUTING_CAPACITY = "routing_capacity"
 STATUS_KIND_SAMPLE_RATE = "sample_rate"
 STATUS_KIND_SAMPLE_RATE_PULLUP = "sample_rate_pullup"
 STATUS_KIND_SWITCH_CONFIGURATION = "switch_configuration"
+UNATTRIBUTED_CONMON_KEY_LIMIT = 256
 WAITER_KIND_PREFERRED_LEADER = "preferred_leader"
 
 
@@ -397,7 +399,9 @@ class NotificationPacketHandlers:
     def _on_packet(self, data: bytes, addr: tuple[str, int]) -> None:
         source_ip = addr[0]
         if not data and addr[1] == DEVICE_SETTINGS_PORT:
-            for waiter in self.waiters_for("conmon_export", source_ip):
+            for waiter in self.waiters_for(
+                "conmon_export", self._waiter_key(source_ip, self._lookup_device(source_ip))
+            ):
                 waiter.observe_unavailable()
             return
         if len(data) < 4:
@@ -415,7 +419,10 @@ class NotificationPacketHandlers:
             return
 
         notification_id = envelope["notification_id"]
-        device = self._lookup_device(source_ip, envelope.get("device_id"))
+        device = self._lookup_device(source_ip, envelope)
+        if device is None and envelope["is_conmon"]:
+            self._count_unattributed_conmon(source_ip, envelope)
+            return
 
         if envelope["is_conmon"] and self._handle_conmon_response(
             data, source_ip, notification_id, envelope["response_kind"], device
@@ -464,6 +471,7 @@ class NotificationPacketHandlers:
                 device_name=device.name if device else "",
                 server_name=device.server_name if device else "",
                 data={
+                    "association_generation": getattr(device, "association_generation", None),
                     "notification_id": notification_id,
                     "notification_name": notification_name,
                     "raw": data,
@@ -509,6 +517,7 @@ class NotificationPacketHandlers:
                 device_name=device.name if device else "",
                 server_name=device.server_name if device else "",
                 data={
+                    "association_generation": getattr(device, "association_generation", None),
                     "kind": parsed.kind,
                     "notification_id": opcode,
                     "raw": data,
@@ -535,10 +544,37 @@ class NotificationPacketHandlers:
             handled = handled or waiter.collector.matched
         return handled
 
-    def _lookup_device(self, ip_str: str, device_id: str | None = None):
+    def _lookup_device(self, ip_str: str, envelope: dict | None = None):
         if self._device_lookup:
-            return self._device_lookup(ip_str, device_id)
+            return self._device_lookup(ip_str, envelope)
         return None
+
+    @property
+    def unattributed_conmon_counts(self) -> OrderedDict:
+        return self.__dict__.setdefault("_unattributed_conmon_counts", OrderedDict())
+
+    def reset_unattributed_conmon_counts(self) -> None:
+        self.unattributed_conmon_counts.clear()
+
+    def _count_unattributed_conmon(self, source_ip: str, envelope: dict) -> None:
+        source_identifier = envelope.get("device_id")
+        process = envelope.get("process")
+        if source_identifier is None or process is None:
+            reason = "missing_identity"
+        else:
+            reason = "no_current_association"
+        counts = self.unattributed_conmon_counts
+        key = (source_identifier, process, reason)
+        count = counts.pop(key, 0) + 1
+        counts[key] = count
+        while len(counts) > UNATTRIBUTED_CONMON_KEY_LIMIT:
+            counts.popitem(last=False)
+        if count == 1:
+            logger.info(
+                f"Dropped ConMon {envelope.get('notification_name') or envelope.get('notification_id')} "
+                f"from {source_ip}: source {source_identifier} process {process} has no current association ({reason}); "
+                "repeats are counted"
+            )
 
     def _waiter_key(self, source_ip: str, device) -> str:
         if self._waiter_key_lookup:

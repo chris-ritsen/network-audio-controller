@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ipaddress
+import itertools
 import logging
+import re
 import time
 from copy import deepcopy
 
@@ -36,8 +38,73 @@ def device_advertises_aes67_multicast_prefix(device) -> bool:
     )["aes67_multicast_prefix"]
 
 
+ASSOCIATION_GENERATIONS = itertools.count(1)
+CMC_PROCESS_PATTERN = re.compile(r"[0-9]{1,5}")
+CMC_SOURCE_IDENTIFIER_PATTERN = re.compile(r"[0-9A-Fa-f]{16}")
+
+
+def cmc_txt_identity(properties: dict | None) -> dict:
+    if properties is None:
+        return {
+            "cmc_process": None,
+            "cmc_process_state": "none",
+            "cmc_source_identifier": None,
+            "cmc_txt_id_raw": None,
+            "cmc_txt_process_raw": None,
+        }
+    raw_identifier = properties.get("id")
+    raw_process = properties.get("process")
+    source_identifier = None
+    if isinstance(raw_identifier, str) and CMC_SOURCE_IDENTIFIER_PATTERN.fullmatch(raw_identifier):
+        source_identifier = raw_identifier.lower()
+    process = None
+    if "process" not in properties:
+        process_state = "missing"
+    elif isinstance(raw_process, str) and CMC_PROCESS_PATTERN.fullmatch(raw_process) and int(raw_process) <= 0xFFFF:
+        process = int(raw_process)
+        process_state = "advertised"
+    else:
+        process_state = "invalid"
+    return {
+        "cmc_process": process,
+        "cmc_process_state": process_state,
+        "cmc_source_identifier": source_identifier,
+        "cmc_txt_id_raw": raw_identifier,
+        "cmc_txt_process_raw": raw_process,
+    }
+
+
+def cmc_membership_identity(memberships: list[dict]) -> dict:
+    identities = [cmc_txt_identity(properties) for properties in memberships]
+    if not identities:
+        return cmc_txt_identity(None)
+    advertised = {
+        (identity["cmc_source_identifier"], identity["cmc_process_state"], identity["cmc_process"])
+        for identity in identities
+    }
+    if len(advertised) == 1:
+        return identities[0]
+    source_identifiers = {identity["cmc_source_identifier"] for identity in identities}
+    return {
+        "cmc_process": None,
+        "cmc_process_state": "contradictory",
+        "cmc_source_identifier": next(iter(source_identifiers)) if len(source_identifiers) == 1 else None,
+        "cmc_txt_id_raw": None,
+        "cmc_txt_process_raw": None,
+    }
+
+
 class DanteDevice:
     def __init__(self, server_name="", dump_payloads=False, debug=False, app=None):
+        self.association_detached = False
+        self.association_generation = next(ASSOCIATION_GENERATIONS)
+        self.association_signature = ("none", None, None, "none", ())
+        self.association_state = "none"
+        self.cmc_process: int | None = None
+        self.cmc_process_state = "none"
+        self.cmc_source_identifier: str | None = None
+        self.cmc_txt_id_raw: str | None = None
+        self.cmc_txt_process_raw: str | None = None
         self.device_controls: dict = {}
         self.virtual_panel_supported: bool | None = None
         self.video_transmission_supported: bool | None = None

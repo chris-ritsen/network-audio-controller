@@ -73,9 +73,24 @@ def normalized_device_identities(device: object) -> frozenset[tuple[str, str]]:
     return frozenset(identities)
 
 
+def advertised_conmon_identity(device: object) -> tuple | None:
+    source_identifier = getattr(device, "cmc_source_identifier", None)
+    if not isinstance(source_identifier, str):
+        return None
+    return source_identifier, getattr(device, "cmc_process_state", None), getattr(device, "cmc_process", None)
+
+
 def same_canonical_device(first: object, second: object) -> bool:
     if first is second:
         return True
+    first_conmon_identity = advertised_conmon_identity(first)
+    second_conmon_identity = advertised_conmon_identity(second)
+    if (
+        first_conmon_identity is not None
+        and second_conmon_identity is not None
+        and first_conmon_identity != second_conmon_identity
+    ):
+        return False
     first_identities = normalized_device_identities(first)
     second_identities = normalized_device_identities(second)
     return bool(first_identities and first_identities.intersection(second_identities))

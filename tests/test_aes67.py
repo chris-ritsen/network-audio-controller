@@ -1,4 +1,5 @@
 import struct
+from types import SimpleNamespace
 
 import pytest
 
@@ -145,7 +146,10 @@ class TestAES67Waiter:
 
     def test_register_and_notify_waiter(self):
         dispatcher = DanteEventDispatcher()
-        service = DanteNotificationService(dispatcher=dispatcher)
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="device", server_name="device.local."),
+        )
         device_ip = "192.168.1.247"
 
         waiter = service.register_waiter("aes67", device_ip)
@@ -161,7 +165,10 @@ class TestAES67Waiter:
 
     def test_waiter_captures_pending_state(self):
         dispatcher = DanteEventDispatcher()
-        service = DanteNotificationService(dispatcher=dispatcher)
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="device", server_name="device.local."),
+        )
         device_ip = "192.168.1.36"
 
         waiter = service.register_waiter("aes67", device_ip)
@@ -176,7 +183,10 @@ class TestAES67Waiter:
 
     def test_waiter_captures_on_to_off_pending(self):
         dispatcher = DanteEventDispatcher()
-        service = DanteNotificationService(dispatcher=dispatcher)
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="device", server_name="device.local."),
+        )
         device_ip = "192.168.1.108"
 
         waiter = service.register_waiter("aes67", device_ip)
@@ -191,7 +201,10 @@ class TestAES67Waiter:
 
     def test_unsolicited_status_is_published_without_a_waiter(self):
         dispatcher = DanteEventDispatcher()
-        service = DanteNotificationService(dispatcher=dispatcher)
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda _source_ip, _envelope: SimpleNamespace(name="device", server_name="device.local."),
+        )
 
         packet = self._build_conmon_1007_packet(0x03)
         service._on_packet(packet, ("192.168.1.247", 8700))
@@ -200,6 +213,7 @@ class TestAES67Waiter:
         assert event.type is EventType.DEVICE_STATUS_RECEIVED
         assert isinstance(event.data.pop("received_order"), int)
         assert event.data == {
+            "association_generation": None,
             "kind": "aes67",
             "notification_id": 0x1007,
             "raw": packet,
