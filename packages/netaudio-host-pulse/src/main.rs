@@ -1,4 +1,4 @@
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 mod provider;
 
 fn main() -> anyhow::Result<()> {
@@ -6,9 +6,9 @@ fn main() -> anyhow::Result<()> {
         netaudio_core::host_audio::protocol::Provider::Pulse,
         netaudio_core::host_audio::protocol::Purpose::Observe,
     )?;
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     let result = provider::run(&mut output);
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     let result: anyhow::Result<()> = Err(anyhow::anyhow!(
         "PulseAudio observation is unavailable on this platform"
     ));

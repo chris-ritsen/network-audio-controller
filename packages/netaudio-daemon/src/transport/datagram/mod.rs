@@ -40,6 +40,8 @@ impl DatagramSocket {
     fn bind_with_reuse(port: u16, reuse: bool) -> io::Result<Self> {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
         socket.set_reuse_address(reuse)?;
+        #[cfg(target_vendor = "apple")]
+        socket.set_reuse_port(reuse)?;
         socket.set_nonblocking(true)?;
         let receiver = PacketReceiver::new(&socket)?;
         socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)).into())?;
