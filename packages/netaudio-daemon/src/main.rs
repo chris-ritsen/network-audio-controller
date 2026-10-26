@@ -23,10 +23,23 @@ struct Arguments {
     dissect: bool,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let arguments = Arguments::parse();
     initialize_logging()?;
+    let mut runtime = tokio::runtime::Builder::new_multi_thread();
+    if std::env::var_os("TOKIO_WORKER_THREADS").is_none() {
+        let available = std::thread::available_parallelism()
+            .context("determine available async executor parallelism")?;
+        runtime.worker_threads(available.get().min(4));
+    }
+    runtime
+        .enable_all()
+        .build()
+        .context("initialize async executor")?
+        .block_on(run(arguments))
+}
+
+async fn run(arguments: Arguments) -> Result<()> {
     let configuration =
         Configuration::load(arguments.config.as_deref(), arguments.profile.as_deref())?;
     let cancellation = CancellationToken::new();

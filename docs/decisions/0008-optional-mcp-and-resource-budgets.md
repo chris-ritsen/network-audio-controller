@@ -65,6 +65,15 @@ all evidence while avoiding a permanently allocated JSON tree per sample.
 Diagnostic responses should serialize from retained typed records instead of
 constructing a second expanded tree of the complete history.
 
+Signal-history rings allocate fixed-size pages only when a slot is written.
+Unallocated slots retain the same unrecorded semantics, and the existing
+retention lengths and database representation are unchanged. Dense histories
+can still use the full ring capacity. The async executor defaults to at most
+four available processors; the existing `TOKIO_WORKER_THREADS` override remains
+available. Blocking providers keep their independently owned lifecycles. A
+captured-workload replay found that reducing idle async workers reduced allocator
+retention; replacing the allocator did not improve on the smaller worker pool.
+
 Ordinary HTTP users avoid initializing unused MCP services. MCP users enable
 the capability explicitly and retain its current routes and authentication.
 Performance changes must preserve device information, history, event ordering,
