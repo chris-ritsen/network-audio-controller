@@ -117,6 +117,10 @@ pub struct ManagedSessionStep {
 }
 
 impl ManagedSessionState {
+    pub fn operation_emitted(&self) -> bool {
+        self.sent
+    }
+
     fn receive_bytes(&self) -> Result<usize, String> {
         if self.frame.len() < dapi::FRAME_HEADER_BYTES {
             return Ok(dapi::FRAME_HEADER_BYTES - self.frame.len());
@@ -227,9 +231,11 @@ impl ManagedSessionState {
             );
         }
 
-        if let Some(announcement) = dapi::parse_device_announcement(frame) {
-            self.targets
-                .insert(announcement.device_id, announcement.target_selector);
+        if !matches!(self.operation, Some(ManagedOperation::MonitorSignals)) {
+            if let Some(announcement) = dapi::parse_device_announcement(frame) {
+                self.targets
+                    .insert(announcement.device_id, announcement.target_selector);
+            }
         }
 
         let mut packet_hex = None;
@@ -348,6 +354,10 @@ pub fn advance(request: ManagedSessionRequest) -> Result<ManagedSessionStep, Str
                     }
                 }
             };
+            if matches!(operation, ManagedOperation::MonitorSignals) {
+                state.targets.clear();
+            }
+
             state.operation = Some(operation);
             state.target = target;
             state.sent = false;

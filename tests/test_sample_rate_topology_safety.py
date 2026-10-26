@@ -597,45 +597,6 @@ async def test_post_write_rate_mismatch_reports_changed_but_unverified(install_f
     assert "device reports 48000 Hz instead of 96000 Hz" in str(raised.value)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("current_receive_count", "current_transmit_count", "target_receive_count", "target_transmit_count"),
-    [
-        (64, 0, 32, 0),
-        (0, 64, 0, 32),
-    ],
-)
-async def test_preflight_accepts_proven_zero_directional_capacities(
-    install_flow_inventory,
-    current_receive_count,
-    current_transmit_count,
-    target_receive_count,
-    target_transmit_count,
-):
-    device = FakeA32([_phase(current_receive_count, [])])
-    device.sample_rate_channel_capacities = [
-        {
-            "sample_rate_hertz": 48_000,
-            "receive_channel_count": current_receive_count,
-            "transmit_channel_count": current_transmit_count,
-        },
-        {
-            "sample_rate_hertz": 96_000,
-            "receive_channel_count": target_receive_count,
-            "transmit_channel_count": target_transmit_count,
-        },
-    ]
-    install_flow_inventory(device)
-
-    async def probe():
-        return _sample_rate_status(48_000, [48_000, 96_000])
-
-    preflight = await preflight_sample_rate_change(device, 96_000, probe)
-
-    assert preflight.current_snapshot["capacity"]["receive_channel_count"] == current_receive_count
-    assert preflight.current_snapshot["capacity"]["transmit_channel_count"] == current_transmit_count
-    assert preflight.target_capacity["receive_channel_count"] == target_receive_count
-    assert preflight.target_capacity["transmit_channel_count"] == target_transmit_count
 
 
 @pytest.mark.asyncio

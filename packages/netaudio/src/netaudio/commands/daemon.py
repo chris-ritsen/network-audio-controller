@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import socket
+import sys
 import time
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("netaudio")
@@ -58,20 +61,24 @@ def _wait_for_startup(daemon_port, timeout=15):
 def _run_foreground(daemon_port):
     from netaudio.cli import state
     from netaudio.common.app_config import settings as app_settings
-    from netaudio.daemon.server import EXIT_BUDGET_SECONDS, SHUTDOWN_FAILED_STATUS, run_daemon
-
     effective_port = _effective_daemon_port(daemon_port)
-    app_settings.daemon_port = effective_port
-    stopped_in_time = asyncio.run(
-        run_daemon(
-            dissect=state.dissect,
-            capture=state.capture,
-            daemon_port=effective_port,
-            exit_budget_seconds=EXIT_BUDGET_SECONDS,
-        )
-    )
-    if not stopped_in_time:
-        raise SystemExit(SHUTDOWN_FAILED_STATUS)
+    name = "netaudio-daemon.exe" if sys.platform == "win32" else "netaudio-daemon"
+    executable = Path(__file__).resolve().parents[1] / "bin" / name
+    if not executable.is_file():
+        typer.echo("Error: the native daemon is missing; rebuild or reinstall NetAudio.", err=True)
+        raise typer.Exit(code=1)
+    arguments = [str(executable), "--port", str(effective_port)]
+    if app_settings.interface:
+        arguments.extend(["--interface", app_settings.interface])
+    if state.capture:
+        arguments.append("--capture")
+    if state.dissect:
+        arguments.append("--dissect")
+    level = logging.getLevelName(logging.getLogger().getEffectiveLevel()).lower()
+    level = {"warning": "warn", "critical": "error", "notset": "trace"}.get(level, level)
+    environment = dict(os.environ)
+    environment.setdefault("RUST_LOG", level)
+    os.execve(str(executable), arguments, environment)
 
 
 def _uses_configured_port(effective_port) -> bool:
@@ -494,7 +501,7 @@ def web(
         raise typer.Exit(code=1)
 
     url = f"http://127.0.0.1:{effective_port}/"
-    from netaudio.daemon.http.api import advertisement_addresses
+    from netaudio.daemon.http.tls import advertisement_addresses
     from netaudio.daemon.http.tls import TLSConfigurationError, certificate_fingerprint, daemon_tls_settings
 
     addresses = advertisement_addresses()

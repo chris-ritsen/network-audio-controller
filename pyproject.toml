@@ -52,10 +52,25 @@ include = [
     "/README.md",
     "/hatch_build_core.py",
     "/pyproject.toml",
+    "/Cargo.toml",
+    "/Cargo.lock",
     "/packages/netaudio/src/netaudio",
     "/packages/netaudio-core/Cargo.lock",
     "/packages/netaudio-core/Cargo.toml",
     "/packages/netaudio-core/src",
+    "/packages/netaudio-endpoint/Cargo.lock",
+    "/packages/netaudio-endpoint/Cargo.toml",
+    "/packages/netaudio-endpoint/src",
+    "/packages/netaudio-daemon/Cargo.toml",
+    "/packages/netaudio-daemon/build.rs",
+    "/packages/netaudio-daemon/assets",
+    "/packages/netaudio-daemon/src",
+    "/packages/netaudio-host-worker/Cargo.toml",
+    "/packages/netaudio-host-worker/src",
+    "/packages/netaudio-host-jack/Cargo.toml",
+    "/packages/netaudio-host-jack/src",
+    "/packages/netaudio-host-pulse/Cargo.toml",
+    "/packages/netaudio-host-pulse/src",
 ]
 exclude = [
     "/.gitignore",
@@ -87,7 +102,6 @@ select = ["E", "F", "I", "W", "RUF006"]
 ignore = ["E402", "E501", "E713", "F602", "I001", "W291"]
 
 [tool.ruff.lint.per-file-ignores]
-"packages/netaudio/src/netaudio/daemon/dbus_interfaces.py" = ["F722", "F821"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15
@@ -107,11 +121,6 @@ include = [
     "packages/netaudio/src/netaudio/core/__init__.py",
     "packages/netaudio/src/netaudio/core/binding.py",
     "packages/netaudio/src/netaudio/daemon/client.py",
-    "packages/netaudio/src/netaudio/daemon/dbus_state.py",
-    "packages/netaudio/src/netaudio/daemon/http/api.py",
-    "packages/netaudio/src/netaudio/daemon/managed_signals.py",
-    "packages/netaudio/src/netaudio/daemon/metering.py",
-    "packages/netaudio/src/netaudio/daemon/server.py",
     "packages/netaudio/src/netaudio/dante/analog_control.py",
     "packages/netaudio/src/netaudio/dante/application.py",
     "packages/netaudio/src/netaudio/dante/arc_protocol.py",

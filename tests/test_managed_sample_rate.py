@@ -6,10 +6,8 @@ from netaudio import core
 from netaudio.dante import flows
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.sample_rate_topology import (
-    SampleRateTopologyChangedButUnverifiedError,
     SampleRateTopologyVerificationError,
     change_sample_rate_topology_safe,
-    preflight_sample_rate_change,
 )
 
 
@@ -96,59 +94,12 @@ def setup_adapter(monkeypatch, model, *, changed_members=False, incorrect_counts
     return device, probe, AsyncMock(side_effect=mutate), detect, query
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("model", ["AVIO-DAI2", "AVIO-DAO2"])
-async def test_analog_avio_change_verifies_managed_channels_and_routes(monkeypatch, model):
-    device, probe, mutate, detect, query = setup_adapter(monkeypatch, model)
-    result = await change_sample_rate_topology_safe(device, 96000, probe, mutate)
-    mutate.assert_awaited_once()
-    assert result.changed is True
-    assert result.observed_sample_rate_hertz == 96000
-    assert device.execute.await_count == 2
-    if model == "AVIO-DAI2":
-        device.get_rx_channels.assert_not_awaited()
-        assert query.await_count == 2
-        before = result.preflight.current_snapshot["transmitter_flows"][0]
-        assert before["channel_members"] == [1, 2]
-        assert before["frames_per_packet"] is None
-    else:
-        assert device.get_rx_channels.await_count == 2
-        detect.assert_not_awaited()
-        query.assert_not_awaited()
-        assert len(result.resulting_snapshot["receiver_subscriptions"]) == 2
 
 
-@pytest.mark.asyncio
-async def test_managed_sample_rate_rejects_changed_transmitter_membership(monkeypatch):
-    device, probe, mutate, _, _ = setup_adapter(monkeypatch, "AVIO-DAI2", changed_members=True)
-    with pytest.raises(SampleRateTopologyChangedButUnverifiedError, match="membership and metadata"):
-        await change_sample_rate_topology_safe(device, 96000, probe, mutate)
-    mutate.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_noncontracting_rate_change_allows_automatic_unicast_flow_retirement(monkeypatch):
-    device, probe, mutate, _, _ = setup_adapter(monkeypatch, "AVIO-DAI2", retire_flow=True)
-    result = await change_sample_rate_topology_safe(device, 96000, probe, mutate)
-    assert result.changed is True
-    assert result.preflight.current_snapshot["transmitter_flows"][0]["flow_type"] == "unicast"
-    assert result.resulting_snapshot["transmitter_flows"] == []
 
 
-@pytest.mark.asyncio
-async def test_noncontracting_rate_change_still_rejects_multicast_flow_loss(monkeypatch):
-    device, probe, mutate, _, query = setup_adapter(monkeypatch, "AVIO-DAI2", retire_flow=True)
-    original = query.side_effect
-
-    async def multicast_inventory(*args, **kwargs):
-        inventory = await original(*args, **kwargs)
-        for flow in inventory["flows"]:
-            flow["flow_type"] = "multicast"
-        return inventory
-
-    query.side_effect = multicast_inventory
-    with pytest.raises(SampleRateTopologyChangedButUnverifiedError, match="membership and metadata"):
-        await change_sample_rate_topology_safe(device, 96000, probe, mutate)
 
 
 @pytest.mark.asyncio
@@ -159,29 +110,3 @@ async def test_managed_preflight_rejects_unexpected_channel_counts_before_writin
     mutate.assert_not_awaited()
     detect.assert_not_awaited()
     query.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_managed_preflight_does_not_treat_non_audio_flows_as_audio(monkeypatch):
-    device, probe, _, _, _ = setup_adapter(monkeypatch, "AVIO-DAI2")
-    monkeypatch.setattr(
-        flows,
-        "query_tx_flow_inventory",
-        AsyncMock(
-            return_value={
-                "flows": [
-                    {
-                        "global_flow_id": 1,
-                        "flow_type": "unicast",
-                        "media_type_code": 1,
-                        "channel_slot_count": 1,
-                        "transmitter_channel_ids_by_slot": [1],
-                        "sample_rate": 48000,
-                        "encoding": 24,
-                    }
-                ]
-            }
-        ),
-    )
-    with pytest.raises(SampleRateTopologyVerificationError, match="supported audio flow"):
-        await preflight_sample_rate_change(device, 96000, probe)

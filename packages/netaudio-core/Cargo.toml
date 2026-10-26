@@ -9,9 +9,14 @@ name = "netaudio_core"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
+caseless = "0.2.2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 crypto_secretbox = "0.1"
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
+roxmltree = "0.20"
 schemars = { version = "=1.2.1", optional = true }
 
 [features]
@@ -24,8 +29,3 @@ required-features = ["schema"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-[profile.release]
-lto = true
-panic = "unwind"
-overflow-checks = true

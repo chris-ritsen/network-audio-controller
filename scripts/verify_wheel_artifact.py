@@ -142,7 +142,7 @@ def verify_wheel(wheel: Path, platform_name: str, architecture: str) -> None:
         native_members = [name for name in names if name.endswith((".so", ".dylib", ".dll", ".a", ".lib", ".rlib"))]
         if native_members != [expected_library]:
             raise RuntimeError(
-                f"wheel must contain only {expected_library} as a native artifact; found {native_members}"
+                f"wheel must contain only {expected_library} as a native library; found {native_members}"
             )
 
         wheel_metadata = [name for name in names if name.endswith(".dist-info/WHEEL")]
@@ -161,6 +161,16 @@ def verify_wheel(wheel: Path, platform_name: str, architecture: str) -> None:
             raise RuntimeError("wheel does not declare the netaudio console script")
 
         _verify_native_binary(archive.read(expected_library), platform_name, architecture)
+        for executable in ("netaudio-endpoint", "netaudio-daemon", "netaudio-host-jack", "netaudio-host-pulse"):
+            name = executable + (".exe" if platform_name == "windows" else "")
+            member = f"netaudio/bin/{name}"
+            if member not in names:
+                raise RuntimeError(f"wheel is missing its native executable: {member}")
+            _verify_native_binary(archive.read(member), platform_name, architecture)
+            if platform_name != "windows" and not (archive.getinfo(member).external_attr >> 16) & 0o111:
+                raise RuntimeError(f"native executable is not executable in the wheel: {member}")
+        if "netaudio/daemon/server.py" in names or "netaudio/daemon/http/api.py" in names:
+            raise RuntimeError("wheel contains the superseded Python daemon")
 
 
 def main() -> None:

@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "features": {
+    "events.patches": {
+      "since": 1,
+      "description": "GET /events?patches=1 sends device_patch events carrying only the fields that changed."
+    },
+    "events.telemetry_off": {
+      "since": 1,
+      "description": "GET /events?telemetry=0 leaves telemetry fields out of device records and sends field-name notices instead."
+    },
+    "events.telemetry_fields": {
+      "since": 2,
+      "description": "GET /events?telemetry=name,name sends only the named telemetry fields; the rest arrive as notices."
+    },
+    "events.opt_out": {
+      "since": 2,
+      "description": "GET /events?meters=0 leaves out meter_values and shure_meter_values; telemetry=none leaves out telemetry fields and their notices. The server skips building events no connected client wants."
+    }
+  },
+  "documentation": {
+    "openapi": "/openapi.json",
+    "reference": "/api/docs",
+    "stability": "stable"
+  }
+}

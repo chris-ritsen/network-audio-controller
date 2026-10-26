@@ -1,0 +1,15 @@
+[package]
+name = "netaudio-host-pulse"
+version = "0.4.2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+netaudio-core = { path = "../netaudio-core" }
+netaudio-host-worker = { path = "../netaudio-host-worker" }
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libpulse-binding = "2.30.1"

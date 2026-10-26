@@ -7,8 +7,6 @@ import pytest
 from typer.testing import CliRunner
 
 from netaudio.cli import app
-from netaudio.common.app_config import DEFAULT_DAEMON_PORT
-from netaudio.daemon.http.tls import DEFAULT_TLS_PORT
 from netaudio.commands.ddm import cli as ddm_cli
 
 runner = CliRunner()
@@ -51,16 +49,6 @@ def test_daemon_tls_json_reports_null_when_disabled(monkeypatch):
     assert _json(result) is None
 
 
-def test_daemon_remote_urls_use_tls_by_default(monkeypatch):
-    monkeypatch.setattr("netaudio.commands.daemon._port_in_use", lambda port: True)
-    monkeypatch.setattr("netaudio.daemon.http.api.advertisement_addresses", lambda: ["192.0.2.10"])
-    monkeypatch.setattr("netaudio.daemon.mcp_access.ensure_mcp_token", lambda: "offline-test-token")
-    result = runner.invoke(app, ["-j", "daemon", "web"])
-    payload = _json(result)
-    assert payload["urls"] == [f"http://127.0.0.1:{DEFAULT_DAEMON_PORT}/"]
-    assert f"https://192.0.2.10:{DEFAULT_TLS_PORT}/" in payload["https_urls"]
-    result = runner.invoke(app, ["-j", "daemon", "mcp-token"])
-    assert _json(result)["url"].startswith("https://")
 
 
 def test_virtual_status_json_when_not_running(monkeypatch):

@@ -273,10 +273,12 @@ from netaudio.commands import (
     flow,
     issues,
     key,
+    native_audio,
     report,
     shure,
     status,
     subscription,
+    video,
     virtual,
 )
 from netaudio.commands.capture.cli import app as capture_app
@@ -303,6 +305,8 @@ lab_app.add_typer(provenance_app, name="provenance")
 lock_app.add_typer(key.app, name="key")
 
 app.add_typer(channel.app, name="channel")
+app.add_typer(native_audio.app, name="audio")
+app.add_typer(video.app, name="video")
 app.command("clock")(device_clock)
 app.add_typer(config_app, name="config")
 app.add_typer(daemon.app, name="daemon")

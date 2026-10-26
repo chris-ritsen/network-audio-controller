@@ -65,6 +65,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
+      - if: runner.os == 'macOS'
+        run: brew install pkg-config jack pulseaudio
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libjack-jackd2-dev libpulse-dev pkg-config
       - run: uv sync --python ${{ matrix.python-version }} --all-groups
       - run: uv run --python ${{ matrix.python-version }} python scripts/check_project.py --scope python --report "${{ runner.temp }}/checks/report.json"
       - uses: actions/upload-artifact@v7
@@ -85,6 +89,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
+      - if: runner.os == 'macOS'
+        run: brew install pkg-config jack pulseaudio
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libjack-jackd2-dev libpulse-dev pkg-config
       - run: uv run python scripts/check_project.py --scope runtime --report "${{ runner.temp }}/checks/report.json"
       - uses: actions/upload-artifact@v7
         if: always()
@@ -105,6 +113,10 @@ jobs:
         with:
           tool: cbindgen@0.29.4
       - uses: astral-sh/setup-uv@v7
+      - if: runner.os == 'macOS'
+        run: brew install pkg-config jack pulseaudio
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libjack-jackd2-dev libpulse-dev pkg-config
       - run: uv sync --python 3.10 --all-groups
       - run: uv run --python 3.10 python scripts/check_project.py --scope native --report "${{ runner.temp }}/checks/report.json"
       - uses: actions/upload-artifact@v7
@@ -149,6 +161,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
+      - if: runner.os == 'macOS'
+        run: brew install pkg-config jack pulseaudio
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libjack-jackd2-dev libpulse-dev pkg-config
       - if: matrix.platform == 'windows'
         uses: ilammy/msvc-dev-cmd@v1
       - if: matrix.platform == 'linux'
@@ -161,6 +177,7 @@ jobs:
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
               export PATH="$HOME/.cargo/bin:/opt/python/cp39-cp39/bin:$PATH"
               python -m pip install --disable-pip-version-check uv auditwheel
+              dnf install -y alsa-lib-devel jack-audio-connection-kit-devel pulseaudio-libs-devel pkgconf-pkg-config
               uv build --wheel
               wheel=(dist/*.whl)
               test "${#wheel[@]}" -eq 1

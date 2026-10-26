@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 crate="$root/packages/netaudio-core"
+target_directory="$root/target"
 
 if ! source_commit="$(git -C "$root" rev-parse --verify HEAD)"; then
     echo "refusing to build XCFramework without a committed source revision" >&2
@@ -12,6 +13,8 @@ fi
 repository_changes="$(
     git -C "$root" status --porcelain=v1 --untracked-files=all -- \
         LICENSE \
+        Cargo.toml \
+        Cargo.lock \
         packages/netaudio-core \
         scripts/build_xcframework.sh
 )"
@@ -31,17 +34,17 @@ module netaudio_core {
 }
 MODULEMAP
 
-cargo build --release --manifest-path "$crate/Cargo.toml" --target aarch64-apple-ios
-cargo build --release --manifest-path "$crate/Cargo.toml" --target aarch64-apple-ios-macabi
-cargo build --release --manifest-path "$crate/Cargo.toml" --target aarch64-apple-ios-sim
+cargo build --release --locked --manifest-path "$crate/Cargo.toml" --target-dir "$target_directory" --target aarch64-apple-ios
+cargo build --release --locked --manifest-path "$crate/Cargo.toml" --target-dir "$target_directory" --target aarch64-apple-ios-macabi
+cargo build --release --locked --manifest-path "$crate/Cargo.toml" --target-dir "$target_directory" --target aarch64-apple-ios-sim
 
 rm -rf "$root/dist/netaudio_core.xcframework" "$root/dist/netaudio_core.xcframework.zip"
 mkdir -p "$root/dist"
 
 xcodebuild -create-xcframework \
-    -library "$crate/target/aarch64-apple-ios/release/libnetaudio_core.a" -headers "$crate/include" \
-    -library "$crate/target/aarch64-apple-ios-macabi/release/libnetaudio_core.a" -headers "$crate/include" \
-    -library "$crate/target/aarch64-apple-ios-sim/release/libnetaudio_core.a" -headers "$crate/include" \
+    -library "$target_directory/aarch64-apple-ios/release/libnetaudio_core.a" -headers "$crate/include" \
+    -library "$target_directory/aarch64-apple-ios-macabi/release/libnetaudio_core.a" -headers "$crate/include" \
+    -library "$target_directory/aarch64-apple-ios-sim/release/libnetaudio_core.a" -headers "$crate/include" \
     -output "$root/dist/netaudio_core.xcframework"
 
 framework_path="$root/dist/netaudio_core.xcframework"
@@ -60,7 +63,7 @@ simulator_library_checksum="$(shasum -a 256 "$framework_path/ios-arm64-simulator
 framework_manifest_checksum="$(shasum -a 256 "$framework_path/Info.plist" | awk '{print $1}')"
 header_checksum="$(shasum -a 256 "$framework_path/ios-arm64/Headers/netaudio_core.h" | awk '{print $1}')"
 module_map_checksum="$(shasum -a 256 "$framework_path/ios-arm64/Headers/module.modulemap" | awk '{print $1}')"
-cargo_lock_checksum="$(shasum -a 256 "$crate/Cargo.lock" | awk '{print $1}')"
+cargo_lock_checksum="$(shasum -a 256 "$root/Cargo.lock" | awk '{print $1}')"
 
 cat > "$framework_path/PROVENANCE.md" <<EOF
 # netaudio-core artifact provenance

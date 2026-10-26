@@ -12,6 +12,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import ifaddr
+
+from netaudio.network_path import interface_supports_multicast
 from cryptography import x509
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
@@ -274,3 +276,25 @@ def daemon_tls_settings() -> TLSSettings | None:
     from netaudio.common.config_loader import default_config_path, load_daemon_config
 
     return tls_settings_from_config(load_daemon_config(), base_directory=default_config_path().parent)
+
+
+def advertisement_addresses(selected_interface: str | None = None) -> tuple[str, ...]:
+    addresses = set()
+    for adapter in ifaddr.get_adapters():
+        if selected_interface and adapter.nice_name != selected_interface:
+            continue
+        if interface_supports_multicast(adapter.nice_name) is False:
+            continue
+        for adapter_ip in adapter.ips:
+            address = adapter_ip.ip
+            if not isinstance(address, str):
+                continue
+            try:
+                parsed = ipaddress.IPv4Address(address)
+            except ipaddress.AddressValueError:
+                continue
+            if parsed.is_loopback or parsed.is_unspecified or parsed.is_multicast:
+                continue
+            addresses.add(str(parsed))
+
+    return tuple(sorted(addresses))

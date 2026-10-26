@@ -1,0 +1,17 @@
+[package]
+name = "netaudio-host-jack"
+version = "0.4.2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+netaudio-core = { path = "../netaudio-core" }
+netaudio-host-worker = { path = "../netaudio-host-worker" }
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rtrb = "0.4.0"
+jack = { version = "0.13.5", default-features = false, features = ["dynamic_loading"] }
+jack-sys = { version = "0.5.1", features = ["dynamic_loading"] }

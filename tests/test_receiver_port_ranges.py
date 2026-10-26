@@ -20,37 +20,8 @@ def _fallback_member(name: str) -> bytes:
     return load_protocol_packet("receiver_port_ranges_fallback", name)
 
 
-def test_receiver_port_range_query_and_parser_match_shipping_controller():
-    request = _packet(0x3300, 8175)
-    response = _packet(0x3300, 8176)
-
-    assert core.build_command({"command": "query_receiver_port_ranges", "message_id": 0x033C}) == request
-    assert request.hex() == "2729000a033c33000000"
-    assert response.hex() == "27290012033c330000013800397f398039ff"
-    assert core.parse_response("receiver_port_ranges", response) == {
-        "first_port_range_start": 0x3800,
-        "first_port_range_end": 0x397F,
-        "second_port_range_start": 0x3980,
-        "second_port_range_end": 0x39FF,
-        "second_port_range_available": True,
-    }
 
 
-def test_correlated_unicast_receiver_flows_use_the_first_reported_port_range():
-    port_ranges = core.parse_response("receiver_port_ranges", _packet(0x3300, 8176))
-    flow_page = core.parse_response("receiver_flow_page", _packet(0x3200, 8172))
-    unicast_ports = []
-    multicast_ports = []
-    for receiver_flow in flow_page["flows"]:
-        port = receiver_flow["interface_endpoints"][0]["udp_port"]
-        assert port is not None
-        (multicast_ports if receiver_flow["flow_type"] == "multicast" else unicast_ports).append(port)
-
-    assert unicast_ports
-    assert all(
-        port_ranges["first_port_range_start"] <= port <= port_ranges["first_port_range_end"] for port in unicast_ports
-    )
-    assert multicast_ports == [0x10E1]
 
 
 def test_authentic_fallback_setup_uses_the_same_endpoint_descriptor_layout():

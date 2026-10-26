@@ -16,6 +16,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 CRATE = "packages/netaudio-core/Cargo.toml"
+ENDPOINT_CRATE = "packages/netaudio-endpoint/Cargo.toml"
 TARGET = ROOT / "packages/netaudio-core/target"
 
 
@@ -196,6 +197,7 @@ def run_checks(checks, scopes, report_path, *, timeout=300, library=None):
 def project_checks(library, *, offline=False):
     python = [sys.executable]
     cargo = ["--locked", *(["--offline"] if offline else []), "--manifest-path", CRATE]
+    endpoint_cargo = ["--locked", *(["--offline"] if offline else []), "--manifest-path", ENDPOINT_CRATE]
     return [
         Check("native-build", "core", ["cargo", "build", *cargo, "--target-dir", str(TARGET)]),
         Check("abi", "core", [*python, "scripts/check_native_abi.py", str(library)]),
@@ -225,6 +227,12 @@ def project_checks(library, *, offline=False):
             ],
         ),
         Check("rust-format", "native", ["cargo", "fmt", "--manifest-path", CRATE, "--", "--check"]),
+        Check("endpoint-format", "native", ["cargo", "fmt", "--manifest-path", ENDPOINT_CRATE, "--", "--check"]),
+        Check(
+            "endpoint-clippy",
+            "native",
+            ["cargo", "clippy", *endpoint_cargo, "--all-targets", "--", "-D", "warnings"],
+        ),
         Check(
             "clippy",
             "native",

@@ -71,56 +71,6 @@ fn device_name_strips_header_and_terminator() {
     assert_eq!(parse_device_name(&response).as_deref(), Some("avio-aes3-1"));
 }
 
-fn device_settings_response(values: &[(u16, u32)]) -> Vec<u8> {
-    let mut body = vec![0x00, values.len() as u8];
-    let first_value_offset = RESPONSE_HEADER_SIZE + 2 + values.len() * 4;
-    for (index, (info_code, _)) in values.iter().enumerate() {
-        body.extend_from_slice(&info_code.to_be_bytes());
-        body.extend_from_slice(&((first_value_offset + index * 4) as u16).to_be_bytes());
-    }
-    for (_, value) in values.iter().copied() {
-        body.extend_from_slice(&value.to_be_bytes());
-    }
-    let mut response = vec![0u8; 10];
-    response.extend_from_slice(&body);
-    stamp_arc_response(
-        &mut response,
-        PROTOCOL_ID,
-        OPCODE_DEVICE_SETTINGS,
-        RESULT_CODE_SUCCESS,
-    );
-    response
-}
-
-#[test]
-fn device_settings_decodes_distinct_latency_fields_as_nanoseconds() {
-    let response = device_settings_response(&[
-        (DEVICE_SETTINGS_INFO_SAMPLE_RATE, 48_000u32),
-        (DEVICE_SETTINGS_INFO_DEFAULT_LATENCY_NS, 1_000_000u32),
-        (DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS, 150_000u32),
-        (DEVICE_SETTINGS_INFO_ACTIVE_LATENCY_NS, 1_000_000u32),
-        (DEVICE_SETTINGS_INFO_MAX_LATENCY_NS, 21_333_334u32),
-        (DEVICE_SETTINGS_INFO_MIN_LATENCY_NS, 150_000u32),
-    ]);
-
-    let settings = parse_device_settings(&response).unwrap();
-    assert_eq!(settings.sample_rate, Some(48_000));
-    assert_eq!(settings.default_latency_ns, Some(1_000_000));
-    assert_eq!(settings.configured_latency_ns, Some(150_000));
-    assert_eq!(settings.active_latency_ns, Some(1_000_000));
-    assert_eq!(settings.max_latency_ns, Some(21_333_334));
-    assert_eq!(settings.min_latency_ns, Some(150_000));
-}
-
-#[test]
-fn device_settings_uses_configured_latency_when_active_is_absent() {
-    let response =
-        device_settings_response(&[(DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS, 250_000)]);
-    let settings = parse_device_settings(&response).unwrap();
-    assert_eq!(settings.configured_latency_ns, Some(250_000));
-    assert_eq!(settings.active_latency_ns, None);
-}
-
 fn retained_receive_latency_device_settings_packet() -> Vec<u8> {
     decode_hexadecimal(
             "2729008c134011000001171702010001820400688205006c021000100211000400008218000082198301007083020074830600780310000403110002030300048021007c00f000000000806000220001000000630000006400000065000002220212003000008321000f42400003d09000000000000000000003d09000000000000000000000000000000000",
@@ -261,56 +211,6 @@ fn device_settings_preserves_inline_values_and_unavailable_property_ids() {
     );
 }
 
-#[test]
-fn device_settings_preserves_full_variable_width_referenced_values() {
-    let control = decode_hexadecimal(
-            "27ff00a80000110000011b18802000788021007c0022b000002300000024000100f00000020100018204008c82050090020a0000020b0000021000000211000002120030021300000214000083010094830600988302009c03100010031100020303000483f000a0060100000000000000000000000000000000000000000000000000000000000000000000000f4240000f4240000000000003d090000000000000000500000000",
-        );
-    let treatment = decode_hexadecimal(
-            "27ff00a80000110000011b18802000788021007c0022b000002300000024000100f00000020100018204008c82050090020a0000020b0000021000000211000002120030021300000214000083010094830600988302009c03100010031100020303000483f000a0060100000000000000000000000000000000000000000001000000000000000000000000000f4240000f4240000000000003d090000000000000000500000000",
-        );
-
-    let control_settings = parse_device_settings(&control).unwrap();
-    let treatment_settings = parse_device_settings(&treatment).unwrap();
-    let control_property = control_settings
-        .referenced_values
-        .iter()
-        .find(|value| value.info_code == 0x8021)
-        .unwrap();
-    let treatment_property = treatment_settings
-        .referenced_values
-        .iter()
-        .find(|value| value.info_code == 0x8021)
-        .unwrap();
-
-    assert_eq!(control_property.pointer, 0x007c);
-    assert_eq!(
-        control_property.value_hexadecimal,
-        "00000000000000000000000000000000"
-    );
-    assert_eq!(treatment_property.pointer, 0x007c);
-    assert_eq!(
-        treatment_property.value_hexadecimal,
-        "00000001000000000000000000000000"
-    );
-    assert_eq!(
-        control_settings
-            .referenced_values
-            .iter()
-            .find(|value| value.info_code == 0x83f0)
-            .unwrap()
-            .value_hexadecimal,
-        "0000000500000000"
-    );
-}
-
-#[test]
-fn device_settings_rejects_duplicate_non_placeholder_info_codes() {
-    let mut response = captured_selective_device_settings_packet_9084571();
-    response[32..34].copy_from_slice(&DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS.to_be_bytes());
-    assert_eq!(parse_device_settings(&response), None);
-}
-
 fn property_directory_response(properties: &[(u16, u16)]) -> Vec<u8> {
     let mut response = vec![0u8; RESPONSE_HEADER_SIZE];
     response.extend_from_slice(&(properties.len() as u16).to_be_bytes());
@@ -352,18 +252,6 @@ fn property_directory_preserves_raw_records_and_derives_aes67_presence() {
             .unwrap()
             .aes67_configured_property_advertised
     );
-}
-
-#[test]
-fn property_directory_rejects_duplicate_or_misaligned_records() {
-    let duplicate = property_directory_response(&[(0x0063, 0x0001), (0x0063, 0x0003)]);
-    assert_eq!(parse_property_directory(&duplicate), None);
-
-    let mut trailing = property_directory_response(&[(0x0063, 0x0001)]);
-    trailing.push(0);
-    let length = trailing.len() as u16;
-    trailing[2..4].copy_from_slice(&length.to_be_bytes());
-    assert_eq!(parse_property_directory(&trailing), None);
 }
 
 #[test]

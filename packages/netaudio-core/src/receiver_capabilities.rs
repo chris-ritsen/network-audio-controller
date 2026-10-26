@@ -5,7 +5,7 @@ use crate::spec::SpecError;
 #[derive(Clone, Copy, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
-enum Authority {
+pub enum Authority {
     Direct,
     Managed,
     Observed,
@@ -14,32 +14,32 @@ enum Authority {
 #[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
-struct Evidence {
-    direct: Option<bool>,
-    managed: Option<bool>,
-    managed_fresh: bool,
+pub struct Evidence {
+    pub direct: Option<bool>,
+    pub managed: Option<bool>,
+    pub managed_fresh: bool,
 }
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ReceiverCapabilityRequest {
-    authority: Authority,
-    channels: Vec<Evidence>,
+    pub authority: Authority,
+    pub channels: Vec<Evidence>,
 }
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Capability {
-    supported: Option<bool>,
-    conflict: bool,
+    pub supported: Option<bool>,
+    pub conflict: bool,
 }
 
 #[derive(Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReceiverCapabilities {
-    channels: Vec<Capability>,
-    support: &'static str,
+    pub channels: Vec<Capability>,
+    pub support: &'static str,
 }
 
 /// Resolve advertised evidence without turning stale observations or absence into
@@ -47,6 +47,10 @@ pub struct ReceiverCapabilities {
 pub fn self_connection(input: &str) -> Result<ReceiverCapabilities, SpecError> {
     let request: ReceiverCapabilityRequest =
         serde_json::from_str(input).map_err(|error| SpecError::InvalidJson(error.to_string()))?;
+    Ok(evaluate(request))
+}
+
+pub fn evaluate(request: ReceiverCapabilityRequest) -> ReceiverCapabilities {
     let mut channels = Vec::with_capacity(request.channels.len());
 
     for evidence in request.channels {
@@ -86,5 +90,5 @@ pub fn self_connection(input: &str) -> Result<ReceiverCapabilities, SpecError> {
         (false, true, false) => "unsupported",
     };
 
-    Ok(ReceiverCapabilities { channels, support })
+    ReceiverCapabilities { channels, support }
 }

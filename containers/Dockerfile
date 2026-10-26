@@ -12,12 +12,13 @@ FROM --platform=$BUILDPLATFORM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE}${
 
 ARG BUILDARCH
 RUN case "$BUILDARCH" in \
-        amd64) cross="gcc-aarch64-linux-gnu libc6-dev-arm64-cross" ;; \
-        arm64) cross="gcc-x86-64-linux-gnu libc6-dev-amd64-cross" ;; \
+        amd64) cross="gcc-aarch64-linux-gnu libc6-dev-arm64-cross"; foreign=arm64 ;; \
+        arm64) cross="gcc-x86-64-linux-gnu libc6-dev-amd64-cross"; foreign=amd64 ;; \
         *) echo "cannot build on $BUILDARCH" >&2; exit 1 ;; \
     esac \
+    && dpkg --add-architecture "$foreign" \
     && apt-get update \
-    && apt-get install --yes --no-install-recommends gcc libc6-dev $cross ca-certificates curl \
+    && apt-get install --yes --no-install-recommends gcc libc6-dev $cross ca-certificates curl pkg-config libasound2-dev "libasound2-dev:$foreign" libjack-jackd2-dev "libjack-jackd2-dev:$foreign" libpulse-dev "libpulse-dev:$foreign" \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CARGO_HOME=/usr/local/cargo \
@@ -35,8 +36,13 @@ COPY --from=uv /uv /usr/local/bin/uv
 FROM toolchain AS compiled
 
 WORKDIR /src
-COPY pyproject.toml README.md LICENSE hatch_build_core.py ./
+COPY pyproject.toml README.md LICENSE hatch_build_core.py Cargo.toml Cargo.lock ./
 COPY packages/netaudio-core packages/netaudio-core
+COPY packages/netaudio-endpoint packages/netaudio-endpoint
+COPY packages/netaudio-daemon packages/netaudio-daemon
+COPY packages/netaudio-host-worker packages/netaudio-host-worker
+COPY packages/netaudio-host-jack packages/netaudio-host-jack
+COPY packages/netaudio-host-pulse packages/netaudio-host-pulse
 COPY packages/netaudio/src packages/netaudio/src
 
 ARG TARGETARCH
@@ -44,11 +50,11 @@ ARG REVISION=""
 RUN --mount=type=cache,id=cargo-registry-${TARGETARCH},target=/usr/local/cargo/registry \
     --mount=type=cache,id=netaudio-core-target-${TARGETARCH},target=/src/packages/netaudio-core/target \
     case "$TARGETARCH" in \
-        amd64) target=x86_64-unknown-linux-gnu ;; \
-        arm64) target=aarch64-unknown-linux-gnu ;; \
+        amd64) target=x86_64-unknown-linux-gnu; libraries=x86_64-linux-gnu ;; \
+        arm64) target=aarch64-unknown-linux-gnu; libraries=aarch64-linux-gnu ;; \
         *) echo "cannot build for $TARGETARCH" >&2; exit 1 ;; \
     esac \
-    && CARGO_BUILD_TARGET="$target" NETAUDIO_GIT_REVISION="$REVISION" uv build --wheel --out-dir /dist
+    && PKG_CONFIG_ALLOW_CROSS=1 PKG_CONFIG_LIBDIR="/usr/lib/$libraries/pkgconfig" CARGO_BUILD_TARGET="$target" NETAUDIO_GIT_REVISION="$REVISION" uv build --wheel --out-dir /dist
 
 
 FROM scratch AS prebuilt
@@ -94,6 +100,10 @@ RUN groupadd --system --gid 10001 netaudio \
 
 
 FROM python:${PYTHON_VERSION}-slim-${DEBIAN_RELEASE}${BASE_DIGEST:+@${BASE_DIGEST}} AS runtime
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libasound2t64 libpulse0 libjack-jackd2-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=accounts /accounts/ /
 COPY --from=installed /installed/ /

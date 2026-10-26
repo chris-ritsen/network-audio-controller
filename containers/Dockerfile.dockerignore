@@ -4,10 +4,15 @@
 !README.md
 !LICENSE
 !hatch_build_core.py
+!Cargo.toml
+!Cargo.lock
 !packages/netaudio-core
+!packages/netaudio-endpoint
+!packages/netaudio-daemon
 !packages/netaudio/src
 !dist/*.whl
 packages/netaudio-core/target
+packages/netaudio-endpoint/target
 packages/netaudio/src/**/__pycache__
 packages/netaudio/src/netaudio/core/libnetaudio_core.*
 packages/netaudio/src/netaudio/core/netaudio_core.dll

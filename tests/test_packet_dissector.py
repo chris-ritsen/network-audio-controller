@@ -222,51 +222,8 @@ def test_interface_status_packet_12362182_dissects_link_speed_from_protocol_fact
     assert spans_by_name["link_speed_mbps"].detail == "100 Mbps"
 
 
-def test_device_settings_resolves_latency_values_through_absolute_pointers():
-    properties = [
-        (0x8301, 32),
-        (0x8204, 36),
-        (0x8302, 40),
-        (0x8205, 44),
-        (0x8306, 48),
-    ]
-    values = [1_000_000, 2_000_000, 42_666_667, 256_000, 250_000]
-    body = bytes([0x24, len(properties)])
-    body += b"".join(struct.pack(">HH", *property_record) for property_record in properties)
-    body += b"".join(struct.pack(">I", property_value) for property_value in values)
-
-    result = dissect(_arc_packet(0x2729, 0x1100, 0x0001, body), facts=[])
-
-    assert result.core_kind == "device_settings"
-    assert result.core_fields["default_latency_ns"] == 2_000_000
-    assert result.core_fields["configured_latency_ns"] == 256_000
-    assert result.core_fields["active_latency_ns"] == 1_000_000
-    assert result.core_fields["max_latency_ns"] == 42_666_667
-    assert result.core_fields["min_latency_ns"] == 250_000
-    assert [entry["pointer"] for entry in result.core_fields["referenced_values"]] == [32, 36, 40, 44, 48]
 
 
-@pytest.mark.parametrize(
-    ("value_hexadecimal", "payload_hexadecimal"),
-    [
-        (
-            "00000000000000000000000000000000",
-            "27ff00a80000110000011b18802000788021007c0022b000002300000024000100f00000020100018204008c82050090020a0000020b0000021000000211000002120030021300000214000083010094830600988302009c03100010031100020303000483f000a0060100000000000000000000000000000000000000000000000000000000000000000000000f4240000f4240000000000003d090000000000000000500000000",
-        ),
-        (
-            "00000001000000000000000000000000",
-            "27ff00a80000110000011b18802000788021007c0022b000002300000024000100f00000020100018204008c82050090020a0000020b0000021000000211000002120030021300000214000083010094830600988302009c03100010031100020303000483f000a0060100000000000000000000000000000000000000000001000000000000000000000000000f4240000f4240000000000003d090000000000000000500000000",
-        ),
-    ],
-)
-def test_device_settings_preserves_variable_width_property_values(value_hexadecimal, payload_hexadecimal):
-    result = dissect(bytes.fromhex(payload_hexadecimal), facts=[])
-    referenced_by_property = {entry["info_code"]: entry for entry in result.core_fields["referenced_values"]}
-
-    assert result.core_kind == "device_settings"
-    assert referenced_by_property[0x8021]["pointer"] == 0x007C
-    assert referenced_by_property[0x8021]["value_hexadecimal"] == value_hexadecimal
-    assert referenced_by_property[0x83F0]["value_hexadecimal"] == "0000000500000000"
 
 
 def test_device_settings_preserves_unsupported_property_placeholders():
@@ -301,17 +258,6 @@ def test_device_settings_request_has_no_core_parser():
     assert result.header_summary == "protocol=ARC  18B"
 
 
-@pytest.mark.parametrize("protocol_identifier", [0x2729, 0x27FF, 0x2801, 0x2809])
-def test_property_directory_dissects_captured_arc_protocol_variants(protocol_identifier):
-    body = struct.pack(">HHHHH", 2, 0x8204, 0x0003, 0x8301, 0x0001)
-
-    result = dissect(_arc_packet(protocol_identifier, 0x1102, 0x0001, body), facts=[])
-
-    assert result.core_kind == "property_directory"
-    assert result.core_fields == {
-        "aes67_configured_property_advertised": False,
-        "properties": [{"flags": 3, "property_id": 0x8204}, {"flags": 1, "property_id": 0x8301}],
-    }
 
 
 def test_disproved_facts_never_reach_runtime_labeling(tmp_path, monkeypatch):

@@ -365,7 +365,10 @@ pub fn build_query_fixed_tx_flows_from(
 ) -> Result<Vec<u8>, NetaudioError> {
     if !matches!(
         protocol,
-        PROTOCOL_DANTE_FLOW | PROTOCOL_DANTE_FLOW_2801 | PROTOCOL_ARC_2809
+        crate::protocol::PROTOCOL_ID
+            | PROTOCOL_DANTE_FLOW
+            | PROTOCOL_DANTE_FLOW_2801
+            | PROTOCOL_ARC_2809
     ) {
         return Err(NetaudioError::InvalidFlowProtocol);
     }
@@ -602,7 +605,7 @@ pub fn build_query_receiver_port_ranges_for_protocol(
     protocol_id: u16,
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    if !matches!(protocol_id, PROTOCOL_DANTE_FLOW | PROTOCOL_ARC_2809) {
+    if protocol_id != PROTOCOL_DANTE_FLOW && !crate::protocol::is_modern_arc_protocol(protocol_id) {
         return Err(NetaudioError::UnsupportedProtocolOperation);
     }
     arc_packet_with_reserved_word(
@@ -611,6 +614,23 @@ pub fn build_query_receiver_port_ranges_for_protocol(
         &[],
         message_id,
     )
+}
+
+pub fn build_query_directional_audio_availability(
+    protocol_id: u16,
+    direction: AudioDirection,
+    message_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    if !crate::protocol::is_modern_arc_protocol(protocol_id) {
+        return Err(NetaudioError::UnsupportedProtocolOperation);
+    }
+
+    let operation = match direction {
+        AudioDirection::Transmit => OPCODE_QUERY_TRANSMIT_AVAILABILITY,
+        AudioDirection::Receive => OPCODE_QUERY_RECEIVE_AVAILABILITY,
+    };
+
+    arc_packet_with_reserved_word(protocol_id, operation, &[], message_id)
 }
 
 pub fn build_create_tx_flow(

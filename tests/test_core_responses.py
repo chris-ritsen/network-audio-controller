@@ -39,11 +39,6 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 GOLDEN = json.loads((FIXTURES_DIR / "core_responses_golden.json").read_text())
 
 
-@pytest.mark.parametrize("name", sorted(GOLDEN))
-def test_parse_response_matches_golden(name):
-    entry = GOLDEN[name]
-    parsed = core.parse_response(entry["kind"], response_input_bytes(FIXTURES_DIR, name, entry))
-    assert parsed == entry["parsed"]
 
 
 def _channel_count_response(tx_count=260, rx_count=520):

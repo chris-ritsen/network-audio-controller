@@ -197,6 +197,11 @@ pub(super) enum CommandSpec {
         #[serde(default = "default_arc_protocol")]
         protocol_id: u16,
     },
+    StructuredDeviceIdentity {
+        #[serde(default)]
+        message_id: u16,
+        protocol_id: u16,
+    },
     DeviceLogExport {
         #[serde(default)]
         host_mac: Option<String>,
@@ -357,6 +362,12 @@ pub(super) enum CommandSpec {
         #[serde(default)]
         message_id: u16,
         #[serde(default = "default_flow_protocol")]
+        protocol_id: u16,
+    },
+    QueryDirectionalAudioAvailability {
+        direction: commands::AudioDirection,
+        #[serde(default)]
+        message_id: u16,
         protocol_id: u16,
     },
     QueryTransmitChannelCapabilities {
@@ -623,6 +634,7 @@ impl CommandSpec {
             | CommandSpec::CreateMulticastFlow2809 { message_id, .. }
             | CommandSpec::DeleteTxFlow { message_id, .. }
             | CommandSpec::DeviceInfo { message_id, .. }
+            | CommandSpec::StructuredDeviceIdentity { message_id, .. }
             | CommandSpec::DeviceLogExport { message_id, .. }
             | CommandSpec::DeviceName { message_id, .. }
             | CommandSpec::DeviceSettings { message_id, .. }
@@ -647,6 +659,7 @@ impl CommandSpec {
             | CommandSpec::QueryModernArcReceiverFlowStatus { message_id, .. }
             | CommandSpec::QueryReceiverFlows { message_id, .. }
             | CommandSpec::QueryReceiverPortRanges { message_id, .. }
+            | CommandSpec::QueryDirectionalAudioAvailability { message_id, .. }
             | CommandSpec::QueryTransmitChannelCapabilities { message_id, .. }
             | CommandSpec::QueryModernArcTransmitterChannelStatus { message_id, .. }
             | CommandSpec::QueryTxFlows { message_id, .. }
@@ -701,6 +714,7 @@ impl CommandSpec {
             | CommandSpec::CreateMulticastFlow2809 { .. }
             | CommandSpec::DeleteTxFlow { .. }
             | CommandSpec::DeviceInfo { .. }
+            | CommandSpec::StructuredDeviceIdentity { .. }
             | CommandSpec::DeviceName { .. }
             | CommandSpec::DeviceSettings { .. }
             | CommandSpec::PropertyDirectory { .. }
@@ -710,6 +724,7 @@ impl CommandSpec {
             | CommandSpec::QueryModernArcReceiverFlowStatus { .. }
             | CommandSpec::QueryReceiverFlows { .. }
             | CommandSpec::QueryReceiverPortRanges { .. }
+            | CommandSpec::QueryDirectionalAudioAvailability { .. }
             | CommandSpec::QueryTransmitChannelCapabilities { .. }
             | CommandSpec::QueryModernArcTransmitterChannelStatus { .. }
             | CommandSpec::QueryTxFlows { .. }
@@ -926,6 +941,10 @@ pub(super) fn build_command(
             message_id,
             protocol_id,
         } => commands::build_device_info_for_protocol(protocol_id, message_id)?,
+        CommandSpec::StructuredDeviceIdentity {
+            message_id,
+            protocol_id,
+        } => commands::build_structured_device_identity_query(protocol_id, message_id)?,
         CommandSpec::DeviceLogExport {
             host_mac,
             message_id,
@@ -1060,6 +1079,15 @@ pub(super) fn build_command(
             message_id,
             protocol_id,
         } => commands::build_query_receiver_port_ranges_for_protocol(protocol_id, message_id)?,
+        CommandSpec::QueryDirectionalAudioAvailability {
+            direction,
+            message_id,
+            protocol_id,
+        } => commands::build_query_directional_audio_availability(
+            protocol_id,
+            direction,
+            message_id,
+        )?,
         CommandSpec::QueryTransmitChannelCapabilities {
             starting_channel_identifier,
             maximum_channel_count,

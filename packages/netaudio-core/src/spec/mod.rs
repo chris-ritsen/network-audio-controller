@@ -20,7 +20,9 @@ pub use external_subscription::{
 };
 use external_subscription::{ExternalRtpDestinationSpec, ExternalSubscriptionSpec};
 pub use managed::{build_managed_command, ManagedCommand, ManagedCommandRequest};
-pub use subscription_plan::{plan_subscription_commands, Receiver};
+pub use subscription_plan::{
+    plan_subscription_command_groups, plan_subscription_commands, Receiver, SubscriptionCommand,
+};
 pub(crate) use subscription_plan::{plan_subscription_request, SubscriptionPlanRequest};
 
 #[derive(Debug)]
