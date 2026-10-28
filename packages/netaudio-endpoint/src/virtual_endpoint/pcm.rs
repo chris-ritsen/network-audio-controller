@@ -168,7 +168,7 @@ impl WaveCapture {
     pub fn open(path: &Path, channel_count: u16) -> Result<Self> {
         let mut source = WaveSource::open(path, channel_count)?;
         let (sender, receiver) = mpsc::channel(CAPTURE_QUEUE_BLOCKS);
-        let worker = tokio::task::spawn_blocking(move || {
+        let worker = super::platform::spawn_background(move || {
             while source.remaining_bytes != 0 {
                 let frames = source.read_quantum()?;
 

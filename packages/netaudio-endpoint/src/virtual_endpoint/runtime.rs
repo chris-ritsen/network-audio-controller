@@ -97,6 +97,10 @@ pub struct Summary {
     pub maximum_clock_observation_nanoseconds: u64,
     pub submitted_packets: u64,
     pub maximum_submission_lateness_nanoseconds: u64,
+    pub maximum_receive_deadline_lateness_nanoseconds: u64,
+    pub maximum_observed_datagram_queue: usize,
+    pub maximum_datagram_dispatch_delay_nanoseconds: u64,
+    pub maximum_datagram_processing_nanoseconds: u64,
     pub final_clock: Option<netaudio_core::native_audio::clock::discipline::Snapshot>,
     pub receiver_candidate: Option<Candidate>,
     pub receiver_unavailable: Option<String>,
@@ -178,7 +182,7 @@ struct Server {
     datagrams: mpsc::Receiver<Datagram>,
     pending_status: VecDeque<PendingStatus>,
     counters: Option<CounterProvider>,
-    status_job: Option<JoinHandle<StatusObservation>>,
+    status_job: Option<JoinHandle<Result<StatusObservation>>>,
     summary: Summary,
 }
 
@@ -345,7 +349,8 @@ impl Server {
             address(&sockets.routing)?.port(),
             address(&sockets.monitoring)?.port(),
             address(&sockets.source)?.port(),
-        )?;
+        )
+        .await?;
         let mut counters = CounterProvider::new(configuration.interface.clone());
         counters.measure(time.now())?;
 
@@ -449,13 +454,13 @@ impl Server {
         let pending = self.pending_status.pop_front().context("status request has retired")?;
         let mut provider = self.counters.take().context("statistics provider is busy")?;
         let time = self.time.clone();
-        self.status_job = Some(tokio::task::spawn_blocking(move || {
+        self.status_job = Some(super::platform::spawn_background(move || {
             let statistics = provider.measure(time.now());
-            StatusObservation {
+            Ok(StatusObservation {
                 request: pending.request,
                 provider,
                 statistics,
-            }
+            })
         }));
         Ok(())
     }
@@ -571,6 +576,9 @@ impl Server {
                 } => self.audio_event(event)?,
                 result = receive_deadline.expired(), if receive_due.is_some() => {
                     result?;
+                    let lateness = self.time.now().saturating_sub(receive_due.unwrap());
+                    self.summary.maximum_receive_deadline_lateness_nanoseconds =
+                        self.summary.maximum_receive_deadline_lateness_nanoseconds.max(lateness);
 
                     if let Err(error) = self.receive.dispatch(&mut self.endpoint, self.clock.current().as_ref()) {
                         eprintln!("receive output suspended: {error:#}");
@@ -630,9 +638,20 @@ impl Server {
                 }
                 datagram = self.datagrams.recv() => {
                     let datagram = datagram.context("endpoint receive provider stopped")?;
+                    let started = self.time.now();
+                    self.summary.maximum_observed_datagram_queue =
+                        self.summary.maximum_observed_datagram_queue.max(self.datagrams.len() + 1);
+                    self.summary.maximum_datagram_dispatch_delay_nanoseconds =
+                        self.summary.maximum_datagram_dispatch_delay_nanoseconds.max(
+                            started.saturating_sub(datagram.timestamp.nanoseconds)
+                        );
                     let channel = datagram.channel;
-
-                    if let Err(error) = self.datagram(datagram) {
+                    let result = self.datagram(datagram);
+                    self.summary.maximum_datagram_processing_nanoseconds =
+                        self.summary.maximum_datagram_processing_nanoseconds.max(
+                            self.time.now().saturating_sub(started)
+                        );
+                    if let Err(error) = result {
                         self.summary.rejected_datagrams += 1;
                         eprintln!("endpoint {channel:?} datagram rejected: {error:#}");
                     }
@@ -648,7 +667,7 @@ impl Server {
                         None => std::future::pending().await,
                     }
                 } => {
-                    let observation = observation?;
+                    let observation = observation??;
 
                     if let Err(error) = self.status_ready(observation) {
                         self.summary.rejected_datagrams += 1;
@@ -697,7 +716,7 @@ impl Server {
         }
 
         if let Some(job) = self.status_job.take() {
-            job.await?;
+            job.await??;
         }
 
         self.summary.submitted_packets = self.source.submitted_packets;
@@ -711,12 +730,14 @@ impl Server {
             self.receiver_discovery.unavailable().map(str::to_owned);
         let source = self.source.close(&mut self.endpoint, self.time.now()).await;
         let receive = self.receive.close(&mut self.endpoint).await;
+        let discovery = self.receiver_discovery.close().await;
         let clock = self.clock.close().await;
         let publication = self.publication.stop().await;
         self.summary.final_endpoint = Some(self.endpoint);
         self.summary.audio = self.audio.take().map(crate::audio::Engine::close).transpose()?;
         source?;
         self.summary.receive = Some(receive?);
+        discovery?;
         self.summary.maximum_clock_observation_nanoseconds = clock?.maximum_observation_nanoseconds;
         publication?;
         self.summary.final_clock = Some(final_clock?);

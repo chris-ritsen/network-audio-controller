@@ -159,7 +159,7 @@ impl Runtime {
                         .take()
                         .context("source generation was not prepared")?;
                     let input = self.input.clone();
-                    let capture = tokio::task::spawn_blocking(move || input.open());
+                    let capture = super::platform::spawn_background(move || input.open());
                     self.pending = Some(Pending {
                         peer: datagram.peer,
                         header,
