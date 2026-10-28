@@ -4,8 +4,9 @@ use crate::commands;
 use crate::protocol::{RESULT_CODE_MORE_PAGES, RESULT_CODE_SUCCESS};
 use crate::responses::{self, TxFlow};
 
-use super::endpoint_control::{ARC_REVISION, SAMPLE_BITS, SAMPLE_RATE};
+use super::endpoint_control::ARC_REVISION;
 use super::source_control::{Error, Handle, Header};
+use super::Format;
 
 const FIRST_FLOW_IDENTIFIER: u16 = 1;
 const MAXIMUM_FLOW_IDENTIFIER: u16 = 32;
@@ -28,7 +29,10 @@ impl Default for Inventory {
 
 impl Inventory {
     pub fn new(protocol_revision: u16) -> Self {
-        Self { protocol_revision, ..Self::default() }
+        Self {
+            protocol_revision,
+            ..Self::default()
+        }
     }
 
     pub fn request(&self, transaction: u16) -> Result<Vec<u8>, Error> {
@@ -80,6 +84,7 @@ impl Inventory {
         destination: SocketAddrV4,
         channels: &[u16],
         frames_per_packet: u16,
+        format: Format,
     ) -> Result<(), Error> {
         if self.next.is_some() {
             return Err(Error("source flow inventory is incomplete"));
@@ -103,8 +108,8 @@ impl Inventory {
             "interface": null,
         });
 
-        if flow.sample_rate != SAMPLE_RATE
-            || flow.encoding != SAMPLE_BITS
+        if flow.sample_rate != format.sample_rate()
+            || flow.encoding != format.sample_width().bits()
             || flow.frames_per_packet != Some(frames_per_packet)
             || flow.channels != channels
             || flow.destinations != [expected_destination]

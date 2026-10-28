@@ -3,12 +3,12 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use netaudio_core::native_audio::clock::discipline::{Reading, SampleClock};
-use netaudio_core::native_audio::endpoint_control::{Endpoint, ReceiveFlow, SAMPLE_RATE};
+use netaudio_core::native_audio::endpoint_control::{Endpoint, ReceiveFlow};
 use netaudio_core::native_audio::flow_inventory::Inventory;
 use netaudio_core::native_audio::playout::{self, Buffer, Owner};
 use netaudio_core::native_audio::source_control::{self, Allocation, Handle, Header, ReplyProfile};
 use netaudio_core::native_audio::{
-    Format, MAXIMUM_UDP_PAYLOAD_BYTES, Packet, REVERSE_KEEPALIVE, SampleTime, SampleWidth,
+    Format, MAXIMUM_UDP_PAYLOAD_BYTES, Packet, REVERSE_KEEPALIVE, SampleTime,
 };
 use netaudio_core::protocol::RESULT_CODE_SUCCESS;
 use serde::Serialize;
@@ -22,7 +22,7 @@ use super::sockets::{self, Datagram, MediaPool, Monotonic};
 
 const CONTROL_DEADLINE_NANOSECONDS: u64 = 2_000_000_000;
 const FIRST_MEDIA_DEADLINE_NANOSECONDS: u64 = 5_000_000_000;
-const REVERSE_INTERVAL_FRAMES: u64 = 12_000;
+const REVERSE_INTERVAL_NANOSECONDS: u64 = 250_000_000;
 const RECEIVER_FLOW_NAME: &str = "rx-flow-1";
 const SUBSCRIPTION_UNRESOLVED: u16 = 1;
 const SUBSCRIPTION_UNICAST: u16 = 9;
@@ -88,7 +88,7 @@ impl Flow {
 }
 
 pub enum Event {
-    Prepared(Result<Prepared>),
+    Prepared(Result<Box<Prepared>>),
     Control(Vec<u8>, SocketAddr),
     Timeout,
     Consumed(Receipt),
@@ -110,14 +110,14 @@ pub struct Runtime {
     control_buffer: Vec<u8>,
     buffers: Worker,
     preparing: Option<(Candidate, u64, bool)>,
-    prepared: Option<Prepared>,
+    prepared: Option<Box<Prepared>>,
 }
 
-fn sample_time(tick: u64) -> Result<SampleTime> {
+fn sample_time(tick: u64, sample_rate: u32) -> Result<SampleTime> {
     Ok(SampleTime::new(
-        u32::try_from(tick / u64::from(SAMPLE_RATE))?,
-        (tick % u64::from(SAMPLE_RATE)) as u32,
-        SAMPLE_RATE,
+        u32::try_from(tick / u64::from(sample_rate))?,
+        (tick % u64::from(sample_rate)) as u32,
+        sample_rate,
     )?)
 }
 
@@ -265,11 +265,8 @@ impl Runtime {
                 stream_generation: self.generation()?,
                 clock_generation: reading.generation,
             };
-            let format = Format::new(
-                SAMPLE_RATE,
-                u16::try_from(candidate.context.slots.len())?,
-                SampleWidth::Signed24,
-            )?;
+            let format =
+                candidate.context.profile.format(u16::try_from(candidate.context.slots.len())?)?;
             self.buffers.prepare(Preparation {
                 candidate: candidate.clone(),
                 owner,
@@ -534,6 +531,7 @@ impl Runtime {
                         flow.destination,
                         &flow.inventory_channels,
                         flow.candidate.context.requested_frames_per_packet,
+                        flow.format,
                     )?;
                     Ok(true)
                 })();
@@ -608,7 +606,7 @@ impl Runtime {
             bail!("received audio differs from confirmed source packetization");
         }
 
-        let tick = reading.sample_tick(SAMPLE_RATE)?;
+        let tick = reading.sample_tick(flow.format.sample_rate())?;
         flow.buffer.admit(flow.owner, &datagram.bytes, tick)?;
         flow.source = Some(datagram.peer);
         self.summary.received_packets += 1;
@@ -652,13 +650,16 @@ impl Runtime {
         }
 
         for tick in [
-            flow.buffer.next_frame_index(reading.sample_tick(SAMPLE_RATE)?),
+            flow.buffer.next_frame_index(reading.sample_tick(flow.format.sample_rate())?),
             flow.next_reverse_tick,
         ]
         .into_iter()
         .flatten()
         {
-            let due = reading.sample_deadline(sample_time(tick)?, SAMPLE_RATE)?;
+            let due = reading.sample_deadline(
+                sample_time(tick, flow.format.sample_rate())?,
+                flow.format.sample_rate(),
+            )?;
             deadline = Some(deadline.map_or(due, |current| current.min(due)));
         }
 
@@ -678,7 +679,7 @@ impl Runtime {
                 .retire(endpoint, "received audio did not reach output before its deadline");
         }
 
-        let tick = reading.sample_tick(SAMPLE_RATE)?;
+        let tick = reading.sample_tick(flow.format.sample_rate())?;
 
         if flow.next_reverse_tick.is_some_and(|next| tick >= next) {
             let source = flow.source.context("reverse activity has no admitted source")?;
@@ -691,8 +692,11 @@ impl Runtime {
             }
 
             flow.next_reverse_tick = Some(
-                tick.checked_add(REVERSE_INTERVAL_FRAMES)
-                    .context("reverse sample deadline overflow")?,
+                tick.checked_add(
+                    (u64::from(flow.format.sample_rate()) * REVERSE_INTERVAL_NANOSECONDS)
+                        .div_ceil(1_000_000_000),
+                )
+                .context("reverse sample deadline overflow")?,
             );
             self.summary.reverse_packets += 1;
         }

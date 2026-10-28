@@ -264,7 +264,16 @@ impl Driver {
                     }
                 };
 
-                Ok(self.follower.receive(&packet, interface_index, timestamp, self.time.now())?)
+                self.follower
+                    .receive(&packet, interface_index, timestamp, self.time.now())
+                    .with_context(|| {
+                        format!(
+                            "received clock timestamp: provider {}, expected {}, uncertainty {} ns",
+                            timestamp.provider_incarnation,
+                            self.follower.configuration().provider_incarnation,
+                            timestamp.uncertainty_nanoseconds,
+                        )
+                    })
             }
             Event::Transmitted {
                 identifier,
@@ -296,7 +305,14 @@ impl Driver {
                     Err(netaudio_core::native_audio::clock::Error::StaleOwner) => {
                         Ok(Outcome::Ignored)
                     }
-                    Err(error) => Err(error.into()),
+                    Err(error) => Err(error).with_context(|| {
+                        format!(
+                            "transmitted clock timestamp: provider {}, expected {}, uncertainty {} ns",
+                            timestamp.provider_incarnation,
+                            self.follower.configuration().provider_incarnation,
+                            timestamp.uncertainty_nanoseconds,
+                        )
+                    }),
                 }
             }
         }

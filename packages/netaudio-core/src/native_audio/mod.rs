@@ -27,6 +27,26 @@ pub enum SampleWidth {
 }
 
 impl SampleWidth {
+    pub fn bits(self) -> u16 {
+        (self.bytes() * 8) as u16
+    }
+
+    pub fn minimum_sample(self) -> i32 {
+        match self {
+            Self::Signed16 => i32::from(i16::MIN),
+            Self::Signed24 => -8_388_608,
+            Self::Signed32 => i32::MIN,
+        }
+    }
+
+    pub fn maximum_sample(self) -> i32 {
+        match self {
+            Self::Signed16 => i32::from(i16::MAX),
+            Self::Signed24 => 8_388_607,
+            Self::Signed32 => i32::MAX,
+        }
+    }
+
     pub fn bytes(self) -> usize {
         match self {
             Self::Signed16 => 2,
@@ -44,11 +64,49 @@ impl SampleWidth {
     }
 }
 
+impl TryFrom<u16> for SampleWidth {
+    type Error = Error;
+
+    fn try_from(bits: u16) -> Result<Self, Self::Error> {
+        match bits {
+            16 => Ok(Self::Signed16),
+            24 => Ok(Self::Signed24),
+            32 => Ok(Self::Signed32),
+            _ => Err(Error::InvalidFormat),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SampleFormat {
+    sample_rate: u32,
+    sample_width: SampleWidth,
+}
+
+impl SampleFormat {
+    pub fn new(sample_rate: u32, sample_width: SampleWidth) -> Result<Self, Error> {
+        if sample_rate == 0 {
+            return Err(Error::InvalidFormat);
+        }
+        Ok(Self {
+            sample_rate,
+            sample_width,
+        })
+    }
+
+    pub fn sample_rate(self) -> u32 {
+        self.sample_rate
+    }
+
+    pub fn sample_width(self) -> SampleWidth {
+        self.sample_width
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Format {
-    sample_rate: u32,
+    samples: SampleFormat,
     slot_count: u16,
-    sample_width: SampleWidth,
 }
 
 impl Format {
@@ -62,14 +120,13 @@ impl Format {
         }
 
         Ok(Self {
-            sample_rate,
+            samples: SampleFormat::new(sample_rate, sample_width)?,
             slot_count,
-            sample_width,
         })
     }
 
     pub fn sample_rate(self) -> u32 {
-        self.sample_rate
+        self.samples.sample_rate()
     }
 
     pub fn slot_count(self) -> u16 {
@@ -77,11 +134,15 @@ impl Format {
     }
 
     pub fn sample_width(self) -> SampleWidth {
-        self.sample_width
+        self.samples.sample_width()
     }
 
     pub fn frame_bytes(self) -> usize {
-        usize::from(self.slot_count) * self.sample_width.bytes()
+        usize::from(self.slot_count) * self.sample_width().bytes()
+    }
+
+    pub fn samples(self) -> SampleFormat {
+        self.samples
     }
 }
 
@@ -117,17 +178,10 @@ impl SampleTime {
     }
 
     pub fn advance(self, frames: u64, sample_rate: u32) -> Result<Self, Error> {
-        let ticks = self
-            .ticks(sample_rate)?
-            .checked_add(frames)
-            .ok_or(Error::TimestampOverflow)?;
+        let ticks = self.ticks(sample_rate)?.checked_add(frames).ok_or(Error::TimestampOverflow)?;
         let seconds =
             u32::try_from(ticks / u64::from(sample_rate)).map_err(|_| Error::TimestampOverflow)?;
-        Self::new(
-            seconds,
-            (ticks % u64::from(sample_rate)) as u32,
-            sample_rate,
-        )
+        Self::new(seconds, (ticks % u64::from(sample_rate)) as u32, sample_rate)
     }
 }
 
@@ -148,7 +202,7 @@ impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidFormat => {
-                formatter.write_str("sample rate and slot count must be positive")
+                formatter.write_str("sample rate and slot count must be positive and PCM width must be 16, 24 or 32 bits")
             }
             Self::InvalidTimestamp => {
                 formatter.write_str("sample offset must be within the configured sample second")
@@ -213,7 +267,7 @@ impl<'a> Packet<'a> {
         let sample_offset =
             u32::from_be_bytes(datagram[5..9].try_into().map_err(|_| Error::ShortHeader)?);
         Ok(Self {
-            time: SampleTime::new(seconds, sample_offset, format.sample_rate)?,
+            time: SampleTime::new(seconds, sample_offset, format.sample_rate())?,
             format,
             payload,
         })
@@ -224,12 +278,15 @@ impl<'a> Packet<'a> {
     }
 
     pub fn samples(&self) -> impl ExactSizeIterator<Item = i32> + '_ {
-        self.payload
-            .chunks_exact(self.format.sample_width.bytes())
-            .map(|bytes| match self.format.sample_width {
+        self.payload.chunks_exact(self.format.sample_width().bytes()).map(|bytes| {
+            match self.format.sample_width() {
                 SampleWidth::Signed16 => i32::from(i16::from_be_bytes([bytes[0], bytes[1]])),
                 SampleWidth::Signed24 => i32::from_be_bytes([
-                    if bytes[0] & 0x80 == 0 { 0 } else { 0xff },
+                    if bytes[0] & 0x80 == 0 {
+                        0
+                    } else {
+                        0xff
+                    },
                     bytes[0],
                     bytes[1],
                     bytes[2],
@@ -237,17 +294,17 @@ impl<'a> Packet<'a> {
                 SampleWidth::Signed32 => {
                     i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
                 }
-            })
+            }
+        })
     }
 
     pub fn next_time(&self) -> Result<SampleTime, Error> {
-        self.time
-            .advance(self.frame_count() as u64, self.format.sample_rate)
+        self.time.advance(self.frame_count() as u64, self.format.sample_rate())
     }
 }
 
 pub fn encode(format: Format, time: SampleTime, samples: &[i32]) -> Result<Vec<u8>, Error> {
-    time.ticks(format.sample_rate)?;
+    time.ticks(format.sample_rate())?;
     if samples.is_empty() {
         return Err(Error::EmptyPayload);
     }
@@ -258,17 +315,14 @@ pub fn encode(format: Format, time: SampleTime, samples: &[i32]) -> Result<Vec<u
 
     let length = samples
         .len()
-        .checked_mul(format.sample_width.bytes())
+        .checked_mul(format.sample_width().bytes())
         .and_then(|length| length.checked_add(HEADER_BYTES))
         .ok_or(Error::PayloadTooLarge)?;
     if length > MAXIMUM_UDP_PAYLOAD_BYTES {
         return Err(Error::PayloadTooLarge);
     }
 
-    if samples
-        .iter()
-        .any(|sample| !format.sample_width.contains(*sample))
-    {
+    if samples.iter().any(|sample| !format.sample_width().contains(*sample)) {
         return Err(Error::SampleOutOfRange);
     }
 
@@ -277,7 +331,7 @@ pub fn encode(format: Format, time: SampleTime, samples: &[i32]) -> Result<Vec<u
     packet.extend_from_slice(&time.seconds.to_be_bytes());
     packet.extend_from_slice(&time.sample_offset.to_be_bytes());
     for sample in samples {
-        packet.extend_from_slice(&sample.to_be_bytes()[4 - format.sample_width.bytes()..]);
+        packet.extend_from_slice(&sample.to_be_bytes()[4 - format.sample_width().bytes()..]);
     }
 
     Ok(packet)

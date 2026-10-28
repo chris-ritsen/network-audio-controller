@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
+use netaudio_core::native_audio::SampleFormat;
 use serde::{Deserialize, Serialize};
 
 pub use bridge::{Capture, CaptureFactory, Playback, Receipt, Statistics};
@@ -19,11 +20,6 @@ const RECOVERY_WINDOW: Duration = Duration::from_secs(10);
 const MAXIMUM_RECOVERIES: usize = 8;
 
 pub const CHANNELS: usize = 2;
-pub const SAMPLE_RATE: u32 = 48_000;
-pub const QUANTUM_FRAMES: usize = 48;
-pub const INTEGER_SCALE: f32 = 8_388_608.0;
-pub const MAXIMUM_SAMPLE: i32 = 8_388_607;
-pub const MINIMUM_SAMPLE: i32 = -8_388_608;
 pub type Samples = Vec<i32>;
 pub type FloatSamples = Vec<f32>;
 
@@ -50,7 +46,10 @@ pub struct Configuration {
 }
 
 impl Configuration {
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self, network_format: SampleFormat) -> Result<()> {
+        if !(8_000..=192_000).contains(&network_format.sample_rate()) {
+            bail!("native audio network sample rate must be between 8000 and 192000 Hz");
+        }
         if self.backend.is_empty() || self.client_name.is_empty() {
             bail!("audio backend and client name must be explicit");
         }
@@ -84,10 +83,10 @@ impl Configuration {
         }
 
         if matches!(self.clock_relationship, ClockRelationship::NetworkSynchronized)
-            && self.sample_rate != SAMPLE_RATE
+            && self.sample_rate != network_format.sample_rate()
         {
             bail!(
-                "network-synchronized audio requires a 48000 Hz device sharing the network clock"
+                "network-synchronized audio requires the configured network sample rate and a device sharing the network clock"
             );
         }
 
@@ -109,9 +108,12 @@ enum Streams {
 }
 
 impl Engine {
-    pub fn open(configuration: &Configuration) -> Result<(Self, CaptureFactory, Playback)> {
-        configuration.validate()?;
-        let bridge = bridge::Bridge::new(configuration)?;
+    pub fn open(
+        configuration: &Configuration,
+        network_format: SampleFormat,
+    ) -> Result<(Self, CaptureFactory, Playback)> {
+        configuration.validate(network_format)?;
+        let bridge = bridge::Bridge::new(configuration, network_format)?;
         let streams = if configuration.backend == "jack" {
             #[cfg(feature = "jack")]
             {

@@ -353,14 +353,14 @@ impl Progress {
             .map(|slot| (slot.channel_name.as_str(), &slot.source))
             .collect::<Vec<_>>();
 
-        match eligibility::qualify_with_latency(
+        match eligibility::qualify_with_profile(
             self.capabilities()?,
             &properties,
             &channels,
             &selected,
             self.candidate.context.requested_frames_per_packet,
             self.candidate.context.receiver_domain,
-            self.candidate.context.profile.receive_latency_nanoseconds,
+            self.candidate.context.profile,
         ) {
             Ok(format) => self.source_format = Some(format),
             Err(error) => self.source_format_unavailable = Some(error.to_string()),

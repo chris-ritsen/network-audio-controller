@@ -1,16 +1,22 @@
 use serde::{Deserialize, Serialize};
 
 use crate::native_audio::source_control::{Error, MAXIMUM_CONTROL_BYTES};
-use crate::native_audio::{HEADER_BYTES, MAXIMUM_UDP_PAYLOAD_BYTES};
+use crate::native_audio::{Format, SampleWidth, HEADER_BYTES, MAXIMUM_UDP_PAYLOAD_BYTES};
 
 use super::{
     CHANNEL_COUNT, FRAMES_PER_PACKET, MAXIMUM_TRANSMIT_FRAMES_PER_PACKET,
     RECEIVE_LATENCY_NANOSECONDS, SAMPLE_BITS, SAMPLE_RATE,
 };
 
+pub const MINIMUM_PACKET_SPACING_NANOSECONDS: u64 = 62_500;
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: u32,
+    #[serde(default = "default_sample_bits")]
+    pub sample_bits: u16,
     pub transmit_channels: u16,
     pub receive_channels: u16,
     pub flow_slots: u16,
@@ -23,6 +29,8 @@ pub struct Profile {
 impl Default for Profile {
     fn default() -> Self {
         Self {
+            sample_rate: SAMPLE_RATE,
+            sample_bits: SAMPLE_BITS,
             transmit_channels: CHANNEL_COUNT,
             receive_channels: CHANNEL_COUNT,
             flow_slots: CHANNEL_COUNT,
@@ -35,14 +43,16 @@ impl Default for Profile {
 
 impl Profile {
     pub fn validate(self) -> Result<(), Error> {
+        if !(8_000..=192_000).contains(&self.sample_rate) {
+            return Err(Error("endpoint sample rate must be between 8000 and 192000 Hz"));
+        }
+        self.sample_width()?;
         if self.transmit_channels == 0 || self.receive_channels == 0 || self.flow_slots == 0 {
-            return Err(Error(
-                "endpoint channel counts and flow slot capacity must be positive",
-            ));
+            return Err(Error("endpoint channel counts and flow slot capacity must be positive"));
         }
 
         if usize::from(self.maximum_media_payload_bytes) > MAXIMUM_UDP_PAYLOAD_BYTES
-            || !(FRAMES_PER_PACKET..=self.maximum_frames_per_packet())
+            || !(self.minimum_frames_per_packet()..=self.maximum_frames_per_packet())
                 .contains(&self.frames_per_packet)
         {
             return Err(Error("flow slots cannot fit the minimum packetization in the configured UDP payload budget"));
@@ -65,7 +75,9 @@ impl Profile {
         }
 
         let latency_frames = self.receive_latency_frames();
-        if latency_frames < 96 || latency_frames + 96 >= 8192 {
+        let priming_frames =
+            2 * crate::native_audio::playout::quantum_frames(self.sample_rate) as u64;
+        if latency_frames < priming_frames || latency_frames + priming_frames >= 8192 {
             return Err(Error("receive latency must leave priming and delivery space in the 8192-frame playout buffer"));
         }
 
@@ -73,19 +85,49 @@ impl Profile {
     }
 
     pub fn maximum_frames_per_packet(self) -> u16 {
+        let Ok(width) = self.sample_width() else {
+            return 0;
+        };
         if self.flow_slots == 0 {
             return 0;
         }
 
         let frames = usize::from(self.maximum_media_payload_bytes).saturating_sub(HEADER_BYTES)
-            / (usize::from(self.flow_slots) * usize::from(SAMPLE_BITS / 8));
+            / (usize::from(self.flow_slots) * width.bytes());
         frames.min(usize::from(MAXIMUM_TRANSMIT_FRAMES_PER_PACKET)) as u16
     }
 
     pub fn receive_latency_frames(self) -> u64 {
-        (u64::from(self.receive_latency_nanoseconds) * u64::from(SAMPLE_RATE))
+        (u64::from(self.receive_latency_nanoseconds) * u64::from(self.sample_rate))
             .div_ceil(1_000_000_000)
     }
+
+    pub fn sample_width(self) -> Result<SampleWidth, Error> {
+        SampleWidth::try_from(self.sample_bits)
+            .map_err(|_| Error("endpoint PCM width must be 16, 24 or 32 bits"))
+    }
+
+    pub fn format(self, slots: u16) -> Result<Format, Error> {
+        Format::new(self.sample_rate, slots, self.sample_width()?)
+            .map_err(|_| Error("endpoint media format requires a positive rate and slot count"))
+    }
+
+    pub fn minimum_frames_per_packet(self) -> u16 {
+        u16::try_from(
+            (u64::from(self.sample_rate) * MINIMUM_PACKET_SPACING_NANOSECONDS)
+                .div_ceil(1_000_000_000),
+        )
+        .unwrap_or(u16::MAX)
+        .max(FRAMES_PER_PACKET)
+    }
+}
+
+fn default_sample_rate() -> u32 {
+    SAMPLE_RATE
+}
+
+fn default_sample_bits() -> u16 {
+    SAMPLE_BITS
 }
 
 fn default_frames_per_packet() -> u16 {

@@ -5,16 +5,14 @@ use std::task::Poll;
 
 use anyhow::{Context, Result, bail};
 use futures_util::task::AtomicWaker;
-use netaudio_core::native_audio::playout::{Delivery, Owner};
+use netaudio_core::native_audio::SampleFormat;
+use netaudio_core::native_audio::playout::{Delivery, Owner, quantum_frames};
 use rtrb::{Consumer, Producer, RingBuffer};
 use serde::Serialize;
 
 use super::lifecycle::{Event, Fault, Lifecycle};
 
-use super::{
-    Configuration, INTEGER_SCALE, MAXIMUM_SAMPLE, MINIMUM_SAMPLE, QUANTUM_FRAMES, Samples,
-    resampling,
-};
+use super::{Configuration, Samples, resampling};
 
 const QUEUE_HEADROOM: usize = 4;
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -258,6 +256,7 @@ pub struct CaptureFactory {
     queue: Arc<Mutex<CaptureQueue>>,
     state: Arc<State>,
     configuration: Configuration,
+    network_format: SampleFormat,
 }
 
 struct CaptureQueue {
@@ -290,7 +289,7 @@ impl CaptureQueue {
 
 impl CaptureFactory {
     pub fn open(&self) -> Result<Capture> {
-        let converter = resampling::Capture::new(&self.configuration)?;
+        let converter = resampling::Capture::new(&self.configuration, self.network_format)?;
         let mut capture = Capture {
             factory: self.clone(),
             generation: 0,
@@ -396,10 +395,12 @@ impl Capture {
                     frame
                         .into_iter()
                         .map(|sample| {
-                            (sample * INTEGER_SCALE)
-                                .round()
-                                .clamp(MINIMUM_SAMPLE as f32, MAXIMUM_SAMPLE as f32)
-                                as i32
+                            let width = self.factory.network_format.sample_width();
+                            let scale = -f64::from(width.minimum_sample());
+                            (f64::from(sample) * scale).round().clamp(
+                                f64::from(width.minimum_sample()),
+                                f64::from(width.maximum_sample()),
+                            ) as i32
                         })
                         .collect()
                 })
@@ -422,6 +423,8 @@ pub struct Playback {
     channels: usize,
     receipts: Consumer<Receipt>,
     converter: resampling::Playback,
+    network_format: SampleFormat,
+    quantum_frames: usize,
     owner: Option<Owner>,
     next_frame: Option<u64>,
     capacity: usize,
@@ -437,7 +440,7 @@ impl Playback {
         self.state.check()?;
         delivery.owner.validate()?;
 
-        if delivery.frames.len() != QUANTUM_FRAMES
+        if delivery.frames.len() != self.quantum_frames
             || delivery.frames.iter().any(|frame| {
                 frame.samples.len() != self.channels || frame.received.len() != self.channels
             })
@@ -470,7 +473,8 @@ impl Playback {
             .count();
         let converted = self.converter.convert(
             delivery.frames.iter().map(|frame| {
-                frame.samples.iter().map(|sample| *sample as f32 / INTEGER_SCALE).collect()
+                let scale = -f64::from(self.network_format.sample_width().minimum_sample());
+                frame.samples.iter().map(|sample| (f64::from(*sample) / scale) as f32).collect()
             }),
             self.capacity - self.frames.slots(),
         )?;
@@ -484,10 +488,10 @@ impl Playback {
         let receipt = Receipt {
             owner: delivery.owner,
             first_frame_index: delivery.first_frame_index,
-            frames: QUANTUM_FRAMES,
+            frames: self.quantum_frames,
             output_accepted: true,
             received_samples,
-            local_silence_samples: QUANTUM_FRAMES * self.channels - received_samples,
+            local_silence_samples: self.quantum_frames * self.channels - received_samples,
         };
         self.pending_receipts.push_back(receipt);
         let completed = if !converted.is_empty()
@@ -523,7 +527,7 @@ impl Playback {
         self.next_frame = Some(
             delivery
                 .first_frame_index
-                .checked_add(QUANTUM_FRAMES as u64)
+                .checked_add(self.quantum_frames as u64)
                 .context("native playback sample coordinate overflow")?,
         );
         Ok(())
@@ -554,7 +558,7 @@ pub(super) struct Bridge {
 }
 
 impl Bridge {
-    pub fn new(configuration: &Configuration) -> Result<Self> {
+    pub fn new(configuration: &Configuration, network_format: SampleFormat) -> Result<Self> {
         let capacity = configuration.buffered_frames * QUEUE_HEADROOM;
         let input_channels = configuration.input_channels.len();
         let output_channels = configuration.output_channels.len();
@@ -565,8 +569,8 @@ impl Bridge {
         if sample_bytes > 64 * 1024 * 1024 {
             bail!("native audio queues exceed the 64 MiB sample budget");
         }
-        let capture_converter = resampling::Capture::new(configuration)?;
-        let playback_converter = resampling::Playback::new(configuration)?;
+        let capture_converter = resampling::Capture::new(configuration, network_format)?;
+        let playback_converter = resampling::Playback::new(configuration, network_format)?;
 
         if configuration.buffered_frames + capture_converter.maximum_input_frames() > capacity
             || playback_converter.maximum_output_frames() > capacity
@@ -622,6 +626,7 @@ impl Bridge {
                 })),
                 state: state.clone(),
                 configuration: configuration.clone(),
+                network_format,
             },
             playback: Playback {
                 state,
@@ -630,6 +635,8 @@ impl Bridge {
                 channels: output_channels,
                 receipts: receipt_receiver,
                 converter: playback_converter,
+                network_format,
+                quantum_frames: quantum_frames(network_format.sample_rate()),
                 owner: None,
                 next_frame: None,
                 capacity,

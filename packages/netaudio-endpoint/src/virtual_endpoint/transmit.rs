@@ -3,18 +3,20 @@ use std::net::SocketAddrV4;
 
 use anyhow::{Context, Result, bail};
 use netaudio_core::native_audio::clock::discipline::{NetworkInstant, SampleClock};
-use netaudio_core::native_audio::endpoint_control::{SAMPLE_RATE, TransmitFlow};
-use netaudio_core::native_audio::{Format, SampleTime, SampleWidth, encode, is_reverse_keepalive};
+use netaudio_core::native_audio::endpoint_control::profile::MINIMUM_PACKET_SPACING_NANOSECONDS;
+use netaudio_core::native_audio::endpoint_control::{
+    Profile, TRANSMIT_LATENCY_NANOSECONDS, TransmitFlow,
+};
+use netaudio_core::native_audio::{Format, SampleTime, encode, is_reverse_keepalive};
 use tokio::net::UdpSocket;
 
-use super::pcm::{Capture, Frame, PRIMING_FRAMES, QUANTUM_FRAMES, TRANSMIT_PIPELINE_FRAMES};
+use super::pcm::{Capture, Frame};
 use super::sockets::Monotonic;
+use netaudio_core::native_audio::playout::quantum_frames;
 
-const MAXIMUM_BUFFERED_FRAMES: usize = PRIMING_FRAMES + QUANTUM_FRAMES;
 const INITIAL_KEEPALIVE_GRACE_NANOSECONDS: u64 = 5_000_000_000;
 const KEEPALIVE_DEADLINE_NANOSECONDS: u64 = 2_000_000_000;
-const MAXIMUM_PACKET_AGE_FRAMES: u64 = 192;
-const MINIMUM_SEND_SPACING_NANOSECONDS: u64 = 62_500;
+const TRANSMIT_PIPELINE_NANOSECONDS: u64 = 2_000_000;
 
 struct Schedule {
     clock_generation: u64,
@@ -32,6 +34,9 @@ pub struct Flow {
     channels: Vec<u16>,
     frames_per_packet: u16,
     format: Format,
+    quantum_frames: usize,
+    pipeline_frames: u64,
+    maximum_packet_age_frames: u64,
     capture: Capture,
     frames: VecDeque<Frame>,
     schedule: Option<Schedule>,
@@ -47,6 +52,7 @@ impl Flow {
         port_index: usize,
         output_generation: u64,
         capture: Capture,
+        profile: Profile,
     ) -> Result<Self> {
         let slots = u16::try_from(state.channels.len()).context("source slot count overflow")?;
 
@@ -62,9 +68,15 @@ impl Flow {
             destination: state.destination,
             channels: state.channels.clone(),
             frames_per_packet: state.frames_per_packet,
-            format: Format::new(SAMPLE_RATE, slots, SampleWidth::Signed24)?,
+            format: profile.format(slots)?,
+            quantum_frames: quantum_frames(profile.sample_rate),
+            pipeline_frames: (u64::from(profile.sample_rate) * TRANSMIT_PIPELINE_NANOSECONDS)
+                .div_ceil(1_000_000_000),
+            maximum_packet_age_frames: (u64::from(profile.sample_rate)
+                * u64::from(TRANSMIT_LATENCY_NANOSECONDS))
+                / 1_000_000_000,
             capture,
-            frames: VecDeque::with_capacity(MAXIMUM_BUFFERED_FRAMES),
+            frames: VecDeque::with_capacity(3 * quantum_frames(profile.sample_rate)),
             schedule: None,
             ended: false,
             suspended: false,
@@ -74,9 +86,7 @@ impl Flow {
     }
 
     pub fn needs_capture(&self) -> bool {
-        !self.suspended
-            && !self.ended
-            && self.frames.len() <= MAXIMUM_BUFFERED_FRAMES - QUANTUM_FRAMES
+        !self.suspended && !self.ended && self.frames.len() <= 2 * self.quantum_frames
     }
 
     pub async fn receive_capture(&mut self) -> Result<()> {
@@ -179,14 +189,14 @@ impl Flow {
                 bail!("source receiver keepalive deadline expired");
             }
         } else {
-            if self.frames.len() < PRIMING_FRAMES {
+            if self.frames.len() < 2 * self.quantum_frames {
                 return Ok(None);
             }
 
-            let current_tick = reading.sample_tick(SAMPLE_RATE)?;
-            let quantum_frames = QUANTUM_FRAMES as u64;
+            let current_tick = reading.sample_tick(self.format.sample_rate())?;
+            let quantum_frames = self.quantum_frames as u64;
             let first_tick = current_tick
-                .checked_add(TRANSMIT_PIPELINE_FRAMES)
+                .checked_add(self.pipeline_frames)
                 .context("source pipeline sample coordinate overflow")?
                 .div_ceil(quantum_frames)
                 * quantum_frames;
@@ -201,25 +211,33 @@ impl Flow {
         let schedule = self.schedule.as_ref().context("source schedule is unavailable")?;
         let stale_tick = schedule
             .next_sample_tick
-            .checked_add(MAXIMUM_PACKET_AGE_FRAMES)
+            .checked_add(self.maximum_packet_age_frames)
             .context("source packet age coordinate overflow")?;
 
-        if reading.instant()?.exceeds_sample(sample_time(stale_tick)?, SAMPLE_RATE)? {
+        if reading.instant()?.exceeds_sample(
+            sample_time(stale_tick, self.format.sample_rate())?,
+            self.format.sample_rate(),
+        )? {
             bail!(
-                "source packet exceeded its declared capture age budget: current sample {}, packet sample {}, maximum age {MAXIMUM_PACKET_AGE_FRAMES} frames",
-                reading.sample_tick(SAMPLE_RATE)?,
+                "source packet exceeded its declared capture age budget: current sample {}, packet sample {}, maximum age {} frames",
+                reading.sample_tick(self.format.sample_rate())?,
                 schedule.next_sample_tick,
+                self.maximum_packet_age_frames,
             );
         }
 
         let departure_tick = schedule
             .next_sample_tick
-            .checked_add(TRANSMIT_PIPELINE_FRAMES)
+            .checked_add(self.pipeline_frames)
             .context("source pipeline coordinate overflow")?;
-        let due = reading.sample_deadline(sample_time(departure_tick)?, SAMPLE_RATE)?;
+        let due = reading.sample_deadline(
+            sample_time(departure_tick, self.format.sample_rate())?,
+            self.format.sample_rate(),
+        )?;
         let spacing = match &schedule.last_submission {
-            Some(previous) => reading
-                .instant_deadline(&previous.after_nanoseconds(MINIMUM_SEND_SPACING_NANOSECONDS)?)?,
+            Some(previous) => reading.instant_deadline(
+                &previous.after_nanoseconds(MINIMUM_PACKET_SPACING_NANOSECONDS)?,
+            )?,
             None => due,
         };
 
@@ -260,7 +278,11 @@ impl Flow {
         }
 
         let schedule = self.schedule.as_mut().context("source schedule was retired")?;
-        let bytes = encode(self.format, sample_time(schedule.next_sample_tick)?, &samples)?;
+        let bytes = encode(
+            self.format,
+            sample_time(schedule.next_sample_tick, self.format.sample_rate())?,
+            &samples,
+        )?;
         let submitted = time.now();
         let reading =
             clock.reading(submitted)?.context("source clock was lost before submission")?;
@@ -272,10 +294,13 @@ impl Flow {
         let instant = reading.instant()?;
         let stale_tick = schedule
             .next_sample_tick
-            .checked_add(MAXIMUM_PACKET_AGE_FRAMES)
+            .checked_add(self.maximum_packet_age_frames)
             .context("source packet age coordinate overflow")?;
 
-        if instant.exceeds_sample(sample_time(stale_tick)?, SAMPLE_RATE)? {
+        if instant.exceeds_sample(
+            sample_time(stale_tick, self.format.sample_rate())?,
+            self.format.sample_rate(),
+        )? {
             bail!("source packet exceeded its declared capture age budget before submission");
         }
 
@@ -317,9 +342,9 @@ impl Flow {
     }
 }
 
-fn sample_time(tick: u64) -> Result<SampleTime> {
-    let rate = u64::from(SAMPLE_RATE);
+fn sample_time(tick: u64, sample_rate: u32) -> Result<SampleTime> {
+    let rate = u64::from(sample_rate);
     let seconds =
         u32::try_from(tick / rate).context("source sample time is outside its relative era")?;
-    Ok(SampleTime::new(seconds, (tick % rate) as u32, SAMPLE_RATE)?)
+    Ok(SampleTime::new(seconds, (tick % rate) as u32, sample_rate)?)
 }

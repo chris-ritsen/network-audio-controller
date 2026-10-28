@@ -1,10 +1,12 @@
 use anyhow::Result;
+use netaudio_core::native_audio::SampleFormat;
+use netaudio_core::native_audio::playout::quantum_frames;
 use rubato::{
     Resampler, SincFixedIn, SincFixedOut, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
 };
 
-use super::{ClockRelationship, Configuration, FloatSamples, QUANTUM_FRAMES, SAMPLE_RATE};
+use super::{ClockRelationship, Configuration, FloatSamples};
 
 const FILTER_LENGTH: usize = 128;
 const FILTER_CUTOFF: f32 = 0.95;
@@ -60,27 +62,29 @@ pub struct Capture {
     correction: Correction,
     ratio: f64,
     target: usize,
+    quantum_frames: usize,
 }
 
 impl Capture {
-    pub fn new(configuration: &Configuration) -> Result<Self> {
+    pub fn new(configuration: &Configuration, network_format: SampleFormat) -> Result<Self> {
+        let quantum_frames = quantum_frames(network_format.sample_rate());
         let channels = configuration.input_channels.len();
-        let ratio = f64::from(SAMPLE_RATE) / f64::from(configuration.sample_rate);
+        let ratio = f64::from(network_format.sample_rate()) / f64::from(configuration.sample_rate);
         let converter = match configuration.clock_relationship {
             ClockRelationship::Independent => Some(SincFixedOut::new(
                 ratio,
                 MAXIMUM_RELATIVE_RATIO,
                 parameters(),
-                QUANTUM_FRAMES,
+                quantum_frames,
                 channels,
             )?),
             ClockRelationship::NetworkSynchronized => None,
         };
         let input = converter.as_ref().map_or_else(
-            || vec![vec![0.0; QUANTUM_FRAMES]; channels],
+            || vec![vec![0.0; quantum_frames]; channels],
             |converter| converter.input_buffer_allocate(true),
         );
-        let output = vec![vec![0.0; QUANTUM_FRAMES]; channels];
+        let output = vec![vec![0.0; quantum_frames]; channels];
 
         Ok(Self {
             converter,
@@ -89,6 +93,7 @@ impl Capture {
             correction: Correction::new(configuration.buffered_frames),
             ratio,
             target: configuration.buffered_frames,
+            quantum_frames,
         })
     }
 
@@ -103,11 +108,11 @@ impl Capture {
     }
 
     pub fn needed(&self) -> usize {
-        self.converter.as_ref().map_or(QUANTUM_FRAMES, Resampler::input_frames_next)
+        self.converter.as_ref().map_or(self.quantum_frames, Resampler::input_frames_next)
     }
 
     pub fn maximum_input_frames(&self) -> usize {
-        self.converter.as_ref().map_or(QUANTUM_FRAMES, Resampler::input_frames_max)
+        self.converter.as_ref().map_or(self.quantum_frames, Resampler::input_frames_max)
     }
 
     pub fn convert(
@@ -132,7 +137,7 @@ impl Capture {
             }
         }
 
-        Ok((0..QUANTUM_FRAMES)
+        Ok((0..self.quantum_frames)
             .map(|index| {
                 (0..self.output.len()).map(|channel| self.output[channel][index]).collect()
             })
@@ -147,47 +152,50 @@ pub struct Playback {
     correction: Correction,
     ratio: f64,
     target: usize,
+    quantum_frames: usize,
 }
 
 impl Playback {
-    pub fn new(configuration: &Configuration) -> Result<Self> {
+    pub fn new(configuration: &Configuration, network_format: SampleFormat) -> Result<Self> {
+        let quantum_frames = quantum_frames(network_format.sample_rate());
         let channels = configuration.output_channels.len();
-        let ratio = f64::from(configuration.sample_rate) / f64::from(SAMPLE_RATE);
+        let ratio = f64::from(configuration.sample_rate) / f64::from(network_format.sample_rate());
         let converter = match configuration.clock_relationship {
             ClockRelationship::Independent => Some(SincFixedIn::new(
                 ratio,
                 MAXIMUM_RELATIVE_RATIO,
                 parameters(),
-                QUANTUM_FRAMES,
+                quantum_frames,
                 channels,
             )?),
             ClockRelationship::NetworkSynchronized => None,
         };
         let output = converter.as_ref().map_or_else(
-            || vec![vec![0.0; QUANTUM_FRAMES]; channels],
+            || vec![vec![0.0; quantum_frames]; channels],
             |converter| converter.output_buffer_allocate(true),
         );
 
         Ok(Self {
             converter,
-            input: vec![vec![0.0; QUANTUM_FRAMES]; channels],
+            input: vec![vec![0.0; quantum_frames]; channels],
             output,
             correction: Correction::new(configuration.buffered_frames),
             ratio,
             target: configuration.buffered_frames,
+            quantum_frames,
         })
     }
 
     pub fn receipt_delay_quanta(&self) -> usize {
         if self.converter.is_some() {
-            FILTER_LENGTH.div_ceil(QUANTUM_FRAMES) + 1
+            FILTER_LENGTH.div_ceil(self.quantum_frames) + 1
         } else {
             0
         }
     }
 
     pub fn maximum_output_frames(&self) -> usize {
-        self.converter.as_ref().map_or(QUANTUM_FRAMES, Resampler::output_frames_max)
+        self.converter.as_ref().map_or(self.quantum_frames, Resampler::output_frames_max)
     }
 
     pub fn reset(&mut self) -> Result<()> {
@@ -205,7 +213,7 @@ impl Playback {
         frames: impl Iterator<Item = FloatSamples>,
         occupancy: usize,
     ) -> Result<Vec<FloatSamples>> {
-        for (index, frame) in frames.take(QUANTUM_FRAMES).enumerate() {
+        for (index, frame) in frames.take(self.quantum_frames).enumerate() {
             for (channel, sample) in frame.into_iter().enumerate() {
                 self.input[channel][index] = sample;
             }
@@ -219,7 +227,7 @@ impl Playback {
                 self.output[channel].copy_from_slice(&self.input[channel]);
             }
 
-            QUANTUM_FRAMES
+            self.quantum_frames
         };
 
         Ok((0..produced)

@@ -224,7 +224,13 @@ impl Runtime {
 
         let mut state = pending.state;
         state.generation = pending.generation;
-        let flow = Flow::new(&state, pending.port_index, pending.output_generation, capture)?;
+        let flow = Flow::new(
+            &state,
+            pending.port_index,
+            pending.output_generation,
+            capture,
+            endpoint.profile,
+        )?;
         let bytes = source::allocation_committed(
             endpoint,
             pending.header,

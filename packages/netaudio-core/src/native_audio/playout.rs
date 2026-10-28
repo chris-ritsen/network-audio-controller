@@ -2,14 +2,17 @@ use std::fmt;
 
 use serde::Serialize;
 
-use super::endpoint_control::{Profile, SAMPLE_RATE};
+use super::endpoint_control::Profile;
 use super::{Format, Packet};
 
-pub const QUANTUM_FRAMES: usize = 48;
-pub const PRIMING_FRAMES: usize = 96;
+const REFERENCE_QUANTUM_FRAMES: usize = 48;
+const REFERENCE_SAMPLE_RATE: u32 = 48_000;
 pub const RING_FRAMES: usize = 8192;
-pub const RECEIVE_LATENCY_FRAMES: u64 = 960;
-pub const MAXIMUM_MISSING_FRAMES: usize = 2400;
+const MAXIMUM_MISSING_NANOSECONDS: u64 = 50_000_000;
+
+pub fn quantum_frames(sample_rate: u32) -> usize {
+    REFERENCE_QUANTUM_FRAMES * sample_rate.div_ceil(REFERENCE_SAMPLE_RATE).max(1) as usize
+}
 
 pub type Samples = Vec<i32>;
 
@@ -87,6 +90,8 @@ pub struct Buffer {
     slots: Vec<Vec<usize>>,
     selected: Vec<bool>,
     receive_latency_frames: u64,
+    quantum_frames: usize,
+    maximum_missing_frames: usize,
     frames: Vec<Frame>,
     first_received: Option<u64>,
     cursor: Option<u64>,
@@ -114,8 +119,8 @@ impl Buffer {
         owner.validate()?;
         profile.validate().map_err(|_| Error::InvalidFormat)?;
 
-        if format.sample_rate() != SAMPLE_RATE
-            || format.sample_width() != super::SampleWidth::Signed24
+        if format.sample_rate() != profile.sample_rate
+            || format.sample_width().bits() != profile.sample_bits
             || frames_per_packet == 0
             || usize::from(frames_per_packet) > RING_FRAMES
         {
@@ -161,6 +166,9 @@ impl Buffer {
             slots: mapping,
             selected,
             receive_latency_frames: profile.receive_latency_frames(),
+            quantum_frames: quantum_frames(format.sample_rate()),
+            maximum_missing_frames: (u64::from(format.sample_rate()) * MAXIMUM_MISSING_NANOSECONDS)
+                .div_ceil(1_000_000_000) as usize,
             frames: vec![
                 Frame {
                     samples: vec![0; usize::from(profile.receive_channels)],
@@ -206,14 +214,12 @@ impl Buffer {
 
         let first = packet
             .time
-            .ticks(SAMPLE_RATE)
+            .ticks(self.format.sample_rate())
             .map_err(|_| Error::InvalidTime)?
             .checked_add(self.receive_latency_frames)
             .ok_or(Error::InvalidTime)?;
-        let end = first
-            .checked_add(self.frames_per_packet as u64)
-            .ok_or(Error::InvalidTime)?;
-        let maximum_tick = (u64::from(u32::MAX) + 1) * u64::from(SAMPLE_RATE);
+        let end = first.checked_add(self.frames_per_packet as u64).ok_or(Error::InvalidTime)?;
+        let maximum_tick = (u64::from(u32::MAX) + 1) * u64::from(self.format.sample_rate());
 
         if end > maximum_tick {
             return Err(Error::InvalidTime);
@@ -223,24 +229,21 @@ impl Buffer {
             return Err(Error::OutsideWindow);
         }
 
-        let aligned = first / QUANTUM_FRAMES as u64 * QUANTUM_FRAMES as u64;
         let expired_priming =
             !self.primed && self.cursor.is_some_and(|cursor| cursor <= current_tick);
 
         if self.cursor.is_none() || expired_priming {
-            if aligned <= current_tick {
+            if first <= current_tick {
                 return Err(Error::OutsideWindow);
             }
 
             self.reset(owner)?;
             self.first_received = Some(first);
-            self.cursor = Some(aligned);
+            self.cursor = Some(first);
         }
 
         let cursor = self.cursor.ok_or(Error::NotPrimed)?;
-        let window_end = cursor
-            .checked_add(RING_FRAMES as u64)
-            .ok_or(Error::InvalidTime)?;
+        let window_end = cursor.checked_add(RING_FRAMES as u64).ok_or(Error::InvalidTime)?;
 
         if first < cursor || end > window_end {
             return Err(Error::OutsideWindow);
@@ -281,7 +284,7 @@ impl Buffer {
             }
 
             let first = self.first_received?;
-            let end = first.checked_add(PRIMING_FRAMES as u64)?;
+            let end = first.checked_add(2 * self.quantum_frames as u64)?;
 
             for tick in first..end {
                 let frame = &self.frames[(tick % RING_FRAMES as u64) as usize];
@@ -312,9 +315,7 @@ impl Buffer {
         }
 
         let first = self.cursor.ok_or(Error::NotPrimed)?;
-        let end = first
-            .checked_add(QUANTUM_FRAMES as u64)
-            .ok_or(Error::InvalidTime)?;
+        let end = first.checked_add(self.quantum_frames as u64).ok_or(Error::InvalidTime)?;
 
         if current_tick < first {
             return Err(Error::EarlyDelivery);
@@ -324,7 +325,7 @@ impl Buffer {
             return Err(Error::MissedDeadline);
         }
 
-        let mut frames = Vec::with_capacity(QUANTUM_FRAMES);
+        let mut frames = Vec::with_capacity(self.quantum_frames);
         let mut missing_limit_reached = false;
 
         for tick in first..end {
@@ -338,16 +339,13 @@ impl Buffer {
                 .zip(&frame.received)
                 .any(|(selected, received)| *selected && !*received);
 
-            if self
-                .first_received
-                .is_some_and(|first_received| tick >= first_received)
-            {
+            if self.first_received.is_some_and(|first_received| tick >= first_received) {
                 self.consecutive_missing = if missing {
                     self.consecutive_missing.saturating_add(1)
                 } else {
                     0
                 };
-                missing_limit_reached |= self.consecutive_missing >= MAXIMUM_MISSING_FRAMES;
+                missing_limit_reached |= self.consecutive_missing >= self.maximum_missing_frames;
             }
 
             frames.push(frame);

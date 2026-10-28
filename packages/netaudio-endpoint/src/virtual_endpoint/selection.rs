@@ -202,6 +202,13 @@ impl Selection {
             }
 
             let source = Source::decode(&service.text)?;
+            source.packetization.request(self.profile.frames_per_packet)?;
+
+            if source.sample_rate != self.profile.sample_rate
+                || !source.encodings.contains(&self.profile.sample_bits)
+            {
+                bail!("source discovery does not advertise the configured receiver audio format");
+            }
 
             if source.named_domain != context.receiver_domain {
                 bail!("source named clock domain does not match the receiver");
