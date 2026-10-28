@@ -205,20 +205,28 @@ impl Server {
                 None,
                 super::pcm::CaptureFactory::Wave {
                     path: input.clone(),
-                    channels: configuration.profile.transmit_channels,
+                    format: configuration
+                        .profile
+                        .format(configuration.profile.transmit_channels)?,
                 },
                 output
                     .as_deref()
                     .map(|path| {
                         super::playback::Playback::open(
                             path,
-                            configuration.profile.receive_channels,
+                            configuration.profile.format(configuration.profile.receive_channels)?,
                         )
                     })
                     .transpose()?,
             ),
-            AudioConfiguration::Native(configuration) => {
-                let (engine, capture, playback) = crate::audio::Engine::open(configuration)?;
+            AudioConfiguration::Native(native) => {
+                let (engine, capture, playback) = crate::audio::Engine::open(
+                    native,
+                    configuration
+                        .profile
+                        .format(configuration.profile.transmit_channels)?
+                        .samples(),
+                )?;
                 (
                     Some(engine),
                     super::pcm::CaptureFactory::Native(capture),

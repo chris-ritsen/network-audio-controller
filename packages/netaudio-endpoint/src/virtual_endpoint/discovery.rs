@@ -6,11 +6,9 @@ use mdns_sd::{DaemonEvent, IfKind, ServiceDaemon, ServiceInfo, TxtProperty};
 use netaudio_core::bytes::hexadecimal;
 use netaudio_core::native_audio::endpoint_control::monitoring::Identity;
 use netaudio_core::native_audio::endpoint_control::{
-    Endpoint, FRAMES_PER_PACKET, NAMED_CLOCK_DOMAIN, SAMPLE_BITS, SAMPLE_RATE,
-    TRANSMIT_LATENCY_NANOSECONDS,
+    Endpoint, NAMED_CLOCK_DOMAIN, TRANSMIT_LATENCY_NANOSECONDS,
 };
 use netaudio_core::native_audio::source_control::REFERENCE_REVISION;
-use netaudio_core::native_audio::source_discovery::{SUPPORTED_PCM_BITMAP, SUPPORTED_PCM_BYTES};
 use netaudio_core::protocol::{SERVICE_ARC, SERVICE_CHAN, SERVICE_CMC, SERVICE_DBC};
 
 pub struct Publication {
@@ -83,15 +81,23 @@ impl Publication {
                 ("nchan", endpoint.profile.flow_slots.to_string()),
                 ("dbcp1", format!("{REFERENCE_REVISION:#06x}")),
                 ("dbcp", format!("{REFERENCE_REVISION:#06x}")),
-                ("rate", SAMPLE_RATE.to_string()),
-                ("en", SAMPLE_BITS.to_string()),
-                ("enc", SAMPLE_BITS.to_string()),
-                ("pcm", format!("{SUPPORTED_PCM_BYTES} {SUPPORTED_PCM_BITMAP:x}")),
+                ("rate", endpoint.profile.sample_rate.to_string()),
+                ("en", endpoint.profile.sample_bits.to_string()),
+                ("enc", endpoint.profile.sample_bits.to_string()),
+                (
+                    "pcm",
+                    format!(
+                        "{} {:x}",
+                        endpoint.profile.sample_bits / 8,
+                        1_u16 << (endpoint.profile.sample_bits / 8 - 1)
+                    ),
+                ),
                 (
                     "fpp",
                     format!(
-                        "{},{FRAMES_PER_PACKET}-{}",
+                        "{},{}-{}",
                         endpoint.profile.frames_per_packet,
+                        endpoint.profile.minimum_frames_per_packet(),
                         endpoint.profile.maximum_frames_per_packet()
                     ),
                 ),

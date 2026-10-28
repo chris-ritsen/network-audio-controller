@@ -3,34 +3,32 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use netaudio_core::native_audio::endpoint_control::{SAMPLE_BITS, SAMPLE_RATE};
+use netaudio_core::native_audio::Format;
+use netaudio_core::native_audio::playout::quantum_frames;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-
-pub const QUANTUM_FRAMES: usize = 48;
-pub const PRIMING_FRAMES: usize = 96;
-pub const TRANSMIT_PIPELINE_FRAMES: u64 = 96;
 
 const CAPTURE_QUEUE_BLOCKS: usize = 4;
 const RIFF_HEADER_BYTES: usize = 12;
 const CHUNK_HEADER_BYTES: usize = 8;
 const PCM_FORMAT_BYTES: usize = 16;
 const PCM_FORMAT_TAG: u16 = 1;
-const BITS_PER_BYTE: u16 = 8;
-const SAMPLE_BYTES: usize = (SAMPLE_BITS / BITS_PER_BYTE) as usize;
-const SIGN_EXTENSION_SHIFT: u32 = i32::BITS - SAMPLE_BITS as u32;
 
 pub type Frame = Vec<i32>;
 
 struct WaveSource {
     file: File,
     remaining_bytes: u64,
-    channels: u16,
+    format: Format,
 }
 
 impl WaveSource {
-    fn open(path: &Path, channel_count: u16) -> Result<Self> {
-        let frame_bytes = usize::from(channel_count) * SAMPLE_BYTES;
+    fn open(path: &Path, expected: Format) -> Result<Self> {
+        let frame_bytes = expected.frame_bytes();
+        let expected_bytes_per_second = expected
+            .sample_rate()
+            .checked_mul(u32::try_from(frame_bytes)?)
+            .context("capture WAVE byte rate exceeds its representation")?;
         let mut file =
             File::open(path).with_context(|| format!("open capture file {}", path.display()))?;
         let metadata = file.metadata()?;
@@ -89,14 +87,14 @@ impl WaveSource {
                     let sample_bits = u16::from_le_bytes(format[14..].try_into()?);
 
                     if tag != PCM_FORMAT_TAG
-                        || channels != channel_count
-                        || sample_rate != SAMPLE_RATE
-                        || sample_bits != SAMPLE_BITS
+                        || channels != expected.slot_count()
+                        || sample_rate != expected.sample_rate()
+                        || sample_bits != expected.sample_width().bits()
                         || block_alignment as usize != frame_bytes
-                        || bytes_per_second != SAMPLE_RATE * frame_bytes as u32
+                        || bytes_per_second != expected_bytes_per_second
                     {
                         bail!(
-                            "capture requires the configured channel count and signed PCM24 at 48000 Hz with consistent WAVE framing"
+                            "capture requires the configured channel count, sample rate and signed PCM width with consistent WAVE framing"
                         );
                     }
 
@@ -120,9 +118,11 @@ impl WaveSource {
 
         let frames = length / frame_bytes as u64;
 
-        if frames < PRIMING_FRAMES as u64 || !frames.is_multiple_of(QUANTUM_FRAMES as u64) {
+        let quantum_frames = quantum_frames(expected.sample_rate()) as u64;
+        let priming_frames = 2 * quantum_frames;
+        if frames < priming_frames || !frames.is_multiple_of(quantum_frames) {
             bail!(
-                "capture WAVE needs at least {PRIMING_FRAMES} frames and a whole number of {QUANTUM_FRAMES}-frame quanta"
+                "capture WAVE needs at least {priming_frames} frames and a whole number of {quantum_frames}-frame quanta"
             );
         }
 
@@ -131,25 +131,29 @@ impl WaveSource {
         Ok(Self {
             file,
             remaining_bytes: length,
-            channels: channel_count,
+            format: expected,
         })
     }
 
     fn read_quantum(&mut self) -> Result<Vec<Frame>> {
-        let frame_bytes = usize::from(self.channels) * SAMPLE_BYTES;
-        let frames =
-            (self.remaining_bytes / frame_bytes as u64).min(QUANTUM_FRAMES as u64) as usize;
+        let frame_bytes = self.format.frame_bytes();
+        let sample_bytes = self.format.sample_width().bytes();
+        let sign_extension_shift = i32::BITS - u32::from(self.format.sample_width().bits());
+        let frames = (self.remaining_bytes / frame_bytes as u64)
+            .min(quantum_frames(self.format.sample_rate()) as u64) as usize;
         let mut bytes = vec![0; frames * frame_bytes];
         self.file.read_exact(&mut bytes)?;
         self.remaining_bytes -= bytes.len() as u64;
         let mut output = Vec::with_capacity(frames);
 
         for frame in bytes.chunks_exact(frame_bytes) {
-            let mut samples = vec![0; usize::from(self.channels)];
+            let mut samples = vec![0; usize::from(self.format.slot_count())];
 
-            for (channel, sample) in frame.as_chunks::<SAMPLE_BYTES>().0.iter().enumerate() {
-                let value = i32::from_le_bytes([sample[0], sample[1], sample[2], 0]);
-                samples[channel] = (value << SIGN_EXTENSION_SHIFT) >> SIGN_EXTENSION_SHIFT;
+            for (channel, sample) in frame.chunks_exact(sample_bytes).enumerate() {
+                let mut word = [0; 4];
+                word[..sample_bytes].copy_from_slice(sample);
+                let value = i32::from_le_bytes(word);
+                samples[channel] = (value << sign_extension_shift) >> sign_extension_shift;
             }
 
             output.push(samples);
@@ -165,8 +169,8 @@ pub struct WaveCapture {
 }
 
 impl WaveCapture {
-    pub fn open(path: &Path, channel_count: u16) -> Result<Self> {
-        let mut source = WaveSource::open(path, channel_count)?;
+    pub fn open(path: &Path, format: Format) -> Result<Self> {
+        let mut source = WaveSource::open(path, format)?;
         let (sender, receiver) = mpsc::channel(CAPTURE_QUEUE_BLOCKS);
         let worker = super::platform::spawn_background(move || {
             while source.remaining_bytes != 0 {
@@ -217,7 +221,7 @@ impl WaveCapture {
 pub enum CaptureFactory {
     Wave {
         path: std::path::PathBuf,
-        channels: u16,
+        format: Format,
     },
     Native(crate::audio::CaptureFactory),
 }
@@ -227,8 +231,8 @@ impl CaptureFactory {
         match self {
             Self::Wave {
                 path,
-                channels,
-            } => Ok(Capture::Wave(WaveCapture::open(path, *channels)?)),
+                format,
+            } => Ok(Capture::Wave(WaveCapture::open(path, *format)?)),
             Self::Native(factory) => Ok(Capture::Native(Box::new(factory.open()?))),
         }
     }

@@ -1,19 +1,15 @@
 use std::collections::BTreeSet;
 
-use serde::Serialize;
 use crate::protocol::NetaudioProtocol;
+use serde::Serialize;
 
 use super::domain::NamedDomain;
-use super::endpoint_control::{
-    ARC_REVISION, RECEIVE_LATENCY_NANOSECONDS, SAMPLE_BITS, SAMPLE_RATE,
-};
+use super::endpoint_control::ARC_REVISION;
 use super::source_control::{Error, REFERENCE_REVISION};
 
 const TEXT_REVISION: u16 = 2;
 const MAXIMUM_ENCODINGS: usize = 8;
 const MAXIMUM_TEXT_BYTES: usize = 1500;
-pub const SUPPORTED_PCM_BYTES: u16 = 3;
-pub const SUPPORTED_PCM_BITMAP: u16 = 4;
 const MAXIMUM_VERSION_TEXT_BYTES: usize = 63;
 const MAXIMUM_ROUTING_VERSION_COMPONENT: u16 = 15;
 const ROUTING_MAJOR_SHIFT: u32 = 12;
@@ -45,11 +41,8 @@ const SOURCE_FIELDS: &[&[u8]] = &[
     b"gid",
     b"rid",
 ];
-const ROUTING_FIELDS: &[&[u8]] = &[
-    ROUTING_CURRENT_VERSION_KEY,
-    ROUTING_MINIMUM_VERSION_KEY,
-    ROUTER_VERSION_KEY,
-];
+const ROUTING_FIELDS: &[&[u8]] =
+    &[ROUTING_CURRENT_VERSION_KEY, ROUTING_MINIMUM_VERSION_KEY, ROUTER_VERSION_KEY];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TextEntry {
@@ -75,11 +68,9 @@ impl Packetization {
         };
         let (second, third, third_present) = match remaining {
             Some(remaining) => match remaining.split_once('-') {
-                Some((second, third)) => (
-                    decimal(second.as_bytes())?,
-                    decimal(third.as_bytes())?,
-                    true,
-                ),
+                Some((second, third)) => {
+                    (decimal(second.as_bytes())?, decimal(third.as_bytes())?, true)
+                }
                 None => (decimal(remaining.as_bytes())?, 0, false),
             },
             None => (0, 0, false),
@@ -88,7 +79,11 @@ impl Packetization {
         Ok(Self {
             raw: value.to_owned(),
             first,
-            second: if second == 0 { first } else { second },
+            second: if second == 0 {
+                first
+            } else {
+                second
+            },
             third,
             second_present: remaining.is_some(),
             third_present,
@@ -97,9 +92,7 @@ impl Packetization {
 
     pub fn request(&self, receiver_default: u16) -> Result<u16, Error> {
         if self.first == 0 || (self.third != 0 && self.third < self.first) {
-            return Err(Error(
-                "source packetization is zero or has a contradictory ceiling",
-            ));
+            return Err(Error("source packetization is zero or has a contradictory ceiling"));
         }
 
         let configured = if receiver_default < self.first {
@@ -119,9 +112,7 @@ fn decimal<T: std::str::FromStr>(value: &[u8]) -> Result<T, Error> {
         || (value.len() > 1 && value[0] == b'0')
         || !value.iter().all(u8::is_ascii_digit)
     {
-        return Err(Error(
-            "source numeric field is not complete canonical unsigned decimal",
-        ));
+        return Err(Error("source numeric field is not complete canonical unsigned decimal"));
     }
 
     std::str::from_utf8(value)
@@ -132,9 +123,7 @@ fn decimal<T: std::str::FromStr>(value: &[u8]) -> Result<T, Error> {
 
 pub fn text_entries(bytes: &[u8]) -> Result<Vec<TextEntry>, Error> {
     if bytes.is_empty() || bytes.len() > MAXIMUM_TEXT_BYTES {
-        return Err(Error(
-            "source TXT record is empty or exceeds the selected profile budget",
-        ));
+        return Err(Error("source TXT record is empty or exceeds the selected profile budget"));
     }
 
     let mut entries = Vec::new();
@@ -148,9 +137,7 @@ pub fn text_entries(bytes: &[u8]) -> Result<Vec<TextEntry>, Error> {
             .ok_or(Error("source TXT entry exceeds its complete record"))?;
 
         if entry.is_empty() || entry.contains(&0) {
-            return Err(Error(
-                "source TXT entry is empty or contains an embedded NUL",
-            ));
+            return Err(Error("source TXT entry is empty or contains an embedded NUL"));
         }
 
         let (key, value) = match entry.iter().position(|byte| *byte == b'=') {
@@ -158,14 +145,8 @@ pub fn text_entries(bytes: &[u8]) -> Result<Vec<TextEntry>, Error> {
             None => (entry, None),
         };
 
-        if key.is_empty()
-            || !key
-                .iter()
-                .all(|byte| byte.is_ascii_graphic() && *byte != b'=')
-        {
-            return Err(Error(
-                "source TXT key is not a complete printable ASCII key",
-            ));
+        if key.is_empty() || !key.iter().all(|byte| byte.is_ascii_graphic() && *byte != b'=') {
+            return Err(Error("source TXT key is not a complete printable ASCII key"));
         }
 
         entries.push(TextEntry {
@@ -192,7 +173,9 @@ impl<'a> Fields<'a> {
             }
         }
 
-        Ok(Self { entries })
+        Ok(Self {
+            entries,
+        })
     }
 
     fn entry(&self, key: &[u8]) -> Option<&'a TextEntry> {
@@ -202,17 +185,13 @@ impl<'a> Fields<'a> {
     fn optional(&self, key: &[u8]) -> Result<Option<&'a [u8]>, Error> {
         self.entry(key)
             .map(|entry| {
-                entry
-                    .value
-                    .as_deref()
-                    .ok_or(Error("source scalar TXT field has no value"))
+                entry.value.as_deref().ok_or(Error("source scalar TXT field has no value"))
             })
             .transpose()
     }
 
     fn required(&self, key: &[u8]) -> Result<&'a [u8], Error> {
-        self.optional(key)?
-            .ok_or(Error("source TXT lacks a required explicit field"))
+        self.optional(key)?.ok_or(Error("source TXT lacks a required explicit field"))
     }
 
     fn number<T: std::str::FromStr>(&self, key: &[u8]) -> Result<T, Error> {
@@ -229,9 +208,7 @@ fn version(value: &[u8]) -> Result<[u16; 3], Error> {
     let mut result = [0; 3];
 
     for component in &mut result {
-        let digits = components
-            .next()
-            .ok_or(Error("routing version is not a complete triple"))?;
+        let digits = components.next().ok_or(Error("routing version is not a complete triple"))?;
 
         if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
             return Err(Error("routing version component is not unsigned decimal"));
@@ -257,9 +234,7 @@ fn routing_revision(value: &[u8]) -> Result<u16, Error> {
         || minor > MAXIMUM_ROUTING_VERSION_COMPONENT
         || patch > u16::from(u8::MAX)
     {
-        return Err(Error(
-            "routing version is outside its lossless header representation",
-        ));
+        return Err(Error("routing version is outside its lossless header representation"));
     }
 
     Ok((major << ROUTING_MAJOR_SHIFT) | (minor << ROUTING_MINOR_SHIFT) | patch)
@@ -285,21 +260,15 @@ impl Routing {
             || router_version[0] > u16::from(u8::MAX)
             || router_version[1] > u16::from(u8::MAX)
         {
-            return Err(Error(
-                "router version is outside the supported complete tuple",
-            ));
+            return Err(Error("router version is outside the supported complete tuple"));
         }
 
         if minimum_revision > current_revision {
-            return Err(Error(
-                "routing minimum exceeds the current advertised revision",
-            ));
+            return Err(Error("routing minimum exceeds the current advertised revision"));
         }
 
         if ![ARC_REVISION, NetaudioProtocol::Arc2729 as u16].contains(&current_revision) {
-            return Err(Error(
-                "source routing service has no implemented acquisition profile",
-            ));
+            return Err(Error("source routing service has no implemented acquisition profile"));
         }
 
         Ok(Self {
@@ -313,6 +282,9 @@ impl Routing {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Source {
+    pub sample_rate: u32,
+    pub preferred_encoding: u16,
+    pub encodings: Vec<u16>,
     pub channel_identifier: u16,
     pub slot_capacity: u16,
     pub interface_count: u16,
@@ -328,18 +300,14 @@ impl Source {
         let fields = Fields::new(&entries, SOURCE_FIELDS)?;
 
         if fields.number::<u16>(b"txtvers")? != TEXT_REVISION {
-            return Err(Error(
-                "source TXT revision is outside the implemented profile",
-            ));
+            return Err(Error("source TXT revision is outside the implemented profile"));
         }
 
         let revision = std::str::from_utf8(fields.required(b"dbcp1")?)
             .map_err(|_| Error("source control revision is not ASCII"))?;
         let revision = if let Some(hexadecimal) = revision.strip_prefix("0x") {
             if hexadecimal.len() != 4 || !hexadecimal.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Err(Error(
-                    "source control revision is not a complete hexadecimal u16",
-                ));
+                return Err(Error("source control revision is not a complete hexadecimal u16"));
             }
 
             u16::from_str_radix(hexadecimal, 16)
@@ -349,9 +317,7 @@ impl Source {
         };
 
         if revision != REFERENCE_REVISION {
-            return Err(Error(
-                "source control revision has no implemented allocation contract",
-            ));
+            return Err(Error("source control revision has no implemented allocation contract"));
         }
 
         if fields.entry(b"at2").is_none() && fields.entry(b"at3").is_some() {
@@ -374,21 +340,14 @@ impl Source {
             .checked_add(1)
             .ok_or(Error("source interface count exceeds its representation"))?;
 
-        if fields
-                .optional(b"st")?
-                .map(decimal::<u16>)
-                .transpose()?
-                .is_some_and(|value| value != 0)
+        if fields.optional(b"st")?.map(decimal::<u16>).transpose()?.is_some_and(|value| value != 0)
         {
-            return Err(Error(
-                "source requires an unimplemented source-status context",
-            ));
+            return Err(Error("source requires an unimplemented source-status context"));
         }
 
-        if fields.number::<u32>(b"rate")? != SAMPLE_RATE {
-            return Err(Error(
-                "source rate differs from the selected local PCM rate",
-            ));
+        let sample_rate = fields.number::<u32>(b"rate")?;
+        if sample_rate == 0 {
+            return Err(Error("source rate must be positive"));
         }
 
         let preferred = fields.number::<u16>(b"en")?;
@@ -402,10 +361,7 @@ impl Source {
         if encodings.len() > MAXIMUM_ENCODINGS
             || unique.len() != encodings.len()
             || !unique.contains(&preferred)
-            || !unique.contains(&SAMPLE_BITS)
-            || unique
-                .iter()
-                .any(|encoding| !matches!(encoding, 16 | 24 | 32))
+            || unique.iter().any(|encoding| !matches!(encoding, 16 | 24 | 32))
         {
             return Err(Error(
                 "source encoding set is ambiguous or has no supported PCM intersection",
@@ -415,17 +371,13 @@ impl Source {
         if let Some(compact) = fields.optional(b"pcm")? {
             let mut members = compact.split(|byte| *byte == b' ');
             let width = decimal::<u16>(members.next().unwrap_or_default())?;
-            let bitmap = members
-                .next()
-                .ok_or(Error("source PCM bitmap is missing"))?;
+            let bitmap = members.next().ok_or(Error("source PCM bitmap is missing"))?;
 
             if members.next().is_some()
                 || bitmap.is_empty()
                 || !bitmap.iter().all(u8::is_ascii_hexdigit)
             {
-                return Err(Error(
-                    "source PCM capability is not a complete width and bitmap",
-                ));
+                return Err(Error("source PCM capability is not a complete width and bitmap"));
             }
 
             let bitmap = u16::from_str_radix(
@@ -434,13 +386,14 @@ impl Source {
             )
             .map_err(|_| Error("source PCM bitmap exceeds its supported range"))?;
 
-            if width != SUPPORTED_PCM_BYTES
-                || bitmap != SUPPORTED_PCM_BITMAP
-                || preferred != SAMPLE_BITS
-                || unique != BTreeSet::from([SAMPLE_BITS])
+            let expected_bitmap =
+                unique.iter().fold(0_u16, |bitmap, encoding| bitmap | (1 << (encoding / 8 - 1)));
+            if !(2..=4).contains(&width)
+                || !unique.contains(&(width * 8))
+                || bitmap != expected_bitmap
             {
                 return Err(Error(
-                    "source compact PCM capabilities differ from the supported explicit PCM24 profile",
+                    "source compact PCM capabilities disagree with its explicit encoding set",
                 ));
             }
         }
@@ -454,28 +407,20 @@ impl Source {
         let slot_capacity = fields.number::<u16>(b"nchan")?;
 
         if channel_identifier == 0 || slot_capacity == 0 {
-            return Err(Error(
-                "source channel identifier and flow slot capacity must be positive",
-            ));
+            return Err(Error("source channel identifier and flow slot capacity must be positive"));
         }
 
         let packetization = Packetization::decode(
             std::str::from_utf8(fields.required(b"fpp")?)
                 .map_err(|_| Error("source packetization is not ASCII"))?,
         )?;
-        packetization.request(super::endpoint_control::FRAMES_PER_PACKET)?;
-        let latency_nanoseconds = fields
-            .optional(b"latency_ns")?
-            .map(decimal::<u32>)
-            .transpose()?;
-
-        if latency_nanoseconds.is_some_and(|value| value > RECEIVE_LATENCY_NANOSECONDS) {
-            return Err(Error(
-                "source latency requirement exceeds local receive capacity",
-            ));
-        }
+        let latency_nanoseconds =
+            fields.optional(b"latency_ns")?.map(decimal::<u32>).transpose()?;
 
         Ok(Self {
+            sample_rate,
+            preferred_encoding: preferred,
+            encodings,
             channel_identifier,
             slot_capacity,
             interface_count,

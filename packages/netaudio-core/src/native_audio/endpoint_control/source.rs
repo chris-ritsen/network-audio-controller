@@ -2,10 +2,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 
 use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
 
-use super::{
-    double_word, string, word, Endpoint, TransmitFlow, Writer, FRAMES_PER_PACKET, SAMPLE_BITS,
-    SAMPLE_RATE,
-};
+use super::{double_word, string, word, Endpoint, TransmitFlow, Writer};
 use crate::native_audio::source_control::{
     Error, Header, ALLOCATION_OPERATION, REFERENCE_REVISION, STOP_OPERATION,
 };
@@ -38,9 +35,7 @@ pub enum Action {
 }
 
 fn reply(header: Header, result: u16) -> Result<Action, Error> {
-    Ok(Action::Reply(
-        Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish(),
-    ))
+    Ok(Action::Reply(Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish()))
 }
 
 pub fn unavailable(header: Header) -> Result<Vec<u8>, Error> {
@@ -56,9 +51,7 @@ fn checked_region(
 ) -> Result<(), Error> {
     if offset < minimum
         || offset % alignment != 0
-        || offset
-            .checked_add(length)
-            .is_none_or(|end| end > bytes.len())
+        || offset.checked_add(length).is_none_or(|end| end > bytes.len())
     {
         return Err(Error(
             "source object is incomplete, overlaps the fixed directory or is misaligned",
@@ -126,7 +119,9 @@ pub fn admit(endpoint: &Endpoint, request: &[u8]) -> Result<Option<Action>, Erro
                 if request.len() != 16 {
                     return Err(Error("owned source STOP has surplus bytes"));
                 }
-                Action::Stop { header }
+                Action::Stop {
+                    header,
+                }
             } else {
                 let count = usize::from(word(request, 16)?);
                 if request.len() != 18 + 2 * count {
@@ -175,16 +170,14 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
         return Err(Error("source allocation directory is incomplete"));
     }
 
-    if double_word(request, 12)? != SAMPLE_RATE || word(request, 18)? != SAMPLE_BITS {
+    if double_word(request, 12)? != endpoint.profile.sample_rate
+        || word(request, 18)? != endpoint.profile.sample_bits
+    {
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 
-    let (channels, result) = selected_channels(
-        request,
-        24 + 2 * interfaces,
-        count,
-        endpoint.profile.transmit_channels,
-    )?;
+    let (channels, result) =
+        selected_channels(request, 24 + 2 * interfaces, count, endpoint.profile.transmit_channels)?;
     if channels.iter().all(|identifier| *identifier == 0) {
         return reply(header, NO_SELECTED_CHANNEL);
     }
@@ -212,9 +205,7 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
 
     let extension = usize::from(word(request, fixed_end - 2)?);
     if extension == 0 {
-        return Err(Error(
-            "selected source allocation requires its complete reference extension",
-        ));
+        return Err(Error("selected source allocation requires its complete reference extension"));
     }
     checked_region(request, extension, 20, fixed_end, 2)?;
     let extension_length = usize::from(request[extension]) * 2;
@@ -224,7 +215,8 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
     }
 
     let frames_per_packet = word(request, extension + 4)?;
-    if !(FRAMES_PER_PACKET..=endpoint.profile.maximum_frames_per_packet())
+    if !(endpoint.profile.minimum_frames_per_packet()
+        ..=endpoint.profile.maximum_frames_per_packet())
         .contains(&frames_per_packet)
     {
         return reply(header, RESOURCE_UNAVAILABLE);
@@ -232,11 +224,7 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
 
     let heap_minimum = extension + extension_length;
     let hostname = string(request, usize::from(word(request, 10)?), heap_minimum)?;
-    let flow_name = string(
-        request,
-        usize::from(word(request, extension + 6)?),
-        heap_minimum,
-    )?;
+    let flow_name = string(request, usize::from(word(request, extension + 6)?), heap_minimum)?;
     if hostname.is_empty() || flow_name.is_empty() {
         return Err(Error("source allocation receiver names cannot be empty"));
     }
@@ -264,9 +252,7 @@ pub fn allocation_committed(
     result: u16,
 ) -> Result<Vec<u8>, Error> {
     if generation == 0 || endpoint.transmit_flow.is_some() {
-        return Err(Error(
-            "source allocation commit has no uniquely owned generation or resource",
-        ));
+        return Err(Error("source allocation commit has no uniquely owned generation or resource"));
     }
     flow.generation = generation;
     let mut response = Writer::response(header, 24, result)?;

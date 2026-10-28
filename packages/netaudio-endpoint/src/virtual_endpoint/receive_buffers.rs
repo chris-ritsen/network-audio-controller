@@ -25,7 +25,7 @@ enum Request {
 
 pub struct Worker {
     requests: mpsc::Sender<Request>,
-    results: mpsc::Receiver<Result<Prepared>>,
+    results: mpsc::Receiver<Result<Box<Prepared>>>,
     worker: JoinHandle<Result<()>>,
 }
 
@@ -50,9 +50,11 @@ impl Worker {
                             &slots,
                             context.profile,
                         )
-                        .map(|buffer| Prepared {
-                            preparation,
-                            buffer,
+                        .map(|buffer| {
+                            Box::new(Prepared {
+                                preparation,
+                                buffer,
+                            })
                         })
                         .map_err(Into::into);
                         if completed.blocking_send(result).is_err() {
@@ -83,7 +85,7 @@ impl Worker {
             .map_err(|_| anyhow::anyhow!("receive buffer worker cannot accept disposal"))
     }
 
-    pub async fn next(&mut self) -> Result<Result<Prepared>> {
+    pub async fn next(&mut self) -> Result<Result<Box<Prepared>>> {
         self.results.recv().await.context("receive buffer worker stopped")
     }
 
