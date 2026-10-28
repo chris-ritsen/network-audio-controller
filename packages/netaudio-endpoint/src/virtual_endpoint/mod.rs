@@ -1,5 +1,6 @@
 pub mod acquisition;
 pub mod clock_driver;
+pub mod clock_service;
 pub mod clock_socket;
 pub mod deadline;
 pub mod discovery;

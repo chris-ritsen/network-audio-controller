@@ -25,6 +25,12 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    #[cfg(target_os = "linux")]
+    #[command(about = "Own shared host PTP transport for independent endpoint consumers")]
+    ClockServe {
+        #[arg(long)]
+        socket: PathBuf,
+    },
     #[command(
         about = "List compiled audio backends or devices and formats for an explicit backend"
     )]
@@ -103,7 +109,7 @@ enum Command {
     #[cfg(target_os = "linux")]
     #[command(
         about = "Run a virtual native-v2 audio source and routed receiver",
-        long_about = "Publish two 48 kHz/24-bit transmit channels and receive named routes with PTPv1 timing. Configuration JSON requires name, interface, address, identity, status_publication, local_clock_identity, parent_clock_identity, state_directory and audio. Select audio.type=native with explicit backend, client_name, input_channels, output_channels, sample_rate, buffer_frames, buffered_frames and clock_relationship (independent or network_synchronized). Optional input_device and output_device select stable device IDs from audio-devices; omission explicitly selects that backend's default device. Channel mappings contain two one-based device channel numbers; [1, 1] duplicates a mono input. Output channels must be distinct; unused device outputs receive silence. JACK mappings must be [1, 2]. JACK creates send_1/send_2 input ports and receive_1/receive_2 output ports without connecting them. No audio server is started. Select audio.type=wave with input and optional output for file-based recording work. The selected clock parent must be established independently. Route replacement retires its owned source flow. Uncertain allocation and STOP requests are not retried. CTRL-C, SIGTERM or duration withdraws discovery and closes owned audio resources."
+        long_about = "Publish configurable 48 kHz/24-bit transmit and receive channels with PTPv1 timing. Configuration JSON requires name, interface, address, identity, status_publication, local_clock_identity, parent_clock_identity, state_directory and audio. Select audio.type=native with explicit backend, client_name, input_channels, output_channels, sample_rate, buffer_frames, buffered_frames and clock_relationship (independent or network_synchronized). Optional input_device and output_device select stable device IDs from audio-devices; omission explicitly selects that backend's default device. The optional profile object supplies transmit_channels, receive_channels, flow_slots, receive_latency_nanoseconds and maximum_media_payload_bytes; omission selects the stereo profile. Each direction currently owns one flow. Channel mappings contain one entry per configured channel; [1, 1] duplicates a mono input. Output channels must be distinct; unused device outputs receive silence. JACK mappings enumerate each direction in order from one. JACK creates send_N input ports and receive_N output ports without connecting them. No audio server is started. Select audio.type=wave with input and optional output for file-based recording work. The selected clock parent must be established independently. Route replacement retires its owned source flow. Uncertain allocation and STOP requests are not retried. CTRL-C, SIGTERM or duration withdraws discovery and closes owned audio resources."
     )]
     Serve {
         #[arg(long)]
@@ -231,6 +237,18 @@ fn main() -> std::process::ExitCode {
 
 async fn execute(arguments: Arguments) -> Result<()> {
     match arguments.command {
+        #[cfg(target_os = "linux")]
+        Command::ClockServe {
+            socket,
+        } => {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut interrupt = signal(SignalKind::interrupt())?;
+            let mut termination = signal(SignalKind::terminate())?;
+            netaudio_endpoint::virtual_endpoint::clock_service::run(&socket, async {
+                tokio::select! { _ = interrupt.recv() => {}, _ = termination.recv() => {} }
+            })
+            .await
+        }
         Command::AudioDevices {
             backend,
         } => {

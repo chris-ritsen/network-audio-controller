@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::Serialize;
 
-use super::endpoint_control::{CHANNEL_COUNT, SAMPLE_RATE};
+use super::endpoint_control::{Profile, SAMPLE_RATE};
 use super::{Format, Packet};
 
 pub const QUANTUM_FRAMES: usize = 48;
@@ -11,7 +11,7 @@ pub const RING_FRAMES: usize = 8192;
 pub const RECEIVE_LATENCY_FRAMES: u64 = 960;
 pub const MAXIMUM_MISSING_FRAMES: usize = 2400;
 
-pub type Samples = [i32; CHANNEL_COUNT as usize];
+pub type Samples = Vec<i32>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Owner {
@@ -33,10 +33,10 @@ impl Owner {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Frame {
     pub samples: Samples,
-    pub received: [bool; CHANNEL_COUNT as usize],
+    pub received: Vec<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,7 +85,8 @@ pub struct Buffer {
     format: Format,
     frames_per_packet: usize,
     slots: Vec<Vec<usize>>,
-    selected: [bool; CHANNEL_COUNT as usize],
+    selected: Vec<bool>,
+    receive_latency_frames: u64,
     frames: Vec<Frame>,
     first_received: Option<u64>,
     cursor: Option<u64>,
@@ -100,7 +101,18 @@ impl Buffer {
         frames_per_packet: u16,
         slots: &[Vec<u16>],
     ) -> Result<Self, Error> {
+        Self::with_profile(owner, format, frames_per_packet, slots, Profile::default())
+    }
+
+    pub fn with_profile(
+        owner: Owner,
+        format: Format,
+        frames_per_packet: u16,
+        slots: &[Vec<u16>],
+        profile: Profile,
+    ) -> Result<Self, Error> {
         owner.validate()?;
+        profile.validate().map_err(|_| Error::InvalidFormat)?;
 
         if format.sample_rate() != SAMPLE_RATE
             || format.sample_width() != super::SampleWidth::Signed24
@@ -114,14 +126,14 @@ impl Buffer {
             return Err(Error::InvalidMapping);
         }
 
-        let mut selected = [false; CHANNEL_COUNT as usize];
+        let mut selected = vec![false; usize::from(profile.receive_channels)];
         let mut mapping = Vec::with_capacity(slots.len());
 
         for slot in slots {
             let mut channels = Vec::with_capacity(slot.len());
 
             for channel in slot {
-                if !(1..=CHANNEL_COUNT).contains(channel) {
+                if !(1..=profile.receive_channels).contains(channel) {
                     return Err(Error::InvalidMapping);
                 }
 
@@ -148,7 +160,14 @@ impl Buffer {
             frames_per_packet: usize::from(frames_per_packet),
             slots: mapping,
             selected,
-            frames: vec![Frame::default(); RING_FRAMES],
+            receive_latency_frames: profile.receive_latency_frames(),
+            frames: vec![
+                Frame {
+                    samples: vec![0; usize::from(profile.receive_channels)],
+                    received: vec![false; usize::from(profile.receive_channels)]
+                };
+                RING_FRAMES
+            ],
             first_received: None,
             cursor: None,
             primed: false,
@@ -163,7 +182,10 @@ impl Buffer {
     pub fn reset(&mut self, owner: Owner) -> Result<(), Error> {
         owner.validate()?;
         self.owner = owner;
-        self.frames.fill(Frame::default());
+        for frame in &mut self.frames {
+            frame.samples.fill(0);
+            frame.received.fill(false);
+        }
         self.first_received = None;
         self.cursor = None;
         self.primed = false;
@@ -186,7 +208,7 @@ impl Buffer {
             .time
             .ticks(SAMPLE_RATE)
             .map_err(|_| Error::InvalidTime)?
-            .checked_add(RECEIVE_LATENCY_FRAMES)
+            .checked_add(self.receive_latency_frames)
             .ok_or(Error::InvalidTime)?;
         let end = first
             .checked_add(self.frames_per_packet as u64)
@@ -267,8 +289,8 @@ impl Buffer {
                 if self
                     .selected
                     .iter()
-                    .zip(frame.received)
-                    .any(|(selected, received)| *selected && !received)
+                    .zip(&frame.received)
+                    .any(|(selected, received)| *selected && !*received)
                 {
                     return None;
                 }
@@ -306,12 +328,15 @@ impl Buffer {
         let mut missing_limit_reached = false;
 
         for tick in first..end {
-            let frame = std::mem::take(&mut self.frames[(tick % RING_FRAMES as u64) as usize]);
+            let stored = &mut self.frames[(tick % RING_FRAMES as u64) as usize];
+            let frame = stored.clone();
+            stored.samples.fill(0);
+            stored.received.fill(false);
             let missing = self
                 .selected
                 .iter()
-                .zip(frame.received)
-                .any(|(selected, received)| *selected && !received);
+                .zip(&frame.received)
+                .any(|(selected, received)| *selected && !*received);
 
             if self
                 .first_received

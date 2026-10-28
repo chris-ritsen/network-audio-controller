@@ -38,7 +38,7 @@ def serve(
         ...,
         exists=True,
         dir_okay=False,
-        help="JSON with endpoint identity, interface, clock, state_directory and audio. Set audio.type=native for live input/output with an explicit backend and device configuration, or audio.type=wave with input and optional output for files. Native JACK exposes unconnected send_1/send_2 and receive_1/receive_2 ports.",
+        help="JSON with endpoint identity, interface, clock_transport, state_directory, profile and audio. Native JACK exposes unconnected send_N and receive_N ports for the configured channels. Wave adapters use explicit input and output files.",
     ),
     duration: int | None = typer.Option(None, min=1, help="Stop after this many seconds; otherwise run until interrupted."),
 ) -> NoReturn:
@@ -52,6 +52,17 @@ def serve(
         arguments.extend(["--duration", str(duration)])
 
     _execute(arguments)
+
+
+@app.command(help="Run the shared Linux PTP transport for independent local audio endpoints.")
+def clock_serve(
+    socket: Path = typer.Option(..., help="Absolute Unix socket path in a private directory owned by the endpoint user."),
+) -> NoReturn:
+    if sys.platform != "linux":
+        typer.echo("Error: the shared clock transport currently requires Linux.", err=True)
+        raise typer.Exit(code=1)
+
+    _execute(["clock-serve", "--socket", str(socket)])
 
 
 @app.command(

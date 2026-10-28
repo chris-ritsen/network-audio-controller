@@ -4,14 +4,13 @@ use rubato::{
     WindowFunction,
 };
 
-use super::{
-    CHANNELS, ClockRelationship, Configuration, FloatSamples, QUANTUM_FRAMES, SAMPLE_RATE,
-};
+use super::{ClockRelationship, Configuration, FloatSamples, QUANTUM_FRAMES, SAMPLE_RATE};
 
 const FILTER_LENGTH: usize = 128;
 const FILTER_CUTOFF: f32 = 0.95;
 const FILTER_OVERSAMPLING: usize = 128;
 const MAXIMUM_RATIO_DEVIATION: f64 = 0.005;
+const MAXIMUM_RELATIVE_RATIO: f64 = 1.0 / (1.0 - MAXIMUM_RATIO_DEVIATION);
 const OCCUPANCY_SMOOTHING: f64 = 0.001;
 const PROPORTIONAL_GAIN: f64 = 0.005;
 const INTEGRAL_GAIN: f64 = 0.000_000_05;
@@ -41,13 +40,16 @@ impl Correction {
         }
     }
 
-    fn ratio(&mut self, frames: usize) -> f64 {
+    fn ratio(&mut self, frames: usize, nominal_ratio: f64) -> f64 {
         self.occupancy += OCCUPANCY_SMOOTHING * (frames as f64 - self.occupancy);
         let error = (self.target - self.occupancy) / self.target;
         self.integral = (self.integral + error * INTEGRAL_GAIN)
             .clamp(-MAXIMUM_RATIO_DEVIATION, MAXIMUM_RATIO_DEVIATION);
-        1.0 + (error * PROPORTIONAL_GAIN + self.integral)
-            .clamp(-MAXIMUM_RATIO_DEVIATION, MAXIMUM_RATIO_DEVIATION)
+        let relative = 1.0
+            + (error * PROPORTIONAL_GAIN + self.integral)
+                .clamp(-MAXIMUM_RATIO_DEVIATION, MAXIMUM_RATIO_DEVIATION);
+        (nominal_ratio * relative)
+            .clamp(nominal_ratio / MAXIMUM_RELATIVE_RATIO, nominal_ratio * MAXIMUM_RELATIVE_RATIO)
     }
 }
 
@@ -62,22 +64,23 @@ pub struct Capture {
 
 impl Capture {
     pub fn new(configuration: &Configuration) -> Result<Self> {
+        let channels = configuration.input_channels.len();
         let ratio = f64::from(SAMPLE_RATE) / f64::from(configuration.sample_rate);
         let converter = match configuration.clock_relationship {
             ClockRelationship::Independent => Some(SincFixedOut::new(
                 ratio,
-                1.0 + MAXIMUM_RATIO_DEVIATION,
+                MAXIMUM_RELATIVE_RATIO,
                 parameters(),
                 QUANTUM_FRAMES,
-                CHANNELS,
+                channels,
             )?),
             ClockRelationship::NetworkSynchronized => None,
         };
         let input = converter.as_ref().map_or_else(
-            || vec![vec![0.0; QUANTUM_FRAMES]; CHANNELS],
+            || vec![vec![0.0; QUANTUM_FRAMES]; channels],
             |converter| converter.input_buffer_allocate(true),
         );
-        let output = vec![vec![0.0; QUANTUM_FRAMES]; CHANNELS];
+        let output = vec![vec![0.0; QUANTUM_FRAMES]; channels];
 
         Ok(Self {
             converter,
@@ -122,15 +125,17 @@ impl Capture {
 
         if let Some(converter) = &mut self.converter {
             converter.process_into_buffer(&self.input, &mut self.output, None)?;
-            converter.set_resample_ratio(self.ratio * self.correction.ratio(occupancy), true)?;
+            converter.set_resample_ratio(self.correction.ratio(occupancy, self.ratio), true)?;
         } else {
-            for channel in 0..CHANNELS {
+            for channel in 0..self.input.len() {
                 self.output[channel].copy_from_slice(&self.input[channel]);
             }
         }
 
         Ok((0..QUANTUM_FRAMES)
-            .map(|index| std::array::from_fn(|channel| self.output[channel][index]))
+            .map(|index| {
+                (0..self.output.len()).map(|channel| self.output[channel][index]).collect()
+            })
             .collect())
     }
 }
@@ -146,25 +151,26 @@ pub struct Playback {
 
 impl Playback {
     pub fn new(configuration: &Configuration) -> Result<Self> {
+        let channels = configuration.output_channels.len();
         let ratio = f64::from(configuration.sample_rate) / f64::from(SAMPLE_RATE);
         let converter = match configuration.clock_relationship {
             ClockRelationship::Independent => Some(SincFixedIn::new(
                 ratio,
-                1.0 + MAXIMUM_RATIO_DEVIATION,
+                MAXIMUM_RELATIVE_RATIO,
                 parameters(),
                 QUANTUM_FRAMES,
-                CHANNELS,
+                channels,
             )?),
             ClockRelationship::NetworkSynchronized => None,
         };
         let output = converter.as_ref().map_or_else(
-            || vec![vec![0.0; QUANTUM_FRAMES]; CHANNELS],
+            || vec![vec![0.0; QUANTUM_FRAMES]; channels],
             |converter| converter.output_buffer_allocate(true),
         );
 
         Ok(Self {
             converter,
-            input: vec![vec![0.0; QUANTUM_FRAMES]; CHANNELS],
+            input: vec![vec![0.0; QUANTUM_FRAMES]; channels],
             output,
             correction: Correction::new(configuration.buffered_frames),
             ratio,
@@ -184,12 +190,14 @@ impl Playback {
         self.converter.as_ref().map_or(QUANTUM_FRAMES, Resampler::output_frames_max)
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self) -> Result<()> {
         if let Some(converter) = &mut self.converter {
             converter.reset();
+            converter.set_resample_ratio(self.ratio, false)?;
         }
 
         self.correction = Correction::new(self.target);
+        Ok(())
     }
 
     pub fn convert(
@@ -204,10 +212,10 @@ impl Playback {
         }
 
         let produced = if let Some(converter) = &mut self.converter {
-            converter.set_resample_ratio(self.ratio * self.correction.ratio(occupancy), true)?;
+            converter.set_resample_ratio(self.correction.ratio(occupancy, self.ratio), true)?;
             converter.process_into_buffer(&self.input, &mut self.output, None)?.1
         } else {
-            for channel in 0..CHANNELS {
+            for channel in 0..self.input.len() {
                 self.output[channel].copy_from_slice(&self.input[channel]);
             }
 
@@ -215,7 +223,9 @@ impl Playback {
         };
 
         Ok((0..produced)
-            .map(|index| std::array::from_fn(|channel| self.output[channel][index]))
+            .map(|index| {
+                (0..self.output.len()).map(|channel| self.output[channel][index]).collect()
+            })
             .collect())
     }
 }

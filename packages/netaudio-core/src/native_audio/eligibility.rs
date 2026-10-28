@@ -34,6 +34,26 @@ pub fn qualify(
     requested_frames_per_packet: u16,
     receiver_domain: NamedDomain,
 ) -> Result<SourceFormat, Error> {
+    qualify_with_latency(
+        capabilities,
+        properties,
+        channels,
+        selected,
+        requested_frames_per_packet,
+        receiver_domain,
+        RECEIVE_LATENCY_NANOSECONDS,
+    )
+}
+
+pub fn qualify_with_latency(
+    capabilities: &ChannelCount,
+    properties: &AudioProperties,
+    channels: &[&TransmitChannel],
+    selected: &[(&str, &Source)],
+    requested_frames_per_packet: u16,
+    receiver_domain: NamedDomain,
+    receive_latency_nanoseconds: u32,
+) -> Result<SourceFormat, Error> {
     if capabilities.uses_modern_transmit_flow_authoring {
         return Err(Error("selected source needs media-specific resources"));
     }
@@ -77,7 +97,7 @@ pub fn qualify(
         sample_rate: SAMPLE_RATE,
         sample_bits: SAMPLE_BITS,
         requested_frames_per_packet,
-        receive_latency_nanoseconds: RECEIVE_LATENCY_NANOSECONDS,
+        receive_latency_nanoseconds,
     };
 
     for (name, source) in selected {
@@ -124,7 +144,7 @@ pub fn qualify(
 
         if source
             .latency_nanoseconds
-            .is_some_and(|latency| latency > RECEIVE_LATENCY_NANOSECONDS)
+            .is_some_and(|latency| latency > receive_latency_nanoseconds)
         {
             return Err(Error(
                 "selected source latency exceeds the receiver capacity",

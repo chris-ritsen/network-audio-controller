@@ -6,8 +6,8 @@ use mdns_sd::{DaemonEvent, IfKind, ServiceDaemon, ServiceInfo, TxtProperty};
 use netaudio_core::bytes::hexadecimal;
 use netaudio_core::native_audio::endpoint_control::monitoring::Identity;
 use netaudio_core::native_audio::endpoint_control::{
-    CHANNEL_COUNT, Endpoint, FRAMES_PER_PACKET, MAXIMUM_TRANSMIT_FRAMES_PER_PACKET,
-    NAMED_CLOCK_DOMAIN, SAMPLE_BITS, SAMPLE_RATE, TRANSMIT_LATENCY_NANOSECONDS,
+    Endpoint, FRAMES_PER_PACKET, NAMED_CLOCK_DOMAIN, SAMPLE_BITS, SAMPLE_RATE,
+    TRANSMIT_LATENCY_NANOSECONDS,
 };
 use netaudio_core::native_audio::source_control::REFERENCE_REVISION;
 use netaudio_core::native_audio::source_discovery::{SUPPORTED_PCM_BITMAP, SUPPORTED_PCM_BYTES};
@@ -80,7 +80,7 @@ impl Publication {
             let properties = [
                 ("txtvers", "2".to_owned()),
                 ("id", (index + 1).to_string()),
-                ("nchan", CHANNEL_COUNT.to_string()),
+                ("nchan", endpoint.profile.flow_slots.to_string()),
                 ("dbcp1", format!("{REFERENCE_REVISION:#06x}")),
                 ("dbcp", format!("{REFERENCE_REVISION:#06x}")),
                 ("rate", SAMPLE_RATE.to_string()),
@@ -90,7 +90,9 @@ impl Publication {
                 (
                     "fpp",
                     format!(
-                        "{FRAMES_PER_PACKET},{FRAMES_PER_PACKET}-{MAXIMUM_TRANSMIT_FRAMES_PER_PACKET}"
+                        "{},{FRAMES_PER_PACKET}-{}",
+                        endpoint.profile.frames_per_packet,
+                        endpoint.profile.maximum_frames_per_packet()
                     ),
                 ),
                 ("latency_ns", TRANSMIT_LATENCY_NANOSECONDS.to_string()),

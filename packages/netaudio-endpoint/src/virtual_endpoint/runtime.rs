@@ -7,10 +7,10 @@ use std::sync::atomic::AtomicU64;
 use anyhow::{Context, Result, bail};
 use netaudio_core::native_audio::clock::discipline::Configuration as ClockConfiguration;
 use netaudio_core::native_audio::clock::version_one::{DEFAULT_DOMAIN, PortIdentity};
-use netaudio_core::native_audio::endpoint_control::Endpoint;
 use netaudio_core::native_audio::endpoint_control::monitoring::{
     self, Identity, Interface, Manager, Statistics, StatusContext,
 };
+use netaudio_core::native_audio::endpoint_control::{Endpoint, Profile};
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
@@ -58,9 +58,13 @@ pub struct Configuration {
     pub identity: Identity,
     pub status_publication: StatusPublicationMode,
     pub local_clock_identity: PortIdentity,
+    #[serde(default)]
+    pub clock_transport: super::clock_service::TransportConfiguration,
     pub parent_clock_identity: PortIdentity,
     pub state_directory: PathBuf,
     pub audio: AudioConfiguration,
+    #[serde(default)]
+    pub profile: Profile,
 }
 
 #[derive(Clone, Deserialize)]
@@ -81,6 +85,7 @@ impl Configuration {
 
 #[derive(Default, Serialize)]
 pub struct Summary {
+    pub initialization_canceled: bool,
     pub routing_replies: u64,
     pub source_replies: u64,
     pub monitoring_replies: u64,
@@ -179,6 +184,14 @@ struct Server {
 
 impl Server {
     async fn start(configuration: Configuration) -> Result<Self> {
+        configuration.profile.validate()?;
+        if let AudioConfiguration::Native(audio) = &configuration.audio
+            && (audio.input_channels.len() != usize::from(configuration.profile.transmit_channels)
+                || audio.output_channels.len()
+                    != usize::from(configuration.profile.receive_channels))
+        {
+            bail!("native channel maps must match the configured directional endpoint counts");
+        }
         let service = super::service::Service::open()?;
         let (audio, capture, playback) = match &configuration.audio {
             AudioConfiguration::Wave {
@@ -186,8 +199,19 @@ impl Server {
                 output,
             } => (
                 None,
-                super::pcm::CaptureFactory::Wave(input.clone()),
-                output.as_deref().map(super::playback::Playback::open).transpose()?,
+                super::pcm::CaptureFactory::Wave {
+                    path: input.clone(),
+                    channels: configuration.profile.transmit_channels,
+                },
+                output
+                    .as_deref()
+                    .map(|path| {
+                        super::playback::Playback::open(
+                            path,
+                            configuration.profile.receive_channels,
+                        )
+                    })
+                    .transpose()?,
             ),
             AudioConfiguration::Native(configuration) => {
                 let (engine, capture, playback) = crate::audio::Engine::open(configuration)?;
@@ -198,8 +222,8 @@ impl Server {
                 )
             }
         };
-        let endpoint = Endpoint::new(configuration.name.clone())?;
-        let interface_observer =
+        let endpoint = Endpoint::with_profile(configuration.name.clone(), configuration.profile)?;
+        let mut interface_observer =
             InterfaceObserver::start(configuration.interface.clone(), configuration.address)
                 .await?;
         let interface = interface_observer.initial.clone();
@@ -215,7 +239,7 @@ impl Server {
         )?;
         let incarnation = u64::from(issuer.reserve()?);
         let time = Monotonic::new(incarnation);
-        let clock = Worker::start(
+        let mut clock = Worker::start(
             configuration.address,
             ClockConfiguration {
                 domain: DEFAULT_DOMAIN,
@@ -227,6 +251,7 @@ impl Server {
                 transmit_calibration_nanoseconds: 0,
             },
             time.clone(),
+            configuration.clock_transport.clone(),
         )
         .await?;
         let sockets =
@@ -290,6 +315,29 @@ impl Server {
         }
 
         drop(sender);
+        let eligible_at = source
+            .pool
+            .next_available()
+            .into_iter()
+            .chain(receive.pool.next_available())
+            .max()
+            .context("endpoint media port pools have no initial availability")?;
+        let startup_timeout_microseconds =
+            eligible_at.saturating_sub(time.now()).div_ceil(1_000) + 5_000_000;
+        service.send(&format!(
+            "STATUS=Waiting for initial media port reuse quarantine before publishing the endpoint\nEXTEND_TIMEOUT_USEC={startup_timeout_microseconds}"
+        ))?;
+        let eligibility_deadline = time.instant(eligible_at)?;
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep_until(eligibility_deadline) => break,
+                result = clock.changed() => result?,
+                result = interface_observer.changed() => {
+                    result?;
+                    bail!("endpoint interface changed during initial media port quarantine");
+                }
+            }
+        }
         let publication = Publication::start(
             &endpoint,
             configuration.address,
@@ -680,7 +728,14 @@ pub async fn run(
     configuration: Configuration,
     stopped: impl std::future::Future<Output = ()>,
 ) -> Result<Summary> {
-    let mut server = Server::start(configuration).await?;
+    tokio::pin!(stopped);
+    let mut server = tokio::select! {
+        started = Server::start(configuration) => started?,
+        _ = &mut stopped => {
+            super::service::Service::open()?.send("STOPPING=1\nSTATUS=Endpoint initialization canceled before discovery publication")?;
+            return Ok(Summary { initialization_canceled: true, ..Summary::default() });
+        }
+    };
     let result = server.serve(stopped).await;
     let notification = server.service.stopping(result.as_ref().err());
     let summary = server.close().await;

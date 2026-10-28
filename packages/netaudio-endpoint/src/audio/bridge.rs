@@ -12,8 +12,8 @@ use serde::Serialize;
 use super::lifecycle::{Event, Fault, Lifecycle};
 
 use super::{
-    CHANNELS, Configuration, FloatSamples, INTEGER_SCALE, MAXIMUM_SAMPLE, MINIMUM_SAMPLE,
-    QUANTUM_FRAMES, Samples, resampling,
+    Configuration, INTEGER_SCALE, MAXIMUM_SAMPLE, MINIMUM_SAMPLE, QUANTUM_FRAMES, Samples,
+    resampling,
 };
 
 const QUEUE_HEADROOM: usize = 4;
@@ -112,22 +112,22 @@ impl State {
 #[derive(Clone, Copy)]
 struct Captured {
     generation: u64,
-    samples: FloatSamples,
 }
 
 struct OutputFrame {
     generation: u64,
-    samples: FloatSamples,
     receipt: Option<Receipt>,
 }
 
 pub(super) struct InputCallback {
     pub state: Arc<State>,
     frames: Producer<Captured>,
+    samples: Producer<f32>,
+    channels: usize,
 }
 
 impl InputCallback {
-    pub fn process(&mut self, frames: impl Iterator<Item = FloatSamples>) {
+    pub fn process(&mut self, frames: usize, mut sample: impl FnMut(usize, usize) -> f32) {
         let generation = self.state.capture_generation.load(Ordering::Acquire);
 
         if generation == 0 || self.state.event().is_some() {
@@ -136,22 +136,28 @@ impl InputCallback {
 
         let mut captured = 0;
 
-        for samples in frames {
-            if samples.iter().any(|sample| !sample.is_finite()) {
-                self.state.report(Fault::InvalidSample);
+        for frame in 0..frames {
+            if self.frames.slots() == 0 || self.samples.slots() < self.channels {
+                self.state.capture_overflows.fetch_add(1, Ordering::Relaxed);
+                self.state.report(Fault::CaptureOverflow);
                 break;
             }
 
-            if self
-                .frames
+            let chunk =
+                self.samples.write_chunk_uninit(self.channels).expect("sample capacity checked");
+            let mut invalid = false;
+            chunk.fill_from_iter((0..self.channels).map(|channel| {
+                let value = sample(frame, channel);
+                invalid |= !value.is_finite();
+                value
+            }));
+            self.frames
                 .push(Captured {
                     generation,
-                    samples,
                 })
-                .is_err()
-            {
-                self.state.capture_overflows.fetch_add(1, Ordering::Relaxed);
-                self.state.report(Fault::CaptureOverflow);
+                .expect("frame capacity checked");
+            if invalid {
+                self.state.report(Fault::InvalidSample);
                 break;
             }
 
@@ -166,6 +172,8 @@ impl InputCallback {
 pub(super) struct OutputCallback {
     pub state: Arc<State>,
     frames: Consumer<OutputFrame>,
+    samples: Consumer<f32>,
+    channels: usize,
     receipts: Producer<Receipt>,
     generation: u64,
     primed: bool,
@@ -174,7 +182,8 @@ pub(super) struct OutputCallback {
 }
 
 impl OutputCallback {
-    pub fn next(&mut self) -> FloatSamples {
+    pub fn next(&mut self, samples: &mut [f32]) {
+        samples.fill(0.0);
         let generation = self.state.playback_generation.load(Ordering::Acquire);
 
         if generation != self.generation {
@@ -184,15 +193,19 @@ impl OutputCallback {
 
         while self.frames.peek().is_ok_and(|frame| frame.generation != generation) {
             let _ = self.frames.pop();
+            self.samples
+                .read_chunk(self.channels)
+                .expect("retired frame samples are committed")
+                .commit_all();
         }
 
         if generation == 0 || self.state.event().is_some() {
-            return [0.0; CHANNELS];
+            return;
         }
 
         if !self.primed {
             if self.frames.slots() < self.priming_frames {
-                return [0.0; CHANNELS];
+                return;
             }
 
             self.primed = true;
@@ -201,20 +214,26 @@ impl OutputCallback {
         let Ok(frame) = self.frames.pop() else {
             self.state.playback_underflows.fetch_add(1, Ordering::Relaxed);
             self.state.report(Fault::PlaybackUnderflow);
-            return [0.0; CHANNELS];
+            return;
         };
+
+        let chunk = self.samples.read_chunk(self.channels).expect("frame samples are committed");
+        let (first, second) = chunk.as_slices();
+        samples[..first.len()].copy_from_slice(first);
+        samples[first.len()..].copy_from_slice(second);
+        chunk.commit_all();
 
         if let Some(receipt) = frame.receipt {
             if self.completed_receipts.len() == self.completed_receipts.capacity() {
                 self.state.report(Fault::ReceiptOverflow);
-                return [0.0; CHANNELS];
+                samples.fill(0.0);
+                return;
             }
 
             self.completed_receipts.push(receipt);
         }
 
         self.state.played_frames.fetch_add(1, Ordering::Relaxed);
-        frame.samples
     }
 
     pub fn completed(&mut self) {
@@ -236,9 +255,37 @@ impl OutputCallback {
 
 #[derive(Clone)]
 pub struct CaptureFactory {
-    frames: Arc<Mutex<Consumer<Captured>>>,
+    queue: Arc<Mutex<CaptureQueue>>,
     state: Arc<State>,
     configuration: Configuration,
+}
+
+struct CaptureQueue {
+    frames: Consumer<Captured>,
+    samples: Consumer<f32>,
+    channels: usize,
+}
+
+impl CaptureQueue {
+    fn discard(&mut self) {
+        self.frames.pop().expect("capture frame availability checked");
+        self.samples
+            .read_chunk(self.channels)
+            .expect("capture frame samples are committed")
+            .commit_all();
+    }
+
+    fn next(&mut self) -> Vec<f32> {
+        self.frames.pop().expect("capture frame availability checked");
+        let chunk =
+            self.samples.read_chunk(self.channels).expect("capture frame samples are committed");
+        let (first, second) = chunk.as_slices();
+        let mut samples = Vec::with_capacity(self.channels);
+        samples.extend_from_slice(first);
+        samples.extend_from_slice(second);
+        chunk.commit_all();
+        samples
+    }
 }
 
 impl CaptureFactory {
@@ -283,7 +330,7 @@ impl Capture {
         self.primed = false;
         let mut frames = self
             .factory
-            .frames
+            .queue
             .lock()
             .map_err(|_| anyhow::anyhow!("native capture ownership lock failed"))?;
 
@@ -291,7 +338,9 @@ impl Capture {
             bail!("native capture ownership changed before its queue could be acquired");
         }
 
-        while frames.pop().is_ok() {}
+        while frames.frames.peek().is_ok() {
+            frames.discard();
+        }
 
         self.generation = self
             .factory
@@ -318,16 +367,16 @@ impl Capture {
 
             let mut frames = self
                 .factory
-                .frames
+                .queue
                 .lock()
                 .map_err(|_| anyhow::anyhow!("native capture ownership lock failed"))?;
 
-            while frames.peek().is_ok_and(|frame| frame.generation != self.generation) {
-                let _ = frames.pop();
+            while frames.frames.peek().is_ok_and(|frame| frame.generation != self.generation) {
+                frames.discard();
             }
 
             let needed = self.converter.needed();
-            let available = frames.slots();
+            let available = frames.frames.slots();
             let threshold = if self.primed {
                 needed
             } else {
@@ -339,20 +388,20 @@ impl Capture {
             }
 
             self.primed = true;
-            let converted = self.converter.convert(
-                (0..needed)
-                    .map(|_| frames.pop().expect("capture queue availability checked").samples),
-                available - needed,
-            )?;
+            let converted =
+                self.converter.convert((0..needed).map(|_| frames.next()), available - needed)?;
             Poll::Ready(Ok(converted
                 .into_iter()
                 .map(|frame| {
-                    frame.map(|sample| {
-                        (sample * INTEGER_SCALE)
-                            .round()
-                            .clamp(MINIMUM_SAMPLE as f32, MAXIMUM_SAMPLE as f32)
-                            as i32
-                    })
+                    frame
+                        .into_iter()
+                        .map(|sample| {
+                            (sample * INTEGER_SCALE)
+                                .round()
+                                .clamp(MINIMUM_SAMPLE as f32, MAXIMUM_SAMPLE as f32)
+                                as i32
+                        })
+                        .collect()
                 })
                 .collect()))
         })
@@ -369,6 +418,8 @@ impl Drop for Capture {
 pub struct Playback {
     state: Arc<State>,
     frames: Producer<OutputFrame>,
+    samples: Producer<f32>,
+    channels: usize,
     receipts: Consumer<Receipt>,
     converter: resampling::Playback,
     owner: Option<Owner>,
@@ -386,7 +437,11 @@ impl Playback {
         self.state.check()?;
         delivery.owner.validate()?;
 
-        if delivery.frames.len() != QUANTUM_FRAMES {
+        if delivery.frames.len() != QUANTUM_FRAMES
+            || delivery.frames.iter().any(|frame| {
+                frame.samples.len() != self.channels || frame.received.len() != self.channels
+            })
+        {
             bail!("native playback requires a complete PCM quantum");
         }
 
@@ -397,7 +452,7 @@ impl Playback {
         }
 
         if self.owner != Some(delivery.owner) {
-            self.converter.reset();
+            self.converter.reset()?;
             self.owner = Some(delivery.owner);
             self.next_frame = None;
             self.pending_receipts.clear();
@@ -410,18 +465,19 @@ impl Playback {
         let received_samples = delivery
             .frames
             .iter()
-            .flat_map(|frame| frame.received)
+            .flat_map(|frame| frame.received.iter().copied())
             .filter(|received| *received)
             .count();
         let converted = self.converter.convert(
-            delivery
-                .frames
-                .iter()
-                .map(|frame| frame.samples.map(|sample| sample as f32 / INTEGER_SCALE)),
+            delivery.frames.iter().map(|frame| {
+                frame.samples.iter().map(|sample| *sample as f32 / INTEGER_SCALE).collect()
+            }),
             self.capacity - self.frames.slots(),
         )?;
 
-        if self.frames.slots() < converted.len() {
+        if self.frames.slots() < converted.len()
+            || self.samples.slots() < converted.len() * self.channels
+        {
             bail!("native playback cannot queue a complete converted quantum");
         }
 
@@ -431,7 +487,7 @@ impl Playback {
             frames: QUANTUM_FRAMES,
             output_accepted: true,
             received_samples,
-            local_silence_samples: QUANTUM_FRAMES * CHANNELS - received_samples,
+            local_silence_samples: QUANTUM_FRAMES * self.channels - received_samples,
         };
         self.pending_receipts.push_back(receipt);
         let completed = if !converted.is_empty()
@@ -448,10 +504,13 @@ impl Playback {
         let last = converted.len().saturating_sub(1);
 
         for (index, samples) in converted.into_iter().enumerate() {
+            self.samples
+                .write_chunk_uninit(self.channels)
+                .map_err(|_| anyhow::anyhow!("native playback sample queue overflowed"))?
+                .fill_from_iter(samples);
             self.frames
                 .push(OutputFrame {
                     generation: delivery.owner.stream_generation,
-                    samples,
                     receipt: if index == last {
                         completed
                     } else {
@@ -497,6 +556,15 @@ pub(super) struct Bridge {
 impl Bridge {
     pub fn new(configuration: &Configuration) -> Result<Self> {
         let capacity = configuration.buffered_frames * QUEUE_HEADROOM;
+        let input_channels = configuration.input_channels.len();
+        let output_channels = configuration.output_channels.len();
+        let sample_bytes = capacity
+            .checked_mul(input_channels + output_channels)
+            .and_then(|samples| samples.checked_mul(std::mem::size_of::<f32>()))
+            .context("native audio queue geometry overflow")?;
+        if sample_bytes > 64 * 1024 * 1024 {
+            bail!("native audio queues exceed the 64 MiB sample budget");
+        }
         let capture_converter = resampling::Capture::new(configuration)?;
         let playback_converter = resampling::Playback::new(configuration)?;
 
@@ -508,6 +576,8 @@ impl Bridge {
 
         let (input_sender, input_receiver) = RingBuffer::new(capacity);
         let (output_sender, output_receiver) = RingBuffer::new(capacity);
+        let (input_samples, captured_samples) = RingBuffer::new(capacity * input_channels);
+        let (output_samples, playback_samples) = RingBuffer::new(capacity * output_channels);
         let (receipt_sender, receipt_receiver) = RingBuffer::new(capacity);
         let state = Arc::new(State {
             capture_generation: AtomicU64::new(0),
@@ -530,10 +600,14 @@ impl Bridge {
             input: InputCallback {
                 state: state.clone(),
                 frames: input_sender,
+                samples: input_samples,
+                channels: input_channels,
             },
             output: OutputCallback {
                 state: state.clone(),
                 frames: output_receiver,
+                samples: playback_samples,
+                channels: output_channels,
                 receipts: receipt_sender,
                 generation: 0,
                 primed: false,
@@ -541,13 +615,19 @@ impl Bridge {
                 completed_receipts: Vec::with_capacity(configuration.buffered_frames),
             },
             capture: CaptureFactory {
-                frames: Arc::new(Mutex::new(input_receiver)),
+                queue: Arc::new(Mutex::new(CaptureQueue {
+                    frames: input_receiver,
+                    samples: captured_samples,
+                    channels: input_channels,
+                })),
                 state: state.clone(),
                 configuration: configuration.clone(),
             },
             playback: Playback {
                 state,
                 frames: output_sender,
+                samples: output_samples,
+                channels: output_channels,
                 receipts: receipt_receiver,
                 converter: playback_converter,
                 owner: None,

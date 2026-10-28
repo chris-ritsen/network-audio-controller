@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
-use netaudio_core::native_audio::endpoint_control::{CHANNEL_COUNT, SAMPLE_RATE};
+use netaudio_core::native_audio::endpoint_control::SAMPLE_RATE;
 use netaudio_core::native_audio::playout::{Delivery, Owner, QUANTUM_FRAMES};
 use netaudio_core::native_audio::{Format, SampleWidth};
 use tokio::sync::mpsc;
@@ -23,10 +23,11 @@ struct Writer {
     current: Option<(Owner, u64, Segment)>,
     receipts: BufWriter<File>,
     finalizations: mpsc::Sender<Segment>,
+    channels: u16,
 }
 
 impl Writer {
-    fn open(directory: &Path, finalizations: mpsc::Sender<Segment>) -> Result<Self> {
+    fn open(directory: &Path, finalizations: mpsc::Sender<Segment>, channels: u16) -> Result<Self> {
         std::fs::create_dir(directory)
             .with_context(|| format!("create new playback directory {}", directory.display()))?;
         let receipts = OpenOptions::new()
@@ -39,6 +40,7 @@ impl Writer {
             current: None,
             receipts: BufWriter::new(receipts),
             finalizations,
+            channels,
         })
     }
 
@@ -74,7 +76,7 @@ impl Writer {
 
             if replace {
                 self.finish_segment()?;
-                let format = Format::new(SAMPLE_RATE, CHANNEL_COUNT, SampleWidth::Signed24)?;
+                let format = Format::new(SAMPLE_RATE, self.channels, SampleWidth::Signed24)?;
                 let segment = Segment::create(
                     &self.directory,
                     delivery.owner.stream_generation,
@@ -93,7 +95,7 @@ impl Writer {
 
             if current_generation.load(Ordering::Acquire) == delivery.owner.stream_generation {
                 segment.append_samples(
-                    delivery.frames.iter().flat_map(|frame| frame.samples),
+                    delivery.frames.iter().flat_map(|frame| frame.samples.iter().copied()),
                     delivery.frames.len(),
                 )?;
                 segment.flush()?;
@@ -104,11 +106,11 @@ impl Writer {
                 receipt.received_samples = delivery
                     .frames
                     .iter()
-                    .flat_map(|frame| frame.received)
+                    .flat_map(|frame| frame.received.iter().copied())
                     .filter(|received| *received)
                     .count();
                 receipt.local_silence_samples =
-                    delivery.frames.len() * CHANNEL_COUNT as usize - receipt.received_samples;
+                    delivery.frames.len() * usize::from(self.channels) - receipt.received_samples;
             }
         }
 
@@ -135,9 +137,9 @@ pub struct WavePlayback {
 }
 
 impl WavePlayback {
-    pub fn open(directory: &Path) -> Result<Self> {
+    pub fn open(directory: &Path, channels: u16) -> Result<Self> {
         let (finalizations, mut finalized) = mpsc::channel::<Segment>(PENDING_FINALIZATIONS);
-        let mut writer = Writer::open(directory, finalizations)?;
+        let mut writer = Writer::open(directory, finalizations, channels)?;
         let finalizer = tokio::task::spawn_blocking(move || {
             while let Some(segment) = finalized.blocking_recv() {
                 segment.finish()?;
@@ -204,8 +206,8 @@ pub enum Playback {
 }
 
 impl Playback {
-    pub fn open(directory: &Path) -> Result<Self> {
-        Ok(Self::Wave(WavePlayback::open(directory)?))
+    pub fn open(directory: &Path, channels: u16) -> Result<Self> {
+        Ok(Self::Wave(WavePlayback::open(directory, channels)?))
     }
 
     pub fn select(&self, generation: u64) {

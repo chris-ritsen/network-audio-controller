@@ -24,8 +24,8 @@ pub const QUANTUM_FRAMES: usize = 48;
 pub const INTEGER_SCALE: f32 = 8_388_608.0;
 pub const MAXIMUM_SAMPLE: i32 = 8_388_607;
 pub const MINIMUM_SAMPLE: i32 = -8_388_608;
-pub type Samples = [i32; CHANNELS];
-pub type FloatSamples = [f32; CHANNELS];
+pub type Samples = Vec<i32>;
+pub type FloatSamples = Vec<f32>;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -41,8 +41,8 @@ pub struct Configuration {
     pub client_name: String,
     pub input_device: Option<String>,
     pub output_device: Option<String>,
-    pub input_channels: [u16; CHANNELS],
-    pub output_channels: [u16; CHANNELS],
+    pub input_channels: Vec<u16>,
+    pub output_channels: Vec<u16>,
     pub sample_rate: u32,
     pub buffer_frames: u32,
     pub buffered_frames: usize,
@@ -55,11 +55,21 @@ impl Configuration {
             bail!("audio backend and client name must be explicit");
         }
 
+        if self.input_channels.is_empty()
+            || self.output_channels.is_empty()
+            || self.input_channels.len() > usize::from(u16::MAX)
+            || self.output_channels.len() > usize::from(u16::MAX)
+        {
+            bail!("native audio requires positive representable channel counts");
+        }
+
         if self.input_channels.contains(&0) || self.output_channels.contains(&0) {
             bail!("native audio channel numbers start at one");
         }
 
-        if self.output_channels[0] == self.output_channels[1] {
+        if self.output_channels.iter().copied().collect::<std::collections::BTreeSet<_>>().len()
+            != self.output_channels.len()
+        {
             bail!("native audio output channels must be distinct");
         }
 
