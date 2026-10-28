@@ -3,9 +3,8 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
 
 use super::{
-    double_word, string, word, Endpoint, TransmitFlow, Writer, CHANNEL_COUNT, FRAMES_PER_PACKET,
-    MAXIMUM_TRANSMIT_FRAMES_PER_PACKET,
-    SAMPLE_BITS, SAMPLE_RATE,
+    double_word, string, word, Endpoint, TransmitFlow, Writer, FRAMES_PER_PACKET, SAMPLE_BITS,
+    SAMPLE_RATE,
 };
 use crate::native_audio::source_control::{
     Error, Header, ALLOCATION_OPERATION, REFERENCE_REVISION, STOP_OPERATION,
@@ -69,12 +68,17 @@ fn checked_region(
     Ok(())
 }
 
-fn selected_channels(bytes: &[u8], offset: usize, count: usize) -> Result<(Vec<u16>, u16), Error> {
+fn selected_channels(
+    bytes: &[u8],
+    offset: usize,
+    count: usize,
+    maximum_channel: u16,
+) -> Result<(Vec<u16>, u16), Error> {
     let mut channels = Vec::with_capacity(count);
     let mut result = RESULT_CODE_SUCCESS;
     for index in 0..count {
         let identifier = word(bytes, offset + 2 * index)?;
-        if identifier > CHANNEL_COUNT {
+        if identifier > maximum_channel {
             channels.push(0);
             result = UNKNOWN_CHANNEL_WARNING;
         } else {
@@ -133,7 +137,8 @@ pub fn admit(endpoint: &Endpoint, request: &[u8]) -> Result<Option<Action>, Erro
                     return reply(header, SLOT_COUNT_MISMATCH).map(Some);
                 }
 
-                let (channels, result) = selected_channels(request, 18, count)?;
+                let (channels, result) =
+                    selected_channels(request, 18, count, endpoint.profile.transmit_channels)?;
                 if channels.iter().all(|identifier| *identifier == 0) {
                     return reply(header, NO_SELECTED_CHANNEL).map(Some);
                 }
@@ -161,7 +166,7 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
 
     let interfaces = usize::from(word(request, 20)?);
     let count = usize::from(word(request, 22)?);
-    if interfaces != 1 || !(1..=usize::from(CHANNEL_COUNT)).contains(&count) {
+    if interfaces != 1 || !(1..=usize::from(endpoint.profile.flow_slots)).contains(&count) {
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 
@@ -174,7 +179,12 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 
-    let (channels, result) = selected_channels(request, 24 + 2 * interfaces, count)?;
+    let (channels, result) = selected_channels(
+        request,
+        24 + 2 * interfaces,
+        count,
+        endpoint.profile.transmit_channels,
+    )?;
     if channels.iter().all(|identifier| *identifier == 0) {
         return reply(header, NO_SELECTED_CHANNEL);
     }
@@ -214,7 +224,9 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
     }
 
     let frames_per_packet = word(request, extension + 4)?;
-    if !(FRAMES_PER_PACKET..=MAXIMUM_TRANSMIT_FRAMES_PER_PACKET).contains(&frames_per_packet) {
+    if !(FRAMES_PER_PACKET..=endpoint.profile.maximum_frames_per_packet())
+        .contains(&frames_per_packet)
+    {
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 

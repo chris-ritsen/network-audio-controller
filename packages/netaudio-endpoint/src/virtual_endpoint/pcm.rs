@@ -3,7 +3,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use netaudio_core::native_audio::endpoint_control::{CHANNEL_COUNT, SAMPLE_BITS, SAMPLE_RATE};
+use netaudio_core::native_audio::endpoint_control::{SAMPLE_BITS, SAMPLE_RATE};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -18,18 +18,19 @@ const PCM_FORMAT_BYTES: usize = 16;
 const PCM_FORMAT_TAG: u16 = 1;
 const BITS_PER_BYTE: u16 = 8;
 const SAMPLE_BYTES: usize = (SAMPLE_BITS / BITS_PER_BYTE) as usize;
-const FRAME_BYTES: usize = CHANNEL_COUNT as usize * SAMPLE_BYTES;
 const SIGN_EXTENSION_SHIFT: u32 = i32::BITS - SAMPLE_BITS as u32;
 
-pub type Frame = [i32; CHANNEL_COUNT as usize];
+pub type Frame = Vec<i32>;
 
 struct WaveSource {
     file: File,
     remaining_bytes: u64,
+    channels: u16,
 }
 
 impl WaveSource {
-    fn open(path: &Path) -> Result<Self> {
+    fn open(path: &Path, channel_count: u16) -> Result<Self> {
+        let frame_bytes = usize::from(channel_count) * SAMPLE_BYTES;
         let mut file =
             File::open(path).with_context(|| format!("open capture file {}", path.display()))?;
         let metadata = file.metadata()?;
@@ -88,14 +89,14 @@ impl WaveSource {
                     let sample_bits = u16::from_le_bytes(format[14..].try_into()?);
 
                     if tag != PCM_FORMAT_TAG
-                        || channels != CHANNEL_COUNT
+                        || channels != channel_count
                         || sample_rate != SAMPLE_RATE
                         || sample_bits != SAMPLE_BITS
-                        || block_alignment as usize != FRAME_BYTES
-                        || bytes_per_second != SAMPLE_RATE * FRAME_BYTES as u32
+                        || block_alignment as usize != frame_bytes
+                        || bytes_per_second != SAMPLE_RATE * frame_bytes as u32
                     {
                         bail!(
-                            "capture requires stereo signed PCM24 at 48000 Hz with consistent WAVE framing"
+                            "capture requires the configured channel count and signed PCM24 at 48000 Hz with consistent WAVE framing"
                         );
                     }
 
@@ -113,11 +114,11 @@ impl WaveSource {
 
         let (start, length) = data.context("capture WAVE has no PCM data chunk")?;
 
-        if !format_seen || length == 0 || length % FRAME_BYTES as u64 != 0 {
+        if !format_seen || length == 0 || length % frame_bytes as u64 != 0 {
             bail!("capture WAVE needs its format and a positive whole number of PCM frames");
         }
 
-        let frames = length / FRAME_BYTES as u64;
+        let frames = length / frame_bytes as u64;
 
         if frames < PRIMING_FRAMES as u64 || !frames.is_multiple_of(QUANTUM_FRAMES as u64) {
             bail!(
@@ -130,19 +131,21 @@ impl WaveSource {
         Ok(Self {
             file,
             remaining_bytes: length,
+            channels: channel_count,
         })
     }
 
     fn read_quantum(&mut self) -> Result<Vec<Frame>> {
+        let frame_bytes = usize::from(self.channels) * SAMPLE_BYTES;
         let frames =
-            (self.remaining_bytes / FRAME_BYTES as u64).min(QUANTUM_FRAMES as u64) as usize;
-        let mut bytes = vec![0; frames * FRAME_BYTES];
+            (self.remaining_bytes / frame_bytes as u64).min(QUANTUM_FRAMES as u64) as usize;
+        let mut bytes = vec![0; frames * frame_bytes];
         self.file.read_exact(&mut bytes)?;
         self.remaining_bytes -= bytes.len() as u64;
         let mut output = Vec::with_capacity(frames);
 
-        for frame in bytes.as_chunks::<FRAME_BYTES>().0 {
-            let mut samples = [0; CHANNEL_COUNT as usize];
+        for frame in bytes.chunks_exact(frame_bytes) {
+            let mut samples = vec![0; usize::from(self.channels)];
 
             for (channel, sample) in frame.as_chunks::<SAMPLE_BYTES>().0.iter().enumerate() {
                 let value = i32::from_le_bytes([sample[0], sample[1], sample[2], 0]);
@@ -162,8 +165,8 @@ pub struct WaveCapture {
 }
 
 impl WaveCapture {
-    pub fn open(path: &Path) -> Result<Self> {
-        let mut source = WaveSource::open(path)?;
+    pub fn open(path: &Path, channel_count: u16) -> Result<Self> {
+        let mut source = WaveSource::open(path, channel_count)?;
         let (sender, receiver) = mpsc::channel(CAPTURE_QUEUE_BLOCKS);
         let worker = tokio::task::spawn_blocking(move || {
             while source.remaining_bytes != 0 {
@@ -212,14 +215,20 @@ impl WaveCapture {
 
 #[derive(Clone)]
 pub enum CaptureFactory {
-    Wave(std::path::PathBuf),
+    Wave {
+        path: std::path::PathBuf,
+        channels: u16,
+    },
     Native(crate::audio::CaptureFactory),
 }
 
 impl CaptureFactory {
     pub fn open(&self) -> Result<Capture> {
         match self {
-            Self::Wave(path) => Ok(Capture::Wave(WaveCapture::open(path)?)),
+            Self::Wave {
+                path,
+                channels,
+            } => Ok(Capture::Wave(WaveCapture::open(path, *channels)?)),
             Self::Native(factory) => Ok(Capture::Native(Box::new(factory.open()?))),
         }
     }

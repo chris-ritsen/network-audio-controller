@@ -3,9 +3,7 @@ use std::net::SocketAddrV4;
 use anyhow::{Context, Result, bail};
 use hickory_proto::rr::Name;
 use netaudio_core::native_audio::domain::NamedDomain;
-use netaudio_core::native_audio::endpoint_control::{
-    Endpoint, FRAMES_PER_PACKET, NAMED_CLOCK_DOMAIN,
-};
+use netaudio_core::native_audio::endpoint_control::{Endpoint, NAMED_CLOCK_DOMAIN, Profile};
 use netaudio_core::native_audio::source_discovery::{Routing, Source};
 use serde::Serialize;
 
@@ -28,6 +26,7 @@ pub struct Selection {
     device: String,
     channels: Vec<Channel>,
     routing_name: Name,
+    profile: Profile,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -59,6 +58,7 @@ pub struct Candidate {
     pub requested_frames_per_packet: u16,
     pub receiver_domain: NamedDomain,
     pub usable_through: u64,
+    pub profile: Profile,
 }
 
 impl Candidate {
@@ -71,6 +71,7 @@ impl Candidate {
             && self.slots == other.slots
             && self.requested_frames_per_packet == other.requested_frames_per_packet
             && self.receiver_domain == other.receiver_domain
+            && self.profile == other.profile
     }
 }
 
@@ -89,6 +90,7 @@ impl Selection {
                 device: route.device.clone(),
                 channels: Vec::new(),
                 routing_name,
+                profile: endpoint.profile,
             });
 
             if route.device != selected.device {
@@ -111,6 +113,13 @@ impl Selection {
             }
         }
 
+        if selection.as_ref().is_some_and(|selection| {
+            selection.channels.len() > usize::from(endpoint.profile.flow_slots)
+        }) {
+            bail!(
+                "selected distinct source channels exceed the configured receive flow slot capacity"
+            );
+        }
         Ok(selection)
     }
 
@@ -153,11 +162,12 @@ impl Selection {
                 declaration: Routing::decode(&routing.text)?,
             },
             slots: Vec::with_capacity(services.len()),
-            requested_frames_per_packet: FRAMES_PER_PACKET,
+            requested_frames_per_packet: self.profile.frames_per_packet,
             receiver_domain: NAMED_CLOCK_DOMAIN,
             usable_through: first.usable_through.min(routing.usable_through),
+            profile: self.profile,
         };
-        let mut ceiling = u16::MAX;
+        let mut ceiling = self.profile.maximum_frames_per_packet();
 
         for (channel, service) in self.channels.iter().zip(&services) {
             if service.name != channel.name

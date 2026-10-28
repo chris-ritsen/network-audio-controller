@@ -7,7 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use netaudio_core::native_audio::clock::NANOSECONDS_PER_SECOND;
 use netaudio_core::native_audio::clock::discipline::LocalTimestamp;
-use socket2::{Domain, Protocol, Socket, Type};
+use serde::{Deserialize, Serialize};
+use socket2::{Domain, InterfaceIndexOrAddress, Protocol, Socket, Type};
 use tokio::io::Interest;
 use tokio::io::unix::AsyncFd;
 
@@ -25,6 +26,7 @@ pub struct ClockSocket {
     next_transmit_identifier: Option<u32>,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
 pub enum Event {
     Received {
         bytes: Vec<u8>,
@@ -46,16 +48,22 @@ struct Ancillary {
 
 impl ClockSocket {
     pub fn bind(address: Ipv4Addr, group: Ipv4Addr, port: u16) -> Result<Self> {
+        let socket = Self::bind_transport(port)?;
+        socket.socket.get_ref().set_multicast_if_v4(&address)?;
+        socket.join(address, group)?;
+        Ok(socket)
+    }
+
+    pub fn bind_transport(port: u16) -> Result<Self> {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
         socket.set_nonblocking(true)?;
         socket.set_multicast_all_v4(false)?;
-        socket.set_multicast_if_v4(&address)?;
         socket.set_multicast_loop_v4(false)?;
+        socket.set_multicast_ttl_v4(1)?;
         socket.set_recv_buffer_size(256 * 1024)?;
         socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into()).with_context(|| {
             format!("bind exclusive PTP UDP port {port}; privileged ports require bind permission")
         })?;
-        socket.join_multicast_v4(&group, &address)?;
 
         set_option(&socket, libc::SOL_IP, libc::IP_PKTINFO, 1)?;
         set_option(&socket, libc::SOL_IP, libc::IP_RECVERR, 1)?;
@@ -71,6 +79,79 @@ impl ClockSocket {
             socket: unsafe { AsyncFd::register(socket)? },
             next_transmit_identifier: Some(0),
         })
+    }
+
+    pub fn join(&self, address: Ipv4Addr, group: Ipv4Addr) -> Result<()> {
+        Ok(self.socket.get_ref().join_multicast_v4(&group, &address)?)
+    }
+
+    pub fn join_on(&self, interface_index: u32, group: Ipv4Addr) -> Result<()> {
+        Ok(self
+            .socket
+            .get_ref()
+            .join_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))?)
+    }
+
+    pub fn leave_on(&self, interface_index: u32, group: Ipv4Addr) -> Result<()> {
+        Ok(self
+            .socket
+            .get_ref()
+            .leave_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))?)
+    }
+
+    pub fn try_send_on(
+        &mut self,
+        bytes: &[u8],
+        destination: SocketAddrV4,
+        address: Ipv4Addr,
+        interface_index: u32,
+    ) -> Result<u32> {
+        let identifier = self
+            .next_transmit_identifier
+            .context("clock socket transmit identifier space is exhausted")?;
+        let destination = socket2::SockAddr::from(destination);
+        let mut vector = libc::iovec {
+            iov_base: bytes.as_ptr().cast_mut().cast(),
+            iov_len: bytes.len(),
+        };
+        let mut control = [0usize; CONTROL_BUFFER_WORDS];
+        let mut message: libc::msghdr = unsafe { zeroed() };
+        message.msg_name = destination.as_ptr().cast_mut().cast();
+        message.msg_namelen = destination.len();
+        message.msg_iov = &mut vector;
+        message.msg_iovlen = 1;
+        message.msg_control = control.as_mut_ptr().cast();
+        message.msg_controllen =
+            unsafe { libc::CMSG_SPACE(size_of::<libc::in_pktinfo>() as u32) } as usize;
+        let information = libc::in_pktinfo {
+            ipi_ifindex: interface_index.try_into()?,
+            ipi_spec_dst: libc::in_addr {
+                s_addr: u32::from_ne_bytes(address.octets()),
+            },
+            ipi_addr: libc::in_addr {
+                s_addr: 0,
+            },
+        };
+        unsafe {
+            let header = libc::CMSG_FIRSTHDR(&message);
+            (*header).cmsg_level = libc::SOL_IP;
+            (*header).cmsg_type = libc::IP_PKTINFO;
+            (*header).cmsg_len = libc::CMSG_LEN(size_of::<libc::in_pktinfo>() as u32) as usize;
+            std::ptr::write_unaligned(
+                libc::CMSG_DATA(header).cast::<libc::in_pktinfo>(),
+                information,
+            );
+        }
+        let written =
+            unsafe { libc::sendmsg(self.socket.as_raw_fd(), &message, libc::MSG_DONTWAIT) };
+        if written < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        self.next_transmit_identifier = identifier.checked_add(1);
+        if written as usize != bytes.len() {
+            bail!("clock socket submitted an incomplete datagram");
+        }
+        Ok(identifier)
     }
 
     pub async fn send(&mut self, bytes: &[u8], destination: SocketAddrV4) -> Result<u32> {

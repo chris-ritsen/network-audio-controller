@@ -274,7 +274,13 @@ impl Runtime {
             confirmed: false,
             retiring: false,
             source: None,
-            buffer: Buffer::new(owner, format, candidate.requested_frames_per_packet, &slots)?,
+            buffer: Buffer::with_profile(
+                owner,
+                format,
+                candidate.requested_frames_per_packet,
+                &slots,
+                endpoint.profile,
+            )?,
             next_reverse_tick: None,
             first_media_deadline: self
                 .time

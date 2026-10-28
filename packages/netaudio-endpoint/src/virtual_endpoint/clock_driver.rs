@@ -10,6 +10,7 @@ use netaudio_core::native_audio::clock::version_one::{self, Body, Packet};
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 
+use super::clock_service::{Client, TransportConfiguration};
 use super::clock_socket::{ClockMapping, ClockSocket, Event};
 use super::deadline::Deadline;
 use super::sockets::Monotonic;
@@ -33,6 +34,7 @@ impl Worker {
         address: Ipv4Addr,
         configuration: Configuration,
         time: Monotonic,
+        transport: TransportConfiguration,
     ) -> Result<Self> {
         let (startup, ready) = oneshot::channel();
         let (stop, stopped) = oneshot::channel();
@@ -40,7 +42,8 @@ impl Worker {
             let runtime =
                 tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build()?;
             runtime.block_on(async move {
-                let mut driver = Driver::start(address, configuration, time.clone())?;
+                let mut driver =
+                    Driver::start(address, configuration, time.clone(), transport).await?;
                 let initial = driver.follower.publication(time.now())?;
                 let (publications, receiver) = watch::channel(Arc::new(initial));
 
@@ -95,12 +98,19 @@ struct PendingTransmit {
     deadline: u64,
 }
 
+enum Transport {
+    Exclusive {
+        event: ClockSocket,
+        general: ClockSocket,
+    },
+    Shared(Client),
+}
+
 pub struct Driver {
     pub follower: Follower,
     time: Monotonic,
     mapping: ClockMapping,
-    event: ClockSocket,
-    general: ClockSocket,
+    transport: Transport,
     destination: SocketAddrV4,
     pending_transmit: Option<PendingTransmit>,
 }
@@ -125,7 +135,15 @@ impl Driver {
                 _ = &mut stopped => return Ok(summary),
                 observed = self.next_event() => {
                     let started = self.time.now();
-                    let result = observed.and_then(|observed| self.observe(observed));
+                    let observed = match observed {
+                        Ok(observed) => observed,
+                        Err(error) => {
+                            self.follower.provider_lost(self.time.now())?;
+                            publications.send_replace(Arc::new(self.follower.publication(self.time.now())?));
+                            return Err(error);
+                        }
+                    };
+                    let result = self.observe(observed);
                     summary.maximum_observation_nanoseconds =
                         summary.maximum_observation_nanoseconds.max(self.time.now() - started);
 
@@ -165,28 +183,50 @@ impl Driver {
         }
     }
 
-    pub fn start(address: Ipv4Addr, configuration: Configuration, time: Monotonic) -> Result<Self> {
+    pub async fn start(
+        address: Ipv4Addr,
+        configuration: Configuration,
+        time: Monotonic,
+        transport: TransportConfiguration,
+    ) -> Result<Self> {
         let group = version_one::multicast_group(configuration.domain)?;
+        let transport = match transport {
+            TransportConfiguration::Exclusive => Transport::Exclusive {
+                event: ClockSocket::bind(address, group, version_one::EVENT_PORT)?,
+                general: ClockSocket::bind(address, group, version_one::GENERAL_PORT)?,
+            },
+            TransportConfiguration::Shared {
+                socket,
+            } => Transport::Shared(Client::connect(&socket, address, configuration.clone()).await?),
+        };
         let follower = Follower::new(configuration, time.now())?;
         let mapping = ClockMapping::new(time.clone())?;
-        let event = ClockSocket::bind(address, group, version_one::EVENT_PORT)?;
-        let general = ClockSocket::bind(address, group, version_one::GENERAL_PORT)?;
-
         Ok(Self {
             follower,
             time,
             mapping,
-            event,
-            general,
+            transport,
             destination: SocketAddrV4::new(group, version_one::EVENT_PORT),
             pending_transmit: None,
         })
     }
 
-    pub async fn next_event(&self) -> Result<Observed> {
-        tokio::select! {
-            result = self.event.receive() => Ok(Observed { event: result?, event_port: true }),
-            result = self.general.receive() => Ok(Observed { event: result?, event_port: false }),
+    pub async fn next_event(&mut self) -> Result<Observed> {
+        match &mut self.transport {
+            Transport::Exclusive {
+                event,
+                general,
+            } => tokio::select! {
+                result = event.receive() => Ok(Observed { event: result?, event_port: true }),
+                result = general.receive() => Ok(Observed { event: result?, event_port: false }),
+            },
+            Transport::Shared(client) => {
+                let (event_port, event) = client.receive().await?;
+                Ok(Observed {
+                    event,
+                    event_port,
+                })
+            }
         }
     }
 
@@ -272,7 +312,14 @@ impl Driver {
         let Some(request) = self.follower.prepare_delay_request(now)? else {
             return Ok(());
         };
-        let identifier = match self.event.try_send(&request.bytes, self.destination) {
+        let submitted = match &mut self.transport {
+            Transport::Exclusive {
+                event,
+                ..
+            } => event.try_send(&request.bytes, self.destination),
+            Transport::Shared(client) => client.submit(&request.bytes),
+        };
+        let identifier = match submitted {
             Ok(identifier) => identifier,
             Err(error) => {
                 self.follower.request_failed(request.owner, self.time.now())?;
