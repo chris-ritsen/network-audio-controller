@@ -140,7 +140,7 @@ impl WavePlayback {
     pub fn open(directory: &Path, channels: u16) -> Result<Self> {
         let (finalizations, mut finalized) = mpsc::channel::<Segment>(PENDING_FINALIZATIONS);
         let mut writer = Writer::open(directory, finalizations, channels)?;
-        let finalizer = tokio::task::spawn_blocking(move || {
+        let finalizer = super::platform::spawn_background(move || {
             while let Some(segment) = finalized.blocking_recv() {
                 segment.finish()?;
             }
@@ -151,7 +151,7 @@ impl WavePlayback {
         let (receipt_sender, receipts) = mpsc::channel(QUEUED_DELIVERIES);
         let current_generation = Arc::new(AtomicU64::new(0));
         let worker_generation = current_generation.clone();
-        let worker = tokio::task::spawn_blocking(move || {
+        let worker = super::platform::spawn_background(move || {
             while let Some(delivery) = receiver.blocking_recv() {
                 let receipt = writer.consume(delivery, &worker_generation)?;
 

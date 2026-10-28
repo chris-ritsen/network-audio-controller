@@ -19,7 +19,7 @@ pub struct Publication {
 }
 
 impl Publication {
-    pub fn start(
+    pub async fn start(
         endpoint: &Endpoint,
         address: Ipv4Addr,
         identity: Identity,
@@ -27,7 +27,7 @@ impl Publication {
         monitoring_port: u16,
         source_port: u16,
     ) -> Result<Self> {
-        let daemon = ServiceDaemon::new()?;
+        let daemon = super::platform::spawn_background(|| Ok(ServiceDaemon::new()?)).await??;
         daemon.disable_interface(IfKind::All)?;
         daemon.enable_interface(IfKind::Addr(IpAddr::V4(address)))?;
         daemon.set_ip_check_interval(0)?;

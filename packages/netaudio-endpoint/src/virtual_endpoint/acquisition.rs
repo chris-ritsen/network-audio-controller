@@ -124,6 +124,7 @@ impl Client {
                 .as_ref()
                 .context("source acquisition has no selected context")?
                 .candidate
+                .context
                 .routing
                 .declaration
                 .current_revision,
@@ -141,7 +142,7 @@ impl Client {
 
         let deadline = Instant::now() + REQUEST_DEADLINE;
         let length =
-            self.socket.try_send_to(&packet, progress.candidate.routing.endpoint.into())?;
+            self.socket.try_send_to(&packet, progress.candidate.context.routing.endpoint.into())?;
 
         if length != packet.len() {
             bail!("source acquisition submitted an incomplete datagram");
@@ -240,7 +241,7 @@ impl Client {
                     return;
                 };
 
-                if peer != progress.candidate.routing.endpoint.into() {
+                if peer != progress.candidate.context.routing.endpoint.into() {
                     progress.discarded_datagrams += 1;
                     return;
                 }
@@ -346,6 +347,7 @@ impl Progress {
             .collect::<Vec<_>>();
         let selected = self
             .candidate
+            .context
             .slots
             .iter()
             .map(|slot| (slot.channel_name.as_str(), &slot.source))
@@ -356,9 +358,9 @@ impl Progress {
             &properties,
             &channels,
             &selected,
-            self.candidate.requested_frames_per_packet,
-            self.candidate.receiver_domain,
-            self.candidate.profile.receive_latency_nanoseconds,
+            self.candidate.context.requested_frames_per_packet,
+            self.candidate.context.receiver_domain,
+            self.candidate.context.profile.receive_latency_nanoseconds,
         ) {
             Ok(format) => self.source_format = Some(format),
             Err(error) => self.source_format_unavailable = Some(error.to_string()),

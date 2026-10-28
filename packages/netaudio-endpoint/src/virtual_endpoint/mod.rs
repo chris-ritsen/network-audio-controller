@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod pcm;
 pub mod platform;
 pub mod playback;
+mod receive_buffers;
 pub mod receive_runtime;
 pub mod receiver;
 pub mod resolution;

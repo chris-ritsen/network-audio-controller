@@ -38,7 +38,7 @@ impl Worker {
     ) -> Result<Self> {
         let (startup, ready) = oneshot::channel();
         let (stop, stopped) = oneshot::channel();
-        let worker = tokio::task::spawn_blocking(move || {
+        let worker = super::platform::spawn_background(move || {
             let runtime =
                 tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build()?;
             runtime.block_on(async move {

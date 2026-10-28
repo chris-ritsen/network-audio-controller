@@ -1,9 +1,12 @@
 use std::net::SocketAddrV4;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use hickory_proto::rr::Name;
 use netaudio_core::native_audio::domain::NamedDomain;
-use netaudio_core::native_audio::endpoint_control::{Endpoint, NAMED_CLOCK_DOMAIN, Profile};
+use netaudio_core::native_audio::endpoint_control::{
+    Endpoint, NAMED_CLOCK_DOMAIN, Profile, RouteIntent,
+};
 use netaudio_core::native_audio::source_discovery::{Routing, Source};
 use serde::Serialize;
 
@@ -12,6 +15,27 @@ use super::resolution::records::service_name;
 
 const CHANNEL_SERVICE: &[u8] = b"_netaudio-chan";
 const ROUTING_SERVICE: &[u8] = b"_netaudio-arc";
+
+#[derive(Clone)]
+pub struct Request {
+    pub generation: u64,
+    profile: Profile,
+    routes: Vec<Option<RouteIntent>>,
+}
+
+impl Request {
+    pub fn from_endpoint(endpoint: &Endpoint) -> Self {
+        Self {
+            generation: endpoint.route_generation,
+            profile: endpoint.profile,
+            routes: endpoint
+                .receive_channels
+                .iter()
+                .map(|receiver| receiver.desired.clone())
+                .collect(),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 struct Channel {
@@ -48,7 +72,7 @@ pub struct RoutingService {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Candidate {
+pub struct CandidateContext {
     pub route_generation: u64,
     pub device: String,
     pub target: String,
@@ -57,40 +81,40 @@ pub struct Candidate {
     pub slots: Vec<SourceSlot>,
     pub requested_frames_per_packet: u16,
     pub receiver_domain: NamedDomain,
-    pub usable_through: u64,
     pub profile: Profile,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Candidate {
+    #[serde(flatten)]
+    pub context: Arc<CandidateContext>,
+    pub discovery_generation: u64,
+    pub usable_through: u64,
 }
 
 impl Candidate {
     pub fn same_context(&self, other: &Self) -> bool {
-        self.route_generation == other.route_generation
-            && self.device == other.device
-            && self.target == other.target
-            && self.control_endpoint == other.control_endpoint
-            && self.routing == other.routing
-            && self.slots == other.slots
-            && self.requested_frames_per_packet == other.requested_frames_per_packet
-            && self.receiver_domain == other.receiver_domain
-            && self.profile == other.profile
+        self.discovery_generation == other.discovery_generation
+            && (Arc::ptr_eq(&self.context, &other.context) || self.context == other.context)
     }
 }
 
 impl Selection {
-    pub fn from_endpoint(endpoint: &Endpoint) -> Result<Option<Self>> {
+    pub fn from_request(request: &Request) -> Result<Option<Self>> {
         let mut selection: Option<Self> = None;
 
-        for (index, receiver) in endpoint.receive_channels.iter().enumerate() {
-            let Some(route) = &receiver.desired else {
+        for (index, route) in request.routes.iter().enumerate() {
+            let Some(route) = route else {
                 continue;
             };
 
             let routing_name = service_name(route.device.as_bytes(), ROUTING_SERVICE)?;
             let selected = selection.get_or_insert_with(|| Self {
-                generation: endpoint.route_generation,
+                generation: request.generation,
                 device: route.device.clone(),
                 channels: Vec::new(),
                 routing_name,
-                profile: endpoint.profile,
+                profile: request.profile,
             });
 
             if route.device != selected.device {
@@ -114,7 +138,7 @@ impl Selection {
         }
 
         if selection.as_ref().is_some_and(|selection| {
-            selection.channels.len() > usize::from(endpoint.profile.flow_slots)
+            selection.channels.len() > usize::from(request.profile.flow_slots)
         }) {
             bail!(
                 "selected distinct source channels exceed the configured receive flow slot capacity"
@@ -150,7 +174,7 @@ impl Selection {
             bail!("selected source routing service does not share its channel target and address");
         }
 
-        let mut candidate = Candidate {
+        let mut context = CandidateContext {
             route_generation: self.generation,
             device: self.device.clone(),
             target: first.target.to_utf8(),
@@ -164,9 +188,9 @@ impl Selection {
             slots: Vec::with_capacity(services.len()),
             requested_frames_per_packet: self.profile.frames_per_packet,
             receiver_domain: NAMED_CLOCK_DOMAIN,
-            usable_through: first.usable_through.min(routing.usable_through),
             profile: self.profile,
         };
+        let mut usable_through = first.usable_through.min(routing.usable_through);
         let mut ceiling = self.profile.maximum_frames_per_packet();
 
         for (channel, service) in self.channels.iter().zip(&services) {
@@ -179,14 +203,11 @@ impl Selection {
 
             let source = Source::decode(&service.text)?;
 
-            if source.named_domain != candidate.receiver_domain {
+            if source.named_domain != context.receiver_domain {
                 bail!("source named clock domain does not match the receiver");
             }
 
-            if candidate
-                .slots
-                .iter()
-                .any(|slot| slot.source_identifier == source.channel_identifier)
+            if context.slots.iter().any(|slot| slot.source_identifier == source.channel_identifier)
             {
                 bail!("distinct source channel services claim the same source identifier");
             }
@@ -195,15 +216,15 @@ impl Selection {
                 bail!("selected channels exceed the source flow slot capacity");
             }
 
-            candidate.requested_frames_per_packet =
-                candidate.requested_frames_per_packet.max(source.packetization.first);
+            context.requested_frames_per_packet =
+                context.requested_frames_per_packet.max(source.packetization.first);
 
             if source.packetization.third != 0 {
                 ceiling = ceiling.min(source.packetization.third);
             }
 
-            candidate.usable_through = candidate.usable_through.min(service.usable_through);
-            candidate.slots.push(SourceSlot {
+            usable_through = usable_through.min(service.usable_through);
+            context.slots.push(SourceSlot {
                 service: channel.name.to_utf8(),
                 channel_name: channel.label.clone(),
                 source_identifier: source.channel_identifier,
@@ -213,16 +234,20 @@ impl Selection {
             });
         }
 
-        candidate.requested_frames_per_packet = candidate.requested_frames_per_packet.min(ceiling);
+        context.requested_frames_per_packet = context.requested_frames_per_packet.min(ceiling);
 
-        if candidate
+        if context
             .slots
             .iter()
-            .any(|slot| slot.source.packetization.first > candidate.requested_frames_per_packet)
+            .any(|slot| slot.source.packetization.first > context.requested_frames_per_packet)
         {
             bail!("selected channels have no common source packetization range");
         }
 
-        Ok(candidate)
+        Ok(Candidate {
+            context: Arc::new(context),
+            discovery_generation: 0,
+            usable_through,
+        })
     }
 }

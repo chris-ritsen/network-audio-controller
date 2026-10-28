@@ -16,6 +16,7 @@ use tokio::net::UdpSocket;
 
 use super::acquisition::Progress;
 use super::playback::{Playback, Receipt};
+use super::receive_buffers::{Preparation, Prepared, Worker};
 use super::selection::Candidate;
 use super::sockets::{self, Datagram, MediaPool, Monotonic};
 
@@ -82,11 +83,12 @@ struct Flow {
 
 impl Flow {
     fn slots(&self) -> Vec<Vec<u16>> {
-        self.candidate.slots.iter().map(|slot| slot.receivers.clone()).collect()
+        self.candidate.context.slots.iter().map(|slot| slot.receivers.clone()).collect()
     }
 }
 
 pub enum Event {
+    Prepared(Result<Prepared>),
     Control(Vec<u8>, SocketAddr),
     Timeout,
     Consumed(Receipt),
@@ -106,6 +108,9 @@ pub struct Runtime {
     flow: Option<Flow>,
     pending: Option<Pending>,
     control_buffer: Vec<u8>,
+    buffers: Worker,
+    preparing: Option<(Candidate, u64, bool)>,
+    prepared: Option<Prepared>,
 }
 
 fn sample_time(tick: u64) -> Result<SampleTime> {
@@ -137,6 +142,9 @@ impl Runtime {
             flow: None,
             pending: None,
             control_buffer: vec![0; MAXIMUM_UDP_PAYLOAD_BYTES],
+            buffers: Worker::new(),
+            preparing: None,
+            prepared: None,
         })
     }
 
@@ -192,7 +200,25 @@ impl Runtime {
             self.retire(endpoint, "receive route or clock context changed")?;
         }
 
-        if self.flow.is_some() || self.pending.is_some() || self.summary.uncertain_remote_effect {
+        if let Some((previous, generation, valid)) = &mut self.preparing {
+            *valid &= candidate.is_some_and(|candidate| candidate.same_context(previous))
+                && reading.as_ref().is_some_and(|reading| reading.generation == *generation);
+        }
+        if self.prepared.as_ref().is_some_and(|prepared| {
+            !candidate
+                .is_some_and(|candidate| candidate.same_context(&prepared.preparation.candidate))
+                || !reading.as_ref().is_some_and(|reading| {
+                    reading.generation == prepared.preparation.owner.clock_generation
+                })
+        }) {
+            self.buffers.dispose(self.prepared.take().unwrap().buffer)?;
+        }
+
+        if self.flow.is_some()
+            || self.pending.is_some()
+            || self.preparing.is_some()
+            || self.summary.uncertain_remote_effect
+        {
             return Ok(());
         }
 
@@ -217,9 +243,11 @@ impl Runtime {
             return Ok(());
         }
 
-        if self.attempted.as_ref().is_some_and(|(previous, generation)| {
-            previous.same_context(candidate) && *generation == reading.generation
-        }) {
+        if self.prepared.is_none()
+            && self.attempted.as_ref().is_some_and(|(previous, generation)| {
+                previous.same_context(candidate) && *generation == reading.generation
+            })
+        {
             return Ok(());
         }
 
@@ -229,27 +257,54 @@ impl Runtime {
             return Ok(());
         }
 
-        let inventory_channels =
-            format.channels.iter().map(|channel| channel.routing_identifier).collect();
-        let generation = self.generation()?;
+        if self.prepared.is_none() {
+            let inventory_channels =
+                format.channels.iter().map(|channel| channel.routing_identifier).collect();
+            let owner = Owner {
+                endpoint_generation: self.endpoint_generation,
+                stream_generation: self.generation()?,
+                clock_generation: reading.generation,
+            };
+            let format = Format::new(
+                SAMPLE_RATE,
+                u16::try_from(candidate.context.slots.len())?,
+                SampleWidth::Signed24,
+            )?;
+            self.buffers.prepare(Preparation {
+                candidate: candidate.clone(),
+                owner,
+                format,
+                inventory_channels,
+            })?;
+            self.preparing = Some((candidate.clone(), reading.generation, true));
+            self.attempted = Some((candidate.clone(), reading.generation));
+            self.summary.unavailable = Some("preparing receive buffer".into());
+            return Ok(());
+        }
+        let generation = self
+            .prepared
+            .as_ref()
+            .context("receive buffer preparation disappeared")?
+            .preparation
+            .owner
+            .stream_generation;
         let Some(port_index) = self.pool.acquire(generation, self.time.now()) else {
             self.waiting_for_port = true;
             self.summary.unavailable = Some("receive ports are quarantined or unavailable".into());
             return Ok(());
         };
+        let prepared = self.prepared.take().context("receive buffer preparation disappeared")?;
+        let Preparation {
+            owner,
+            format,
+            inventory_channels,
+            ..
+        } = prepared.preparation;
         let SocketAddr::V4(destination) = self.pool.slots[port_index].socket.local_addr()? else {
             bail!("receive media socket is not IPv4");
         };
-        let owner = Owner {
-            endpoint_generation: self.endpoint_generation,
-            stream_generation: generation,
-            clock_generation: reading.generation,
-        };
-        let format =
-            Format::new(SAMPLE_RATE, u16::try_from(candidate.slots.len())?, SampleWidth::Signed24)?;
-        let slots = candidate.slots.iter().map(|slot| slot.receivers.clone()).collect::<Vec<_>>();
         let channels =
-            candidate.slots.iter().map(|slot| slot.source_identifier).collect::<Vec<_>>();
+            candidate.context.slots.iter().map(|slot| slot.source_identifier).collect::<Vec<_>>();
         let request = source_control::allocate(
             &Allocation {
                 receiver_hostname: &endpoint.name,
@@ -257,7 +312,7 @@ impl Runtime {
                 destination,
                 format,
                 source_channel_identifiers: &channels,
-                requested_frames_per_packet: candidate.requested_frames_per_packet,
+                requested_frames_per_packet: candidate.context.requested_frames_per_packet,
             },
             self.transaction()?,
         )?;
@@ -269,18 +324,12 @@ impl Runtime {
             format,
             destination,
             handle: None,
-            inventory: Inventory::new(candidate.routing.declaration.current_revision),
+            inventory: Inventory::new(candidate.context.routing.declaration.current_revision),
             inventory_channels,
             confirmed: false,
             retiring: false,
             source: None,
-            buffer: Buffer::with_profile(
-                owner,
-                format,
-                candidate.requested_frames_per_packet,
-                &slots,
-                endpoint.profile,
-            )?,
+            buffer: prepared.buffer,
             next_reverse_tick: None,
             first_media_deadline: self
                 .time
@@ -292,7 +341,7 @@ impl Runtime {
         self.attempted = Some((candidate.clone(), reading.generation));
         self.summary.unavailable = Some("waiting for source allocation".into());
         self.summary.allocation_requests += 1;
-        self.submit(Operation::Allocate, candidate.control_endpoint, &request)
+        self.submit(Operation::Allocate, candidate.context.control_endpoint, &request)
     }
 
     fn clear_status(endpoint: &mut Endpoint) {
@@ -310,6 +359,12 @@ impl Runtime {
     }
 
     pub fn retire(&mut self, endpoint: &mut Endpoint, reason: &str) -> Result<()> {
+        if let Some((_, _, valid)) = &mut self.preparing {
+            *valid = false;
+        }
+        if let Some(prepared) = self.prepared.take() {
+            self.buffers.dispose(prepared.buffer)?;
+        }
         if self.summary.unavailable.as_deref() != Some(reason) {
             eprintln!("receiver retiring: {reason}");
         }
@@ -335,7 +390,7 @@ impl Runtime {
 
         self.pending = None;
         let handle = flow.handle.context("receive flow has no allocation owner to retire")?;
-        let peer = flow.candidate.control_endpoint;
+        let peer = flow.candidate.context.control_endpoint;
         let request = source_control::stop(handle, self.transaction()?)?;
         self.summary.stop_requests += 1;
         self.submit(Operation::Stop, peer, &request)
@@ -344,6 +399,7 @@ impl Runtime {
     fn release(&mut self) -> Result<()> {
         if let Some(flow) = self.flow.take() {
             self.pool.release(flow.port_index, self.time.now())?;
+            self.buffers.dispose(flow.buffer)?;
         }
 
         Ok(())
@@ -353,7 +409,7 @@ impl Runtime {
         let transaction = self.transaction()?;
         let flow = self.flow.as_ref().context("source inventory lost its allocation")?;
         let request = flow.inventory.request(transaction)?;
-        self.submit(Operation::Inventory, flow.candidate.routing.endpoint, &request)
+        self.submit(Operation::Inventory, flow.candidate.context.routing.endpoint, &request)
     }
 
     pub async fn next_event(&mut self) -> Result<Event> {
@@ -362,6 +418,7 @@ impl Runtime {
 
         tokio::select! {
             biased;
+            prepared = self.buffers.next() => Ok(Event::Prepared(prepared?)),
             _ = async {
                 match deadline {
                     Some(deadline) => tokio::time::sleep_until(deadline).await,
@@ -383,6 +440,17 @@ impl Runtime {
 
     pub fn event(&mut self, event: Event, endpoint: &mut Endpoint) -> Result<()> {
         match event {
+            Event::Prepared(prepared) => {
+                let (_, _, valid) =
+                    self.preparing.take().context("receive buffer has no preparation owner")?;
+                let prepared = prepared?;
+                if valid {
+                    self.prepared = Some(prepared);
+                } else {
+                    self.buffers.dispose(prepared.buffer)?;
+                }
+                Ok(())
+            }
             Event::Consumed(receipt) => self.consumed(receipt, endpoint),
             Event::Timeout => {
                 let pending = self.pending.take().context("receive deadline has no request")?;
@@ -465,7 +533,7 @@ impl Runtime {
                         flow.handle.context("source handle is missing")?,
                         flow.destination,
                         &flow.inventory_channels,
-                        flow.candidate.requested_frames_per_packet,
+                        flow.candidate.context.requested_frames_per_packet,
                     )?;
                     Ok(true)
                 })();
@@ -527,7 +595,7 @@ impl Runtime {
         if index != flow.port_index
             || datagram.generation != flow.socket_generation
             || reading.generation != flow.owner.clock_generation
-            || datagram.peer.ip() != flow.candidate.control_endpoint.ip()
+            || datagram.peer.ip() != flow.candidate.context.control_endpoint.ip()
             || flow.source.is_some_and(|source| source != datagram.peer)
         {
             self.summary.rejected_packets += 1;
@@ -536,7 +604,7 @@ impl Runtime {
 
         let packet = Packet::decode(&datagram.bytes, flow.format)?;
 
-        if packet.frame_count() != usize::from(flow.candidate.requested_frames_per_packet) {
+        if packet.frame_count() != usize::from(flow.candidate.context.requested_frames_per_packet) {
             bail!("received audio differs from confirmed source packetization");
         }
 
@@ -557,7 +625,7 @@ impl Runtime {
                 status: 0,
             });
 
-            for slot in &flow.candidate.slots {
+            for slot in &flow.candidate.context.slots {
                 for identifier in &slot.receivers {
                     let channel = &mut endpoint.receive_channels[usize::from(*identifier - 1)];
                     channel.subscription_status = SUBSCRIPTION_UNICAST;
@@ -746,7 +814,7 @@ impl Runtime {
                 flow.active = true;
             }
 
-            for slot in &flow.candidate.slots {
+            for slot in &flow.candidate.context.slots {
                 for identifier in &slot.receivers {
                     endpoint.receive_channels[usize::from(*identifier - 1)].asserted_interfaces =
                         SELECTED_ASSOCIATION_MASK;
@@ -769,6 +837,7 @@ impl Runtime {
         }
 
         self.release()?;
+        self.buffers.close().await?;
 
         if let Some(playback) = self.playback.take() {
             playback.close().await?;
