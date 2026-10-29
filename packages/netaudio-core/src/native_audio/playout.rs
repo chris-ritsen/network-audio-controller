@@ -2,16 +2,19 @@ use std::fmt;
 
 use serde::Serialize;
 
-use super::endpoint_control::{CHANNEL_COUNT, SAMPLE_RATE};
+use super::endpoint_control::Profile;
 use super::{Format, Packet};
 
-pub const QUANTUM_FRAMES: usize = 48;
-pub const PRIMING_FRAMES: usize = 96;
+const REFERENCE_QUANTUM_FRAMES: usize = 48;
+const REFERENCE_SAMPLE_RATE: u32 = 48_000;
 pub const RING_FRAMES: usize = 8192;
-pub const RECEIVE_LATENCY_FRAMES: u64 = 960;
-pub const MAXIMUM_MISSING_FRAMES: usize = 2400;
+const MAXIMUM_MISSING_NANOSECONDS: u64 = 50_000_000;
 
-pub type Samples = [i32; CHANNEL_COUNT as usize];
+pub fn quantum_frames(sample_rate: u32) -> usize {
+    REFERENCE_QUANTUM_FRAMES * sample_rate.div_ceil(REFERENCE_SAMPLE_RATE).max(1) as usize
+}
+
+pub type Samples = Vec<i32>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Owner {
@@ -33,10 +36,10 @@ impl Owner {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Frame {
     pub samples: Samples,
-    pub received: [bool; CHANNEL_COUNT as usize],
+    pub received: Vec<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,6 +62,7 @@ pub enum Error {
     NotPrimed,
     EarlyDelivery,
     MissedDeadline,
+    GenerationExhausted,
 }
 
 impl fmt::Display for Error {
@@ -74,6 +78,7 @@ impl fmt::Display for Error {
             Self::NotPrimed => "playout does not have a complete initial sample interval",
             Self::EarlyDelivery => "playout delivery was requested before its sample deadline",
             Self::MissedDeadline => "playout missed a complete local sample quantum",
+            Self::GenerationExhausted => "playout buffer generation space is exhausted",
         })
     }
 }
@@ -85,11 +90,17 @@ pub struct Buffer {
     format: Format,
     frames_per_packet: usize,
     slots: Vec<Vec<usize>>,
-    selected: [bool; CHANNEL_COUNT as usize],
+    selected: Vec<bool>,
+    receive_latency_frames: u64,
+    quantum_frames: usize,
+    maximum_missing_frames: usize,
     frames: Vec<Frame>,
+    frame_generations: Vec<u64>,
+    generation: u64,
     first_received: Option<u64>,
     cursor: Option<u64>,
     primed: bool,
+    aligned: bool,
     consecutive_missing: usize,
 }
 
@@ -100,10 +111,21 @@ impl Buffer {
         frames_per_packet: u16,
         slots: &[Vec<u16>],
     ) -> Result<Self, Error> {
-        owner.validate()?;
+        Self::with_profile(owner, format, frames_per_packet, slots, Profile::default())
+    }
 
-        if format.sample_rate() != SAMPLE_RATE
-            || format.sample_width() != super::SampleWidth::Signed24
+    pub fn with_profile(
+        owner: Owner,
+        format: Format,
+        frames_per_packet: u16,
+        slots: &[Vec<u16>],
+        profile: Profile,
+    ) -> Result<Self, Error> {
+        owner.validate()?;
+        profile.validate().map_err(|_| Error::InvalidFormat)?;
+
+        if format.sample_rate() != profile.sample_rate
+            || format.sample_width().bits() != profile.sample_bits
             || frames_per_packet == 0
             || usize::from(frames_per_packet) > RING_FRAMES
         {
@@ -114,14 +136,14 @@ impl Buffer {
             return Err(Error::InvalidMapping);
         }
 
-        let mut selected = [false; CHANNEL_COUNT as usize];
+        let mut selected = vec![false; usize::from(profile.receive_channels)];
         let mut mapping = Vec::with_capacity(slots.len());
 
         for slot in slots {
             let mut channels = Vec::with_capacity(slot.len());
 
             for channel in slot {
-                if !(1..=CHANNEL_COUNT).contains(channel) {
+                if !(1..=profile.receive_channels).contains(channel) {
                     return Err(Error::InvalidMapping);
                 }
 
@@ -148,10 +170,23 @@ impl Buffer {
             frames_per_packet: usize::from(frames_per_packet),
             slots: mapping,
             selected,
-            frames: vec![Frame::default(); RING_FRAMES],
+            receive_latency_frames: profile.receive_latency_frames(),
+            quantum_frames: quantum_frames(format.sample_rate()),
+            maximum_missing_frames: (u64::from(format.sample_rate()) * MAXIMUM_MISSING_NANOSECONDS)
+                .div_ceil(1_000_000_000) as usize,
+            frames: vec![
+                Frame {
+                    samples: vec![0; usize::from(profile.receive_channels)],
+                    received: vec![false; usize::from(profile.receive_channels)]
+                };
+                RING_FRAMES
+            ],
+            frame_generations: vec![0; RING_FRAMES],
+            generation: 1,
             first_received: None,
             cursor: None,
             primed: false,
+            aligned: false,
             consecutive_missing: 0,
         })
     }
@@ -162,11 +197,13 @@ impl Buffer {
 
     pub fn reset(&mut self, owner: Owner) -> Result<(), Error> {
         owner.validate()?;
+        let generation = self.generation.checked_add(1).ok_or(Error::GenerationExhausted)?;
         self.owner = owner;
-        self.frames.fill(Frame::default());
+        self.generation = generation;
         self.first_received = None;
         self.cursor = None;
         self.primed = false;
+        self.aligned = false;
         self.consecutive_missing = 0;
         Ok(())
     }
@@ -184,14 +221,12 @@ impl Buffer {
 
         let first = packet
             .time
-            .ticks(SAMPLE_RATE)
+            .ticks(self.format.sample_rate())
             .map_err(|_| Error::InvalidTime)?
-            .checked_add(RECEIVE_LATENCY_FRAMES)
+            .checked_add(self.receive_latency_frames)
             .ok_or(Error::InvalidTime)?;
-        let end = first
-            .checked_add(self.frames_per_packet as u64)
-            .ok_or(Error::InvalidTime)?;
-        let maximum_tick = (u64::from(u32::MAX) + 1) * u64::from(SAMPLE_RATE);
+        let end = first.checked_add(self.frames_per_packet as u64).ok_or(Error::InvalidTime)?;
+        let maximum_tick = (u64::from(u32::MAX) + 1) * u64::from(self.format.sample_rate());
 
         if end > maximum_tick {
             return Err(Error::InvalidTime);
@@ -201,33 +236,29 @@ impl Buffer {
             return Err(Error::OutsideWindow);
         }
 
-        let aligned = first / QUANTUM_FRAMES as u64 * QUANTUM_FRAMES as u64;
         let expired_priming =
             !self.primed && self.cursor.is_some_and(|cursor| cursor <= current_tick);
 
         if self.cursor.is_none() || expired_priming {
-            if aligned <= current_tick {
+            if first <= current_tick {
                 return Err(Error::OutsideWindow);
             }
 
             self.reset(owner)?;
             self.first_received = Some(first);
-            self.cursor = Some(aligned);
+            self.cursor = Some(first);
         }
 
         let cursor = self.cursor.ok_or(Error::NotPrimed)?;
-        let window_end = cursor
-            .checked_add(RING_FRAMES as u64)
-            .ok_or(Error::InvalidTime)?;
+        let window_end = cursor.checked_add(RING_FRAMES as u64).ok_or(Error::InvalidTime)?;
 
         if first < cursor || end > window_end {
             return Err(Error::OutsideWindow);
         }
 
         for tick in first..end {
-            let frame = &self.frames[(tick % RING_FRAMES as u64) as usize];
-
-            if frame.received.iter().any(|received| *received) {
+            let index = (tick % RING_FRAMES as u64) as usize;
+            if self.frame_generations[index] == self.generation {
                 return Err(Error::Overlap);
             }
         }
@@ -235,7 +266,11 @@ impl Buffer {
         let mut samples = packet.samples();
 
         for tick in first..end {
-            let frame = &mut self.frames[(tick % RING_FRAMES as u64) as usize];
+            let index = (tick % RING_FRAMES as u64) as usize;
+            let frame = &mut self.frames[index];
+            frame.samples.fill(0);
+            frame.received.fill(false);
+            self.frame_generations[index] = self.generation;
 
             for slot in &self.slots {
                 let sample = samples.next().ok_or(Error::InvalidFormat)?;
@@ -259,16 +294,18 @@ impl Buffer {
             }
 
             let first = self.first_received?;
-            let end = first.checked_add(PRIMING_FRAMES as u64)?;
+            let end = first.checked_add(2 * self.quantum_frames as u64)?;
 
             for tick in first..end {
-                let frame = &self.frames[(tick % RING_FRAMES as u64) as usize];
+                let index = (tick % RING_FRAMES as u64) as usize;
+                let frame = &self.frames[index];
 
-                if self
-                    .selected
-                    .iter()
-                    .zip(frame.received)
-                    .any(|(selected, received)| *selected && !received)
+                if self.frame_generations[index] != self.generation
+                    || self
+                        .selected
+                        .iter()
+                        .zip(&frame.received)
+                        .any(|(selected, received)| *selected && !*received)
                 {
                     return None;
                 }
@@ -278,6 +315,22 @@ impl Buffer {
         }
 
         Some(cursor)
+    }
+
+    pub fn align(&mut self, first: u64) -> Result<(), Error> {
+        let cursor = self.cursor.ok_or(Error::NotPrimed)?;
+        if self.aligned && first != cursor {
+            return Err(Error::MissedDeadline);
+        }
+        if first.abs_diff(cursor) >= RING_FRAMES as u64 {
+            return Err(Error::OutsideWindow);
+        }
+        for tick in cursor..first {
+            self.frame_generations[(tick % RING_FRAMES as u64) as usize] = 0;
+        }
+        self.cursor = Some(first);
+        self.aligned = true;
+        Ok(())
     }
 
     pub fn deliver(&mut self, owner: Owner, current_tick: u64) -> Result<Delivery, Error> {
@@ -290,9 +343,7 @@ impl Buffer {
         }
 
         let first = self.cursor.ok_or(Error::NotPrimed)?;
-        let end = first
-            .checked_add(QUANTUM_FRAMES as u64)
-            .ok_or(Error::InvalidTime)?;
+        let end = first.checked_add(self.quantum_frames as u64).ok_or(Error::InvalidTime)?;
 
         if current_tick < first {
             return Err(Error::EarlyDelivery);
@@ -302,27 +353,31 @@ impl Buffer {
             return Err(Error::MissedDeadline);
         }
 
-        let mut frames = Vec::with_capacity(QUANTUM_FRAMES);
+        let mut frames = Vec::with_capacity(self.quantum_frames);
         let mut missing_limit_reached = false;
 
         for tick in first..end {
-            let frame = std::mem::take(&mut self.frames[(tick % RING_FRAMES as u64) as usize]);
+            let index = (tick % RING_FRAMES as u64) as usize;
+            let stored = &mut self.frames[index];
+            if self.frame_generations[index] != self.generation {
+                stored.samples.fill(0);
+                stored.received.fill(false);
+            }
+            let frame = stored.clone();
+            self.frame_generations[index] = 0;
             let missing = self
                 .selected
                 .iter()
-                .zip(frame.received)
-                .any(|(selected, received)| *selected && !received);
+                .zip(&frame.received)
+                .any(|(selected, received)| *selected && !*received);
 
-            if self
-                .first_received
-                .is_some_and(|first_received| tick >= first_received)
-            {
+            if self.first_received.is_some_and(|first_received| tick >= first_received) {
                 self.consecutive_missing = if missing {
                     self.consecutive_missing.saturating_add(1)
                 } else {
                     0
                 };
-                missing_limit_reached |= self.consecutive_missing >= MAXIMUM_MISSING_FRAMES;
+                missing_limit_reached |= self.consecutive_missing >= self.maximum_missing_frames;
             }
 
             frames.push(frame);

@@ -1,119 +1,58 @@
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::net::Ipv4Addr;
 
 use anyhow::{Context, Result, bail};
-use netaudio_core::native_audio::clock::discipline::{Reading, SampleClock};
-use netaudio_core::native_audio::endpoint_control::{Endpoint, ReceiveFlow, SAMPLE_RATE};
-use netaudio_core::native_audio::flow_inventory::Inventory;
-use netaudio_core::native_audio::playout::{self, Buffer, Owner};
-use netaudio_core::native_audio::source_control::{self, Allocation, Handle, Header, ReplyProfile};
-use netaudio_core::native_audio::{
-    Format, MAXIMUM_UDP_PAYLOAD_BYTES, Packet, REVERSE_KEEPALIVE, SampleTime, SampleWidth,
-};
-use netaudio_core::protocol::RESULT_CODE_SUCCESS;
+use futures_util::future::select_all;
+use netaudio_core::native_audio::SampleTime;
+use netaudio_core::native_audio::clock::discipline::SampleClock;
+use netaudio_core::native_audio::endpoint_control::{Endpoint, Profile};
+use netaudio_core::native_audio::playout::{Delivery, Frame, Owner, quantum_frames};
 use serde::Serialize;
-use tokio::net::UdpSocket;
 
-use super::acquisition::Progress;
 use super::playback::{Playback, Receipt};
+use super::receive_session::{self, Session};
 use super::selection::Candidate;
-use super::sockets::{self, Datagram, MediaPool, Monotonic};
+use super::sockets::{Datagram, MediaPool, Monotonic, PoolSlot};
 
-const CONTROL_DEADLINE_NANOSECONDS: u64 = 2_000_000_000;
-const FIRST_MEDIA_DEADLINE_NANOSECONDS: u64 = 5_000_000_000;
-const REVERSE_INTERVAL_FRAMES: u64 = 12_000;
-const RECEIVER_FLOW_NAME: &str = "rx-flow-1";
-const SUBSCRIPTION_UNRESOLVED: u16 = 1;
-const SUBSCRIPTION_UNICAST: u16 = 9;
-const SELECTED_ASSOCIATION_MASK: u8 = 1;
+const PORTS_PER_FLOW: usize = 2;
+const MAXIMUM_PENDING_OUTPUT_BLOCKS: usize = 256;
 
 #[derive(Default, Serialize)]
 pub struct Summary {
-    pub allocation_requests: u64,
-    pub allocation_acceptances: u64,
-    pub inventory_confirmations: u64,
-    pub stop_requests: u64,
-    pub stop_acceptances: u64,
-    pub received_packets: u64,
-    pub rejected_packets: u64,
-    pub reverse_packets: u64,
-    pub delivered_frames: u64,
-    pub received_samples_consumed: u64,
-    pub local_silence_samples_consumed: u64,
-    pub media_suspensions: u64,
-    pub missed_playout_deadlines: u64,
-    pub missing_frame_suspensions: u64,
-    pub uncertain_remote_effect: bool,
-    pub unavailable: Option<String>,
+    #[serde(flatten)]
+    pub totals: receive_session::Summary,
+    pub peak_flows: usize,
+    pub output_frames: u64,
+    pub flows: Vec<FlowSummary>,
+    pub unavailable: Vec<String>,
 }
 
-#[derive(Clone, Copy)]
-enum Operation {
-    Allocate,
-    Inventory,
-    Stop,
-}
-
-struct Pending {
-    operation: Operation,
-    header: Header,
-    peer: SocketAddrV4,
-    deadline: u64,
-}
-
-struct Flow {
-    candidate: Candidate,
-    port_index: usize,
-    socket_generation: u64,
-    owner: Owner,
-    format: Format,
-    destination: SocketAddrV4,
-    handle: Option<Handle>,
-    inventory: Inventory,
-    inventory_channels: Vec<u16>,
-    confirmed: bool,
-    retiring: bool,
-    source: Option<SocketAddrV4>,
-    buffer: Buffer,
-    next_reverse_tick: Option<u64>,
-    first_media_deadline: u64,
-    last_receipt_end: Option<u64>,
-}
-
-impl Flow {
-    fn slots(&self) -> Vec<Vec<u16>> {
-        self.candidate.slots.iter().map(|slot| slot.receivers.clone()).collect()
-    }
+#[derive(Serialize)]
+pub struct FlowSummary {
+    pub identifier: u16,
+    pub candidate: Option<Candidate>,
+    pub acquisition: Option<super::acquisition::Progress>,
+    #[serde(flatten)]
+    pub counters: receive_session::Summary,
 }
 
 pub enum Event {
-    Control(Vec<u8>, SocketAddr),
-    Timeout,
+    Session(usize, Result<receive_session::Event>),
     Consumed(Receipt),
 }
 
 pub struct Runtime {
-    pub pool: MediaPool,
     pub summary: Summary,
-    control: Arc<UdpSocket>,
+    sessions: Vec<Session>,
     playback: Option<Playback>,
     time: Monotonic,
+    profile: Profile,
     endpoint_generation: u64,
-    generation: u64,
-    next_transaction: Option<u16>,
-    attempted: Option<(Candidate, u64)>,
-    waiting_for_port: bool,
-    flow: Option<Flow>,
-    pending: Option<Pending>,
-    control_buffer: Vec<u8>,
-}
-
-fn sample_time(tick: u64) -> Result<SampleTime> {
-    Ok(SampleTime::new(
-        u32::try_from(tick / u64::from(SAMPLE_RATE))?,
-        (tick % u64::from(SAMPLE_RATE)) as u32,
-        SAMPLE_RATE,
-    )?)
+    output_generation: u64,
+    output_owner: Option<Owner>,
+    output_tick: Option<u64>,
+    pending: BTreeMap<u64, Vec<(usize, Receipt)>>,
+    last_event: usize,
 }
 
 impl Runtime {
@@ -122,386 +61,130 @@ impl Runtime {
         playback: Option<Playback>,
         time: Monotonic,
         incarnation: u64,
+        profile: Profile,
     ) -> Result<Self> {
+        let pool =
+            MediaPool::reserve(address, time.now(), profile.receive_flows * PORTS_PER_FLOW as u16)
+                .await?;
+        let mut sessions = Vec::new();
+        for (index, pool) in pool.partition(PORTS_PER_FLOW)?.into_iter().enumerate() {
+            sessions.push(
+                Session::new(
+                    address,
+                    playback.is_some(),
+                    time.clone(),
+                    incarnation,
+                    (index + 1) as u16,
+                    pool,
+                )
+                .await?,
+            );
+        }
         Ok(Self {
-            pool: MediaPool::reserve(address, time.now()).await?,
             summary: Summary::default(),
-            control: sockets::bind(address).await?,
+            sessions,
             playback,
             time,
+            profile,
             endpoint_generation: incarnation,
-            generation: 0,
-            next_transaction: Some(1),
-            attempted: None,
-            waiting_for_port: false,
-            flow: None,
-            pending: None,
-            control_buffer: vec![0; MAXIMUM_UDP_PAYLOAD_BYTES],
+            output_generation: 0,
+            output_owner: None,
+            output_tick: None,
+            pending: BTreeMap::new(),
+            last_event: 0,
         })
     }
 
-    fn generation(&mut self) -> Result<u64> {
-        self.generation = self.generation.checked_add(1).context("receive generation exhausted")?;
-        Ok(self.generation)
+    pub fn media_slots(&self) -> impl Iterator<Item = &PoolSlot> {
+        self.sessions.iter().flat_map(|session| &session.pool.slots)
     }
 
-    fn transaction(&mut self) -> Result<u16> {
-        let transaction =
-            self.next_transaction.context("receive control transaction space exhausted")?;
-        self.next_transaction = transaction.checked_add(1);
-        Ok(transaction)
-    }
-
-    fn submit(&mut self, operation: Operation, peer: SocketAddrV4, bytes: &[u8]) -> Result<()> {
-        let header = Header::decode(bytes)?;
-        self.pending = Some(Pending {
-            operation,
-            header,
-            peer,
-            deadline: self
-                .time
-                .now()
-                .checked_add(CONTROL_DEADLINE_NANOSECONDS)
-                .context("receive control deadline overflow")?,
-        });
-        let sent = self.control.try_send_to(bytes, peer.into())?;
-
-        if sent != bytes.len() {
-            bail!("receive control request was not submitted completely");
-        }
-
-        Ok(())
+    pub fn next_available_port(&self) -> Option<u64> {
+        self.sessions.iter().filter_map(|session| session.pool.next_available()).min()
     }
 
     pub fn synchronize(
         &mut self,
         endpoint: &mut Endpoint,
-        candidate: Option<&Candidate>,
-        progress: Option<&Progress>,
+        candidates: &[Candidate],
         clock: &impl SampleClock,
     ) -> Result<()> {
-        let reading = clock.reading(self.time.now())?;
-        let current = self.flow.as_ref().is_none_or(|flow| {
-            candidate.is_some_and(|candidate| candidate.same_context(&flow.candidate))
-                && reading
-                    .as_ref()
-                    .is_some_and(|reading| reading.generation == flow.owner.clock_generation)
-        });
-
-        if !current {
-            self.retire(endpoint, "receive route or clock context changed")?;
+        let mut assigned = vec![false; candidates.len()];
+        for session in &mut self.sessions {
+            let current = session.candidate.as_ref().and_then(|previous| {
+                candidates.iter().enumerate().find(|(_, candidate)| {
+                    self.time.now() <= candidate.usable_through && candidate.same_context(previous)
+                })
+            });
+            match current {
+                Some((index, candidate)) => {
+                    assigned[index] = true;
+                    session.select(Some(candidate));
+                }
+                None => session.select(None),
+            }
         }
-
-        if self.flow.is_some() || self.pending.is_some() || self.summary.uncertain_remote_effect {
-            return Ok(());
-        }
-
-        self.waiting_for_port = false;
-        let Some(candidate) = candidate else {
-            return Ok(());
-        };
-        let Some(reading) = reading else {
-            self.summary.unavailable = Some("receive clock is unavailable".into());
-            return Ok(());
-        };
-        let Some(progress) = progress else {
-            return Ok(());
-        };
-        let Some(format) = &progress.source_format else {
-            self.summary.unavailable.clone_from(&progress.source_format_unavailable);
-            return Ok(());
-        };
-
-        if self.playback.is_none() {
-            self.summary.unavailable = Some("receive output is not configured".into());
-            return Ok(());
-        }
-
-        if self.attempted.as_ref().is_some_and(|(previous, generation)| {
-            previous.same_context(candidate) && *generation == reading.generation
-        }) {
-            return Ok(());
-        }
-
-        if self.pool.next_available().is_none_or(|deadline| deadline > self.time.now()) {
-            self.waiting_for_port = true;
-            self.summary.unavailable = Some("receive ports are quarantined or unavailable".into());
-            return Ok(());
-        }
-
-        let inventory_channels =
-            format.channels.iter().map(|channel| channel.routing_identifier).collect();
-        let generation = self.generation()?;
-        let Some(port_index) = self.pool.acquire(generation, self.time.now()) else {
-            self.waiting_for_port = true;
-            self.summary.unavailable = Some("receive ports are quarantined or unavailable".into());
-            return Ok(());
-        };
-        let SocketAddr::V4(destination) = self.pool.slots[port_index].socket.local_addr()? else {
-            bail!("receive media socket is not IPv4");
-        };
-        let owner = Owner {
-            endpoint_generation: self.endpoint_generation,
-            stream_generation: generation,
-            clock_generation: reading.generation,
-        };
-        let format =
-            Format::new(SAMPLE_RATE, u16::try_from(candidate.slots.len())?, SampleWidth::Signed24)?;
-        let slots = candidate.slots.iter().map(|slot| slot.receivers.clone()).collect::<Vec<_>>();
-        let channels =
-            candidate.slots.iter().map(|slot| slot.source_identifier).collect::<Vec<_>>();
-        let request = source_control::allocate(
-            &Allocation {
-                receiver_hostname: &endpoint.name,
-                receiver_flow_name: RECEIVER_FLOW_NAME,
-                destination,
-                format,
-                source_channel_identifiers: &channels,
-                requested_frames_per_packet: candidate.requested_frames_per_packet,
-            },
-            self.transaction()?,
-        )?;
-        self.flow = Some(Flow {
-            candidate: candidate.clone(),
-            port_index,
-            socket_generation: generation,
-            owner,
-            format,
-            destination,
-            handle: None,
-            inventory: Inventory::new(candidate.routing.declaration.current_revision),
-            inventory_channels,
-            confirmed: false,
-            retiring: false,
-            source: None,
-            buffer: Buffer::new(owner, format, candidate.requested_frames_per_packet, &slots)?,
-            next_reverse_tick: None,
-            first_media_deadline: self
-                .time
-                .now()
-                .checked_add(FIRST_MEDIA_DEADLINE_NANOSECONDS)
-                .context("first media deadline overflow")?,
-            last_receipt_end: None,
-        });
-        self.attempted = Some((candidate.clone(), reading.generation));
-        self.summary.unavailable = Some("waiting for source allocation".into());
-        self.summary.allocation_requests += 1;
-        self.submit(Operation::Allocate, candidate.control_endpoint, &request)
-    }
-
-    fn clear_status(endpoint: &mut Endpoint) {
-        endpoint.receive_flow = None;
-
-        for channel in &mut endpoint.receive_channels {
-            channel.subscription_status = if channel.desired.is_some() {
-                SUBSCRIPTION_UNRESOLVED
+        self.summary.unavailable.clear();
+        for (index, candidate) in candidates.iter().enumerate() {
+            if assigned[index] || self.time.now() > candidate.usable_through {
+                continue;
+            }
+            if let Some(session) = self.sessions.iter_mut().find(|session| {
+                session.candidate.is_none()
+                    && session.idle()
+                    && !session.summary.uncertain_remote_effect
+            }) {
+                session.select(Some(candidate));
             } else {
-                0
-            };
-            channel.available_interfaces = 0;
-            channel.asserted_interfaces = 0;
+                self.summary.unavailable.push(format!(
+                    "no receive flow resource is currently available for {}",
+                    candidate.context.device
+                ));
+            }
         }
-    }
-
-    pub fn retire(&mut self, endpoint: &mut Endpoint, reason: &str) -> Result<()> {
-        if self.summary.unavailable.as_deref() != Some(reason) {
-            eprintln!("receiver retiring: {reason}");
+        for session in &mut self.sessions {
+            if let Err(error) = session.synchronize(endpoint, clock) {
+                session.summary.unavailable = Some(format!("{error:#}"));
+                eprintln!("receiver flow {} reconciliation failed: {error:#}", session.identifier);
+            }
         }
-        if !self.summary.uncertain_remote_effect {
-            self.summary.unavailable = Some(reason.to_owned());
-        }
-        Self::clear_status(endpoint);
-
-        if let Some(playback) = &self.playback {
-            playback.select(0);
-        }
-
-        let Some(flow) = &mut self.flow else {
-            return Ok(());
-        };
-        flow.retiring = true;
-
-        if self.pending.as_ref().is_some_and(|pending| {
-            matches!(pending.operation, Operation::Allocate | Operation::Stop)
-        }) {
-            return Ok(());
-        }
-
-        self.pending = None;
-        let handle = flow.handle.context("receive flow has no allocation owner to retire")?;
-        let peer = flow.candidate.control_endpoint;
-        let request = source_control::stop(handle, self.transaction()?)?;
-        self.summary.stop_requests += 1;
-        self.submit(Operation::Stop, peer, &request)
-    }
-
-    fn release(&mut self) -> Result<()> {
-        if let Some(flow) = self.flow.take() {
-            self.pool.release(flow.port_index, self.time.now())?;
-        }
-
+        self.summary.peak_flows = self
+            .summary
+            .peak_flows
+            .max(self.sessions.iter().filter(|session| !session.idle()).count());
+        self.update_output_selection()?;
         Ok(())
     }
 
-    fn inventory(&mut self) -> Result<()> {
-        let transaction = self.transaction()?;
-        let flow = self.flow.as_ref().context("source inventory lost its allocation")?;
-        let request = flow.inventory.request(transaction)?;
-        self.submit(Operation::Inventory, flow.candidate.routing.endpoint, &request)
-    }
-
-    pub async fn next_event(&mut self) -> Result<Event> {
-        let deadline =
-            self.pending.as_ref().map(|pending| self.time.instant(pending.deadline)).transpose()?;
-
-        tokio::select! {
-            biased;
-            _ = async {
-                match deadline {
-                    Some(deadline) => tokio::time::sleep_until(deadline).await,
-                    _ => std::future::pending().await,
-                }
-            } => Ok(Event::Timeout),
-            received = self.control.recv_from(&mut self.control_buffer), if self.pending.is_some() => {
-                let (length, peer) = received?;
-                Ok(Event::Control(self.control_buffer[..length].to_vec(), peer))
-            }
-            receipt = async {
-                match &mut self.playback {
-                    Some(playback) if self.flow.as_ref().is_some_and(|flow| !flow.retiring) => playback.receipt().await,
-                    _ => std::future::pending().await,
-                }
-            } => Ok(Event::Consumed(receipt?)),
+    fn update_output_selection(&mut self) -> Result<()> {
+        if !self.sessions.iter().any(|session| session.owner().is_some()) {
+            self.stop_output();
         }
-    }
-
-    pub fn event(&mut self, event: Event, endpoint: &mut Endpoint) -> Result<()> {
-        match event {
-            Event::Consumed(receipt) => self.consumed(receipt, endpoint),
-            Event::Timeout => {
-                let pending = self.pending.take().context("receive deadline has no request")?;
-
-                if matches!(pending.operation, Operation::Allocate | Operation::Stop) {
-                    self.summary.uncertain_remote_effect = true;
-                    self.release()?;
-                    Self::clear_status(endpoint);
-                    bail!(
-                        "receive mutation timed out; remote effect is uncertain and will not be retried"
-                    );
-                }
-
-                self.retire(endpoint, "source flow inventory timed out")
-            }
-            Event::Control(bytes, peer) => self.control_reply(&bytes, peer, endpoint),
-        }
-    }
-
-    fn control_reply(
-        &mut self,
-        bytes: &[u8],
-        peer: SocketAddr,
-        endpoint: &mut Endpoint,
-    ) -> Result<()> {
-        let Some(pending) = &self.pending else {
-            return Ok(());
-        };
-
-        if self.time.now() >= pending.deadline {
-            return self.event(Event::Timeout, endpoint);
-        }
-
-        if peer != SocketAddr::V4(pending.peer)
-            || !Header::decode(bytes).is_ok_and(|header| pending.header.owns_reply(header))
-        {
-            self.summary.rejected_packets += 1;
-            return Ok(());
-        }
-
-        match pending.operation {
-            Operation::Allocate => {
-                let outcome = source_control::allocation_reply(
-                    bytes,
-                    ReplyProfile::DetailedInterfaceOutcomes,
-                )?;
-                self.pending = None;
-                let Some(handle) = outcome.handle else {
-                    self.summary.unavailable =
-                        Some(format!("source rejected allocation: {:#06x}", outcome.header.result));
-                    self.release()?;
-                    return Ok(());
-                };
-                let flow = self.flow.as_mut().context("source reply lost its receive owner")?;
-                flow.handle = Some(handle);
-                self.summary.allocation_acceptances += 1;
-
-                if outcome.header.result != RESULT_CODE_SUCCESS
-                    || outcome.interface_outcomes.as_deref() != Some(&[RESULT_CODE_SUCCESS])
-                {
-                    return self
-                        .retire(endpoint, "source did not accept the complete receive interface");
-                }
-
-                if flow.retiring {
-                    return self.retire(endpoint, "retiring superseded receive allocation");
-                }
-
-                self.inventory()
-            }
-            Operation::Inventory => {
-                self.pending = None;
-                let flow = self.flow.as_mut().context("inventory reply lost its allocation")?;
-                let result = (|| -> Result<bool> {
-                    if !flow.inventory.accept(bytes)? {
-                        return Ok(false);
-                    }
-
-                    flow.inventory.confirm(
-                        flow.handle.context("source handle is missing")?,
-                        flow.destination,
-                        &flow.inventory_channels,
-                        flow.candidate.requested_frames_per_packet,
-                    )?;
-                    Ok(true)
-                })();
-
-                match result {
-                    Ok(false) => self.inventory(),
-                    Ok(true) => {
-                        flow.confirmed = true;
-                        flow.first_media_deadline = self
-                            .time
-                            .now()
-                            .checked_add(FIRST_MEDIA_DEADLINE_NANOSECONDS)
-                            .context("first media deadline overflow")?;
-                        self.summary.inventory_confirmations += 1;
-                        self.summary.unavailable =
-                            Some("waiting for received audio and output consumption".into());
-                        self.playback
-                            .as_ref()
-                            .context("receive output disappeared")?
-                            .select(flow.owner.stream_generation);
-                        Ok(())
-                    }
-                    Err(error) => {
-                        self.retire(endpoint, &format!("source flow readback failed: {error:#}"))
+        if let Some(playback) = &self.playback {
+            let mut generations = vec![0; usize::from(self.profile.receive_channels)];
+            for session in &self.sessions {
+                if let Some(owner) = session.owner() {
+                    for identifier in &session.channels {
+                        let channel = &mut generations[usize::from(*identifier - 1)];
+                        if *channel != 0 {
+                            bail!("multiple receive flows own the same host channel");
+                        }
+                        *channel = owner.stream_generation;
                     }
                 }
             }
-            Operation::Stop => {
-                let reply = source_control::stop_reply(bytes)?;
-                self.pending = None;
-
-                if reply.result == RESULT_CODE_SUCCESS {
-                    self.summary.stop_acceptances += 1;
-                } else {
-                    self.summary.uncertain_remote_effect = true;
-                    self.summary.unavailable =
-                        Some(format!("owned source STOP failed: {:#06x}", reply.result));
-                }
-
-                self.release()
-            }
+            playback.select_channels(&generations)?;
         }
+        Ok(())
+    }
+
+    fn stop_output(&mut self) {
+        if let Some(playback) = &self.playback {
+            playback.select(0);
+        }
+        self.output_owner = None;
+        self.output_tick = None;
+        self.pending.clear();
     }
 
     pub fn media(
@@ -511,264 +194,272 @@ impl Runtime {
         clock: &impl SampleClock,
         endpoint: &mut Endpoint,
     ) -> Result<()> {
-        let Some(flow) = self.flow.as_mut().filter(|flow| flow.confirmed && !flow.retiring) else {
-            return Ok(());
-        };
-        let Some(reading) = clock.reading(self.time.now())? else {
-            return Ok(());
-        };
+        self.sessions
+            .get_mut(index / PORTS_PER_FLOW)
+            .context("receive media port has no session")?
+            .media(index % PORTS_PER_FLOW, datagram, clock, endpoint)
+    }
 
-        if index != flow.port_index
-            || datagram.generation != flow.socket_generation
-            || reading.generation != flow.owner.clock_generation
-            || datagram.peer.ip() != flow.candidate.control_endpoint.ip()
-            || flow.source.is_some_and(|source| source != datagram.peer)
-        {
-            self.summary.rejected_packets += 1;
-            return Ok(());
+    pub async fn next_event(&mut self) -> Result<Event> {
+        let count = self.sessions.len();
+        let offset = self.last_event;
+        let session_events = self
+            .sessions
+            .iter_mut()
+            .enumerate()
+            .map(|(index, session)| {
+                Box::pin(async move { (index, Event::Session(index, session.next_event().await)) })
+            })
+            .collect::<Vec<_>>();
+        let mut session_events = session_events;
+        session_events.rotate_left(offset % count);
+        tokio::select! {
+            (result, _, _) = select_all(session_events) => {
+                self.last_event = (result.0 + 1) % count;
+                Ok(result.1)
+            }
+            receipt = async {
+                match &mut self.playback {
+                    Some(playback) if self.output_owner.is_some() => playback.receipt().await,
+                    _ => std::future::pending().await,
+                }
+            } => Ok(Event::Consumed(receipt?)),
         }
+    }
 
-        let packet = Packet::decode(&datagram.bytes, flow.format)?;
-
-        if packet.frame_count() != usize::from(flow.candidate.requested_frames_per_packet) {
-            bail!("received audio differs from confirmed source packetization");
-        }
-
-        let tick = reading.sample_tick(SAMPLE_RATE)?;
-        flow.buffer.admit(flow.owner, &datagram.bytes, tick)?;
-        flow.source = Some(datagram.peer);
-        self.summary.received_packets += 1;
-
-        if flow.next_reverse_tick.is_none() {
-            flow.next_reverse_tick = Some(tick);
-        }
-
-        if endpoint.receive_flow.is_none() {
-            endpoint.receive_flow = Some(ReceiveFlow {
-                source: datagram.peer,
-                slots: flow.slots(),
-                active: false,
-                status: 0,
-            });
-
-            for slot in &flow.candidate.slots {
-                for identifier in &slot.receivers {
-                    let channel = &mut endpoint.receive_channels[usize::from(*identifier - 1)];
-                    channel.subscription_status = SUBSCRIPTION_UNICAST;
-                    channel.available_interfaces = SELECTED_ASSOCIATION_MASK;
-                    channel.asserted_interfaces = 0;
+    pub fn event(&mut self, event: Event, endpoint: &mut Endpoint) -> Result<()> {
+        match event {
+            Event::Session(index, result) => {
+                let session = &mut self.sessions[index];
+                match result.and_then(|event| session.event(event, endpoint)) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        session.summary.unavailable = Some(format!("{error:#}"));
+                        eprintln!("receive flow {} event failed: {error:#}", session.identifier);
+                    }
+                }
+            }
+            Event::Consumed(receipt) => {
+                if self.output_owner != Some(receipt.owner) {
+                    return Ok(());
+                }
+                let receipts = self
+                    .pending
+                    .remove(&receipt.first_frame_index)
+                    .context("host output receipt has no submitted block")?;
+                if receipt.output_accepted {
+                    self.summary.output_frames += receipt.frames as u64;
+                    for (index, mut flow_receipt) in receipts {
+                        let session = &mut self.sessions[index];
+                        flow_receipt.received_samples = session
+                            .channels
+                            .iter()
+                            .map(|channel| {
+                                let channel = usize::from(*channel - 1);
+                                if receipt.channel_generations[channel]
+                                    == flow_receipt.owner.stream_generation
+                                {
+                                    receipt.received_by_channel[channel]
+                                } else {
+                                    0
+                                }
+                            })
+                            .sum();
+                        flow_receipt.local_silence_samples = flow_receipt.frames
+                            * session.channels.len()
+                            - flow_receipt.received_samples;
+                        session.consumed(flow_receipt, endpoint)?;
+                    }
                 }
             }
         }
-
-        Ok(())
+        self.update_output_selection()
     }
 
     pub fn deadline(&mut self, clock: &impl SampleClock) -> Result<Option<u64>> {
-        let mut deadline = self.waiting_for_port.then(|| self.pool.next_available()).flatten();
-        let Some(flow) = self.flow.as_mut().filter(|flow| flow.confirmed && !flow.retiring) else {
-            return Ok(deadline);
-        };
+        let mut deadline = None;
+        for session in &mut self.sessions {
+            if let Some(due) = session.deadline(clock)? {
+                deadline = Some(deadline.map_or(due, |current: u64| current.min(due)));
+            }
+        }
         let Some(reading) = clock.reading(self.time.now())? else {
             return Ok(deadline);
         };
-
-        if flow.last_receipt_end.is_none() {
-            deadline = Some(flow.first_media_deadline);
-        }
-
-        for tick in [
-            flow.buffer.next_frame_index(reading.sample_tick(SAMPLE_RATE)?),
-            flow.next_reverse_tick,
-        ]
-        .into_iter()
-        .flatten()
+        let tick = reading.sample_tick(self.profile.sample_rate)?;
+        let ready = self.sessions.iter_mut().filter_map(|session| session.ready_tick(tick)).min();
+        if self.output_tick.is_none()
+            && let Some(first) = ready
         {
-            let due = reading.sample_deadline(sample_time(tick)?, SAMPLE_RATE)?;
+            self.output_generation = self
+                .output_generation
+                .checked_add(1)
+                .context("host output generation exhausted")?;
+            let owner = Owner {
+                endpoint_generation: self.endpoint_generation,
+                stream_generation: self.output_generation,
+                clock_generation: reading.generation,
+            };
+            self.output_owner = Some(owner);
+            self.output_tick = Some(first);
+            self.playback
+                .as_ref()
+                .context("receive output disappeared")?
+                .select(owner.stream_generation);
+        }
+        if let Some(first) = self.output_tick {
+            let due = reading.sample_deadline(
+                sample_time(first, self.profile.sample_rate)?,
+                self.profile.sample_rate,
+            )?;
             deadline = Some(deadline.map_or(due, |current| current.min(due)));
         }
-
         Ok(deadline)
     }
 
     pub fn dispatch(&mut self, endpoint: &mut Endpoint, clock: &impl SampleClock) -> Result<()> {
+        for session in &mut self.sessions {
+            if let Err(error) = session.dispatch(endpoint, clock) {
+                session.retire(endpoint, &format!("{error:#}"))?;
+            }
+        }
         let Some(reading) = clock.reading(self.time.now())? else {
             return Ok(());
         };
-        let Some(flow) = self.flow.as_mut().filter(|flow| flow.confirmed && !flow.retiring) else {
+        let tick = reading.sample_tick(self.profile.sample_rate)?;
+        let Some(first) = self.output_tick.filter(|first| tick >= *first) else {
             return Ok(());
         };
-
-        if flow.last_receipt_end.is_none() && self.time.now() >= flow.first_media_deadline {
-            return self
-                .retire(endpoint, "received audio did not reach output before its deadline");
-        }
-
-        let tick = reading.sample_tick(SAMPLE_RATE)?;
-
-        if flow.next_reverse_tick.is_some_and(|next| tick >= next) {
-            let source = flow.source.context("reverse activity has no admitted source")?;
-            let sent = self.pool.slots[flow.port_index]
-                .socket
-                .try_send_to(REVERSE_KEEPALIVE, source.into())?;
-
-            if sent != REVERSE_KEEPALIVE.len() {
-                bail!("receive reverse activity submission was incomplete");
-            }
-
-            flow.next_reverse_tick = Some(
-                tick.checked_add(REVERSE_INTERVAL_FRAMES)
-                    .context("reverse sample deadline overflow")?,
-            );
-            self.summary.reverse_packets += 1;
-        }
-
-        if flow.buffer.next_frame_index(tick).is_some_and(|next| tick >= next) {
-            let delivery = match flow.buffer.deliver(flow.owner, tick) {
-                Ok(delivery) => delivery,
-                Err(playout::Error::MissedDeadline) => {
-                    self.summary.missed_playout_deadlines += 1;
-                    return self.suspend(
-                        endpoint,
-                        &reading,
-                        "receive output missed its sample deadline",
-                    );
+        let quantum = quantum_frames(self.profile.sample_rate);
+        if tick >= first + quantum as u64 {
+            for session in &mut self.sessions {
+                if session.owner().is_some() {
+                    session.summary.missed_playout_deadlines += 1;
                 }
-                Err(error) => return Err(error.into()),
-            };
-            let missing = delivery.missing_limit_reached;
-
-            if let Err(error) =
-                self.playback.as_mut().context("receive output disappeared")?.submit(delivery)
-            {
-                return self.retire(
-                    endpoint,
-                    &format!("receive output could not accept a complete block: {error:#}"),
-                );
             }
-
-            if missing {
-                self.summary.missing_frame_suspensions += 1;
-                self.suspend(
-                    endpoint,
-                    &reading,
-                    "received audio exceeded the missing-frame limit",
-                )?;
+            return self.suspend_output(endpoint, "shared host output missed its sample deadline");
+        }
+        if self.pending.len() >= MAXIMUM_PENDING_OUTPUT_BLOCKS {
+            bail!("host output consumption has exceeded its bounded receipt queue");
+        }
+        let channels = usize::from(self.profile.receive_channels);
+        let mut frames = vec![
+            Frame {
+                samples: vec![0; channels],
+                received: vec![false; channels]
+            };
+            quantum
+        ];
+        let mut owners = vec![0; channels];
+        let mut receipts = Vec::new();
+        for (index, session) in self.sessions.iter_mut().enumerate() {
+            let delivery = match session.render(first, tick, endpoint, &reading) {
+                Ok(delivery) => delivery,
+                Err(error) => {
+                    session.retire(endpoint, &format!("receive placement failed: {error:#}"))?;
+                    None
+                }
+            };
+            if let Some(delivery) = delivery {
+                let mut received_samples = 0;
+                for (local, identifier) in session.channels.iter().enumerate() {
+                    let channel = usize::from(*identifier - 1);
+                    if owners[channel] != 0 {
+                        bail!("host playback channel has competing flow owners");
+                    }
+                    owners[channel] = delivery.owner.stream_generation;
+                    for (output, input) in frames.iter_mut().zip(&delivery.frames) {
+                        output.samples[channel] = input.samples[local];
+                        output.received[channel] = input.received[local];
+                        received_samples += usize::from(input.received[local]);
+                    }
+                }
+                receipts.push((
+                    index,
+                    Receipt {
+                        owner: delivery.owner,
+                        first_frame_index: first,
+                        frames: quantum,
+                        output_accepted: true,
+                        received_samples,
+                        local_silence_samples: quantum * session.channels.len() - received_samples,
+                        channel_generations: Vec::new(),
+                        received_by_channel: Vec::new(),
+                    },
+                ));
             }
         }
-
-        Ok(())
+        let delivery = Delivery {
+            owner: self.output_owner.context("host output lost its clock owner")?,
+            first_frame_index: first,
+            frames,
+            missing_limit_reached: false,
+        };
+        self.playback.as_mut().context("receive output disappeared")?.submit(delivery, owners)?;
+        self.pending.insert(first, receipts);
+        self.output_tick = Some(
+            first.checked_add(quantum as u64).context("host output sample coordinate overflow")?,
+        );
+        self.update_output_selection()
     }
 
-    fn suspend(
+    pub fn retire(&mut self, endpoint: &mut Endpoint, reason: &str) -> Result<()> {
+        for session in &mut self.sessions {
+            session.retire(endpoint, reason)?;
+        }
+        self.stop_output();
+        self.update_output_selection()
+    }
+
+    pub fn failed_port(
         &mut self,
         endpoint: &mut Endpoint,
-        reading: &Reading<'_>,
+        index: usize,
         reason: &str,
     ) -> Result<()> {
-        if let Some(flow) = &mut self.flow {
-            flow.owner.clock_generation = reading.generation;
-        }
-
-        self.suspend_output(endpoint, reason)
+        let session = &mut self.sessions[index / PORTS_PER_FLOW];
+        session.retire(endpoint, reason)?;
+        session.pool.disable(index % PORTS_PER_FLOW)?;
+        self.update_output_selection()
     }
 
     pub fn suspend_output(&mut self, endpoint: &mut Endpoint, reason: &str) -> Result<()> {
-        if self.flow.as_ref().is_none_or(|flow| flow.retiring) {
-            if let Some(playback) = &self.playback {
-                playback.select(0);
-            }
-
-            return Ok(());
+        for session in &mut self.sessions {
+            session.suspend_output(endpoint, reason)?;
         }
-
-        eprintln!("receive output suspended at {} ns: {reason}", self.time.now());
-        let generation = self.generation()?;
-        let flow = self.flow.as_mut().context("receive suspension has no allocation")?;
-        flow.owner.stream_generation = generation;
-        flow.buffer.reset(flow.owner)?;
-        flow.last_receipt_end = None;
-        flow.first_media_deadline = self
-            .time
-            .now()
-            .checked_add(FIRST_MEDIA_DEADLINE_NANOSECONDS)
-            .context("receive recovery deadline overflow")?;
-        self.playback.as_ref().context("receive output disappeared")?.select(generation);
-        self.summary.media_suspensions += 1;
-        self.summary.unavailable = Some(reason.to_owned());
-
-        if let Some(flow) = &mut endpoint.receive_flow {
-            flow.active = false;
-        }
-
-        for channel in &mut endpoint.receive_channels {
-            channel.asserted_interfaces = 0;
-        }
-
-        Ok(())
-    }
-
-    fn consumed(&mut self, receipt: Receipt, endpoint: &mut Endpoint) -> Result<()> {
-        let Some(flow) =
-            self.flow.as_mut().filter(|flow| !flow.retiring && flow.owner == receipt.owner)
-        else {
-            return Ok(());
-        };
-
-        if !receipt.output_accepted {
-            return Ok(());
-        }
-
-        if flow.last_receipt_end.is_some_and(|end| end != receipt.first_frame_index) {
-            bail!("receive output consumption is discontinuous");
-        }
-
-        flow.last_receipt_end = Some(
-            receipt
-                .first_frame_index
-                .checked_add(receipt.frames as u64)
-                .context("receive output coordinate overflow")?,
-        );
-        self.summary.delivered_frames += receipt.frames as u64;
-        self.summary.received_samples_consumed += receipt.received_samples as u64;
-        self.summary.local_silence_samples_consumed += receipt.local_silence_samples as u64;
-
-        if receipt.received_samples > 0 {
-            self.summary.unavailable = None;
-
-            if let Some(flow) = &mut endpoint.receive_flow {
-                flow.active = true;
-            }
-
-            for slot in &flow.candidate.slots {
-                for identifier in &slot.receivers {
-                    endpoint.receive_channels[usize::from(*identifier - 1)].asserted_interfaces =
-                        SELECTED_ASSOCIATION_MASK;
-                }
-            }
-        }
-
-        Ok(())
+        self.stop_output();
+        self.update_output_selection()
     }
 
     pub async fn close(mut self, endpoint: &mut Endpoint) -> Result<Summary> {
-        let retirement = self.retire(endpoint, "receive endpoint stopped");
-
-        while self.pending.is_some() {
-            let event = self.next_event().await?;
-
-            if let Err(error) = self.event(event, endpoint) {
-                self.summary.unavailable = Some(format!("{error:#}"));
-            }
+        self.stop_output();
+        for session in &mut self.sessions {
+            session.retire(endpoint, "receive endpoint stopped")?;
         }
-
-        self.release()?;
-
+        for session in self.sessions {
+            let identifier = session.identifier;
+            let candidate = session.candidate.clone();
+            let acquisition = session.acquisition.progress(candidate.as_ref()).cloned();
+            let counters = session.close(endpoint).await?;
+            self.summary.totals.add(&counters);
+            self.summary.flows.push(FlowSummary {
+                identifier,
+                candidate,
+                acquisition,
+                counters,
+            });
+        }
         if let Some(playback) = self.playback.take() {
             playback.close().await?;
         }
-
-        retirement?;
         Ok(self.summary)
     }
+}
+
+fn sample_time(tick: u64, rate: u32) -> Result<SampleTime> {
+    Ok(SampleTime::new(
+        u32::try_from(tick / u64::from(rate))?,
+        (tick % u64::from(rate)) as u32,
+        rate,
+    )?)
 }

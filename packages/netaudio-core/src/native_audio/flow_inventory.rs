@@ -4,31 +4,29 @@ use crate::commands;
 use crate::protocol::{RESULT_CODE_MORE_PAGES, RESULT_CODE_SUCCESS};
 use crate::responses::{self, TxFlow};
 
-use super::endpoint_control::{ARC_REVISION, SAMPLE_BITS, SAMPLE_RATE};
 use super::source_control::{Error, Handle, Header};
+use super::Format;
 
 const FIRST_FLOW_IDENTIFIER: u16 = 1;
-const MAXIMUM_FLOW_IDENTIFIER: u16 = 32;
 
 pub struct Inventory {
     protocol_revision: u16,
     next: Option<u16>,
+    capacity: u16,
     flows: Vec<TxFlow>,
 }
 
-impl Default for Inventory {
-    fn default() -> Self {
-        Self {
-            protocol_revision: ARC_REVISION,
+impl Inventory {
+    pub fn new(protocol_revision: u16, capacity: u16) -> Result<Self, Error> {
+        if capacity == 0 || capacity == u16::MAX {
+            return Err(Error("source flow capacity has no qualified finite traversal"));
+        }
+        Ok(Self {
+            protocol_revision,
+            capacity,
             next: Some(FIRST_FLOW_IDENTIFIER),
             flows: Vec::new(),
-        }
-    }
-}
-
-impl Inventory {
-    pub fn new(protocol_revision: u16) -> Self {
-        Self { protocol_revision, ..Self::default() }
+        })
     }
 
     pub fn request(&self, transaction: u16) -> Result<Vec<u8>, Error> {
@@ -42,14 +40,14 @@ impl Inventory {
 
     pub fn accept(&mut self, bytes: &[u8]) -> Result<bool, Error> {
         let header = Header::decode(bytes)?;
-        let page = responses::parse_tx_flow_page(bytes)
+        let page = responses::parse_tx_flow_page_with_capacity(bytes, self.capacity)
             .ok_or(Error("source flow inventory has an unsupported or incomplete layout"))?;
         let first = self.next.ok_or(Error("source flow inventory is already complete"))?;
         let mut highest = None;
 
         for flow in page.flows {
             if flow.flow_number < first
-                || flow.flow_number > MAXIMUM_FLOW_IDENTIFIER
+                || flow.flow_number > self.capacity
                 || highest.is_some_and(|previous| flow.flow_number <= previous)
             {
                 return Err(Error("source flow page repeated or reversed its cursor"));
@@ -64,7 +62,7 @@ impl Inventory {
             RESULT_CODE_MORE_PAGES => {
                 let next = highest
                     .and_then(|highest| highest.checked_add(1))
-                    .filter(|next| *next <= MAXIMUM_FLOW_IDENTIFIER)
+                    .filter(|next| *next <= self.capacity)
                     .ok_or(Error("partial source flow inventory made no progress"))?;
                 Some(next)
             }
@@ -80,6 +78,7 @@ impl Inventory {
         destination: SocketAddrV4,
         channels: &[u16],
         frames_per_packet: u16,
+        format: Format,
     ) -> Result<(), Error> {
         if self.next.is_some() {
             return Err(Error("source flow inventory is incomplete"));
@@ -103,8 +102,8 @@ impl Inventory {
             "interface": null,
         });
 
-        if flow.sample_rate != SAMPLE_RATE
-            || flow.encoding != SAMPLE_BITS
+        if flow.sample_rate != format.sample_rate()
+            || flow.encoding != format.sample_width().bits()
             || flow.frames_per_packet != Some(frames_per_packet)
             || flow.channels != channels
             || flow.destinations != [expected_destination]

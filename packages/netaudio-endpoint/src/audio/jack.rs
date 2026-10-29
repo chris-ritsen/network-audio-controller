@@ -35,8 +35,10 @@ impl NotificationHandler for Notifications {
 }
 
 struct Process {
-    input_ports: [Port<AudioIn>; 2],
-    output_ports: [Port<AudioOut>; 2],
+    input_ports: Vec<Port<AudioIn>>,
+    output_ports: Vec<Port<AudioOut>>,
+    input_samples: Vec<f32>,
+    output_samples: Vec<f32>,
     input: InputCallback,
     output: OutputCallback,
     buffer_frames: u32,
@@ -44,15 +46,29 @@ struct Process {
 
 impl ProcessHandler for Process {
     fn process(&mut self, _: &Client, scope: &ProcessScope) -> Control {
-        let left = self.input_ports[0].as_slice(scope);
-        let right = self.input_ports[1].as_slice(scope);
-        self.input.process(left.iter().zip(right).map(|(left, right)| [*left, *right]));
-        let [left_port, right_port] = &mut self.output_ports;
-        let left = left_port.as_mut_slice(scope);
-        let right = right_port.as_mut_slice(scope);
+        if scope.n_frames() != self.buffer_frames {
+            self.input.state.report(Fault::BufferSizeChanged);
+            return Control::Quit;
+        }
 
-        for (left, right) in left.iter_mut().zip(right.iter_mut()) {
-            [*left, *right] = self.output.next();
+        let input_channels = self.input_ports.len();
+        for (channel, port) in self.input_ports.iter().enumerate() {
+            for (frame, sample) in port.as_slice(scope).iter().enumerate() {
+                self.input_samples[frame * input_channels + channel] = *sample;
+            }
+        }
+        self.input.process(scope.n_frames() as usize, |frame, channel| {
+            self.input_samples[frame * input_channels + channel]
+        });
+
+        let output_channels = self.output_ports.len();
+        for frame in self.output_samples.chunks_exact_mut(output_channels) {
+            self.output.next(frame);
+        }
+        for (channel, port) in self.output_ports.iter_mut().enumerate() {
+            for (frame, sample) in port.as_mut_slice(scope).iter_mut().enumerate() {
+                *sample = self.output_samples[frame * output_channels + channel];
+            }
         }
 
         self.output.completed();
@@ -81,8 +97,18 @@ impl Stream {
             bail!("JACK exposes named ports; device selectors do not apply");
         }
 
-        if configuration.input_channels != [1, 2] || configuration.output_channels != [1, 2] {
-            bail!("JACK exposes two ports in each direction; channel mappings must be [1, 2]");
+        if !configuration
+            .input_channels
+            .iter()
+            .enumerate()
+            .all(|(index, channel)| usize::from(*channel) == index + 1)
+            || !configuration
+                .output_channels
+                .iter()
+                .enumerate()
+                .all(|(index, channel)| usize::from(*channel) == index + 1)
+        {
+            bail!("JACK channel maps must enumerate the published ports in order starting at one");
         }
 
         let (client, _) = Client::new(
@@ -102,14 +128,16 @@ impl Stream {
             );
         }
 
-        let input_ports = [
-            client.register_port("send_1", AudioIn::default())?,
-            client.register_port("send_2", AudioIn::default())?,
-        ];
-        let output_ports = [
-            client.register_port("receive_1", AudioOut::default())?,
-            client.register_port("receive_2", AudioOut::default())?,
-        ];
+        let input_ports = configuration
+            .input_channels
+            .iter()
+            .map(|channel| client.register_port(&format!("send_{channel}"), AudioIn::default()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let output_ports = configuration
+            .output_channels
+            .iter()
+            .map(|channel| client.register_port(&format!("receive_{channel}"), AudioOut::default()))
+            .collect::<Result<Vec<_>, _>>()?;
         let notifications = Notifications {
             state: input.state.clone(),
             sample_rate: configuration.sample_rate,
@@ -117,6 +145,16 @@ impl Stream {
         let process = Process {
             input_ports,
             output_ports,
+            input_samples: vec![
+                0.0;
+                configuration.input_channels.len()
+                    * configuration.buffer_frames as usize
+            ],
+            output_samples: vec![
+                0.0;
+                configuration.output_channels.len()
+                    * configuration.buffer_frames as usize
+            ],
             input,
             output,
             buffer_frames: configuration.buffer_frames,

@@ -16,6 +16,21 @@ use tokio::task::JoinHandle;
 const NETLINK_ERROR: u16 = libc::NLMSG_ERROR as u16;
 const NETLINK_OVERRUN: u16 = libc::NLMSG_OVERRUN as u16;
 
+pub fn spawn_background<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T> + Send + 'static,
+) -> JoinHandle<Result<T>> {
+    tokio::task::spawn_blocking(move || {
+        let parameters = libc::sched_param {
+            sched_priority: 0,
+        };
+        if unsafe { libc::sched_setscheduler(0, libc::SCHED_OTHER, &parameters) } != 0 {
+            return Err(std::io::Error::last_os_error())
+                .context("set ordinary scheduling for endpoint background work");
+        }
+        work()
+    })
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct DurableState {
@@ -112,13 +127,13 @@ impl GenerationIssuer {
 
 pub struct Generations {
     receiver: mpsc::Receiver<Result<u32>>,
-    worker: JoinHandle<()>,
+    worker: JoinHandle<Result<()>>,
 }
 
 impl Generations {
     pub fn start(mut issuer: GenerationIssuer) -> Self {
         let (sender, receiver) = mpsc::channel(1);
-        let worker = tokio::task::spawn_blocking(move || {
+        let worker = spawn_background(move || {
             loop {
                 let result = issuer.reserve();
                 let failed = result.is_err();
@@ -127,6 +142,7 @@ impl Generations {
                     break;
                 }
             }
+            Ok(())
         });
 
         Self {
@@ -141,7 +157,7 @@ impl Generations {
 
     pub async fn close(mut self) -> Result<()> {
         self.receiver.close();
-        self.worker.await?;
+        self.worker.await??;
         Ok(())
     }
 }
@@ -256,16 +272,14 @@ impl InterfaceObserver {
     pub async fn start(name: String, address: Ipv4Addr) -> Result<Self> {
         let notifications = InterfaceNotifications::new()?;
         let selected_name = name.clone();
-        let initial =
-            tokio::task::spawn_blocking(move || interface(&selected_name, address)).await??;
+        let initial = spawn_background(move || interface(&selected_name, address)).await??;
         let baseline = initial.clone();
         let worker = tokio::spawn(async move {
             loop {
                 notifications.changed(baseline.index).await?;
                 let selected_name = name.clone();
                 let current =
-                    tokio::task::spawn_blocking(move || interface(&selected_name, address))
-                        .await??;
+                    spawn_background(move || interface(&selected_name, address)).await??;
 
                 if current != baseline {
                     return Ok(current);

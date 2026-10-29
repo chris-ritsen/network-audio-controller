@@ -30,7 +30,7 @@ impl Service {
         })
     }
 
-    fn send(&self, message: &str) -> Result<()> {
+    pub(super) fn send(&self, message: &str) -> Result<()> {
         if let Some((socket, address)) = &self.socket {
             let sent = socket.send_to_addr(message.as_bytes(), address)?;
 

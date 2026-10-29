@@ -7,7 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use netaudio_core::native_audio::clock::NANOSECONDS_PER_SECOND;
 use netaudio_core::native_audio::clock::discipline::LocalTimestamp;
-use socket2::{Domain, Protocol, Socket, Type};
+use serde::{Deserialize, Serialize};
+use socket2::{Domain, InterfaceIndexOrAddress, Protocol, Socket, Type};
 use tokio::io::Interest;
 use tokio::io::unix::AsyncFd;
 
@@ -19,12 +20,14 @@ const SOFTWARE_TIMESTAMP_INDEX: usize = 0;
 const TIMESTAMP_COUNT: usize = 3;
 const TRANSMIT_TIMESTAMP_KIND: u32 = 0;
 const MAXIMUM_CLOCK_MAPPING_CHANGE_NANOSECONDS: i128 = 2_000;
+const CLOCK_MAPPING_OBSERVATIONS: usize = 5;
 
 pub struct ClockSocket {
     socket: AsyncFd<Socket>,
     next_transmit_identifier: Option<u32>,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
 pub enum Event {
     Received {
         bytes: Vec<u8>,
@@ -46,16 +49,22 @@ struct Ancillary {
 
 impl ClockSocket {
     pub fn bind(address: Ipv4Addr, group: Ipv4Addr, port: u16) -> Result<Self> {
+        let socket = Self::bind_transport(port)?;
+        socket.socket.get_ref().set_multicast_if_v4(&address)?;
+        socket.join(address, group)?;
+        Ok(socket)
+    }
+
+    pub fn bind_transport(port: u16) -> Result<Self> {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
         socket.set_nonblocking(true)?;
         socket.set_multicast_all_v4(false)?;
-        socket.set_multicast_if_v4(&address)?;
         socket.set_multicast_loop_v4(false)?;
+        socket.set_multicast_ttl_v4(1)?;
         socket.set_recv_buffer_size(256 * 1024)?;
         socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into()).with_context(|| {
             format!("bind exclusive PTP UDP port {port}; privileged ports require bind permission")
         })?;
-        socket.join_multicast_v4(&group, &address)?;
 
         set_option(&socket, libc::SOL_IP, libc::IP_PKTINFO, 1)?;
         set_option(&socket, libc::SOL_IP, libc::IP_RECVERR, 1)?;
@@ -71,6 +80,79 @@ impl ClockSocket {
             socket: unsafe { AsyncFd::register(socket)? },
             next_transmit_identifier: Some(0),
         })
+    }
+
+    pub fn join(&self, address: Ipv4Addr, group: Ipv4Addr) -> Result<()> {
+        Ok(self.socket.get_ref().join_multicast_v4(&group, &address)?)
+    }
+
+    pub fn join_on(&self, interface_index: u32, group: Ipv4Addr) -> Result<()> {
+        Ok(self
+            .socket
+            .get_ref()
+            .join_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))?)
+    }
+
+    pub fn leave_on(&self, interface_index: u32, group: Ipv4Addr) -> Result<()> {
+        Ok(self
+            .socket
+            .get_ref()
+            .leave_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))?)
+    }
+
+    pub fn try_send_on(
+        &mut self,
+        bytes: &[u8],
+        destination: SocketAddrV4,
+        address: Ipv4Addr,
+        interface_index: u32,
+    ) -> Result<u32> {
+        let identifier = self
+            .next_transmit_identifier
+            .context("clock socket transmit identifier space is exhausted")?;
+        let destination = socket2::SockAddr::from(destination);
+        let mut vector = libc::iovec {
+            iov_base: bytes.as_ptr().cast_mut().cast(),
+            iov_len: bytes.len(),
+        };
+        let mut control = [0usize; CONTROL_BUFFER_WORDS];
+        let mut message: libc::msghdr = unsafe { zeroed() };
+        message.msg_name = destination.as_ptr().cast_mut().cast();
+        message.msg_namelen = destination.len();
+        message.msg_iov = &mut vector;
+        message.msg_iovlen = 1;
+        message.msg_control = control.as_mut_ptr().cast();
+        message.msg_controllen =
+            unsafe { libc::CMSG_SPACE(size_of::<libc::in_pktinfo>() as u32) } as usize;
+        let information = libc::in_pktinfo {
+            ipi_ifindex: interface_index.try_into()?,
+            ipi_spec_dst: libc::in_addr {
+                s_addr: u32::from_ne_bytes(address.octets()),
+            },
+            ipi_addr: libc::in_addr {
+                s_addr: 0,
+            },
+        };
+        unsafe {
+            let header = libc::CMSG_FIRSTHDR(&message);
+            (*header).cmsg_level = libc::SOL_IP;
+            (*header).cmsg_type = libc::IP_PKTINFO;
+            (*header).cmsg_len = libc::CMSG_LEN(size_of::<libc::in_pktinfo>() as u32) as usize;
+            std::ptr::write_unaligned(
+                libc::CMSG_DATA(header).cast::<libc::in_pktinfo>(),
+                information,
+            );
+        }
+        let written =
+            unsafe { libc::sendmsg(self.socket.as_raw_fd(), &message, libc::MSG_DONTWAIT) };
+        if written < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        self.next_transmit_identifier = identifier.checked_add(1);
+        if written as usize != bytes.len() {
+            bail!("clock socket submitted an incomplete datagram");
+        }
+        Ok(identifier)
     }
 
     pub async fn send(&mut self, bytes: &[u8], destination: SocketAddrV4) -> Result<u32> {
@@ -320,43 +402,107 @@ fn ancillary(message: &libc::msghdr) -> io::Result<Ancillary> {
 
 pub struct ClockMapping {
     time: Monotonic,
+    initial: MappingObservation,
+    summary: MappingSummary,
+}
+
+#[derive(Clone, Copy, Default)]
+struct MappingObservation {
     realtime_offset: i128,
-    initial_uncertainty: u32,
+    uncertainty_nanoseconds: u32,
+}
+
+impl MappingObservation {
+    fn check_consistency(self, other: Self) -> Result<()> {
+        let change = (self.realtime_offset - other.realtime_offset).abs();
+        let uncertainty = self.uncertainty_nanoseconds.max(other.uncertainty_nanoseconds);
+        if change > MAXIMUM_CLOCK_MAPPING_CHANGE_NANOSECONDS + i128::from(uncertainty) {
+            bail!(
+                "system realtime clock moved relative to the monotonic timestamp provider: \
+                 mapping change {change} ns, observation uncertainty {uncertainty} ns"
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Default, Serialize)]
+pub struct MappingSummary {
+    pub acquisitions: u64,
+    pub observations: u64,
+    pub maximum_observation_uncertainty_nanoseconds: u32,
+    pub maximum_selected_uncertainty_nanoseconds: u32,
+    pub inconsistent_acquisitions: u64,
 }
 
 impl ClockMapping {
     pub fn new(time: Monotonic) -> Result<Self> {
-        let (realtime_offset, initial_uncertainty) = Self::measure(&time)?;
+        let mut summary = MappingSummary::default();
+        let initial = Self::measure(&time, None, &mut summary)?;
 
         Ok(Self {
             time,
-            realtime_offset,
-            initial_uncertainty,
+            initial,
+            summary,
         })
     }
 
-    fn measure(time: &Monotonic) -> Result<(i128, u32)> {
+    pub fn summary(&self) -> MappingSummary {
+        self.summary.clone()
+    }
+
+    fn observe(time: &Monotonic) -> Result<MappingObservation> {
         let before = time.now();
         let realtime = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let after = time.now();
         let sample = time.stamp(before, after)?;
         let offset = i128::try_from(realtime)? - i128::from(sample.nanoseconds);
-        Ok((offset, sample.uncertainty_nanoseconds))
+        Ok(MappingObservation {
+            realtime_offset: offset,
+            uncertainty_nanoseconds: sample.uncertainty_nanoseconds,
+        })
     }
 
-    pub fn project(&self, realtime_nanoseconds: u64) -> Result<LocalTimestamp> {
-        let (offset, uncertainty) = Self::measure(&self.time)?;
-        let mapping_change = (offset - self.realtime_offset).abs();
-        let observation_uncertainty = uncertainty.max(self.initial_uncertainty);
-
-        if mapping_change
-            > MAXIMUM_CLOCK_MAPPING_CHANGE_NANOSECONDS + i128::from(observation_uncertainty)
-        {
-            bail!("system realtime clock moved relative to the monotonic timestamp provider");
+    fn measure(
+        time: &Monotonic,
+        initial: Option<MappingObservation>,
+        summary: &mut MappingSummary,
+    ) -> Result<MappingObservation> {
+        summary.acquisitions += 1;
+        let mut observations = [MappingObservation::default(); CLOCK_MAPPING_OBSERVATIONS];
+        for observation in &mut observations {
+            *observation = Self::observe(time)?;
+            summary.observations += 1;
+            summary.maximum_observation_uncertainty_nanoseconds = summary
+                .maximum_observation_uncertainty_nanoseconds
+                .max(observation.uncertainty_nanoseconds);
         }
 
-        let nanoseconds = u64::try_from(i128::from(realtime_nanoseconds) - offset)
-            .context("kernel timestamp precedes this clock provider incarnation")?;
+        let selected = *observations
+            .iter()
+            .min_by_key(|observation| observation.uncertainty_nanoseconds)
+            .context("clock mapping acquisition has no observations")?;
+        for observation in observations {
+            let consistency = selected.check_consistency(observation).and_then(|()| {
+                initial.map_or(Ok(()), |reference| reference.check_consistency(observation))
+            });
+            if let Err(error) = consistency {
+                summary.inconsistent_acquisitions += 1;
+                return Err(error);
+            }
+        }
+        summary.maximum_selected_uncertainty_nanoseconds =
+            summary.maximum_selected_uncertainty_nanoseconds.max(selected.uncertainty_nanoseconds);
+        Ok(selected)
+    }
+
+    pub fn project(&mut self, realtime_nanoseconds: u64) -> Result<LocalTimestamp> {
+        let observation = Self::measure(&self.time, Some(self.initial), &mut self.summary)?;
+        let observation_uncertainty =
+            observation.uncertainty_nanoseconds.max(self.initial.uncertainty_nanoseconds);
+        let nanoseconds =
+            u64::try_from(i128::from(realtime_nanoseconds) - observation.realtime_offset)
+                .context("kernel timestamp precedes this clock provider incarnation")?;
         let now = self.time.now();
 
         if nanoseconds > now {
