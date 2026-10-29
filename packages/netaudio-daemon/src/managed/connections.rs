@@ -62,9 +62,12 @@ impl Registry {
             ));
         }
         let certificate = existing.and_then(|server| server.trust_certificate_file.clone());
-        let transport = tokio::task::spawn_blocking(move || Transport::new(certificate.as_deref()))
-            .await
-            .map_err(|_| Error::Persistence("Managed trust configuration worker failed"))??;
+        let pin = existing.and_then(|server| server.controller_certificate_sha256.clone());
+        let transport = tokio::task::spawn_blocking(move || {
+            Transport::new(certificate.as_deref(), pin.as_deref())
+        })
+        .await
+        .map_err(|_| Error::Persistence("Managed trust configuration worker failed"))??;
         let credential = match request.authentication {
             Authentication::Password { username, password } => {
                 Client::authenticate(&url, &username, &password, &transport, Limits::default())

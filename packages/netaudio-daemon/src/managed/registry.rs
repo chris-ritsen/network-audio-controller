@@ -739,7 +739,10 @@ fn entries(
                 let setup = (|| {
                     let credential = resources.credential?;
                     let certificates = resources.certificates?;
-                    let transport = Transport::from_certificate_bytes(certificates.as_deref())?;
+                    let transport = Transport::from_certificate_bytes(
+                        certificates.as_deref(),
+                        configuration.controller_certificate_sha256.as_deref(),
+                    )?;
                     source.credential = Some(credential.clone());
                     source.client = Some(Client::new(
                         configuration

@@ -149,6 +149,7 @@ impl Store {
                         .ok_or(Error::Invalid("Server profile must be a TOML table"))?;
                     server.insert("url", value(url));
                     if changed_address {
+                        server.remove("controller_certificate_sha256");
                         server.remove("credential_file");
                         server.remove("credential");
                         server.remove("trust_certificate_file");
