@@ -13,6 +13,7 @@ mod receive_session;
 pub mod receiver;
 pub mod resolution;
 pub mod runtime;
+mod scheduling;
 pub mod selection;
 mod service;
 pub mod sockets;

@@ -62,6 +62,7 @@ pub enum Error {
     NotPrimed,
     EarlyDelivery,
     MissedDeadline,
+    GenerationExhausted,
 }
 
 impl fmt::Display for Error {
@@ -77,6 +78,7 @@ impl fmt::Display for Error {
             Self::NotPrimed => "playout does not have a complete initial sample interval",
             Self::EarlyDelivery => "playout delivery was requested before its sample deadline",
             Self::MissedDeadline => "playout missed a complete local sample quantum",
+            Self::GenerationExhausted => "playout buffer generation space is exhausted",
         })
     }
 }
@@ -93,6 +95,8 @@ pub struct Buffer {
     quantum_frames: usize,
     maximum_missing_frames: usize,
     frames: Vec<Frame>,
+    frame_generations: Vec<u64>,
+    generation: u64,
     first_received: Option<u64>,
     cursor: Option<u64>,
     primed: bool,
@@ -177,6 +181,8 @@ impl Buffer {
                 };
                 RING_FRAMES
             ],
+            frame_generations: vec![0; RING_FRAMES],
+            generation: 1,
             first_received: None,
             cursor: None,
             primed: false,
@@ -191,11 +197,9 @@ impl Buffer {
 
     pub fn reset(&mut self, owner: Owner) -> Result<(), Error> {
         owner.validate()?;
+        let generation = self.generation.checked_add(1).ok_or(Error::GenerationExhausted)?;
         self.owner = owner;
-        for frame in &mut self.frames {
-            frame.samples.fill(0);
-            frame.received.fill(false);
-        }
+        self.generation = generation;
         self.first_received = None;
         self.cursor = None;
         self.primed = false;
@@ -253,9 +257,8 @@ impl Buffer {
         }
 
         for tick in first..end {
-            let frame = &self.frames[(tick % RING_FRAMES as u64) as usize];
-
-            if frame.received.iter().any(|received| *received) {
+            let index = (tick % RING_FRAMES as u64) as usize;
+            if self.frame_generations[index] == self.generation {
                 return Err(Error::Overlap);
             }
         }
@@ -263,7 +266,11 @@ impl Buffer {
         let mut samples = packet.samples();
 
         for tick in first..end {
-            let frame = &mut self.frames[(tick % RING_FRAMES as u64) as usize];
+            let index = (tick % RING_FRAMES as u64) as usize;
+            let frame = &mut self.frames[index];
+            frame.samples.fill(0);
+            frame.received.fill(false);
+            self.frame_generations[index] = self.generation;
 
             for slot in &self.slots {
                 let sample = samples.next().ok_or(Error::InvalidFormat)?;
@@ -290,13 +297,15 @@ impl Buffer {
             let end = first.checked_add(2 * self.quantum_frames as u64)?;
 
             for tick in first..end {
-                let frame = &self.frames[(tick % RING_FRAMES as u64) as usize];
+                let index = (tick % RING_FRAMES as u64) as usize;
+                let frame = &self.frames[index];
 
-                if self
-                    .selected
-                    .iter()
-                    .zip(&frame.received)
-                    .any(|(selected, received)| *selected && !*received)
+                if self.frame_generations[index] != self.generation
+                    || self
+                        .selected
+                        .iter()
+                        .zip(&frame.received)
+                        .any(|(selected, received)| *selected && !*received)
                 {
                     return None;
                 }
@@ -317,9 +326,7 @@ impl Buffer {
             return Err(Error::OutsideWindow);
         }
         for tick in cursor..first {
-            let frame = &mut self.frames[(tick % RING_FRAMES as u64) as usize];
-            frame.samples.fill(0);
-            frame.received.fill(false);
+            self.frame_generations[(tick % RING_FRAMES as u64) as usize] = 0;
         }
         self.cursor = Some(first);
         self.aligned = true;
@@ -350,10 +357,14 @@ impl Buffer {
         let mut missing_limit_reached = false;
 
         for tick in first..end {
-            let stored = &mut self.frames[(tick % RING_FRAMES as u64) as usize];
+            let index = (tick % RING_FRAMES as u64) as usize;
+            let stored = &mut self.frames[index];
+            if self.frame_generations[index] != self.generation {
+                stored.samples.fill(0);
+                stored.received.fill(false);
+            }
             let frame = stored.clone();
-            stored.samples.fill(0);
-            stored.received.fill(false);
+            self.frame_generations[index] = 0;
             let missing = self
                 .selected
                 .iter()
