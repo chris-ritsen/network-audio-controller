@@ -213,7 +213,13 @@ def edit_ddm_server(path: Path, *, current_name: str, name: str | None, url: str
         )
         values = {"url": url}
         if url != existing.url:
-            values.update(credential_file=None, credential=None, enabled=False)
+            values.update(
+                controller_certificate_sha256=None,
+                credential=None,
+                credential_file=None,
+                enabled=False,
+                trust_certificate_file=None,
+            )
         text = _upsert_table(text, new_header, values)
     for context in configuration.contexts.values():
         if context.server != current_name:

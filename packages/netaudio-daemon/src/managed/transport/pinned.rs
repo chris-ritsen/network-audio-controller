@@ -1,11 +1,15 @@
 use super::Error;
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, RootCertStore, SignatureScheme};
+use rustls::crypto::{
+    CryptoProvider, verify_tls12_signature, verify_tls13_signature,
+    verify_tls13_signature_with_raw_key,
+};
+use rustls::pki_types::{CertificateDer, ServerName, SubjectPublicKeyInfoDer, UnixTime};
+use rustls::{CertificateError, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use x509_parser::prelude::{FromDer, X509Certificate};
 
 #[derive(Debug)]
 pub(super) struct Controller {
@@ -30,6 +34,20 @@ impl Controller {
             verifier,
         })
     }
+
+    fn pinned(&self, certificate: &CertificateDer<'_>) -> bool {
+        Sha256::digest(certificate.as_ref()).as_slice() == self.pin
+    }
+}
+
+fn public_key(certificate: &CertificateDer<'_>) -> Result<Vec<u8>, rustls::Error> {
+    let (_, parsed) = X509Certificate::from_der(certificate.as_ref())
+        .map_err(|_| rustls::Error::InvalidCertificate(CertificateError::BadEncoding))?;
+    Ok(parsed.tbs_certificate.subject_pki.raw.to_vec())
+}
+
+fn bad_signature() -> rustls::Error {
+    rustls::Error::InvalidCertificate(CertificateError::BadSignature)
 }
 
 impl ServerCertVerifier for Controller {
@@ -41,7 +59,7 @@ impl ServerCertVerifier for Controller {
         ocsp_response: &[u8],
         now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
-        if Sha256::digest(end_entity.as_ref()).as_slice() == self.pin {
+        if self.pinned(end_entity) {
             return Ok(ServerCertVerified::assertion());
         }
         self.verifier
@@ -54,12 +72,28 @@ impl ServerCertVerifier for Controller {
         certificate: &CertificateDer<'_>,
         signature: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(
-            message,
-            certificate,
-            signature,
-            &self.provider.signature_verification_algorithms,
-        )
+        let algorithms = &self.provider.signature_verification_algorithms;
+        if !self.pinned(certificate) {
+            return verify_tls12_signature(message, certificate, signature, algorithms);
+        }
+        let key = public_key(certificate)?;
+        let key = SubjectPublicKeyInfoDer::from(key.as_slice());
+        let entity = webpki::RawPublicKeyEntity::try_from(&key)
+            .map_err(|_| rustls::Error::InvalidCertificate(CertificateError::BadEncoding))?;
+        let candidates = algorithms
+            .mapping
+            .iter()
+            .find(|(scheme, _)| *scheme == signature.scheme)
+            .map(|(_, candidates)| *candidates)
+            .ok_or_else(bad_signature)?;
+        for algorithm in candidates {
+            match entity.verify_signature(*algorithm, message, signature.signature()) {
+                Ok(()) => return Ok(HandshakeSignatureValid::assertion()),
+                Err(webpki::Error::UnsupportedSignatureAlgorithmForPublicKeyContext(_)) => {}
+                Err(_) => return Err(bad_signature()),
+            }
+        }
+        Err(bad_signature())
     }
 
     fn verify_tls13_signature(
@@ -68,11 +102,16 @@ impl ServerCertVerifier for Controller {
         certificate: &CertificateDer<'_>,
         signature: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(
+        let algorithms = &self.provider.signature_verification_algorithms;
+        if !self.pinned(certificate) {
+            return verify_tls13_signature(message, certificate, signature, algorithms);
+        }
+        let key = public_key(certificate)?;
+        verify_tls13_signature_with_raw_key(
             message,
-            certificate,
+            &SubjectPublicKeyInfoDer::from(key.as_slice()),
             signature,
-            &self.provider.signature_verification_algorithms,
+            algorithms,
         )
     }
 

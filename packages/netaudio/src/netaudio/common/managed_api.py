@@ -163,7 +163,16 @@ def _server_configuration(
     base_directory: Path | None,
 ) -> ManagedAPIConfiguration:
     _reject_unknown_keys(
-        mapping, {"url", "credential_file", "refresh_interval", "enabled"}, f"ddm.servers.{name} settings"
+        mapping,
+        {
+            "controller_certificate_sha256",
+            "credential_file",
+            "enabled",
+            "refresh_interval",
+            "trust_certificate_file",
+            "url",
+        },
+        f"ddm.servers.{name} settings",
     )
     url = _optional_string(mapping.get("url"))
     credential_file_value = _optional_string(mapping.get("credential_file"))

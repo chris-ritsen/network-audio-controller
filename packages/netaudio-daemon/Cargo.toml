@@ -36,6 +36,7 @@ redis = { version = "=1.7.1", default-features = false, features = ["tokio-rustl
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 rustls-pemfile = "2"
+rustls-webpki = { version = "0.103", default-features = false, features = ["alloc"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 schemars = "=1.2.1"
 serde.workspace = true
