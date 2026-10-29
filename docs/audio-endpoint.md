@@ -45,6 +45,22 @@ never falls back to exclusive binding. The implementation currently uses Linux
 software timestamps and a selected PTPv1 parent; it does not implement PTPv2,
 leader election, hardware timestamps or a universal host clock.
 
+Realtime-to-monotonic conversion takes five independently bracketed clock
+observations at startup and for each timestamp. It uses the narrowest observed
+interval while checking every observation against that selection and the
+startup reference. The existing 2 microsecond mapping-change allowance and
+10 microsecond timestamp-uncertainty limit remain enforced. A scheduling delay
+in one observation does not set the precision of the whole acquisition;
+consistently uncertain observations still fail. A detected clock step or invalid
+provider still invalidates the follower and its media generation.
+
+The shutdown `clock_mapping` summary records acquisition and observation counts,
+maximum raw and selected observation uncertainties, and inconsistent
+acquisitions. Selected uncertainty excludes the separately applied mapping
+allowance; timestamp uncertainty includes it and the startup reference's
+uncertainty. These measurements describe software clock conversion, not hardware
+timestamp accuracy or measured physical path latency.
+
 Both processes support systemd notification. Start the shared transport before
 its endpoints. Endpoint readiness and discovery wait through the existing
 60-second media-port reuse quarantine. A `Type=notify` service receives one
