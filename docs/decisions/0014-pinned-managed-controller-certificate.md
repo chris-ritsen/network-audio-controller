@@ -15,10 +15,17 @@ A DDM server entry may set `controller_certificate_sha256` to the SHA-256
 fingerprint of the controller's leaf certificate, in hexadecimal with or
 without colons. When set, a peer presenting exactly that leaf is accepted for
 that server's managed transports, regardless of host name. Handshake
-signatures are still verified. Any other certificate must pass ordinary chain
-and host name verification. Without the setting, behavior is unchanged.
-Changing a server's address removes the pin with its credential and trust
-file.
+signatures are still verified, against the public key of the pinned leaf. The
+leaf is an X.509 version 1 certificate, which the certificate path validator
+rejects, so a pinned leaf is verified as a raw public key. Any other
+certificate must pass ordinary chain and host name verification. Without the
+setting, behavior is unchanged. Changing a server's address removes the pin
+with its credential and trust file. The Python launcher accepts the same
+server settings, so it does not reject a configuration the daemon reads.
+
+The appliance offers TLS 1.2 only. A probe from www on October 29, 2026,
+accepted the pinned leaf over TLS 1.2, returned `HTTP/1.1 200 OK` for
+`GET /dapi`, and rejected an all-zero pin.
 
 This matches the iOS app, which accepts a system-trusted chain or a leaf the
 user pinned for the profile. It fails closed on certificate replacement until

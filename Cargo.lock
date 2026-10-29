@@ -2438,6 +2438,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "rustls-pemfile",
+ "rustls-webpki",
  "schemars",
  "sd-notify",
  "serde",
