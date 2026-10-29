@@ -119,6 +119,13 @@ requires a device clock at the configured network rate already synchronized by
 the caller. Native float callbacks and resampling do not preserve all 32-bit
 integer precision.
 
+Native `buffered_frames` applies separately to capture priming and playback
+priming. At 48000 Hz, 960 frames represent 20 ms in each direction. These host
+buffers are additional to configured receive latency. Source timestamp placement,
+sample-quantum alignment, callback/graph scheduling and any resampling delay also
+affect the observed path. Receive latency alone is not an end-to-end latency
+measurement.
+
 Changing format, channel geometry or the selected device requires an explicit
 process replacement. Automatic device reopening and macOS/Windows network endpoint support remain
 separate work. Short isolated runs do not qualify sustained hardware performance or
@@ -138,9 +145,20 @@ still produces explicit silence, and capture-age and playback deadlines remain
 enforced.
 
 The shutdown summary includes event-loop scheduling measurements. Preparation
-measures reconciliation and deadline setup. Each selected event measures the
-interval from entering selection through completing its handler, including
-waiting and other tasks on that runtime. Wall time, thread CPU time and deadline
-overrun are recorded together. These measurements help distinguish expensive
-work from scheduling delay; they do not establish an operating-system latency
-guarantee.
+measures reconciliation and deadline setup. Individual future polls and selected
+handlers record their actual execution intervals, excluding time suspended at an
+await. Setting `scheduling_thread_observations` to `true` in the endpoint JSON
+configuration also records thread CPU time and voluntary/involuntary context
+switches for the enclosing selection poll and preparation. This diagnostic mode
+defaults to `false` because its system calls materially increase endpoint CPU
+use. The shutdown summary records the selected mode; unmeasured thread fields
+are null.
+Pending deadline polls retain their maximum overrun separately from completed
+polls. These observations distinguish owned execution, cached readiness delay and
+off-CPU time; they do not identify the preempting task or guarantee operating-system
+latency.
+
+When a timer's monotonic target has elapsed, the endpoint first attempts to consume
+its nonblocking kernel expiration directly. Other ready work cannot make it wait
+solely for the runtime's cached I/O readiness to refresh. One-shot validation,
+capture-age limits and missed-playout rejection remain enforced.
