@@ -18,6 +18,13 @@ impl From<StatusQuery> for Query {
 }
 
 impl Query {
+    pub fn preflight(query: StatusQuery) -> Vec<Self> {
+        match query {
+            StatusQuery::Codec | StatusQuery::Lock => vec![query.into()],
+            _ => vec![StatusQuery::Lock.into(), query.into()],
+        }
+    }
+
     pub fn kind(self) -> StatusKind {
         match self {
             Self::Status(query) => query.kind(),

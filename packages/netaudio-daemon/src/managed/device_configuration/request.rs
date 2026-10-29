@@ -88,9 +88,7 @@ impl<'a> Configuration<'a> {
                 StatusQuery::Aes67.into(),
                 Query::MulticastPrefix,
             ],
-            Self::Status(configuration) => {
-                vec![StatusQuery::Lock.into(), configuration.query().into()]
-            }
+            Self::Status(configuration) => Query::preflight(configuration.query()),
             Self::Audio(configuration) => {
                 vec![StatusQuery::Lock.into(), configuration.kind.query().into()]
             }
