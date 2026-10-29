@@ -64,6 +64,8 @@ pub struct Configuration {
     pub audio: AudioConfiguration,
     #[serde(default)]
     pub profile: Profile,
+    #[serde(default)]
+    pub scheduling_thread_observations: bool,
 }
 
 #[derive(Clone, Deserialize)]
@@ -85,6 +87,7 @@ impl Configuration {
 #[derive(Default, Serialize)]
 pub struct Summary {
     pub scheduling: super::scheduling::Measurements,
+    pub scheduling_thread_observations: bool,
     pub initialization_canceled: bool,
     pub routing_replies: u64,
     pub source_replies: u64,
@@ -367,6 +370,13 @@ impl Server {
         .await?;
         let mut counters = CounterProvider::new(configuration.interface.clone());
         counters.measure(time.now())?;
+        let summary = Summary {
+            scheduling: super::scheduling::Measurements::new(
+                configuration.scheduling_thread_observations,
+            ),
+            scheduling_thread_observations: configuration.scheduling_thread_observations,
+            ..Summary::default()
+        };
 
         Ok(Self {
             configuration,
@@ -388,7 +398,7 @@ impl Server {
             pending_status: VecDeque::new(),
             counters: Some(counters),
             status_job: None,
-            summary: Summary::default(),
+            summary,
         })
     }
 
@@ -541,7 +551,7 @@ impl Server {
                 continue;
             }
 
-            let preparation_started = super::scheduling::Started::now(&self.time)?;
+            let preparation_started = self.summary.scheduling.start(&self.time)?;
 
             if let Err(error) = self.receive.synchronize(
                 &mut self.endpoint,
@@ -590,22 +600,29 @@ impl Server {
             )?;
 
             let selected_clock = self.clock.current();
-            let selection_started = super::scheduling::Started::now(&self.time)?;
+            let observations = self.summary.scheduling.clone();
+            let observation_time = self.time.clone();
+            let continuing = observations.task("selection_poll", &observation_time, next_deadline, async {
             let operation;
+            let handler_started;
             tokio::select! {
                 biased;
-                _ = &mut stopped => return Ok(()),
-                event = async {
+                _ = &mut stopped => return Ok(false),
+                event = observations.poll("audio_event_poll", &observation_time, next_deadline, async {
                     match &self.audio {
                         Some(audio) => audio.next_event().await,
                         None => std::future::pending().await,
                     }
-                } => {
-                    operation = "audio_event";
+                }) => {
+                    let event = event?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "audio_event_handler";
                     self.audio_event(event)?;
                 }
-                result = receive_deadline.expired(), if receive_due.is_some() => {
-                    operation = "receive_dispatch";
+                result = observations.poll("receive_deadline_poll", &observation_time, receive_due, receive_deadline.expired()), if receive_due.is_some() => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "receive_dispatch_handler";
                     result?;
                     let lateness = self.time.now().saturating_sub(receive_due.unwrap());
                     self.summary.maximum_receive_deadline_lateness_nanoseconds =
@@ -620,8 +637,10 @@ impl Server {
                         }
                     }
                 }
-                result = media_deadline.expired(), if due.is_some() => {
-                    operation = "source_dispatch";
+                result = observations.poll("source_deadline_poll", &observation_time, due, media_deadline.expired()), if due.is_some() => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "source_dispatch_handler";
                     result?;
 
                     if let Err(error) = self.source.send(&mut self.endpoint, self.clock.current().as_ref(), &self.time) {
@@ -630,18 +649,24 @@ impl Server {
                         self.source.suspend(&mut self.endpoint)?;
                     }
                 }
-                result = self.clock.changed() => {
-                    operation = "clock_observation";
+                result = observations.poll("clock_observation_poll", &observation_time, next_deadline, self.clock.changed()) => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "clock_observation_handler";
                     result?;
                     let clock = self.clock.current().snapshot(self.time.now())?;
                     self.service.status(clock.usable, &clock.reason)?;
                 }
-                result = self.receiver_discovery.changed() => {
-                    operation = "discovery";
+                result = observations.poll("discovery_poll", &observation_time, next_deadline, self.receiver_discovery.changed()) => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "discovery_handler";
                     result?;
                 }
-                event = self.receive.next_event() => {
-                    operation = "receive_event";
+                event = observations.poll("receive_event_poll", &observation_time, next_deadline, self.receive.next_event()) => {
+                    let event = event?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "receive_event_handler";
                     match event {
                         Ok(event) => {
                             if let Err(error) = self.receive.event(event, &mut self.endpoint) {
@@ -659,8 +684,10 @@ impl Server {
                         }
                     }
                 }
-                result = self.source.next_event(&mut self.endpoint, &self.time, selected_clock.as_ref()) => {
-                    operation = "source_event";
+                result = observations.poll("source_event_poll", &observation_time, next_deadline, self.source.next_event(&mut self.endpoint, &self.time, selected_clock.as_ref())) => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "source_event_handler";
                     match result {
                         Ok(Some(response)) => {
                             reply(&self.sockets.source, response.peer, &response.bytes)?;
@@ -670,8 +697,10 @@ impl Server {
                         Err(error) => eprintln!("source worker failed: {error:#}"),
                     }
                 }
-                datagram = self.datagrams.recv() => {
-                    operation = "datagram";
+                datagram = observations.poll("datagram_poll", &observation_time, next_deadline, self.datagrams.recv()) => {
+                    let datagram = datagram?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "datagram_handler";
                     let datagram = datagram.context("endpoint receive provider stopped")?;
                     let started = self.time.now();
                     self.summary.maximum_observed_datagram_queue =
@@ -691,22 +720,28 @@ impl Server {
                         eprintln!("endpoint {channel:?} datagram rejected: {error:#}");
                     }
                 }
-                event = monitor.recv_async() => {
-                    operation = "publication";
+                event = observations.poll("publication_poll", &observation_time, next_deadline, monitor.recv_async()) => {
+                    let event = event?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "publication_handler";
                     self.publication.check_event(event?)?;
                 }
-                result = status_deadline.expired(), if status_due.is_some() => {
-                    operation = "status_dispatch";
+                result = observations.poll("status_deadline_poll", &observation_time, status_due, status_deadline.expired()), if status_due.is_some() => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "status_dispatch_handler";
                     result?;
                     self.prepare_status()?;
                 }
-                observation = async {
+                observation = observations.poll("status_observation_poll", &observation_time, next_deadline, async {
                     match &mut self.status_job {
                         Some(job) => job.await,
                         None => std::future::pending().await,
                     }
-                } => {
-                    operation = "status_observation";
+                }) => {
+                    let observation = observation?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "status_observation_handler";
                     let observation = observation??;
 
                     if let Err(error) = self.status_ready(observation) {
@@ -714,13 +749,15 @@ impl Server {
                         eprintln!("status preparation failed: {error:#}");
                     }
                 }
-                result = self.interface_observer.changed() => {
-                    let observed = result?;
+                result = observations.poll("interface_poll", &observation_time, next_deadline, self.interface_observer.changed()) => {
+                    let observed = result??;
                     self.source.suspend(&mut self.endpoint)?;
                     bail!("selected network interface changed from {:?} to {observed:?}; endpoint identity must be re-established", self.interface);
                 }
-                reader = self.readers.join_next() => {
-                    operation = "reader_completion";
+                reader = observations.poll("reader_poll", &observation_time, next_deadline, self.readers.join_next()) => {
+                    let reader = reader?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "reader_completion_handler";
                     let (channel, result) = reader.context("endpoint socket readers stopped")??;
                     let reason = result.err().map_or_else(|| "reader stopped".to_owned(), |error| format!("{error:#}"));
 
@@ -740,10 +777,15 @@ impl Server {
             }
             self.summary.scheduling.finish(
                 operation,
-                selection_started,
+                handler_started,
                 &self.time,
                 next_deadline,
             )?;
+            Ok::<_, anyhow::Error>(true)
+            }).await??;
+            if !continuing {
+                return Ok(());
+            }
         }
     }
 
