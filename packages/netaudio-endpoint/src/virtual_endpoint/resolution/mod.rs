@@ -44,6 +44,12 @@ impl Resolver {
         })
     }
 
+    pub fn select(&mut self, services: impl IntoIterator<Item = Name>) -> Result<()> {
+        self.cache.select(services, self.time.now())?;
+        self.schedule_changed = true;
+        Ok(())
+    }
+
     pub fn interface_index(&self) -> u32 {
         self.interface_index
     }

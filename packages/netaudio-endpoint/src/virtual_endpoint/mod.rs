@@ -9,6 +9,7 @@ pub mod platform;
 pub mod playback;
 mod receive_buffers;
 pub mod receive_runtime;
+mod receive_session;
 pub mod receiver;
 pub mod resolution;
 pub mod runtime;

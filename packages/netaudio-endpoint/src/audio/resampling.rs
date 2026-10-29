@@ -153,6 +153,8 @@ pub struct Playback {
     ratio: f64,
     target: usize,
     quantum_frames: usize,
+    channel_generations: Vec<u64>,
+    retained_frames: Vec<usize>,
 }
 
 impl Playback {
@@ -183,6 +185,8 @@ impl Playback {
             ratio,
             target: configuration.buffered_frames,
             quantum_frames,
+            channel_generations: vec![0; channels],
+            retained_frames: vec![0; channels],
         })
     }
 
@@ -205,7 +209,27 @@ impl Playback {
         }
 
         self.correction = Correction::new(self.target);
+        self.channel_generations.fill(0);
+        self.retained_frames.fill(0);
         Ok(())
+    }
+
+    pub fn select_channels(&mut self, generations: &[u64]) -> Vec<bool> {
+        generations
+            .iter()
+            .enumerate()
+            .map(|(index, generation)| {
+                if self.channel_generations[index] != *generation {
+                    self.channel_generations[index] = *generation;
+                    self.retained_frames[index] = if self.converter.is_some() {
+                        2 * FILTER_LENGTH
+                    } else {
+                        0
+                    };
+                }
+                self.retained_frames[index] == 0 && *generation != 0
+            })
+            .collect()
     }
 
     pub fn convert(
@@ -229,6 +253,10 @@ impl Playback {
 
             self.quantum_frames
         };
+
+        for retained in &mut self.retained_frames {
+            *retained = retained.saturating_sub(self.quantum_frames);
+        }
 
         Ok((0..produced)
             .map(|index| {

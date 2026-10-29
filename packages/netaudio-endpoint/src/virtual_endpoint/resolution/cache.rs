@@ -79,6 +79,16 @@ impl Cache {
         Ok(cache)
     }
 
+    pub fn select(&mut self, services: impl IntoIterator<Item = Name>, now: u64) -> Result<()> {
+        let services: BTreeSet<_> = services.into_iter().collect();
+        if services.iter().any(Name::is_root) {
+            bail!("discovery requires exact service identities");
+        }
+        self.services = services;
+        self.synchronize(now);
+        Ok(())
+    }
+
     fn interests(&self) -> BTreeSet<Key> {
         let mut keys = BTreeSet::new();
 

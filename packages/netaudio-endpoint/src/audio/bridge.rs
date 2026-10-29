@@ -15,7 +15,7 @@ use super::lifecycle::{Event, Fault, Lifecycle};
 use super::{Configuration, Samples, resampling};
 
 const QUEUE_HEADROOM: usize = 4;
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Receipt {
     pub owner: Owner,
     pub first_frame_index: u64,
@@ -23,6 +23,8 @@ pub struct Receipt {
     pub output_accepted: bool,
     pub received_samples: usize,
     pub local_silence_samples: usize,
+    pub channel_generations: Vec<u64>,
+    pub received_by_channel: Vec<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -40,6 +42,7 @@ pub(super) struct State {
     capture_generation: AtomicU64,
     next_capture_generation: AtomicU64,
     playback_generation: AtomicU64,
+    playback_channels: Vec<AtomicU64>,
     lifecycle: Lifecycle,
     capture_waker: AtomicWaker,
     receipt_waker: AtomicWaker,
@@ -114,6 +117,7 @@ struct Captured {
 
 struct OutputFrame {
     generation: u64,
+    channels: Arc<[u64]>,
     receipt: Option<Receipt>,
 }
 
@@ -220,8 +224,25 @@ impl OutputCallback {
         samples[..first.len()].copy_from_slice(first);
         samples[first.len()..].copy_from_slice(second);
         chunk.commit_all();
+        for (index, generation) in frame.channels.iter().enumerate() {
+            if *generation == 0
+                || self.state.playback_channels[index].load(Ordering::Acquire) != *generation
+            {
+                samples[index] = 0.0;
+            }
+        }
 
-        if let Some(receipt) = frame.receipt {
+        if let Some(mut receipt) = frame.receipt {
+            for (index, generation) in receipt.channel_generations.iter().enumerate() {
+                if *generation == 0
+                    || self.state.playback_channels[index].load(Ordering::Acquire) != *generation
+                {
+                    receipt.received_by_channel[index] = 0;
+                }
+            }
+            receipt.received_samples = receipt.received_by_channel.iter().sum();
+            receipt.local_silence_samples =
+                receipt.frames * self.channels - receipt.received_samples;
             if self.completed_receipts.len() == self.completed_receipts.capacity() {
                 self.state.report(Fault::ReceiptOverflow);
                 samples.fill(0.0);
@@ -436,9 +457,22 @@ impl Playback {
         self.state.playback_generation.store(generation, Ordering::Release);
     }
 
-    pub fn submit(&mut self, delivery: Delivery) -> Result<()> {
+    pub fn select_channels(&self, generations: &[u64]) -> Result<()> {
+        if generations.len() != self.channels {
+            bail!("native playback channel ownership geometry differs from its adapter");
+        }
+        for (channel, generation) in self.state.playback_channels.iter().zip(generations) {
+            channel.store(*generation, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    pub fn submit(&mut self, delivery: Delivery, channels: Vec<u64>) -> Result<()> {
         self.state.check()?;
         delivery.owner.validate()?;
+        if channels.len() != self.channels {
+            bail!("native playback channel ownership is incomplete");
+        }
 
         if delivery.frames.len() != self.quantum_frames
             || delivery.frames.iter().any(|frame| {
@@ -465,12 +499,28 @@ impl Playback {
             bail!("native playback delivery has a discontinuous sample coordinate");
         }
 
-        let received_samples = delivery
-            .frames
+        let ready = self.converter.select_channels(&channels);
+        let received_by_channel = (0..self.channels)
+            .map(|channel| {
+                if ready[channel] {
+                    delivery.frames.iter().filter(|frame| frame.received[channel]).count()
+                } else {
+                    0
+                }
+            })
+            .collect::<Vec<_>>();
+        let received_samples = received_by_channel.iter().sum();
+        let output_channels: Arc<[u64]> = channels
             .iter()
-            .flat_map(|frame| frame.received.iter().copied())
-            .filter(|received| *received)
-            .count();
+            .zip(&ready)
+            .map(|(generation, ready)| {
+                if *ready {
+                    *generation
+                } else {
+                    0
+                }
+            })
+            .collect();
         let converted = self.converter.convert(
             delivery.frames.iter().map(|frame| {
                 let scale = -f64::from(self.network_format.sample_width().minimum_sample());
@@ -492,9 +542,11 @@ impl Playback {
             output_accepted: true,
             received_samples,
             local_silence_samples: self.quantum_frames * self.channels - received_samples,
+            channel_generations: channels,
+            received_by_channel,
         };
         self.pending_receipts.push_back(receipt);
-        let completed = if !converted.is_empty()
+        let mut completed = if !converted.is_empty()
             && self.pending_receipts.len() > self.converter.receipt_delay_quanta()
         {
             self.pending_receipts.pop_front()
@@ -515,8 +567,9 @@ impl Playback {
             self.frames
                 .push(OutputFrame {
                     generation: delivery.owner.stream_generation,
+                    channels: output_channels.clone(),
                     receipt: if index == last {
-                        completed
+                        completed.take()
                     } else {
                         None
                     },
@@ -587,6 +640,7 @@ impl Bridge {
             capture_generation: AtomicU64::new(0),
             next_capture_generation: AtomicU64::new(1),
             playback_generation: AtomicU64::new(0),
+            playback_channels: (0..output_channels).map(|_| AtomicU64::new(0)).collect(),
             lifecycle: Lifecycle::default(),
             capture_waker: AtomicWaker::new(),
             receipt_waker: AtomicWaker::new(),

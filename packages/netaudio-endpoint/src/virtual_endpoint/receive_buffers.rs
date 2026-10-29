@@ -11,6 +11,7 @@ pub struct Preparation {
     pub owner: Owner,
     pub format: Format,
     pub inventory_channels: Vec<u16>,
+    pub source_flow_capacity: u16,
 }
 
 pub struct Prepared {
@@ -27,6 +28,7 @@ pub struct Worker {
     requests: mpsc::Sender<Request>,
     results: mpsc::Receiver<Result<Box<Prepared>>>,
     worker: JoinHandle<Result<()>>,
+    stopped: bool,
 }
 
 impl Worker {
@@ -38,17 +40,35 @@ impl Worker {
                 match request {
                     Request::Prepare(preparation) => {
                         let context = &preparation.candidate.context;
+                        let mut channels = context
+                            .slots
+                            .iter()
+                            .flat_map(|slot| slot.receivers.iter().copied())
+                            .collect::<Vec<_>>();
+                        channels.sort_unstable();
+                        let mut profile = context.profile;
+                        profile.receive_channels = channels.len() as u16;
                         let slots = context
                             .slots
                             .iter()
-                            .map(|slot| slot.receivers.clone())
+                            .map(|slot| {
+                                slot.receivers
+                                    .iter()
+                                    .map(|identifier| {
+                                        (channels
+                                            .binary_search(identifier)
+                                            .expect("selected receiver")
+                                            + 1) as u16
+                                    })
+                                    .collect()
+                            })
                             .collect::<Vec<_>>();
                         let result = Buffer::with_profile(
                             preparation.owner,
                             preparation.format,
                             context.requested_frames_per_packet,
                             &slots,
-                            context.profile,
+                            profile,
                         )
                         .map(|buffer| {
                             Box::new(Prepared {
@@ -70,7 +90,12 @@ impl Worker {
             requests,
             results,
             worker,
+            stopped: false,
         }
+    }
+
+    pub fn available(&self) -> bool {
+        !self.stopped && !self.requests.is_closed()
     }
 
     pub fn prepare(&self, preparation: Preparation) -> Result<()> {
@@ -86,7 +111,12 @@ impl Worker {
     }
 
     pub async fn next(&mut self) -> Result<Result<Box<Prepared>>> {
-        self.results.recv().await.context("receive buffer worker stopped")
+        if self.stopped {
+            return std::future::pending().await;
+        }
+        let result = self.results.recv().await;
+        self.stopped = result.is_none();
+        result.context("receive buffer worker stopped")
     }
 
     pub async fn close(self) -> Result<()> {

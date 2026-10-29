@@ -12,42 +12,39 @@ use super::sockets::Monotonic;
 #[derive(Clone, Default)]
 struct Observation {
     route_generation: u64,
-    candidate: Option<Candidate>,
-    unavailable: Option<String>,
+    candidates: Vec<Candidate>,
+    unavailable: Vec<String>,
 }
 
 impl Observation {
     fn refresh(
         &mut self,
-        selection: &Selection,
+        selections: &[Selection],
+        unavailable: &[String],
         resolver: &Resolver,
         generation: &mut u64,
     ) -> Result<()> {
-        match selection.resolve(|name| resolver.resolve(name)) {
-            Ok(mut candidate) => {
-                if let Some(previous) = &self.candidate
-                    && previous.context == candidate.context
-                {
-                    candidate.context = previous.context.clone();
-                    candidate.discovery_generation = previous.discovery_generation;
-                } else {
-                    *generation = generation
-                        .checked_add(1)
-                        .context("source discovery generation space is exhausted")?;
-                    candidate.discovery_generation = *generation;
+        let previous = std::mem::take(&mut self.candidates);
+        self.unavailable = unavailable.to_vec();
+        for selection in selections {
+            match selection.resolve_groups(|name| resolver.resolve(name)) {
+                Ok(candidates) => {
+                    for mut candidate in candidates {
+                        if let Some(previous) =
+                            previous.iter().find(|previous| previous.context == candidate.context)
+                        {
+                            candidate.context = previous.context.clone();
+                            candidate.discovery_generation = previous.discovery_generation;
+                        } else {
+                            *generation = generation
+                                .checked_add(1)
+                                .context("source discovery generation space is exhausted")?;
+                            candidate.discovery_generation = *generation;
+                        }
+                        self.candidates.push(candidate);
+                    }
                 }
-                self.candidate = Some(candidate);
-                self.unavailable = None;
-            }
-            Err(error) => {
-                self.candidate = None;
-                let reason = format!("{error:#}");
-
-                if self.unavailable.as_deref() != Some(reason.as_str()) {
-                    eprintln!("receiver source unavailable: {reason}");
-                }
-
-                self.unavailable = Some(reason);
+                Err(error) => self.unavailable.push(format!("{error:#}")),
             }
         }
         Ok(())
@@ -87,7 +84,6 @@ impl Discovery {
             }
             result
         });
-
         Self {
             time,
             current: Observation::default(),
@@ -99,31 +95,35 @@ impl Discovery {
     }
 
     pub fn select(&mut self, endpoint: &Endpoint) -> Result<()> {
-        self.current = Observation {
-            route_generation: endpoint.route_generation,
-            ..Observation::default()
-        };
+        self.current.route_generation = endpoint.route_generation;
+        self.current.candidates.retain(|candidate| candidate.matches_routes(endpoint));
+        self.current.unavailable.clear();
         self.requests
             .send(Some(Request::from_endpoint(endpoint)))
             .context("source discovery worker stopped before route selection")?;
         Ok(())
     }
 
-    pub fn candidate(&self) -> Option<&Candidate> {
+    pub fn candidates(&self) -> Vec<Candidate> {
         self.current
-            .candidate
-            .as_ref()
+            .candidates
+            .iter()
             .filter(|candidate| self.time.now() <= candidate.usable_through)
+            .cloned()
+            .collect()
     }
 
-    pub fn unavailable(&self) -> Option<&str> {
-        self.current.unavailable.as_deref().or_else(|| {
-            self.current
-                .candidate
-                .as_ref()
-                .filter(|candidate| self.time.now() > candidate.usable_through)
-                .map(|_| "selected source records have expired")
-        })
+    pub fn unavailable(&self) -> Vec<String> {
+        let mut reasons = self.current.unavailable.clone();
+        for candidate in &self.current.candidates {
+            if self.time.now() > candidate.usable_through {
+                reasons.push(format!(
+                    "selected source {} records have expired",
+                    candidate.context.device
+                ));
+            }
+        }
+        reasons
     }
 
     pub async fn changed(&mut self) -> Result<()> {
@@ -153,7 +153,9 @@ async fn resolve(
     publications: watch::Sender<Observation>,
     mut stopped: oneshot::Receiver<()>,
 ) -> Result<()> {
-    let mut selected: Option<(Selection, Resolver)> = None;
+    let mut selections = Vec::new();
+    let mut selection_unavailable = Vec::new();
+    let mut resolver: Option<Resolver> = None;
     let mut current = Observation::default();
     let mut generation = 0;
     loop {
@@ -162,31 +164,25 @@ async fn resolve(
             _ = &mut stopped => return Ok(()),
             changed = requests.changed() => {
                 changed.context("source discovery route owner stopped")?;
-                let request = requests.borrow_and_update().clone()
-                    .context("source discovery request has no route state")?;
-                selected = None;
-                current = Observation { route_generation: request.generation, ..Observation::default() };
-                match Selection::from_request(&request) {
-                    Ok(Some(selection)) => {
-                        let resolver = Resolver::new(address, interface_index, selection.names(), time.clone())?;
-                        current.refresh(&selection, &resolver, &mut generation)?;
-                        selected = Some((selection, resolver));
-                    }
-                    Ok(None) => {}
-                    Err(error) => current.unavailable = Some(format!("{error:#}")),
-                }
+                let request = requests.borrow_and_update().clone().context("source discovery request has no route state")?;
+                current.route_generation = request.generation;
+                (selections, selection_unavailable) = Selection::from_request(&request);
+                let names = selections.iter().flat_map(Selection::names).collect::<Vec<_>>();
+                if let Some(resolver) = &mut resolver { resolver.select(names)?; }
+                else if !names.is_empty() { resolver = Some(Resolver::new(address, interface_index, names, time.clone())?); }
+                if let Some(resolver) = &resolver { current.refresh(&selections, &selection_unavailable, resolver, &mut generation)?; }
+                if resolver.is_none() { current.candidates.clear(); current.unavailable = selection_unavailable.clone(); }
                 publications.send_replace(current.clone());
             }
             event = async {
-                match &mut selected {
-                    Some((_, resolver)) => resolver.next_event().await,
+                match &mut resolver {
+                    Some(resolver) => resolver.next_event().await,
                     None => std::future::pending().await,
                 }
             } => {
                 match event? {
                     Event::RecordsChanged => {
-                        let (selection, resolver) = selected.as_ref().context("source discovery selection disappeared")?;
-                        current.refresh(selection, resolver, &mut generation)?;
+                        current.refresh(&selections, &selection_unavailable, resolver.as_ref().context("source resolver disappeared")?, &mut generation)?;
                         publications.send_replace(current.clone());
                     }
                     Event::Rejected(reason) => eprintln!("source discovery datagram rejected: {reason}"),

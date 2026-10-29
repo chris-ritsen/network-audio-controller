@@ -372,7 +372,7 @@ pub fn build_query_fixed_tx_flows_from(
     ) {
         return Err(NetaudioError::InvalidFlowProtocol);
     }
-    if !(1..=MAX_LEGACY_FLOW_ID).contains(&starting_flow) {
+    if starting_flow == 0 {
         return Err(NetaudioError::InvalidFlowSlot);
     }
     let mut body = [0u8; 6];

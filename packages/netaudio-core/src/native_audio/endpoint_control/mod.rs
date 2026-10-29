@@ -4,6 +4,7 @@ pub mod profile;
 pub use profile::Profile;
 pub mod source;
 
+use std::collections::BTreeMap;
 use std::net::SocketAddrV4;
 
 use serde::{Deserialize, Serialize};
@@ -195,8 +196,8 @@ pub struct Endpoint {
     pub profile: Profile,
     pub transmit_names: Vec<String>,
     pub receive_channels: Vec<ReceiverChannel>,
-    pub transmit_flow: Option<TransmitFlow>,
-    pub receive_flow: Option<ReceiveFlow>,
+    pub transmit_flows: BTreeMap<u16, TransmitFlow>,
+    pub receive_flows: BTreeMap<u16, ReceiveFlow>,
     pub route_generation: u64,
 }
 
@@ -238,8 +239,8 @@ impl Endpoint {
                     asserted_interfaces: 0,
                 })
                 .collect(),
-            transmit_flow: None,
-            receive_flow: None,
+            transmit_flows: BTreeMap::new(),
+            receive_flows: BTreeMap::new(),
             route_generation: 1,
         })
     }
@@ -305,8 +306,8 @@ impl Endpoint {
             (14, self.profile.receive_channels),
             (18, self.profile.flow_slots),
             (20, self.profile.flow_slots),
-            (22, 1),
-            (24, 1),
+            (22, self.profile.transmit_flows),
+            (24, self.profile.receive_flows),
             (30, 1),
         ] {
             reply.word(offset, value);
@@ -478,84 +479,118 @@ impl Endpoint {
     }
 
     fn flows(&self, header: Header, request: &[u8]) -> Result<Vec<u8>, Error> {
-        let selected = match ranges(request, 1) {
+        let transmitting = header.operation == TRANSMIT_FLOW_OPERATION;
+        let maximum = if transmitting {
+            self.profile.transmit_flows
+        } else {
+            self.profile.receive_flows
+        };
+        let selected = match bounded_ranges(request, maximum, usize::from(maximum)) {
             Ok(value) => value,
             Err(result) => {
-                return Ok(Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish());
+                return Ok(Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish())
             }
         };
-
-        let mut reply = Writer::response(header, 14, RESULT_CODE_SUCCESS)?;
-        reply.bytes[10] = 1;
-        if selected.is_empty() {
-            return Ok(reply.finish());
-        }
-
-        if header.operation == TRANSMIT_FLOW_OPERATION {
-            if let Some(flow) = &self.transmit_flow {
-                let count = flow.channels.len();
-                let record = reply.reserve(20 + 2 * count, 4)?;
-                reply.word(12, record as u16);
-                reply.bytes[11] = 1;
-                reply.word(record, 1);
-                reply.word(record + 2, 1);
-                reply.double_word(record + 4, self.profile.sample_rate);
-                reply.word(record + 10, self.profile.sample_bits);
-                reply.word(record + 12, 1);
-                reply.word(record + 14, count as u16);
-                let endpoint = reply.endpoint(flow.destination)?;
-                reply.word(record + 16, endpoint);
-                for (index, channel) in flow.channels.iter().enumerate() {
-                    reply.word(record + 18 + 2 * index, *channel);
-                }
-
-                let status = reply.reserve(20, 4)?;
-                reply.word(record + 18 + count * 2, status as u16);
-                reply.bytes[status] = 10;
-                reply.word(status + 2, u16::from(flow.active));
-                let device = reply.text(&flow.receiver_hostname)?;
-                let name = reply.text(&flow.receiver_flow_name)?;
-                reply.word(status + 4, device);
-                reply.word(status + 6, name);
-                reply.word(status + 8, flow.frames_per_packet);
-                reply.double_word(status + 12, TRANSMIT_LATENCY_NANOSECONDS);
+        let capacity = maximum.min(16) as usize;
+        let mut reply = Writer::response(header, 12 + 2 * capacity, RESULT_CODE_SUCCESS)?;
+        reply.bytes[10] = capacity as u8;
+        let mut seen = std::collections::BTreeSet::new();
+        for identifier in selected {
+            if !seen.insert(identifier) {
+                continue;
             }
-        } else if let Some(flow) = &self.receive_flow {
-            let count = flow.slots.len();
-            let record = reply.reserve(22 + 2 * count, 4)?;
-            reply.word(12, record as u16);
-            reply.bytes[11] = 1;
-            reply.word(record, 1);
-            reply.word(record + 2, 1);
-            reply.double_word(record + 4, self.profile.sample_rate);
-            reply.word(record + 10, self.profile.sample_bits);
-            reply.word(record + 12, 1);
-            reply.word(record + 14, count as u16);
-            reply.word(record + 16, self.profile.receive_channels.div_ceil(16));
-            let endpoint = reply.endpoint(flow.source)?;
-            reply.word(record + 18, endpoint);
-            for (index, channels) in flow.slots.iter().enumerate() {
-                let words = usize::from(self.profile.receive_channels).div_ceil(16);
-                let bitmap = reply.reserve(words * 2, 2)?;
-                for channel in channels {
-                    if (1..=self.profile.receive_channels).contains(channel) {
-                        let index = usize::from(*channel - 1);
-                        let offset = bitmap + (index / 16) * 2;
-                        let mask = word(&reply.bytes, offset)? | (1 << (index % 16));
-                        reply.word(offset, mask);
+            let present = if transmitting {
+                self.transmit_flows.contains_key(&identifier)
+            } else {
+                self.receive_flows.contains_key(&identifier)
+            };
+            if !present {
+                continue;
+            }
+            if usize::from(reply.bytes[11]) == capacity {
+                reply.word(8, RESULT_CODE_MORE_PAGES);
+                break;
+            }
+            let pointer = 12 + 2 * usize::from(reply.bytes[11]);
+            let heap_start = reply.bytes.len();
+            let written = (|| -> Result<(), Error> {
+                if transmitting {
+                    let flow = &self.transmit_flows[&identifier];
+                    let count = flow.channels.len();
+                    let record = reply.reserve(20 + 2 * count, 4)?;
+                    reply.word(pointer, record as u16);
+
+                    reply.word(record, identifier);
+                    reply.word(record + 2, 1);
+                    reply.double_word(record + 4, self.profile.sample_rate);
+                    reply.word(record + 10, self.profile.sample_bits);
+                    reply.word(record + 12, 1);
+                    reply.word(record + 14, count as u16);
+                    let endpoint = reply.endpoint(flow.destination)?;
+                    reply.word(record + 16, endpoint);
+                    for (index, channel) in flow.channels.iter().enumerate() {
+                        reply.word(record + 18 + 2 * index, *channel);
                     }
+
+                    let status = reply.reserve(20, 4)?;
+                    reply.word(record + 18 + count * 2, status as u16);
+                    reply.bytes[status] = 10;
+                    reply.word(status + 2, u16::from(flow.active));
+                    let device = reply.text(&flow.receiver_hostname)?;
+                    let name = reply.text(&flow.receiver_flow_name)?;
+                    reply.word(status + 4, device);
+                    reply.word(status + 6, name);
+                    reply.word(status + 8, flow.frames_per_packet);
+                    reply.double_word(status + 12, TRANSMIT_LATENCY_NANOSECONDS);
+                } else {
+                    let flow = &self.receive_flows[&identifier];
+                    let count = flow.slots.len();
+                    let record = reply.reserve(22 + 2 * count, 4)?;
+                    reply.word(pointer, record as u16);
+
+                    reply.word(record, identifier);
+                    reply.word(record + 2, 1);
+                    reply.double_word(record + 4, self.profile.sample_rate);
+                    reply.word(record + 10, self.profile.sample_bits);
+                    reply.word(record + 12, 1);
+                    reply.word(record + 14, count as u16);
+                    reply.word(record + 16, self.profile.receive_channels.div_ceil(16));
+                    let endpoint = reply.endpoint(flow.source)?;
+                    reply.word(record + 18, endpoint);
+                    for (index, channels) in flow.slots.iter().enumerate() {
+                        let words = usize::from(self.profile.receive_channels).div_ceil(16);
+                        let bitmap = reply.reserve(words * 2, 2)?;
+                        for channel in channels {
+                            if (1..=self.profile.receive_channels).contains(channel) {
+                                let index = usize::from(*channel - 1);
+                                let offset = bitmap + (index / 16) * 2;
+                                let mask = word(&reply.bytes, offset)? | (1 << (index % 16));
+                                reply.word(offset, mask);
+                            }
+                        }
+                        reply.word(record + 20 + 2 * index, bitmap as u16);
+                    }
+
+                    let status = reply.reserve(16, 4)?;
+                    reply.word(record + 20 + count * 2, status as u16);
+                    reply.word(status, flow.status);
+                    reply.word(status + 2, u16::from(flow.active));
+                    reply.bytes[status + 4] = 8;
+                    reply.double_word(status + 8, self.profile.receive_latency_nanoseconds);
                 }
-                reply.word(record + 20 + 2 * index, bitmap as u16);
+                Ok(())
+            })();
+            if let Err(error) = written {
+                if reply.bytes[11] == 0 {
+                    return Err(error);
+                }
+                reply.bytes.truncate(heap_start);
+                reply.word(pointer, 0);
+                reply.word(8, RESULT_CODE_MORE_PAGES);
+                break;
             }
-
-            let status = reply.reserve(16, 4)?;
-            reply.word(record + 20 + count * 2, status as u16);
-            reply.word(status, flow.status);
-            reply.word(status + 2, u16::from(flow.active));
-            reply.bytes[status + 4] = 8;
-            reply.double_word(status + 8, self.profile.receive_latency_nanoseconds);
+            reply.bytes[11] += 1;
         }
-
         Ok(reply.finish())
     }
 
@@ -681,10 +716,13 @@ impl Endpoint {
 }
 
 pub(crate) fn ranges(request: &[u8], maximum: u16) -> Result<Vec<u16>, u16> {
+    bounded_ranges(request, maximum, MAXIMUM_RANGE_RESULTS + 1)
+}
+
+fn bounded_ranges(request: &[u8], maximum: u16, limit: usize) -> Result<Vec<u16>, u16> {
     if request.len() < DIRECTORY_HEADER_BYTES {
         return Err(REQUEST_TOO_SHORT);
     }
-
     let expected = 12 + usize::from(request[11]) * 4;
     if request.len() < expected {
         return Err(REQUEST_TOO_SHORT);
@@ -695,6 +733,7 @@ pub(crate) fn ranges(request: &[u8], maximum: u16) -> Result<Vec<u16>, u16> {
     }
 
     let mut identifiers = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
     for index in 0..usize::from(request[11]) {
         let start = word(request, 12 + index * 4).map_err(|_| REQUEST_TOO_SHORT)?;
         let end = word(request, 14 + index * 4).map_err(|_| REQUEST_TOO_SHORT)?;
@@ -715,10 +754,17 @@ pub(crate) fn ranges(request: &[u8], maximum: u16) -> Result<Vec<u16>, u16> {
         };
 
         if start <= end {
-            identifiers.extend((start..=end).take(MAXIMUM_RANGE_RESULTS + 1 - identifiers.len()));
+            for identifier in start..=end {
+                if seen.insert(identifier) {
+                    identifiers.push(identifier);
+                }
+                if identifiers.len() == limit {
+                    break;
+                }
+            }
         }
 
-        if identifiers.len() > MAXIMUM_RANGE_RESULTS {
+        if identifiers.len() >= limit {
             break;
         }
     }

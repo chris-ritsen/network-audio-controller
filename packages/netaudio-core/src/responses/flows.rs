@@ -63,6 +63,16 @@ pub fn parse_multicast_flow_creation_2809(response: &[u8]) -> Option<MulticastFl
 }
 
 pub fn parse_tx_flow_page(response: &[u8]) -> Option<TxFlowPage> {
+    parse_tx_flow_page_with_capacity(response, u16::MAX)
+}
+
+pub fn parse_tx_flow_page_with_capacity(
+    response: &[u8],
+    maximum_flow_identifier: u16,
+) -> Option<TxFlowPage> {
+    if maximum_flow_identifier == 0 {
+        return None;
+    }
     let envelope = validate_response_envelope(
         response,
         &[
@@ -132,7 +142,9 @@ pub fn parse_tx_flow_page(response: &[u8]) -> Option<TxFlowPage> {
             record_end + RESPONSE_HEADER_SIZE,
             &record_regions,
         )?;
-        if !(1..=32).contains(&flow.flow_number) || !flow_numbers.insert(flow.flow_number) {
+        if !(1..=maximum_flow_identifier).contains(&flow.flow_number)
+            || !flow_numbers.insert(flow.flow_number)
+        {
             return None;
         }
         flows.push(flow);

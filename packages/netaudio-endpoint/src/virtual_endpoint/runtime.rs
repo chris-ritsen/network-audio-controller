@@ -16,7 +16,6 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::task::{JoinHandle, JoinSet};
 
-use super::acquisition;
 use super::clock_driver::Worker;
 use super::deadline::Deadline;
 use super::discovery::Publication;
@@ -102,9 +101,9 @@ pub struct Summary {
     pub maximum_datagram_dispatch_delay_nanoseconds: u64,
     pub maximum_datagram_processing_nanoseconds: u64,
     pub final_clock: Option<netaudio_core::native_audio::clock::discipline::Snapshot>,
-    pub receiver_candidate: Option<Candidate>,
-    pub receiver_unavailable: Option<String>,
-    pub receiver_acquisition: Option<acquisition::Progress>,
+    pub receiver_candidates: Vec<Candidate>,
+    pub receiver_unavailable: Vec<String>,
+    pub source: Option<source::Summary>,
     pub receive: Option<receive_runtime::Summary>,
     pub final_endpoint: Option<Endpoint>,
     pub audio: Option<crate::audio::Statistics>,
@@ -173,7 +172,6 @@ struct Server {
     clock: Worker,
     source: source::Runtime,
     receiver_discovery: receiver::Discovery,
-    receiver_acquisition: acquisition::Client,
     receive: receive_runtime::Runtime,
     sockets: ControlSockets,
     monitoring: Manager,
@@ -268,18 +266,24 @@ impl Server {
         .await?;
         let sockets =
             ControlSockets::bind(configuration.address, configuration.status_publication).await?;
-        let pool = MediaPool::reserve(configuration.address, time.now()).await?;
+        let pool = MediaPool::reserve(
+            configuration.address,
+            time.now(),
+            configuration.profile.transmit_flows * 2,
+        )
+        .await?;
         let generations = Generations::start(issuer);
-        let source = source::Runtime::new(pool, generations, capture);
+        let source =
+            source::Runtime::new(pool, generations, capture, configuration.profile.transmit_flows)
+                .await?;
         let receiver_discovery =
             receiver::Discovery::new(configuration.address, interface.index, time.clone());
-        let receiver_acquisition =
-            acquisition::Client::new(configuration.address, time.clone()).await?;
         let receive = receive_runtime::Runtime::new(
             configuration.address,
             playback,
             time.clone(),
             incarnation,
+            configuration.profile,
         )
         .await?;
         let monitoring = Manager::new(
@@ -315,7 +319,7 @@ impl Server {
             });
         }
 
-        for (index, slot) in receive.pool.slots.iter().enumerate() {
+        for (index, slot) in receive.media_slots().enumerate() {
             let channel = Channel::ReceiveMedia(index);
             let socket = slot.socket.clone();
             let owner = slot.owner.clone();
@@ -331,7 +335,7 @@ impl Server {
             .pool
             .next_available()
             .into_iter()
-            .chain(receive.pool.next_available())
+            .chain(receive.next_available_port())
             .max()
             .context("endpoint media port pools have no initial availability")?;
         let startup_timeout_microseconds =
@@ -373,7 +377,6 @@ impl Server {
             clock,
             source,
             receiver_discovery,
-            receiver_acquisition,
             receive,
             sockets,
             monitoring,
@@ -395,9 +398,7 @@ impl Server {
                     self.summary.routing_replies += 1;
 
                     if answer.routes_changed {
-                        self.receiver_acquisition.synchronize(None);
                         self.receiver_discovery.select(&self.endpoint)?;
-                        self.receiver_acquisition.synchronize(self.receiver_discovery.candidate());
                     }
                 }
             }
@@ -540,11 +541,10 @@ impl Server {
 
             if let Err(error) = self.receive.synchronize(
                 &mut self.endpoint,
-                self.receiver_discovery.candidate(),
-                self.receiver_acquisition.progress(self.receiver_discovery.candidate()),
+                &self.receiver_discovery.candidates(),
                 self.clock.current().as_ref(),
             ) {
-                self.receive.summary.unavailable = Some(format!("{error:#}"));
+                self.receive.summary.unavailable.push(format!("{error:#}"));
                 eprintln!("receiver reconciliation failed: {error:#}");
             }
 
@@ -556,7 +556,11 @@ impl Server {
                 }
             };
             receive_deadline.arm(receive_due)?;
-            let due = match self.source.deadline(self.clock.current().as_ref(), self.time.now()) {
+            let due = match self.source.deadline(
+                &mut self.endpoint,
+                self.clock.current().as_ref(),
+                self.time.now(),
+            ) {
                 Ok(due) => due,
                 Err(error) => {
                     eprintln!("source output suspended: {error:#}");
@@ -573,6 +577,7 @@ impl Server {
                 .map(|pending| pending.due);
             status_deadline.arm(status_due)?;
 
+            let selected_clock = self.clock.current();
             tokio::select! {
                 biased;
                 _ = &mut stopped => return Ok(()),
@@ -613,14 +618,12 @@ impl Server {
                 }
                 result = self.receiver_discovery.changed() => {
                     result?;
-                    self.receiver_acquisition.synchronize(self.receiver_discovery.candidate());
                 }
-                _ = self.receiver_acquisition.changed() => {}
                 event = self.receive.next_event() => {
                     match event {
                         Ok(event) => {
                             if let Err(error) = self.receive.event(event, &mut self.endpoint) {
-                                self.receive.summary.unavailable = Some(format!("{error:#}"));
+                                self.receive.summary.unavailable.push(format!("{error:#}"));
                                 eprintln!("receive control event failed: {error:#}");
                             }
                         }
@@ -634,7 +637,7 @@ impl Server {
                         }
                     }
                 }
-                result = self.source.next_event(&mut self.endpoint, &self.time) => {
+                result = self.source.next_event(&mut self.endpoint, &self.time, selected_clock.as_ref()) => {
                     match result {
                         Ok(Some(response)) => {
                             reply(&self.sockets.source, response.peer, &response.bytes)?;
@@ -693,16 +696,12 @@ impl Server {
 
                     match channel {
                         Channel::SourceMedia(index) => {
-                            if self.source.flow.as_ref().is_some_and(|flow| flow.port_index == index) {
-                                self.source.suspend(&mut self.endpoint)?;
-                            }
-                            self.source.pool.disable(index)?;
+                            self.source.failed_port(&mut self.endpoint, index, &reason)?;
                             self.summary.media_failures += 1;
                             eprintln!("source media port retired: {reason}");
                         }
                         Channel::ReceiveMedia(index) => {
-                            self.receive.retire(&mut self.endpoint, &format!("receive media port failed: {reason}"))?;
-                            self.receive.pool.disable(index)?;
+                            self.receive.failed_port(&mut self.endpoint, index, &format!("receive media port failed: {reason}"))?;
                             self.summary.media_failures += 1;
                         }
                         _ => bail!("endpoint {channel:?} provider failed: {reason}"),
@@ -727,15 +726,12 @@ impl Server {
             job.await??;
         }
 
-        self.summary.submitted_packets = self.source.submitted_packets;
+        self.summary.submitted_packets = self.source.summary.submitted_packets;
         self.summary.maximum_submission_lateness_nanoseconds =
-            self.source.maximum_submission_lateness_nanoseconds;
+            self.source.summary.maximum_submission_lateness_nanoseconds;
         let final_clock = self.clock.current().snapshot(self.time.now());
-        self.summary.receiver_candidate = self.receiver_discovery.candidate().cloned();
-        self.summary.receiver_acquisition =
-            self.receiver_acquisition.progress(self.receiver_discovery.candidate()).cloned();
-        self.summary.receiver_unavailable =
-            self.receiver_discovery.unavailable().map(str::to_owned);
+        self.summary.receiver_candidates = self.receiver_discovery.candidates();
+        self.summary.receiver_unavailable = self.receiver_discovery.unavailable();
         let source = self.source.close(&mut self.endpoint, self.time.now()).await;
         let receive = self.receive.close(&mut self.endpoint).await;
         let discovery = self.receiver_discovery.close().await;
@@ -743,7 +739,9 @@ impl Server {
         let publication = self.publication.stop().await;
         self.summary.final_endpoint = Some(self.endpoint);
         self.summary.audio = self.audio.take().map(crate::audio::Engine::close).transpose()?;
-        source?;
+        let source = source?;
+        self.summary.media_failures += source.failures;
+        self.summary.source = Some(source);
         self.summary.receive = Some(receive?);
         discovery?;
         self.summary.maximum_clock_observation_nanoseconds = clock?.maximum_observation_nanoseconds;

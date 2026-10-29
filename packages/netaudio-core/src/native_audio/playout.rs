@@ -96,6 +96,7 @@ pub struct Buffer {
     first_received: Option<u64>,
     cursor: Option<u64>,
     primed: bool,
+    aligned: bool,
     consecutive_missing: usize,
 }
 
@@ -179,6 +180,7 @@ impl Buffer {
             first_received: None,
             cursor: None,
             primed: false,
+            aligned: false,
             consecutive_missing: 0,
         })
     }
@@ -197,6 +199,7 @@ impl Buffer {
         self.first_received = None;
         self.cursor = None;
         self.primed = false;
+        self.aligned = false;
         self.consecutive_missing = 0;
         Ok(())
     }
@@ -303,6 +306,24 @@ impl Buffer {
         }
 
         Some(cursor)
+    }
+
+    pub fn align(&mut self, first: u64) -> Result<(), Error> {
+        let cursor = self.cursor.ok_or(Error::NotPrimed)?;
+        if self.aligned && first != cursor {
+            return Err(Error::MissedDeadline);
+        }
+        if first.abs_diff(cursor) >= RING_FRAMES as u64 {
+            return Err(Error::OutsideWindow);
+        }
+        for tick in cursor..first {
+            let frame = &mut self.frames[(tick % RING_FRAMES as u64) as usize];
+            frame.samples.fill(0);
+            frame.received.fill(false);
+        }
+        self.cursor = Some(first);
+        self.aligned = true;
+        Ok(())
     }
 
     pub fn deliver(&mut self, owner: Owner, current_tick: u64) -> Result<Delivery, Error> {

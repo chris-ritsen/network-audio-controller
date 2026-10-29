@@ -20,6 +20,7 @@ pub struct SelectedChannel {
 #[derive(Clone, Debug, Serialize)]
 pub struct SourceFormat {
     pub channels: Vec<SelectedChannel>,
+    pub flow_capacity: u16,
     pub sample_rate: u32,
     pub sample_bits: u16,
     pub requested_frames_per_packet: u16,
@@ -84,6 +85,9 @@ pub fn qualify_with_profile(
 
     let mut result = SourceFormat {
         channels: Vec::with_capacity(selected.len()),
+        flow_capacity: capabilities
+            .maximum_transmit_flows
+            .ok_or(Error("source flow capacity is absent"))?,
         sample_rate: profile.sample_rate,
         sample_bits: profile.sample_bits,
         requested_frames_per_packet,
