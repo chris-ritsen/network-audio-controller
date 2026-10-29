@@ -15,6 +15,10 @@ pub(super) struct Recording {
 }
 
 impl Recording {
+    pub(super) fn records_frames(&self) -> bool {
+        self.frames.is_some()
+    }
+
     pub(super) fn begin(
         directory: PathBuf,
         configuration: &Configuration,

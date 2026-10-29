@@ -168,8 +168,9 @@ impl Configuration {
             "source must use the selected interface address and a nonzero port"
         );
         ensure!(
-            valid_unicast(*self.destination.ip()) && self.destination.port() != 0,
-            "this source supports an exact unicast destination only"
+            (valid_unicast(*self.destination.ip()) || self.destination.ip().is_multicast())
+                && self.destination.port() != 0,
+            "source destination must be an exact unicast endpoint or IPv4 multicast group"
         );
         ensure!(self.source != self.destination, "source and destination must differ");
         ensure!(
