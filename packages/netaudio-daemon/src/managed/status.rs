@@ -40,7 +40,7 @@ impl Registry {
                     ],
                     Inspection::Latency => vec![StatusQuery::Lock.into(), Query::Latency],
                     Inspection::Lock => vec![StatusQuery::Lock.into()],
-                    Inspection::Status(query) => vec![StatusQuery::Lock.into(), query.into()],
+                    Inspection::Status(query) => Query::preflight(query),
                     Inspection::Network | Inspection::Redundancy => {
                         vec![
                             StatusQuery::Interface.into(),
@@ -88,9 +88,7 @@ impl Registry {
                     .await?;
             }
             Inspection::Status(query) => {
-                self.controller_status(source, &fresh, &mut session, StatusQuery::Lock)
-                    .await?;
-                if !matches!(query, StatusQuery::Lock) {
+                for query in Query::preflight(query) {
                     self.controller_status(source, &fresh, &mut session, query)
                         .await?;
                 }
