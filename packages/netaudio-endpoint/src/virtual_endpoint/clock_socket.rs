@@ -20,6 +20,7 @@ const SOFTWARE_TIMESTAMP_INDEX: usize = 0;
 const TIMESTAMP_COUNT: usize = 3;
 const TRANSMIT_TIMESTAMP_KIND: u32 = 0;
 const MAXIMUM_CLOCK_MAPPING_CHANGE_NANOSECONDS: i128 = 2_000;
+const CLOCK_MAPPING_OBSERVATIONS: usize = 5;
 
 pub struct ClockSocket {
     socket: AsyncFd<Socket>,
@@ -401,43 +402,107 @@ fn ancillary(message: &libc::msghdr) -> io::Result<Ancillary> {
 
 pub struct ClockMapping {
     time: Monotonic,
+    initial: MappingObservation,
+    summary: MappingSummary,
+}
+
+#[derive(Clone, Copy, Default)]
+struct MappingObservation {
     realtime_offset: i128,
-    initial_uncertainty: u32,
+    uncertainty_nanoseconds: u32,
+}
+
+impl MappingObservation {
+    fn check_consistency(self, other: Self) -> Result<()> {
+        let change = (self.realtime_offset - other.realtime_offset).abs();
+        let uncertainty = self.uncertainty_nanoseconds.max(other.uncertainty_nanoseconds);
+        if change > MAXIMUM_CLOCK_MAPPING_CHANGE_NANOSECONDS + i128::from(uncertainty) {
+            bail!(
+                "system realtime clock moved relative to the monotonic timestamp provider: \
+                 mapping change {change} ns, observation uncertainty {uncertainty} ns"
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Default, Serialize)]
+pub struct MappingSummary {
+    pub acquisitions: u64,
+    pub observations: u64,
+    pub maximum_observation_uncertainty_nanoseconds: u32,
+    pub maximum_selected_uncertainty_nanoseconds: u32,
+    pub inconsistent_acquisitions: u64,
 }
 
 impl ClockMapping {
     pub fn new(time: Monotonic) -> Result<Self> {
-        let (realtime_offset, initial_uncertainty) = Self::measure(&time)?;
+        let mut summary = MappingSummary::default();
+        let initial = Self::measure(&time, None, &mut summary)?;
 
         Ok(Self {
             time,
-            realtime_offset,
-            initial_uncertainty,
+            initial,
+            summary,
         })
     }
 
-    fn measure(time: &Monotonic) -> Result<(i128, u32)> {
+    pub fn summary(&self) -> MappingSummary {
+        self.summary.clone()
+    }
+
+    fn observe(time: &Monotonic) -> Result<MappingObservation> {
         let before = time.now();
         let realtime = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let after = time.now();
         let sample = time.stamp(before, after)?;
         let offset = i128::try_from(realtime)? - i128::from(sample.nanoseconds);
-        Ok((offset, sample.uncertainty_nanoseconds))
+        Ok(MappingObservation {
+            realtime_offset: offset,
+            uncertainty_nanoseconds: sample.uncertainty_nanoseconds,
+        })
     }
 
-    pub fn project(&self, realtime_nanoseconds: u64) -> Result<LocalTimestamp> {
-        let (offset, uncertainty) = Self::measure(&self.time)?;
-        let mapping_change = (offset - self.realtime_offset).abs();
-        let observation_uncertainty = uncertainty.max(self.initial_uncertainty);
-
-        if mapping_change
-            > MAXIMUM_CLOCK_MAPPING_CHANGE_NANOSECONDS + i128::from(observation_uncertainty)
-        {
-            bail!("system realtime clock moved relative to the monotonic timestamp provider");
+    fn measure(
+        time: &Monotonic,
+        initial: Option<MappingObservation>,
+        summary: &mut MappingSummary,
+    ) -> Result<MappingObservation> {
+        summary.acquisitions += 1;
+        let mut observations = [MappingObservation::default(); CLOCK_MAPPING_OBSERVATIONS];
+        for observation in &mut observations {
+            *observation = Self::observe(time)?;
+            summary.observations += 1;
+            summary.maximum_observation_uncertainty_nanoseconds = summary
+                .maximum_observation_uncertainty_nanoseconds
+                .max(observation.uncertainty_nanoseconds);
         }
 
-        let nanoseconds = u64::try_from(i128::from(realtime_nanoseconds) - offset)
-            .context("kernel timestamp precedes this clock provider incarnation")?;
+        let selected = *observations
+            .iter()
+            .min_by_key(|observation| observation.uncertainty_nanoseconds)
+            .context("clock mapping acquisition has no observations")?;
+        for observation in observations {
+            let consistency = selected.check_consistency(observation).and_then(|()| {
+                initial.map_or(Ok(()), |reference| reference.check_consistency(observation))
+            });
+            if let Err(error) = consistency {
+                summary.inconsistent_acquisitions += 1;
+                return Err(error);
+            }
+        }
+        summary.maximum_selected_uncertainty_nanoseconds =
+            summary.maximum_selected_uncertainty_nanoseconds.max(selected.uncertainty_nanoseconds);
+        Ok(selected)
+    }
+
+    pub fn project(&mut self, realtime_nanoseconds: u64) -> Result<LocalTimestamp> {
+        let observation = Self::measure(&self.time, Some(self.initial), &mut self.summary)?;
+        let observation_uncertainty =
+            observation.uncertainty_nanoseconds.max(self.initial.uncertainty_nanoseconds);
+        let nanoseconds =
+            u64::try_from(i128::from(realtime_nanoseconds) - observation.realtime_offset)
+                .context("kernel timestamp precedes this clock provider incarnation")?;
         let now = self.time.now();
 
         if nanoseconds > now {

@@ -11,7 +11,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 
 use super::clock_service::{Client, TransportConfiguration};
-use super::clock_socket::{ClockMapping, ClockSocket, Event};
+use super::clock_socket::{ClockMapping, ClockSocket, Event, MappingSummary};
 use super::deadline::Deadline;
 use super::sockets::Monotonic;
 
@@ -21,6 +21,7 @@ const DELAY_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
 #[derive(Default)]
 pub struct Summary {
     pub maximum_observation_nanoseconds: u64,
+    pub mapping: MappingSummary,
 }
 
 pub struct Worker {
@@ -132,7 +133,10 @@ impl Driver {
             deadline.arm(due)?;
 
             tokio::select! {
-                _ = &mut stopped => return Ok(summary),
+                _ = &mut stopped => {
+                    summary.mapping = self.mapping.summary();
+                    return Ok(summary);
+                },
                 observed = self.next_event() => {
                     let started = self.time.now();
                     let observed = match observed {
@@ -178,6 +182,7 @@ impl Driver {
             }
 
             if publications.send(Arc::new(publication)).is_err() {
+                summary.mapping = self.mapping.summary();
                 return Ok(summary);
             }
         }

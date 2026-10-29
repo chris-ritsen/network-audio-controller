@@ -95,6 +95,7 @@ pub struct Summary {
     pub rejected_datagrams: u64,
     pub media_failures: u64,
     pub maximum_clock_observation_nanoseconds: u64,
+    pub clock_mapping: super::clock_socket::MappingSummary,
     pub submitted_packets: u64,
     pub maximum_submission_lateness_nanoseconds: u64,
     pub maximum_receive_deadline_lateness_nanoseconds: u64,
@@ -779,7 +780,9 @@ impl Server {
         self.summary.source = Some(source);
         self.summary.receive = Some(receive?);
         discovery?;
-        self.summary.maximum_clock_observation_nanoseconds = clock?.maximum_observation_nanoseconds;
+        let clock = clock?;
+        self.summary.maximum_clock_observation_nanoseconds = clock.maximum_observation_nanoseconds;
+        self.summary.clock_mapping = clock.mapping;
         publication?;
         self.summary.final_clock = Some(final_clock?);
         Ok(self.summary)
