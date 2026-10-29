@@ -6,6 +6,7 @@ use super::{
 use crate::devices::operations::{
     ControlCompletion, ControlError, ControlOperation, SubscriptionChange,
 };
+use crate::devices::panels::Operation;
 use netaudio_core::managed_api::control::{Control, Subscription};
 use netaudio_core::managed_api::inventory::Observation;
 use serde_json::{Value, json};
@@ -85,6 +86,14 @@ pub fn validate(record: &Value, operation: &ControlOperation) -> Result<(), Cont
     ) {
         return Ok(());
     }
+    if let ControlOperation::Panel(operation) = operation {
+        return match super::panels::configuration(operation)? {
+            Some(configuration) if matches!(operation, Operation::Apply(_)) => {
+                validate(record, &super::panels::status_operation(configuration))
+            }
+            _ => Ok(()),
+        };
+    }
     if let ControlOperation::SampleRate(operation) = operation {
         operation.validate_status(record)?;
         if record["sample_rate_hz"] != operation.target {
@@ -145,6 +154,10 @@ pub fn command_count(operation: &ControlOperation) -> Result<usize, ControlError
             | ControlOperation::RefreshAudio(_)
     ) {
         return Ok(0);
+    }
+    if let ControlOperation::Panel(operation) = operation {
+        super::panels::configuration(operation)?;
+        return Ok(usize::from(matches!(operation, Operation::Apply(_))));
     }
     if let ControlOperation::SampleRate(operation) = operation {
         return Ok(usize::from(!operation.preview));
@@ -335,6 +348,11 @@ impl Registry {
         if let Some(action) = super::device_control::Action::from_operation(&request.operation) {
             return self
                 .controller_control(&request, &source, &revision, action)
+                .await;
+        }
+        if let ControlOperation::Panel(operation) = &request.operation {
+            return self
+                .controller_panel(&request, &source, &revision, operation)
                 .await;
         }
         if let ControlOperation::SampleRate(operation) = &request.operation {

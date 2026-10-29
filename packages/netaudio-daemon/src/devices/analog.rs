@@ -72,6 +72,21 @@ pub fn present(record: &mut Map<String, Value>) {
     }
 }
 
+pub fn access(record: &Value, write: bool) -> Result<Option<&'static str>, ControlError> {
+    let access: AnalogAccess = serde_json::from_value(json!({
+        "managed": record["requires_managed_control"] == true,
+        "managed_context_available": record["ddm_fresh"] == true && record["ddm_connection_state"] == "READY",
+        "managed_write_permitted": record["managed_operation_permissions"]["codec_control"],
+        "address_available": !record["ipv4"].is_null(),
+        "online": record["online"],
+        "supported": record["generic_codec_control_supported"],
+        "locked": record["is_locked"],
+        "write": write,
+    }))
+    .map_err(anyhow::Error::from)?;
+    Ok(access.denial())
+}
+
 #[derive(Clone, Debug)]
 pub struct Configuration {
     pub channel: u16,
@@ -138,19 +153,7 @@ impl Configuration {
     }
 
     pub fn command(&self, record: &Value) -> Result<Option<Value>, ControlError> {
-        let access: AnalogAccess = serde_json::from_value(json!({
-            "managed": record["requires_managed_control"] == true,
-            "managed_context_available": record["ddm_fresh"] == true && record["ddm_connection_state"] == "READY",
-            "managed_write_permitted": record["managed_operation_permissions"]["codec_control"],
-            "address_available": !record["ipv4"].is_null(),
-            "online": record["online"],
-            "supported": record["generic_codec_control_supported"],
-            "locked": record["is_locked"],
-            "write": true,
-        }))
-        .map_err(anyhow::Error::from)?;
-
-        if let Some(reason) = access.denial() {
+        if let Some(reason) = access(record, true)? {
             return Err(ControlError::Conflict(reason.to_owned()));
         }
 
