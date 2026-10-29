@@ -1,6 +1,10 @@
 pub mod monitoring;
+pub mod profile;
+
+pub use profile::Profile;
 pub mod source;
 
+use std::collections::BTreeMap;
 use std::net::SocketAddrV4;
 
 use serde::{Deserialize, Serialize};
@@ -48,24 +52,14 @@ const ROUTE_RESERVED_RECORD_BYTES: usize = 20;
 
 pub(crate) fn word(bytes: &[u8], offset: usize) -> Result<u16, Error> {
     let slice = bytes
-        .get(
-            offset
-                ..offset
-                    .checked_add(2)
-                    .ok_or(Error("control offset overflow"))?,
-        )
+        .get(offset..offset.checked_add(2).ok_or(Error("control offset overflow"))?)
         .ok_or(Error("control word is incomplete"))?;
     Ok(u16::from_be_bytes([slice[0], slice[1]]))
 }
 
 pub(crate) fn double_word(bytes: &[u8], offset: usize) -> Result<u32, Error> {
     let slice = bytes
-        .get(
-            offset
-                ..offset
-                    .checked_add(4)
-                    .ok_or(Error("control offset overflow"))?,
-        )
+        .get(offset..offset.checked_add(4).ok_or(Error("control offset overflow"))?)
         .ok_or(Error("control value is incomplete"))?;
     Ok(u32::from_be_bytes(slice.try_into().unwrap()))
 }
@@ -75,9 +69,8 @@ pub(crate) fn string(bytes: &[u8], pointer: usize, minimum: usize) -> Result<Str
         return Err(Error("control string overlaps its fixed record"));
     }
 
-    let suffix = bytes
-        .get(pointer..)
-        .ok_or(Error("control string pointer is outside the packet"))?;
+    let suffix =
+        bytes.get(pointer..).ok_or(Error("control string pointer is outside the packet"))?;
     let end = suffix
         .iter()
         .position(|byte| *byte == 0)
@@ -125,9 +118,7 @@ impl Writer {
             .checked_add(alignment - 1)
             .map(|value| value & !(alignment - 1))
             .ok_or(Error("control heap overflow"))?;
-        let end = start
-            .checked_add(length)
-            .ok_or(Error("control heap overflow"))?;
+        let end = start.checked_add(length).ok_or(Error("control heap overflow"))?;
         if end > MAXIMUM_CONTROL_BYTES {
             return Err(Error("control response exceeds its packet budget"));
         }
@@ -142,10 +133,7 @@ impl Writer {
         }
 
         let start = self.reserve(
-            value
-                .len()
-                .checked_add(1)
-                .ok_or(Error("control string extent overflow"))?,
+            value.len().checked_add(1).ok_or(Error("control string extent overflow"))?,
             2,
         )?;
         self.bytes[start..start + value.len()].copy_from_slice(value.as_bytes());
@@ -205,10 +193,11 @@ pub struct ReceiveFlow {
 #[derive(Clone, Debug, Serialize)]
 pub struct Endpoint {
     pub name: String,
-    pub transmit_names: [String; 2],
-    pub receive_channels: [ReceiverChannel; 2],
-    pub transmit_flow: Option<TransmitFlow>,
-    pub receive_flow: Option<ReceiveFlow>,
+    pub profile: Profile,
+    pub transmit_names: Vec<String>,
+    pub receive_channels: Vec<ReceiverChannel>,
+    pub transmit_flows: BTreeMap<u16, TransmitFlow>,
+    pub receive_flows: BTreeMap<u16, ReceiveFlow>,
     pub route_generation: u64,
 }
 
@@ -219,11 +208,14 @@ pub struct Answer {
 
 impl Endpoint {
     pub fn new(name: String) -> Result<Self, Error> {
+        Self::with_profile(name, Profile::default())
+    }
+
+    pub fn with_profile(name: String, profile: Profile) -> Result<Self, Error> {
+        profile.validate()?;
         if name.is_empty()
             || name.len() > DANTE_NAME_MAX_LENGTH
-            || !name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
             || !name.as_bytes()[0].is_ascii_alphanumeric()
             || !name.as_bytes()[name.len() - 1].is_ascii_alphanumeric()
         {
@@ -234,16 +226,21 @@ impl Endpoint {
 
         Ok(Self {
             name,
-            transmit_names: ["tx-1".into(), "tx-2".into()],
-            receive_channels: [1, 2].map(|identifier| ReceiverChannel {
-                name: format!("rx-{identifier}"),
-                desired: None,
-                subscription_status: 0,
-                available_interfaces: 0,
-                asserted_interfaces: 0,
-            }),
-            transmit_flow: None,
-            receive_flow: None,
+            profile,
+            transmit_names: (1..=profile.transmit_channels)
+                .map(|identifier| format!("tx-{identifier}"))
+                .collect(),
+            receive_channels: (1..=profile.receive_channels)
+                .map(|identifier| ReceiverChannel {
+                    name: format!("rx-{identifier}"),
+                    desired: None,
+                    subscription_status: 0,
+                    available_interfaces: 0,
+                    asserted_interfaces: 0,
+                })
+                .collect(),
+            transmit_flows: BTreeMap::new(),
+            receive_flows: BTreeMap::new(),
             route_generation: 1,
         })
     }
@@ -305,12 +302,12 @@ impl Endpoint {
     fn capabilities(&self, header: Header) -> Result<Vec<u8>, Error> {
         let mut reply = Writer::response(header, 56, RESULT_CODE_SUCCESS)?;
         for (offset, value) in [
-            (12, 2),
-            (14, 2),
-            (18, 2),
-            (20, 2),
-            (22, 1),
-            (24, 1),
+            (12, self.profile.transmit_channels),
+            (14, self.profile.receive_channels),
+            (18, self.profile.flow_slots),
+            (20, self.profile.flow_slots),
+            (22, self.profile.transmit_flows),
+            (24, self.profile.receive_flows),
             (30, 1),
         ] {
             reply.word(offset, value);
@@ -339,11 +336,8 @@ impl Endpoint {
             .finish());
         }
 
-        let mut reply = Writer::response(
-            header,
-            DIRECTORY_HEADER_BYTES + count * 4,
-            RESULT_CODE_SUCCESS,
-        )?;
+        let mut reply =
+            Writer::response(header, DIRECTORY_HEADER_BYTES + count * 4, RESULT_CODE_SUCCESS)?;
         reply.bytes[10] = count as u8;
         reply.bytes[11] = count as u8;
         for index in 0..count {
@@ -352,20 +346,23 @@ impl Endpoint {
             match identifier {
                 identifier::SOURCE_DEFAULT_FRAMES_PER_PACKET
                 | identifier::UNICAST_FRAMES_PER_PACKET
-                | identifier::SOURCE_MINIMUM_FRAMES_PER_PACKET
                 | identifier::RECEIVE_FRAMES_PER_PACKET => {
                     reply.word(row, identifier);
-                    reply.word(row + 2, FRAMES_PER_PACKET);
+                    reply.word(row + 2, self.profile.frames_per_packet);
+                }
+                identifier::SOURCE_MINIMUM_FRAMES_PER_PACKET => {
+                    reply.word(row, identifier);
+                    reply.word(row + 2, self.profile.minimum_frames_per_packet());
                 }
                 identifier::SOURCE_MAXIMUM_FRAMES_PER_PACKET => {
                     reply.word(row, identifier);
-                    reply.word(row + 2, MAXIMUM_TRANSMIT_FRAMES_PER_PACKET);
+                    reply.word(row + 2, self.profile.maximum_frames_per_packet());
                 }
                 identifier::UNICAST_LATENCY | identifier::RECEIVE_LATENCY => {
                     let value = if identifier == identifier::UNICAST_LATENCY {
                         TRANSMIT_LATENCY_NANOSECONDS
                     } else {
-                        RECEIVE_LATENCY_NANOSECONDS
+                        self.profile.receive_latency_nanoseconds
                     };
 
                     let offset = reply.reserve(4, 4)?;
@@ -392,7 +389,7 @@ impl Endpoint {
             return Err(Error("unsupported friendly-name request prefix"));
         }
 
-        ranges(request, CHANNEL_COUNT)
+        ranges(request, self.profile.transmit_channels)
             .map_err(|_| Error("friendly-name request has invalid range extent"))?;
 
         let capacity = self.transmit_names.len().min(MAXIMUM_RANGE_RESULTS);
@@ -403,14 +400,24 @@ impl Endpoint {
     }
 
     fn channels(&self, header: Header, request: &[u8]) -> Result<Vec<u8>, Error> {
-        let selected = match ranges(request, CHANNEL_COUNT) {
+        let receiving = header.operation == OPCODE_RX_CHANNELS;
+        let channel_count = if receiving {
+            self.profile.receive_channels
+        } else {
+            self.profile.transmit_channels
+        };
+        let capacity = usize::from(channel_count).min(if receiving {
+            16
+        } else {
+            32
+        });
+        let selected = match ranges(request, channel_count) {
             Ok(value) => value,
             Err(result) => {
                 return Ok(Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish());
             }
         };
 
-        let receiving = header.operation == OPCODE_RX_CHANNELS;
         let stride = if receiving {
             RECEIVE_CHANNEL_RECORD_BYTES
         } else {
@@ -419,38 +426,51 @@ impl Endpoint {
 
         let mut reply = Writer::response(
             header,
-            DIRECTORY_HEADER_BYTES + usize::from(CHANNEL_COUNT) * stride,
-            if selected.len() > usize::from(CHANNEL_COUNT) {
+            DIRECTORY_HEADER_BYTES + capacity * stride,
+            if selected.len() > capacity {
                 RESULT_CODE_MORE_PAGES
             } else {
                 RESULT_CODE_SUCCESS
             },
         )?;
-        reply.bytes[10] = 2;
-        let descriptor = format_descriptor(&mut reply)?;
-        for (index, identifier) in selected.iter().take(usize::from(CHANNEL_COUNT)).enumerate() {
+        reply.bytes[10] = capacity as u8;
+        let descriptor = format_descriptor(&mut reply, self.profile)?;
+        for (index, identifier) in selected.iter().take(capacity).enumerate() {
             let row = DIRECTORY_HEADER_BYTES + index * stride;
-            let channel_index = usize::from(*identifier - 1);
-            reply.word(row, *identifier);
-            reply.word(row + 4, descriptor);
-            if receiving {
-                let channel = &self.receive_channels[channel_index];
-                reply.word(row + 2, CHANNEL_RENAME_PROHIBITED);
-                if let Some(desired) = &channel.desired {
-                    let label = reply.text(&desired.channel)?;
-                    let device = reply.text(&desired.device)?;
-                    reply.word(row + 6, label);
-                    reply.word(row + 8, device);
-                }
+            let heap_start = reply.bytes.len();
+            let written = (|| -> Result<(), Error> {
+                let channel_index = usize::from(*identifier - 1);
+                reply.word(row, *identifier);
+                reply.word(row + 4, descriptor);
+                if receiving {
+                    let channel = &self.receive_channels[channel_index];
+                    reply.word(row + 2, CHANNEL_RENAME_PROHIBITED);
+                    if let Some(desired) = &channel.desired {
+                        let label = reply.text(&desired.channel)?;
+                        let device = reply.text(&desired.device)?;
+                        reply.word(row + 6, label);
+                        reply.word(row + 8, device);
+                    }
 
-                let name = reply.text(&channel.name)?;
-                reply.word(row + 10, name);
-                reply.bytes[row + 12] = channel.available_interfaces;
-                reply.bytes[row + 13] = channel.asserted_interfaces;
-                reply.word(row + 14, channel.subscription_status);
-            } else {
-                let name = reply.text(&self.transmit_names[channel_index])?;
-                reply.word(row + 6, name);
+                    let name = reply.text(&channel.name)?;
+                    reply.word(row + 10, name);
+                    reply.bytes[row + 12] = channel.available_interfaces;
+                    reply.bytes[row + 13] = channel.asserted_interfaces;
+                    reply.word(row + 14, channel.subscription_status);
+                } else {
+                    let name = reply.text(&self.transmit_names[channel_index])?;
+                    reply.word(row + 6, name);
+                }
+                Ok(())
+            })();
+            if let Err(error) = written {
+                if reply.bytes[11] == 0 {
+                    return Err(error);
+                }
+                reply.bytes.truncate(heap_start);
+                reply.bytes[row..row + stride].fill(0);
+                reply.word(8, RESULT_CODE_MORE_PAGES);
+                break;
             }
             reply.bytes[11] += 1;
         }
@@ -459,82 +479,118 @@ impl Endpoint {
     }
 
     fn flows(&self, header: Header, request: &[u8]) -> Result<Vec<u8>, Error> {
-        let selected = match ranges(request, 1) {
+        let transmitting = header.operation == TRANSMIT_FLOW_OPERATION;
+        let maximum = if transmitting {
+            self.profile.transmit_flows
+        } else {
+            self.profile.receive_flows
+        };
+        let selected = match bounded_ranges(request, maximum, usize::from(maximum)) {
             Ok(value) => value,
             Err(result) => {
-                return Ok(Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish());
+                return Ok(Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish())
             }
         };
-
-        let mut reply = Writer::response(header, 14, RESULT_CODE_SUCCESS)?;
-        reply.bytes[10] = 1;
-        if selected.is_empty() {
-            return Ok(reply.finish());
-        }
-
-        if header.operation == TRANSMIT_FLOW_OPERATION {
-            if let Some(flow) = &self.transmit_flow {
-                let count = flow.channels.len();
-                let record = reply.reserve(20 + 2 * count, 4)?;
-                reply.word(12, record as u16);
-                reply.bytes[11] = 1;
-                reply.word(record, 1);
-                reply.word(record + 2, 1);
-                reply.double_word(record + 4, SAMPLE_RATE);
-                reply.word(record + 10, SAMPLE_BITS);
-                reply.word(record + 12, 1);
-                reply.word(record + 14, count as u16);
-                let endpoint = reply.endpoint(flow.destination)?;
-                reply.word(record + 16, endpoint);
-                for (index, channel) in flow.channels.iter().enumerate() {
-                    reply.word(record + 18 + 2 * index, *channel);
-                }
-
-                let status = reply.reserve(20, 4)?;
-                reply.word(record + 18 + count * 2, status as u16);
-                reply.bytes[status] = 10;
-                reply.word(status + 2, u16::from(flow.active));
-                let device = reply.text(&flow.receiver_hostname)?;
-                let name = reply.text(&flow.receiver_flow_name)?;
-                reply.word(status + 4, device);
-                reply.word(status + 6, name);
-                reply.word(status + 8, flow.frames_per_packet);
-                reply.double_word(status + 12, TRANSMIT_LATENCY_NANOSECONDS);
+        let capacity = maximum.min(16) as usize;
+        let mut reply = Writer::response(header, 12 + 2 * capacity, RESULT_CODE_SUCCESS)?;
+        reply.bytes[10] = capacity as u8;
+        let mut seen = std::collections::BTreeSet::new();
+        for identifier in selected {
+            if !seen.insert(identifier) {
+                continue;
             }
-        } else if let Some(flow) = &self.receive_flow {
-            let count = flow.slots.len();
-            let record = reply.reserve(22 + 2 * count, 4)?;
-            reply.word(12, record as u16);
-            reply.bytes[11] = 1;
-            reply.word(record, 1);
-            reply.word(record + 2, 1);
-            reply.double_word(record + 4, SAMPLE_RATE);
-            reply.word(record + 10, SAMPLE_BITS);
-            reply.word(record + 12, 1);
-            reply.word(record + 14, count as u16);
-            reply.word(record + 16, 1);
-            let endpoint = reply.endpoint(flow.source)?;
-            reply.word(record + 18, endpoint);
-            for (index, channels) in flow.slots.iter().enumerate() {
-                let bitmap = reply.reserve(2, 2)?;
-                let mut mask = 0;
-                for channel in channels {
-                    if (1..=CHANNEL_COUNT).contains(channel) {
-                        mask |= 1 << (*channel - 1);
+            let present = if transmitting {
+                self.transmit_flows.contains_key(&identifier)
+            } else {
+                self.receive_flows.contains_key(&identifier)
+            };
+            if !present {
+                continue;
+            }
+            if usize::from(reply.bytes[11]) == capacity {
+                reply.word(8, RESULT_CODE_MORE_PAGES);
+                break;
+            }
+            let pointer = 12 + 2 * usize::from(reply.bytes[11]);
+            let heap_start = reply.bytes.len();
+            let written = (|| -> Result<(), Error> {
+                if transmitting {
+                    let flow = &self.transmit_flows[&identifier];
+                    let count = flow.channels.len();
+                    let record = reply.reserve(20 + 2 * count, 4)?;
+                    reply.word(pointer, record as u16);
+
+                    reply.word(record, identifier);
+                    reply.word(record + 2, 1);
+                    reply.double_word(record + 4, self.profile.sample_rate);
+                    reply.word(record + 10, self.profile.sample_bits);
+                    reply.word(record + 12, 1);
+                    reply.word(record + 14, count as u16);
+                    let endpoint = reply.endpoint(flow.destination)?;
+                    reply.word(record + 16, endpoint);
+                    for (index, channel) in flow.channels.iter().enumerate() {
+                        reply.word(record + 18 + 2 * index, *channel);
                     }
+
+                    let status = reply.reserve(20, 4)?;
+                    reply.word(record + 18 + count * 2, status as u16);
+                    reply.bytes[status] = 10;
+                    reply.word(status + 2, u16::from(flow.active));
+                    let device = reply.text(&flow.receiver_hostname)?;
+                    let name = reply.text(&flow.receiver_flow_name)?;
+                    reply.word(status + 4, device);
+                    reply.word(status + 6, name);
+                    reply.word(status + 8, flow.frames_per_packet);
+                    reply.double_word(status + 12, TRANSMIT_LATENCY_NANOSECONDS);
+                } else {
+                    let flow = &self.receive_flows[&identifier];
+                    let count = flow.slots.len();
+                    let record = reply.reserve(22 + 2 * count, 4)?;
+                    reply.word(pointer, record as u16);
+
+                    reply.word(record, identifier);
+                    reply.word(record + 2, 1);
+                    reply.double_word(record + 4, self.profile.sample_rate);
+                    reply.word(record + 10, self.profile.sample_bits);
+                    reply.word(record + 12, 1);
+                    reply.word(record + 14, count as u16);
+                    reply.word(record + 16, self.profile.receive_channels.div_ceil(16));
+                    let endpoint = reply.endpoint(flow.source)?;
+                    reply.word(record + 18, endpoint);
+                    for (index, channels) in flow.slots.iter().enumerate() {
+                        let words = usize::from(self.profile.receive_channels).div_ceil(16);
+                        let bitmap = reply.reserve(words * 2, 2)?;
+                        for channel in channels {
+                            if (1..=self.profile.receive_channels).contains(channel) {
+                                let index = usize::from(*channel - 1);
+                                let offset = bitmap + (index / 16) * 2;
+                                let mask = word(&reply.bytes, offset)? | (1 << (index % 16));
+                                reply.word(offset, mask);
+                            }
+                        }
+                        reply.word(record + 20 + 2 * index, bitmap as u16);
+                    }
+
+                    let status = reply.reserve(16, 4)?;
+                    reply.word(record + 20 + count * 2, status as u16);
+                    reply.word(status, flow.status);
+                    reply.word(status + 2, u16::from(flow.active));
+                    reply.bytes[status + 4] = 8;
+                    reply.double_word(status + 8, self.profile.receive_latency_nanoseconds);
                 }
-                reply.word(bitmap, mask);
-                reply.word(record + 20 + 2 * index, bitmap as u16);
+                Ok(())
+            })();
+            if let Err(error) = written {
+                if reply.bytes[11] == 0 {
+                    return Err(error);
+                }
+                reply.bytes.truncate(heap_start);
+                reply.word(pointer, 0);
+                reply.word(8, RESULT_CODE_MORE_PAGES);
+                break;
             }
-
-            let status = reply.reserve(16, 4)?;
-            reply.word(record + 20 + count * 2, status as u16);
-            reply.word(status, flow.status);
-            reply.word(status + 2, u16::from(flow.active));
-            reply.bytes[status + 4] = 8;
-            reply.double_word(status + 8, RECEIVE_LATENCY_NANOSECONDS);
+            reply.bytes[11] += 1;
         }
-
         Ok(reply.finish())
     }
 
@@ -558,17 +614,13 @@ impl Endpoint {
         }
 
         if request[10] != 0 || request[11] != 1 || word(request, 12)? != 0 {
-            return Err(Error(
-                "receiver clear requires one explicit singleton selector",
-            ));
+            return Err(Error("receiver clear requires one explicit singleton selector"));
         }
 
         let receiver = word(request, 14)?;
 
         if receiver == 0 {
-            return Err(Error(
-                "receiver clear requires a nonzero receiver identifier",
-            ));
+            return Err(Error("receiver clear requires a nonzero receiver identifier"));
         }
 
         self.apply_routes(header, vec![(receiver, None)])
@@ -606,7 +658,10 @@ impl Endpoint {
                     if channel.is_empty() || device.is_empty() {
                         return Err(Error("route names cannot be empty"));
                     }
-                    Some(RouteIntent { device, channel })
+                    Some(RouteIntent {
+                        device,
+                        channel,
+                    })
                 }
             };
             changes.push((receiver, desired));
@@ -620,10 +675,8 @@ impl Endpoint {
         header: Header,
         changes: Vec<(u16, Option<RouteIntent>)>,
     ) -> Result<Answer, Error> {
-        let next_generation = self
-            .route_generation
-            .checked_add(1)
-            .ok_or(Error("route generation is exhausted"))?;
+        let next_generation =
+            self.route_generation.checked_add(1).ok_or(Error("route generation is exhausted"))?;
         let mut result = RESULT_CODE_SUCCESS;
         let mut changed = false;
         for (receiver, desired) in changes {
@@ -640,7 +693,11 @@ impl Endpoint {
 
             if channel.desired != desired {
                 channel.desired = desired;
-                channel.subscription_status = if channel.desired.is_some() { 1 } else { 0 };
+                channel.subscription_status = if channel.desired.is_some() {
+                    1
+                } else {
+                    0
+                };
                 channel.available_interfaces = 0;
                 channel.asserted_interfaces = 0;
                 changed = true;
@@ -659,10 +716,13 @@ impl Endpoint {
 }
 
 pub(crate) fn ranges(request: &[u8], maximum: u16) -> Result<Vec<u16>, u16> {
+    bounded_ranges(request, maximum, MAXIMUM_RANGE_RESULTS + 1)
+}
+
+fn bounded_ranges(request: &[u8], maximum: u16, limit: usize) -> Result<Vec<u16>, u16> {
     if request.len() < DIRECTORY_HEADER_BYTES {
         return Err(REQUEST_TOO_SHORT);
     }
-
     let expected = 12 + usize::from(request[11]) * 4;
     if request.len() < expected {
         return Err(REQUEST_TOO_SHORT);
@@ -673,6 +733,7 @@ pub(crate) fn ranges(request: &[u8], maximum: u16) -> Result<Vec<u16>, u16> {
     }
 
     let mut identifiers = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
     for index in 0..usize::from(request[11]) {
         let start = word(request, 12 + index * 4).map_err(|_| REQUEST_TOO_SHORT)?;
         let end = word(request, 14 + index * 4).map_err(|_| REQUEST_TOO_SHORT)?;
@@ -693,10 +754,17 @@ pub(crate) fn ranges(request: &[u8], maximum: u16) -> Result<Vec<u16>, u16> {
         };
 
         if start <= end {
-            identifiers.extend(start..=end);
+            for identifier in start..=end {
+                if seen.insert(identifier) {
+                    identifiers.push(identifier);
+                }
+                if identifiers.len() == limit {
+                    break;
+                }
+            }
         }
 
-        if identifiers.len() > MAXIMUM_RANGE_RESULTS {
+        if identifiers.len() >= limit {
             break;
         }
     }
@@ -704,12 +772,12 @@ pub(crate) fn ranges(request: &[u8], maximum: u16) -> Result<Vec<u16>, u16> {
     Ok(identifiers)
 }
 
-fn format_descriptor(reply: &mut Writer) -> Result<u16, Error> {
+fn format_descriptor(reply: &mut Writer, profile: Profile) -> Result<u16, Error> {
     let descriptor = reply.reserve(16, 4)?;
-    reply.double_word(descriptor, SAMPLE_RATE);
+    reply.double_word(descriptor, profile.sample_rate);
     reply.bytes[descriptor + 4] = 1;
     reply.bytes[descriptor + 5] = 1;
-    reply.word(descriptor + 6, SAMPLE_BITS);
-    reply.word(descriptor + 10, SAMPLE_BITS);
+    reply.word(descriptor + 6, profile.sample_bits);
+    reply.word(descriptor + 10, profile.sample_bits);
     Ok(descriptor as u16)
 }

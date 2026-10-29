@@ -60,11 +60,12 @@ three platforms, including native libraries and installed Python packages.
   allocation outcomes and uncertain cleanup without retrying mutations. See
   `netaudio audio receive-unicast --help` for the required session fields.
   On Linux, `netaudio audio serve --configuration endpoint.json` runs the
-  virtual source in the foreground, publishing two 48 kHz/24-bit channels
-  from a finite stereo WAVE file. See `serve --help` for the explicit interface
-  and clock configuration. The process needs permission to bind PTP ports 319
-  and 320, such as Linux `CAP_NET_BIND_SERVICE`. Receiver acquisition is still being implemented;
-  actual Dante Controller and device compatibility is not yet qualified.
+  bidirectional virtual endpoint with configurable channel counts and
+  48 kHz/24-bit network PCM. Native JACK ports or explicit WAVE adapters
+  provide local input/output. `netaudio audio clock-serve --socket PATH`
+  shares one PTP transport among independent endpoint processes on the host.
+  See [endpoint configuration and operating limits](docs/audio-endpoint.md).
+  Broader Dante Controller and hardware interoperability remain unqualified.
 - **Desktop video adapters (Linux X11):** `netaudio video share --desktop`
   captures a desktop or, with `--window`, one application window. A receiving
   `netaudio video listen` can display it fullscreen or feed an existing

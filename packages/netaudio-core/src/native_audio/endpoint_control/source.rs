@@ -2,11 +2,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 
 use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
 
-use super::{
-    double_word, string, word, Endpoint, TransmitFlow, Writer, CHANNEL_COUNT, FRAMES_PER_PACKET,
-    MAXIMUM_TRANSMIT_FRAMES_PER_PACKET,
-    SAMPLE_BITS, SAMPLE_RATE,
-};
+use super::{double_word, string, word, Endpoint, TransmitFlow, Writer};
 use crate::native_audio::source_control::{
     Error, Header, ALLOCATION_OPERATION, REFERENCE_REVISION, STOP_OPERATION,
 };
@@ -30,18 +26,18 @@ pub enum Action {
     },
     Remap {
         header: Header,
+        identifier: u16,
         channels: Vec<u16>,
         result: u16,
     },
     Stop {
         header: Header,
+        identifier: u16,
     },
 }
 
 fn reply(header: Header, result: u16) -> Result<Action, Error> {
-    Ok(Action::Reply(
-        Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish(),
-    ))
+    Ok(Action::Reply(Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish()))
 }
 
 pub fn unavailable(header: Header) -> Result<Vec<u8>, Error> {
@@ -57,9 +53,7 @@ fn checked_region(
 ) -> Result<(), Error> {
     if offset < minimum
         || offset % alignment != 0
-        || offset
-            .checked_add(length)
-            .is_none_or(|end| end > bytes.len())
+        || offset.checked_add(length).is_none_or(|end| end > bytes.len())
     {
         return Err(Error(
             "source object is incomplete, overlaps the fixed directory or is misaligned",
@@ -69,12 +63,17 @@ fn checked_region(
     Ok(())
 }
 
-fn selected_channels(bytes: &[u8], offset: usize, count: usize) -> Result<(Vec<u16>, u16), Error> {
+fn selected_channels(
+    bytes: &[u8],
+    offset: usize,
+    count: usize,
+    maximum_channel: u16,
+) -> Result<(Vec<u16>, u16), Error> {
     let mut channels = Vec::with_capacity(count);
     let mut result = RESULT_CODE_SUCCESS;
     for index in 0..count {
         let identifier = word(bytes, offset + 2 * index)?;
-        if identifier > CHANNEL_COUNT {
+        if identifier > maximum_channel {
             channels.push(0);
             result = UNKNOWN_CHANNEL_WARNING;
         } else {
@@ -110,7 +109,7 @@ pub fn admit(endpoint: &Endpoint, request: &[u8]) -> Result<Option<Action>, Erro
 
             let selector = word(request, 10)?;
             let generation = double_word(request, 12)?;
-            let Some(current) = endpoint.transmit_flow.as_ref().filter(|_| selector == 1) else {
+            let Some(current) = endpoint.transmit_flows.get(&selector) else {
                 return reply(header, UNKNOWN_FLOW).map(Some);
             };
 
@@ -122,7 +121,10 @@ pub fn admit(endpoint: &Endpoint, request: &[u8]) -> Result<Option<Action>, Erro
                 if request.len() != 16 {
                     return Err(Error("owned source STOP has surplus bytes"));
                 }
-                Action::Stop { header }
+                Action::Stop {
+                    header,
+                    identifier: selector,
+                }
             } else {
                 let count = usize::from(word(request, 16)?);
                 if request.len() != 18 + 2 * count {
@@ -133,12 +135,14 @@ pub fn admit(endpoint: &Endpoint, request: &[u8]) -> Result<Option<Action>, Erro
                     return reply(header, SLOT_COUNT_MISMATCH).map(Some);
                 }
 
-                let (channels, result) = selected_channels(request, 18, count)?;
+                let (channels, result) =
+                    selected_channels(request, 18, count, endpoint.profile.transmit_channels)?;
                 if channels.iter().all(|identifier| *identifier == 0) {
                     return reply(header, NO_SELECTED_CHANNEL).map(Some);
                 }
                 Action::Remap {
                     header,
+                    identifier: selector,
                     channels,
                     result,
                 }
@@ -155,13 +159,13 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
         return Err(Error("source allocation is incomplete"));
     }
 
-    if endpoint.transmit_flow.is_some() {
+    if endpoint.transmit_flows.len() >= usize::from(endpoint.profile.transmit_flows) {
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 
     let interfaces = usize::from(word(request, 20)?);
     let count = usize::from(word(request, 22)?);
-    if interfaces != 1 || !(1..=usize::from(CHANNEL_COUNT)).contains(&count) {
+    if interfaces != 1 || !(1..=usize::from(endpoint.profile.flow_slots)).contains(&count) {
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 
@@ -170,11 +174,14 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
         return Err(Error("source allocation directory is incomplete"));
     }
 
-    if double_word(request, 12)? != SAMPLE_RATE || word(request, 18)? != SAMPLE_BITS {
+    if double_word(request, 12)? != endpoint.profile.sample_rate
+        || word(request, 18)? != endpoint.profile.sample_bits
+    {
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 
-    let (channels, result) = selected_channels(request, 24 + 2 * interfaces, count)?;
+    let (channels, result) =
+        selected_channels(request, 24 + 2 * interfaces, count, endpoint.profile.transmit_channels)?;
     if channels.iter().all(|identifier| *identifier == 0) {
         return reply(header, NO_SELECTED_CHANNEL);
     }
@@ -202,9 +209,7 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
 
     let extension = usize::from(word(request, fixed_end - 2)?);
     if extension == 0 {
-        return Err(Error(
-            "selected source allocation requires its complete reference extension",
-        ));
+        return Err(Error("selected source allocation requires its complete reference extension"));
     }
     checked_region(request, extension, 20, fixed_end, 2)?;
     let extension_length = usize::from(request[extension]) * 2;
@@ -214,17 +219,16 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
     }
 
     let frames_per_packet = word(request, extension + 4)?;
-    if !(FRAMES_PER_PACKET..=MAXIMUM_TRANSMIT_FRAMES_PER_PACKET).contains(&frames_per_packet) {
+    if !(endpoint.profile.minimum_frames_per_packet()
+        ..=endpoint.profile.maximum_frames_per_packet())
+        .contains(&frames_per_packet)
+    {
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 
     let heap_minimum = extension + extension_length;
     let hostname = string(request, usize::from(word(request, 10)?), heap_minimum)?;
-    let flow_name = string(
-        request,
-        usize::from(word(request, extension + 6)?),
-        heap_minimum,
-    )?;
+    let flow_name = string(request, usize::from(word(request, extension + 6)?), heap_minimum)?;
     if hostname.is_empty() || flow_name.is_empty() {
         return Err(Error("source allocation receiver names cannot be empty"));
     }
@@ -248,33 +252,36 @@ pub fn allocation_committed(
     endpoint: &mut Endpoint,
     header: Header,
     mut flow: TransmitFlow,
+    identifier: u16,
     generation: u32,
     result: u16,
 ) -> Result<Vec<u8>, Error> {
-    if generation == 0 || endpoint.transmit_flow.is_some() {
-        return Err(Error(
-            "source allocation commit has no uniquely owned generation or resource",
-        ));
+    if generation == 0
+        || !(1..=endpoint.profile.transmit_flows).contains(&identifier)
+        || endpoint.transmit_flows.contains_key(&identifier)
+    {
+        return Err(Error("source allocation commit has no uniquely owned generation or resource"));
     }
     flow.generation = generation;
     let mut response = Writer::response(header, 24, result)?;
-    response.word(10, 1);
+    response.word(10, identifier);
     response.double_word(12, generation);
     response.word(16, 1);
     response.word(18, 1);
-    endpoint.transmit_flow = Some(flow);
+    endpoint.transmit_flows.insert(identifier, flow);
     Ok(response.finish())
 }
 
 pub fn remap_committed(
     endpoint: &mut Endpoint,
     header: Header,
+    identifier: u16,
     channels: Vec<u16>,
     result: u16,
 ) -> Result<Vec<u8>, Error> {
     let flow = endpoint
-        .transmit_flow
-        .as_mut()
+        .transmit_flows
+        .get_mut(&identifier)
         .ok_or(Error("source allocation retired before remap commit"))?;
     if flow.channels.len() != channels.len() {
         return Err(Error("source remap cannot resize a flow"));
@@ -282,12 +289,16 @@ pub fn remap_committed(
     flow.active = false;
     flow.channels = channels;
     let mut response = Writer::response(header, 22, result)?;
-    response.word(10, 1);
+    response.word(10, identifier);
     response.double_word(12, flow.generation);
     Ok(response.finish())
 }
 
-pub fn stop_committed(endpoint: &mut Endpoint, header: Header) -> Result<Vec<u8>, Error> {
-    endpoint.transmit_flow = None;
+pub fn stop_committed(
+    endpoint: &mut Endpoint,
+    header: Header,
+    identifier: u16,
+) -> Result<Vec<u8>, Error> {
+    endpoint.transmit_flows.remove(&identifier);
     Ok(Writer::response(header, RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS)?.finish())
 }

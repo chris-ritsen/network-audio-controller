@@ -7,16 +7,15 @@ use std::sync::atomic::AtomicU64;
 use anyhow::{Context, Result, bail};
 use netaudio_core::native_audio::clock::discipline::Configuration as ClockConfiguration;
 use netaudio_core::native_audio::clock::version_one::{DEFAULT_DOMAIN, PortIdentity};
-use netaudio_core::native_audio::endpoint_control::Endpoint;
 use netaudio_core::native_audio::endpoint_control::monitoring::{
     self, Identity, Interface, Manager, Statistics, StatusContext,
 };
+use netaudio_core::native_audio::endpoint_control::{Endpoint, Profile};
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::task::{JoinHandle, JoinSet};
 
-use super::acquisition;
 use super::clock_driver::Worker;
 use super::deadline::Deadline;
 use super::discovery::Publication;
@@ -58,9 +57,15 @@ pub struct Configuration {
     pub identity: Identity,
     pub status_publication: StatusPublicationMode,
     pub local_clock_identity: PortIdentity,
+    #[serde(default)]
+    pub clock_transport: super::clock_service::TransportConfiguration,
     pub parent_clock_identity: PortIdentity,
     pub state_directory: PathBuf,
     pub audio: AudioConfiguration,
+    #[serde(default)]
+    pub profile: Profile,
+    #[serde(default)]
+    pub scheduling_thread_observations: bool,
 }
 
 #[derive(Clone, Deserialize)]
@@ -81,6 +86,9 @@ impl Configuration {
 
 #[derive(Default, Serialize)]
 pub struct Summary {
+    pub scheduling: super::scheduling::Measurements,
+    pub scheduling_thread_observations: bool,
+    pub initialization_canceled: bool,
     pub routing_replies: u64,
     pub source_replies: u64,
     pub monitoring_replies: u64,
@@ -90,12 +98,17 @@ pub struct Summary {
     pub rejected_datagrams: u64,
     pub media_failures: u64,
     pub maximum_clock_observation_nanoseconds: u64,
+    pub clock_mapping: super::clock_socket::MappingSummary,
     pub submitted_packets: u64,
     pub maximum_submission_lateness_nanoseconds: u64,
+    pub maximum_receive_deadline_lateness_nanoseconds: u64,
+    pub maximum_observed_datagram_queue: usize,
+    pub maximum_datagram_dispatch_delay_nanoseconds: u64,
+    pub maximum_datagram_processing_nanoseconds: u64,
     pub final_clock: Option<netaudio_core::native_audio::clock::discipline::Snapshot>,
-    pub receiver_candidate: Option<Candidate>,
-    pub receiver_unavailable: Option<String>,
-    pub receiver_acquisition: Option<acquisition::Progress>,
+    pub receiver_candidates: Vec<Candidate>,
+    pub receiver_unavailable: Vec<String>,
+    pub source: Option<source::Summary>,
     pub receive: Option<receive_runtime::Summary>,
     pub final_endpoint: Option<Endpoint>,
     pub audio: Option<crate::audio::Statistics>,
@@ -164,7 +177,6 @@ struct Server {
     clock: Worker,
     source: source::Runtime,
     receiver_discovery: receiver::Discovery,
-    receiver_acquisition: acquisition::Client,
     receive: receive_runtime::Runtime,
     sockets: ControlSockets,
     monitoring: Manager,
@@ -173,12 +185,20 @@ struct Server {
     datagrams: mpsc::Receiver<Datagram>,
     pending_status: VecDeque<PendingStatus>,
     counters: Option<CounterProvider>,
-    status_job: Option<JoinHandle<StatusObservation>>,
+    status_job: Option<JoinHandle<Result<StatusObservation>>>,
     summary: Summary,
 }
 
 impl Server {
     async fn start(configuration: Configuration) -> Result<Self> {
+        configuration.profile.validate()?;
+        if let AudioConfiguration::Native(audio) = &configuration.audio
+            && (audio.input_channels.len() != usize::from(configuration.profile.transmit_channels)
+                || audio.output_channels.len()
+                    != usize::from(configuration.profile.receive_channels))
+        {
+            bail!("native channel maps must match the configured directional endpoint counts");
+        }
         let service = super::service::Service::open()?;
         let (audio, capture, playback) = match &configuration.audio {
             AudioConfiguration::Wave {
@@ -186,11 +206,30 @@ impl Server {
                 output,
             } => (
                 None,
-                super::pcm::CaptureFactory::Wave(input.clone()),
-                output.as_deref().map(super::playback::Playback::open).transpose()?,
+                super::pcm::CaptureFactory::Wave {
+                    path: input.clone(),
+                    format: configuration
+                        .profile
+                        .format(configuration.profile.transmit_channels)?,
+                },
+                output
+                    .as_deref()
+                    .map(|path| {
+                        super::playback::Playback::open(
+                            path,
+                            configuration.profile.format(configuration.profile.receive_channels)?,
+                        )
+                    })
+                    .transpose()?,
             ),
-            AudioConfiguration::Native(configuration) => {
-                let (engine, capture, playback) = crate::audio::Engine::open(configuration)?;
+            AudioConfiguration::Native(native) => {
+                let (engine, capture, playback) = crate::audio::Engine::open(
+                    native,
+                    configuration
+                        .profile
+                        .format(configuration.profile.transmit_channels)?
+                        .samples(),
+                )?;
                 (
                     Some(engine),
                     super::pcm::CaptureFactory::Native(capture),
@@ -198,8 +237,8 @@ impl Server {
                 )
             }
         };
-        let endpoint = Endpoint::new(configuration.name.clone())?;
-        let interface_observer =
+        let endpoint = Endpoint::with_profile(configuration.name.clone(), configuration.profile)?;
+        let mut interface_observer =
             InterfaceObserver::start(configuration.interface.clone(), configuration.address)
                 .await?;
         let interface = interface_observer.initial.clone();
@@ -215,7 +254,7 @@ impl Server {
         )?;
         let incarnation = u64::from(issuer.reserve()?);
         let time = Monotonic::new(incarnation);
-        let clock = Worker::start(
+        let mut clock = Worker::start(
             configuration.address,
             ClockConfiguration {
                 domain: DEFAULT_DOMAIN,
@@ -227,22 +266,29 @@ impl Server {
                 transmit_calibration_nanoseconds: 0,
             },
             time.clone(),
+            configuration.clock_transport.clone(),
         )
         .await?;
         let sockets =
             ControlSockets::bind(configuration.address, configuration.status_publication).await?;
-        let pool = MediaPool::reserve(configuration.address, time.now()).await?;
+        let pool = MediaPool::reserve(
+            configuration.address,
+            time.now(),
+            configuration.profile.transmit_flows * 2,
+        )
+        .await?;
         let generations = Generations::start(issuer);
-        let source = source::Runtime::new(pool, generations, capture);
+        let source =
+            source::Runtime::new(pool, generations, capture, configuration.profile.transmit_flows)
+                .await?;
         let receiver_discovery =
             receiver::Discovery::new(configuration.address, interface.index, time.clone());
-        let receiver_acquisition =
-            acquisition::Client::new(configuration.address, time.clone()).await?;
         let receive = receive_runtime::Runtime::new(
             configuration.address,
             playback,
             time.clone(),
             incarnation,
+            configuration.profile,
         )
         .await?;
         let monitoring = Manager::new(
@@ -278,7 +324,7 @@ impl Server {
             });
         }
 
-        for (index, slot) in receive.pool.slots.iter().enumerate() {
+        for (index, slot) in receive.media_slots().enumerate() {
             let channel = Channel::ReceiveMedia(index);
             let socket = slot.socket.clone();
             let owner = slot.owner.clone();
@@ -290,6 +336,29 @@ impl Server {
         }
 
         drop(sender);
+        let eligible_at = source
+            .pool
+            .next_available()
+            .into_iter()
+            .chain(receive.next_available_port())
+            .max()
+            .context("endpoint media port pools have no initial availability")?;
+        let startup_timeout_microseconds =
+            eligible_at.saturating_sub(time.now()).div_ceil(1_000) + 5_000_000;
+        service.send(&format!(
+            "STATUS=Waiting for initial media port reuse quarantine before publishing the endpoint\nEXTEND_TIMEOUT_USEC={startup_timeout_microseconds}"
+        ))?;
+        let eligibility_deadline = time.instant(eligible_at)?;
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep_until(eligibility_deadline) => break,
+                result = clock.changed() => result?,
+                result = interface_observer.changed() => {
+                    result?;
+                    bail!("endpoint interface changed during initial media port quarantine");
+                }
+            }
+        }
         let publication = Publication::start(
             &endpoint,
             configuration.address,
@@ -297,9 +366,17 @@ impl Server {
             address(&sockets.routing)?.port(),
             address(&sockets.monitoring)?.port(),
             address(&sockets.source)?.port(),
-        )?;
+        )
+        .await?;
         let mut counters = CounterProvider::new(configuration.interface.clone());
         counters.measure(time.now())?;
+        let summary = Summary {
+            scheduling: super::scheduling::Measurements::new(
+                configuration.scheduling_thread_observations,
+            ),
+            scheduling_thread_observations: configuration.scheduling_thread_observations,
+            ..Summary::default()
+        };
 
         Ok(Self {
             configuration,
@@ -312,7 +389,6 @@ impl Server {
             clock,
             source,
             receiver_discovery,
-            receiver_acquisition,
             receive,
             sockets,
             monitoring,
@@ -322,7 +398,7 @@ impl Server {
             pending_status: VecDeque::new(),
             counters: Some(counters),
             status_job: None,
-            summary: Summary::default(),
+            summary,
         })
     }
 
@@ -334,9 +410,7 @@ impl Server {
                     self.summary.routing_replies += 1;
 
                     if answer.routes_changed {
-                        self.receiver_acquisition.synchronize(None);
                         self.receiver_discovery.select(&self.endpoint)?;
-                        self.receiver_acquisition.synchronize(self.receiver_discovery.candidate());
                     }
                 }
             }
@@ -401,13 +475,13 @@ impl Server {
         let pending = self.pending_status.pop_front().context("status request has retired")?;
         let mut provider = self.counters.take().context("statistics provider is busy")?;
         let time = self.time.clone();
-        self.status_job = Some(tokio::task::spawn_blocking(move || {
+        self.status_job = Some(super::platform::spawn_background(move || {
             let statistics = provider.measure(time.now());
-            StatusObservation {
+            Ok(StatusObservation {
                 request: pending.request,
                 provider,
                 statistics,
-            }
+            })
         }));
         Ok(())
     }
@@ -477,13 +551,14 @@ impl Server {
                 continue;
             }
 
+            let preparation_started = self.summary.scheduling.start(&self.time)?;
+
             if let Err(error) = self.receive.synchronize(
                 &mut self.endpoint,
-                self.receiver_discovery.candidate(),
-                self.receiver_acquisition.progress(self.receiver_discovery.candidate()),
+                &self.receiver_discovery.candidates(),
                 self.clock.current().as_ref(),
             ) {
-                self.receive.summary.unavailable = Some(format!("{error:#}"));
+                self.receive.summary.unavailable.push(format!("{error:#}"));
                 eprintln!("receiver reconciliation failed: {error:#}");
             }
 
@@ -495,7 +570,11 @@ impl Server {
                 }
             };
             receive_deadline.arm(receive_due)?;
-            let due = match self.source.deadline(self.clock.current().as_ref(), self.time.now()) {
+            let due = match self.source.deadline(
+                &mut self.endpoint,
+                self.clock.current().as_ref(),
+                self.time.now(),
+            ) {
                 Ok(due) => due,
                 Err(error) => {
                     eprintln!("source output suspended: {error:#}");
@@ -512,17 +591,42 @@ impl Server {
                 .map(|pending| pending.due);
             status_deadline.arm(status_due)?;
 
+            let next_deadline = receive_due.into_iter().chain(due).min();
+            self.summary.scheduling.finish(
+                "preparation",
+                preparation_started,
+                &self.time,
+                next_deadline,
+            )?;
+
+            let selected_clock = self.clock.current();
+            let observations = self.summary.scheduling.clone();
+            let observation_time = self.time.clone();
+            let continuing = observations.task("selection_poll", &observation_time, next_deadline, async {
+            let operation;
+            let handler_started;
             tokio::select! {
                 biased;
-                _ = &mut stopped => return Ok(()),
-                event = async {
+                _ = &mut stopped => return Ok(false),
+                event = observations.poll("audio_event_poll", &observation_time, next_deadline, async {
                     match &self.audio {
                         Some(audio) => audio.next_event().await,
                         None => std::future::pending().await,
                     }
-                } => self.audio_event(event)?,
-                result = receive_deadline.expired(), if receive_due.is_some() => {
+                }) => {
+                    let event = event?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "audio_event_handler";
+                    self.audio_event(event)?;
+                }
+                result = observations.poll("receive_deadline_poll", &observation_time, receive_due, receive_deadline.expired()), if receive_due.is_some() => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "receive_dispatch_handler";
                     result?;
+                    let lateness = self.time.now().saturating_sub(receive_due.unwrap());
+                    self.summary.maximum_receive_deadline_lateness_nanoseconds =
+                        self.summary.maximum_receive_deadline_lateness_nanoseconds.max(lateness);
 
                     if let Err(error) = self.receive.dispatch(&mut self.endpoint, self.clock.current().as_ref()) {
                         eprintln!("receive output suspended: {error:#}");
@@ -533,7 +637,10 @@ impl Server {
                         }
                     }
                 }
-                result = media_deadline.expired(), if due.is_some() => {
+                result = observations.poll("source_deadline_poll", &observation_time, due, media_deadline.expired()), if due.is_some() => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "source_dispatch_handler";
                     result?;
 
                     if let Err(error) = self.source.send(&mut self.endpoint, self.clock.current().as_ref(), &self.time) {
@@ -542,21 +649,28 @@ impl Server {
                         self.source.suspend(&mut self.endpoint)?;
                     }
                 }
-                result = self.clock.changed() => {
+                result = observations.poll("clock_observation_poll", &observation_time, next_deadline, self.clock.changed()) => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "clock_observation_handler";
                     result?;
                     let clock = self.clock.current().snapshot(self.time.now())?;
                     self.service.status(clock.usable, &clock.reason)?;
                 }
-                result = self.receiver_discovery.changed() => {
+                result = observations.poll("discovery_poll", &observation_time, next_deadline, self.receiver_discovery.changed()) => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "discovery_handler";
                     result?;
-                    self.receiver_acquisition.synchronize(self.receiver_discovery.candidate());
                 }
-                _ = self.receiver_acquisition.changed() => {}
-                event = self.receive.next_event() => {
+                event = observations.poll("receive_event_poll", &observation_time, next_deadline, self.receive.next_event()) => {
+                    let event = event?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "receive_event_handler";
                     match event {
                         Ok(event) => {
                             if let Err(error) = self.receive.event(event, &mut self.endpoint) {
-                                self.receive.summary.unavailable = Some(format!("{error:#}"));
+                                self.receive.summary.unavailable.push(format!("{error:#}"));
                                 eprintln!("receive control event failed: {error:#}");
                             }
                         }
@@ -570,7 +684,10 @@ impl Server {
                         }
                     }
                 }
-                result = self.source.next_event(&mut self.endpoint, &self.time) => {
+                result = observations.poll("source_event_poll", &observation_time, next_deadline, self.source.next_event(&mut self.endpoint, &self.time, selected_clock.as_ref())) => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "source_event_handler";
                     match result {
                         Ok(Some(response)) => {
                             reply(&self.sockets.source, response.peer, &response.bytes)?;
@@ -580,59 +697,94 @@ impl Server {
                         Err(error) => eprintln!("source worker failed: {error:#}"),
                     }
                 }
-                datagram = self.datagrams.recv() => {
+                datagram = observations.poll("datagram_poll", &observation_time, next_deadline, self.datagrams.recv()) => {
+                    let datagram = datagram?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "datagram_handler";
                     let datagram = datagram.context("endpoint receive provider stopped")?;
+                    let started = self.time.now();
+                    self.summary.maximum_observed_datagram_queue =
+                        self.summary.maximum_observed_datagram_queue.max(self.datagrams.len() + 1);
+                    self.summary.maximum_datagram_dispatch_delay_nanoseconds =
+                        self.summary.maximum_datagram_dispatch_delay_nanoseconds.max(
+                            started.saturating_sub(datagram.timestamp.nanoseconds)
+                        );
                     let channel = datagram.channel;
-
-                    if let Err(error) = self.datagram(datagram) {
+                    let result = self.datagram(datagram);
+                    self.summary.maximum_datagram_processing_nanoseconds =
+                        self.summary.maximum_datagram_processing_nanoseconds.max(
+                            self.time.now().saturating_sub(started)
+                        );
+                    if let Err(error) = result {
                         self.summary.rejected_datagrams += 1;
                         eprintln!("endpoint {channel:?} datagram rejected: {error:#}");
                     }
                 }
-                event = monitor.recv_async() => self.publication.check_event(event?)?,
-                result = status_deadline.expired(), if status_due.is_some() => {
+                event = observations.poll("publication_poll", &observation_time, next_deadline, monitor.recv_async()) => {
+                    let event = event?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "publication_handler";
+                    self.publication.check_event(event?)?;
+                }
+                result = observations.poll("status_deadline_poll", &observation_time, status_due, status_deadline.expired()), if status_due.is_some() => {
+                    let result = result?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "status_dispatch_handler";
                     result?;
                     self.prepare_status()?;
                 }
-                observation = async {
+                observation = observations.poll("status_observation_poll", &observation_time, next_deadline, async {
                     match &mut self.status_job {
                         Some(job) => job.await,
                         None => std::future::pending().await,
                     }
-                } => {
+                }) => {
                     let observation = observation?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "status_observation_handler";
+                    let observation = observation??;
 
                     if let Err(error) = self.status_ready(observation) {
                         self.summary.rejected_datagrams += 1;
                         eprintln!("status preparation failed: {error:#}");
                     }
                 }
-                result = self.interface_observer.changed() => {
-                    let observed = result?;
+                result = observations.poll("interface_poll", &observation_time, next_deadline, self.interface_observer.changed()) => {
+                    let observed = result??;
                     self.source.suspend(&mut self.endpoint)?;
                     bail!("selected network interface changed from {:?} to {observed:?}; endpoint identity must be re-established", self.interface);
                 }
-                reader = self.readers.join_next() => {
+                reader = observations.poll("reader_poll", &observation_time, next_deadline, self.readers.join_next()) => {
+                    let reader = reader?;
+                    handler_started = super::scheduling::Started::wall(&observation_time);
+                    operation = "reader_completion_handler";
                     let (channel, result) = reader.context("endpoint socket readers stopped")??;
                     let reason = result.err().map_or_else(|| "reader stopped".to_owned(), |error| format!("{error:#}"));
 
                     match channel {
                         Channel::SourceMedia(index) => {
-                            if self.source.flow.as_ref().is_some_and(|flow| flow.port_index == index) {
-                                self.source.suspend(&mut self.endpoint)?;
-                            }
-                            self.source.pool.disable(index)?;
+                            self.source.failed_port(&mut self.endpoint, index, &reason)?;
                             self.summary.media_failures += 1;
                             eprintln!("source media port retired: {reason}");
                         }
                         Channel::ReceiveMedia(index) => {
-                            self.receive.retire(&mut self.endpoint, &format!("receive media port failed: {reason}"))?;
-                            self.receive.pool.disable(index)?;
+                            self.receive.failed_port(&mut self.endpoint, index, &format!("receive media port failed: {reason}"))?;
                             self.summary.media_failures += 1;
                         }
                         _ => bail!("endpoint {channel:?} provider failed: {reason}"),
                     }
                 }
+            }
+            self.summary.scheduling.finish(
+                operation,
+                handler_started,
+                &self.time,
+                next_deadline,
+            )?;
+            Ok::<_, anyhow::Error>(true)
+            }).await??;
+            if !continuing {
+                return Ok(());
             }
         }
     }
@@ -649,27 +801,30 @@ impl Server {
         }
 
         if let Some(job) = self.status_job.take() {
-            job.await?;
+            job.await??;
         }
 
-        self.summary.submitted_packets = self.source.submitted_packets;
+        self.summary.submitted_packets = self.source.summary.submitted_packets;
         self.summary.maximum_submission_lateness_nanoseconds =
-            self.source.maximum_submission_lateness_nanoseconds;
+            self.source.summary.maximum_submission_lateness_nanoseconds;
         let final_clock = self.clock.current().snapshot(self.time.now());
-        self.summary.receiver_candidate = self.receiver_discovery.candidate().cloned();
-        self.summary.receiver_acquisition =
-            self.receiver_acquisition.progress(self.receiver_discovery.candidate()).cloned();
-        self.summary.receiver_unavailable =
-            self.receiver_discovery.unavailable().map(str::to_owned);
+        self.summary.receiver_candidates = self.receiver_discovery.candidates();
+        self.summary.receiver_unavailable = self.receiver_discovery.unavailable();
         let source = self.source.close(&mut self.endpoint, self.time.now()).await;
         let receive = self.receive.close(&mut self.endpoint).await;
+        let discovery = self.receiver_discovery.close().await;
         let clock = self.clock.close().await;
         let publication = self.publication.stop().await;
         self.summary.final_endpoint = Some(self.endpoint);
         self.summary.audio = self.audio.take().map(crate::audio::Engine::close).transpose()?;
-        source?;
+        let source = source?;
+        self.summary.media_failures += source.failures;
+        self.summary.source = Some(source);
         self.summary.receive = Some(receive?);
-        self.summary.maximum_clock_observation_nanoseconds = clock?.maximum_observation_nanoseconds;
+        discovery?;
+        let clock = clock?;
+        self.summary.maximum_clock_observation_nanoseconds = clock.maximum_observation_nanoseconds;
+        self.summary.clock_mapping = clock.mapping;
         publication?;
         self.summary.final_clock = Some(final_clock?);
         Ok(self.summary)
@@ -680,7 +835,14 @@ pub async fn run(
     configuration: Configuration,
     stopped: impl std::future::Future<Output = ()>,
 ) -> Result<Summary> {
-    let mut server = Server::start(configuration).await?;
+    tokio::pin!(stopped);
+    let mut server = tokio::select! {
+        started = Server::start(configuration) => started?,
+        _ = &mut stopped => {
+            super::service::Service::open()?.send("STOPPING=1\nSTATUS=Endpoint initialization canceled before discovery publication")?;
+            return Ok(Summary { initialization_canceled: true, ..Summary::default() });
+        }
+    };
     let result = server.serve(stopped).await;
     let notification = server.service.stopping(result.as_ref().err());
     let summary = server.close().await;

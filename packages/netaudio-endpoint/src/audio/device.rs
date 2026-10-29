@@ -3,8 +3,8 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Host, SampleFormat, SizedSample, Stream, StreamConfig};
 use serde::Serialize;
 
+use super::Configuration;
 use super::bridge::{InputCallback, OutputCallback};
-use super::{CHANNELS, Configuration};
 
 #[derive(Serialize)]
 pub struct DeviceInformation {
@@ -108,9 +108,9 @@ fn format(
     configuration: &Configuration,
 ) -> Result<(SampleFormat, StreamConfig)> {
     let channels = if input {
-        configuration.input_channels
+        &configuration.input_channels
     } else {
-        configuration.output_channels
+        &configuration.output_channels
     };
     let required_channels = *channels.iter().max().expect("channel mapping is not empty");
     let configurations: Vec<_> = if input {
@@ -159,7 +159,7 @@ fn format(
 fn input_stream<Sample>(
     device: &Device,
     configuration: StreamConfig,
-    channels: [u16; CHANNELS],
+    channels: Vec<u16>,
     mut callback: InputCallback,
 ) -> Result<Stream>
 where
@@ -168,15 +168,13 @@ where
 {
     let state = callback.state.clone();
     let frame_channels = usize::from(configuration.channels);
-    let selected = channels.map(|channel| usize::from(channel - 1));
+    let selected: Vec<_> = channels.into_iter().map(|channel| usize::from(channel - 1)).collect();
     Ok(device.build_input_stream(
         configuration,
         move |samples: &[Sample], _| {
-            callback.process(
-                samples
-                    .chunks_exact(frame_channels)
-                    .map(|frame| selected.map(|channel| frame[channel].to_sample::<f32>())),
-            );
+            callback.process(samples.len() / frame_channels, |frame, channel| {
+                samples[frame * frame_channels + selected[channel]].to_sample::<f32>()
+            });
         },
         move |error| state.report(stream_fault(error.kind())),
         None,
@@ -186,7 +184,7 @@ where
 fn output_stream<Sample>(
     device: &Device,
     configuration: StreamConfig,
-    channels: [u16; CHANNELS],
+    channels: Vec<u16>,
     mut callback: OutputCallback,
 ) -> Result<Stream>
 where
@@ -194,17 +192,18 @@ where
 {
     let state = callback.state.clone();
     let frame_channels = usize::from(configuration.channels);
-    let selected = channels.map(|channel| usize::from(channel - 1));
+    let selected: Vec<_> = channels.into_iter().map(|channel| usize::from(channel - 1)).collect();
+    let mut next = vec![0.0; selected.len()];
     Ok(device.build_output_stream(
         configuration,
         move |samples: &mut [Sample], _| {
             samples.fill(Sample::EQUILIBRIUM);
 
             for frame in samples.chunks_exact_mut(frame_channels) {
-                let next = callback.next();
+                callback.next(&mut next);
 
-                for (channel, sample) in selected.into_iter().zip(next) {
-                    frame[channel] = Sample::from_sample(sample);
+                for (channel, sample) in selected.iter().zip(&next) {
+                    frame[*channel] = Sample::from_sample(*sample);
                 }
             }
 
@@ -258,7 +257,7 @@ impl Streams {
             input_format,
             &input_device,
             input_configuration,
-            configuration.input_channels,
+            configuration.input_channels.clone(),
             input
         );
         let output = build!(
@@ -266,7 +265,7 @@ impl Streams {
             output_format,
             &output_device,
             output_configuration,
-            configuration.output_channels,
+            configuration.output_channels.clone(),
             output
         );
         output.play()?;

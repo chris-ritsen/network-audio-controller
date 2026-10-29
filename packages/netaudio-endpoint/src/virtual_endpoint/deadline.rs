@@ -65,27 +65,25 @@ impl Deadline {
 
     pub async fn expired(&mut self) -> Result<()> {
         loop {
-            let mut ready = self.descriptor.readable().await?;
-            let observed = ready.try_io(|descriptor| {
-                let mut expirations = 0u64;
-                let length = unsafe {
-                    libc::read(
-                        descriptor.as_raw_fd(),
-                        (&mut expirations as *mut u64).cast(),
-                        size_of::<u64>(),
-                    )
-                };
-
-                if length < 0 {
-                    return Err(io::Error::last_os_error());
+            let elapsed = if self.armed.is_some_and(|due| self.time.now() >= due) {
+                match read_expiration(self.descriptor.get_ref()) {
+                    Ok(observed) => Some(observed),
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => None,
+                    Err(error) => return Err(error.into()),
                 }
+            } else {
+                None
+            };
 
-                Ok((length, expirations))
-            });
-
-            let (length, expirations) = match observed {
-                Ok(result) => result?,
-                Err(_) => continue,
+            let (length, expirations) = match elapsed {
+                Some(observed) => observed,
+                None => {
+                    let mut ready = self.descriptor.readable().await?;
+                    match ready.try_io(|descriptor| read_expiration(descriptor.get_ref())) {
+                        Ok(result) => result?,
+                        Err(_) => continue,
+                    }
+                }
             };
 
             if length as usize != size_of::<u64>() || expirations != 1 {
@@ -96,4 +94,15 @@ impl Deadline {
             return Ok(());
         }
     }
+}
+
+fn read_expiration(descriptor: &OwnedFd) -> io::Result<(isize, u64)> {
+    let mut expirations = 0u64;
+    let length = unsafe {
+        libc::read(descriptor.as_raw_fd(), (&mut expirations as *mut u64).cast(), size_of::<u64>())
+    };
+    if length < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((length, expirations))
 }

@@ -5,9 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
-use netaudio_core::native_audio::endpoint_control::{CHANNEL_COUNT, SAMPLE_RATE};
-use netaudio_core::native_audio::playout::{Delivery, Owner, QUANTUM_FRAMES};
-use netaudio_core::native_audio::{Format, SampleWidth};
+use netaudio_core::native_audio::Format;
+use netaudio_core::native_audio::playout::{Delivery, Owner, quantum_frames};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -18,15 +17,25 @@ const PENDING_FINALIZATIONS: usize = 4;
 
 pub use crate::audio::Receipt;
 
+struct Submission {
+    delivery: Delivery,
+    channels: Vec<u64>,
+}
+
 struct Writer {
     directory: PathBuf,
     current: Option<(Owner, u64, Segment)>,
     receipts: BufWriter<File>,
     finalizations: mpsc::Sender<Segment>,
+    format: Format,
 }
 
 impl Writer {
-    fn open(directory: &Path, finalizations: mpsc::Sender<Segment>) -> Result<Self> {
+    fn open(
+        directory: &Path,
+        finalizations: mpsc::Sender<Segment>,
+        format: Format,
+    ) -> Result<Self> {
         std::fs::create_dir(directory)
             .with_context(|| format!("create new playback directory {}", directory.display()))?;
         let receipts = OpenOptions::new()
@@ -39,6 +48,7 @@ impl Writer {
             current: None,
             receipts: BufWriter::new(receipts),
             finalizations,
+            format,
         })
     }
 
@@ -52,10 +62,16 @@ impl Writer {
         Ok(())
     }
 
-    fn consume(&mut self, delivery: Delivery, current_generation: &AtomicU64) -> Result<Receipt> {
+    fn consume(
+        &mut self,
+        mut delivery: Delivery,
+        channels: &[u64],
+        current_generation: &AtomicU64,
+        channel_generations: &[AtomicU64],
+    ) -> Result<Receipt> {
         delivery.owner.validate()?;
 
-        if delivery.frames.len() != QUANTUM_FRAMES {
+        if delivery.frames.len() != quantum_frames(self.format.sample_rate()) {
             bail!("playback requires one complete local PCM quantum");
         }
 
@@ -66,6 +82,8 @@ impl Writer {
             output_accepted: false,
             received_samples: 0,
             local_silence_samples: 0,
+            channel_generations: channels.to_vec(),
+            received_by_channel: vec![0; channels.len()],
         };
 
         if current_generation.load(Ordering::Acquire) == delivery.owner.stream_generation {
@@ -74,11 +92,10 @@ impl Writer {
 
             if replace {
                 self.finish_segment()?;
-                let format = Format::new(SAMPLE_RATE, CHANNEL_COUNT, SampleWidth::Signed24)?;
                 let segment = Segment::create(
                     &self.directory,
                     delivery.owner.stream_generation,
-                    format,
+                    self.format,
                     delivery.first_frame_index,
                 )?;
                 self.current = Some((delivery.owner, delivery.first_frame_index, segment));
@@ -92,8 +109,18 @@ impl Writer {
             }
 
             if current_generation.load(Ordering::Acquire) == delivery.owner.stream_generation {
+                for frame in &mut delivery.frames {
+                    for (index, generation) in channels.iter().enumerate() {
+                        if *generation == 0
+                            || channel_generations[index].load(Ordering::Acquire) != *generation
+                        {
+                            frame.samples[index] = 0;
+                            frame.received[index] = false;
+                        }
+                    }
+                }
                 segment.append_samples(
-                    delivery.frames.iter().flat_map(|frame| frame.samples),
+                    delivery.frames.iter().flat_map(|frame| frame.samples.iter().copied()),
                     delivery.frames.len(),
                 )?;
                 segment.flush()?;
@@ -101,14 +128,19 @@ impl Writer {
                     .checked_add(delivery.frames.len() as u64)
                     .context("playback sample coordinate overflow")?;
                 receipt.output_accepted = true;
+                for (index, received) in receipt.received_by_channel.iter_mut().enumerate() {
+                    *received =
+                        delivery.frames.iter().filter(|frame| frame.received[index]).count();
+                }
                 receipt.received_samples = delivery
                     .frames
                     .iter()
-                    .flat_map(|frame| frame.received)
+                    .flat_map(|frame| frame.received.iter().copied())
                     .filter(|received| *received)
                     .count();
-                receipt.local_silence_samples =
-                    delivery.frames.len() * CHANNEL_COUNT as usize - receipt.received_samples;
+                receipt.local_silence_samples = delivery.frames.len()
+                    * usize::from(self.format.slot_count())
+                    - receipt.received_samples;
             }
         }
 
@@ -127,31 +159,40 @@ impl Writer {
 }
 
 pub struct WavePlayback {
-    sender: Option<mpsc::Sender<Delivery>>,
+    sender: Option<mpsc::Sender<Submission>>,
     receipts: mpsc::Receiver<Receipt>,
     current_generation: Arc<AtomicU64>,
+    channel_generations: Arc<Vec<AtomicU64>>,
     worker: JoinHandle<Result<()>>,
     finalizer: JoinHandle<Result<()>>,
 }
 
 impl WavePlayback {
-    pub fn open(directory: &Path) -> Result<Self> {
+    pub fn open(directory: &Path, format: Format) -> Result<Self> {
         let (finalizations, mut finalized) = mpsc::channel::<Segment>(PENDING_FINALIZATIONS);
-        let mut writer = Writer::open(directory, finalizations)?;
-        let finalizer = tokio::task::spawn_blocking(move || {
+        let mut writer = Writer::open(directory, finalizations, format)?;
+        let finalizer = super::platform::spawn_background(move || {
             while let Some(segment) = finalized.blocking_recv() {
                 segment.finish()?;
             }
 
             Ok(())
         });
-        let (sender, mut receiver) = mpsc::channel(QUEUED_DELIVERIES);
+        let (sender, mut receiver) = mpsc::channel::<Submission>(QUEUED_DELIVERIES);
         let (receipt_sender, receipts) = mpsc::channel(QUEUED_DELIVERIES);
         let current_generation = Arc::new(AtomicU64::new(0));
         let worker_generation = current_generation.clone();
-        let worker = tokio::task::spawn_blocking(move || {
+        let channel_generations =
+            Arc::new((0..format.slot_count()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>());
+        let worker_channels = channel_generations.clone();
+        let worker = super::platform::spawn_background(move || {
             while let Some(delivery) = receiver.blocking_recv() {
-                let receipt = writer.consume(delivery, &worker_generation)?;
+                let receipt = writer.consume(
+                    delivery.delivery,
+                    &delivery.channels,
+                    &worker_generation,
+                    &worker_channels,
+                )?;
 
                 if receipt_sender.blocking_send(receipt).is_err() {
                     break;
@@ -165,6 +206,7 @@ impl WavePlayback {
             sender: Some(sender),
             receipts,
             current_generation,
+            channel_generations,
             worker,
             finalizer,
         })
@@ -174,8 +216,21 @@ impl WavePlayback {
         self.current_generation.store(stream_generation, Ordering::Release);
     }
 
-    pub fn submit(&self, delivery: Delivery) -> Result<()> {
-        self.sender.as_ref().context("playback is closing")?.try_send(delivery)?;
+    pub fn select_channels(&self, generations: &[u64]) -> Result<()> {
+        if generations.len() != self.channel_generations.len() {
+            bail!("playback channel ownership geometry differs from its adapter");
+        }
+        for (channel, generation) in self.channel_generations.iter().zip(generations) {
+            channel.store(*generation, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    pub fn submit(&self, delivery: Delivery, channels: Vec<u64>) -> Result<()> {
+        self.sender.as_ref().context("playback is closing")?.try_send(Submission {
+            delivery,
+            channels,
+        })?;
         Ok(())
     }
 
@@ -204,8 +259,8 @@ pub enum Playback {
 }
 
 impl Playback {
-    pub fn open(directory: &Path) -> Result<Self> {
-        Ok(Self::Wave(WavePlayback::open(directory)?))
+    pub fn open(directory: &Path, format: Format) -> Result<Self> {
+        Ok(Self::Wave(WavePlayback::open(directory, format)?))
     }
 
     pub fn select(&self, generation: u64) {
@@ -215,10 +270,17 @@ impl Playback {
         }
     }
 
-    pub fn submit(&mut self, delivery: Delivery) -> Result<()> {
+    pub fn select_channels(&self, generations: &[u64]) -> Result<()> {
         match self {
-            Self::Wave(playback) => playback.submit(delivery),
-            Self::Native(playback) => playback.submit(delivery),
+            Self::Wave(playback) => playback.select_channels(generations),
+            Self::Native(playback) => playback.select_channels(generations),
+        }
+    }
+
+    pub fn submit(&mut self, delivery: Delivery, channels: Vec<u64>) -> Result<()> {
+        match self {
+            Self::Wave(playback) => playback.submit(delivery, channels),
+            Self::Native(playback) => playback.submit(delivery, channels),
         }
     }
 

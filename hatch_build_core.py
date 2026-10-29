@@ -83,7 +83,14 @@ class CoreLibraryBuildHook(BuildHookInterface):
         video_requested = os.environ.get("NETAUDIO_VIDEO", "0")
         if video_requested not in {"0", "1"}:
             raise RuntimeError("NETAUDIO_VIDEO must be 0 or 1")
-        audio_backends = [value.strip() for value in os.environ.get("NETAUDIO_AUDIO_BACKENDS", "").split(",") if value.strip()]
+        target = self._cargo_target()
+        linux_target = "-linux-" in target if target else sys.platform.startswith("linux")
+        default_audio_backends = "jack" if linux_target else ""
+        audio_backends = [
+            value.strip()
+            for value in os.environ.get("NETAUDIO_AUDIO_BACKENDS", default_audio_backends).split(",")
+            if value.strip()
+        ]
         unsupported_backends = set(audio_backends) - {"jack", "pulseaudio", "pipewire", "asio"}
         if unsupported_backends:
             raise RuntimeError(f"Unknown native audio build backends: {', '.join(sorted(unsupported_backends))}")

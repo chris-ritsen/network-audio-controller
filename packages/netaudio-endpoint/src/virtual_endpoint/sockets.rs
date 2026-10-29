@@ -9,9 +9,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
 const DATAGRAM_BUFFER_BYTES: usize = 65_536;
-const MEDIA_PORT_COUNT: u16 = 8;
 const FIRST_DYNAMIC_PORT: u16 = 49_152;
-const LAST_MEDIA_BLOCK_START: u16 = u16::MAX - MEDIA_PORT_COUNT + 1;
 const MEDIA_QUARANTINE_NANOSECONDS: u64 = 60_000_000_000;
 const LOCAL_MULTICAST_TIME_TO_LIVE: u32 = 1;
 
@@ -154,12 +152,13 @@ pub struct MediaPool {
 }
 
 impl MediaPool {
-    pub async fn reserve(address: Ipv4Addr, now: u64) -> Result<Self> {
-        for first in
-            (FIRST_DYNAMIC_PORT..=LAST_MEDIA_BLOCK_START).step_by(usize::from(MEDIA_PORT_COUNT))
-        {
+    pub async fn reserve(address: Ipv4Addr, now: u64, count: u16) -> Result<Self> {
+        if count == 0 || count > 8192 {
+            bail!("media pool count is outside the configured port budget");
+        }
+        for first in (FIRST_DYNAMIC_PORT..=u16::MAX - count + 1).step_by(usize::from(count)) {
             let mut sockets = Vec::new();
-            for offset in 0..MEDIA_PORT_COUNT {
+            for offset in 0..count {
                 match UdpSocket::bind(SocketAddrV4::new(address, first + offset)).await {
                     Ok(socket) => {
                         socket.writable().await?;
@@ -169,7 +168,7 @@ impl MediaPool {
                 }
             }
 
-            if sockets.len() == usize::from(MEDIA_PORT_COUNT) {
+            if sockets.len() == usize::from(count) {
                 let eligible_at = now
                     .checked_add(MEDIA_QUARANTINE_NANOSECONDS)
                     .context("media pool startup quarantine overflow")?;
@@ -187,7 +186,22 @@ impl MediaPool {
                 });
             }
         }
-        bail!("no fully owned aligned eight-port media block is available")
+        bail!("no complete owned media port block is available")
+    }
+
+    pub fn partition(self, width: usize) -> Result<Vec<Self>> {
+        if width == 0 || !self.slots.len().is_multiple_of(width) {
+            bail!("media pool partitions must own complete equal blocks");
+        }
+        let mut slots = self.slots.into_iter();
+        let mut pools = Vec::new();
+        while slots.len() != 0 {
+            pools.push(Self {
+                slots: slots.by_ref().take(width).collect(),
+                next: 0,
+            });
+        }
+        Ok(pools)
     }
 
     pub fn acquire(&mut self, generation: u64, now: u64) -> Option<usize> {
