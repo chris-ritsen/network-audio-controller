@@ -12,6 +12,7 @@ mod device_sample_rate;
 mod device_session;
 mod device_topology;
 pub mod inventory;
+mod panels;
 pub mod registry;
 pub(crate) mod status;
 pub mod store;
