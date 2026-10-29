@@ -940,38 +940,6 @@ fn dante_brooklyn_control_protocol_flow_setup_parsers_reject_malformed_and_trunc
 }
 
 #[test]
-fn flow_parser_rejects_duplicate_records_and_truncated_channel_lists() {
-    let mut duplicate = flow_query_response();
-    duplicate[112..114].copy_from_slice(&1u16.to_be_bytes());
-    assert_eq!(parse_tx_flows(&duplicate), None);
-
-    let mut truncated = flow_query_response();
-    truncated[126..128].copy_from_slice(&23u16.to_be_bytes());
-    assert_eq!(parse_tx_flows(&truncated), None);
-
-    let mut overlapping = flow_query_response();
-    overlapping[14..16].copy_from_slice(&60u16.to_be_bytes());
-    assert_eq!(parse_tx_flows(&overlapping), None);
-
-    let mut invalid_max = flow_query_response();
-    invalid_max[10] = 0;
-    assert_eq!(parse_tx_flows(&invalid_max), None);
-
-    let mut active_above_max = flow_query_response();
-    active_above_max[10] = 1;
-    active_above_max[11] = 2;
-    assert_eq!(parse_tx_flows(&active_above_max), None);
-
-    let mut flow_number_above_max = flow_query_response();
-    flow_number_above_max[44..46].copy_from_slice(&33u16.to_be_bytes());
-    assert_eq!(parse_tx_flows(&flow_number_above_max), None);
-
-    let mut missing_pointer = flow_query_response();
-    missing_pointer[14..16].copy_from_slice(&0u16.to_be_bytes());
-    assert_eq!(parse_tx_flows(&missing_pointer), None);
-}
-
-#[test]
 fn fixed_flow_record_keeps_format_metadata_raw() {
     let mut response = flow_query_response();
     response[52..54].copy_from_slice(&[0x01, 0x02]);

@@ -26,11 +26,13 @@ pub enum Action {
     },
     Remap {
         header: Header,
+        identifier: u16,
         channels: Vec<u16>,
         result: u16,
     },
     Stop {
         header: Header,
+        identifier: u16,
     },
 }
 
@@ -107,7 +109,7 @@ pub fn admit(endpoint: &Endpoint, request: &[u8]) -> Result<Option<Action>, Erro
 
             let selector = word(request, 10)?;
             let generation = double_word(request, 12)?;
-            let Some(current) = endpoint.transmit_flow.as_ref().filter(|_| selector == 1) else {
+            let Some(current) = endpoint.transmit_flows.get(&selector) else {
                 return reply(header, UNKNOWN_FLOW).map(Some);
             };
 
@@ -121,6 +123,7 @@ pub fn admit(endpoint: &Endpoint, request: &[u8]) -> Result<Option<Action>, Erro
                 }
                 Action::Stop {
                     header,
+                    identifier: selector,
                 }
             } else {
                 let count = usize::from(word(request, 16)?);
@@ -139,6 +142,7 @@ pub fn admit(endpoint: &Endpoint, request: &[u8]) -> Result<Option<Action>, Erro
                 }
                 Action::Remap {
                     header,
+                    identifier: selector,
                     channels,
                     result,
                 }
@@ -155,7 +159,7 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
         return Err(Error("source allocation is incomplete"));
     }
 
-    if endpoint.transmit_flow.is_some() {
+    if endpoint.transmit_flows.len() >= usize::from(endpoint.profile.transmit_flows) {
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 
@@ -248,31 +252,36 @@ pub fn allocation_committed(
     endpoint: &mut Endpoint,
     header: Header,
     mut flow: TransmitFlow,
+    identifier: u16,
     generation: u32,
     result: u16,
 ) -> Result<Vec<u8>, Error> {
-    if generation == 0 || endpoint.transmit_flow.is_some() {
+    if generation == 0
+        || !(1..=endpoint.profile.transmit_flows).contains(&identifier)
+        || endpoint.transmit_flows.contains_key(&identifier)
+    {
         return Err(Error("source allocation commit has no uniquely owned generation or resource"));
     }
     flow.generation = generation;
     let mut response = Writer::response(header, 24, result)?;
-    response.word(10, 1);
+    response.word(10, identifier);
     response.double_word(12, generation);
     response.word(16, 1);
     response.word(18, 1);
-    endpoint.transmit_flow = Some(flow);
+    endpoint.transmit_flows.insert(identifier, flow);
     Ok(response.finish())
 }
 
 pub fn remap_committed(
     endpoint: &mut Endpoint,
     header: Header,
+    identifier: u16,
     channels: Vec<u16>,
     result: u16,
 ) -> Result<Vec<u8>, Error> {
     let flow = endpoint
-        .transmit_flow
-        .as_mut()
+        .transmit_flows
+        .get_mut(&identifier)
         .ok_or(Error("source allocation retired before remap commit"))?;
     if flow.channels.len() != channels.len() {
         return Err(Error("source remap cannot resize a flow"));
@@ -280,12 +289,16 @@ pub fn remap_committed(
     flow.active = false;
     flow.channels = channels;
     let mut response = Writer::response(header, 22, result)?;
-    response.word(10, 1);
+    response.word(10, identifier);
     response.double_word(12, flow.generation);
     Ok(response.finish())
 }
 
-pub fn stop_committed(endpoint: &mut Endpoint, header: Header) -> Result<Vec<u8>, Error> {
-    endpoint.transmit_flow = None;
+pub fn stop_committed(
+    endpoint: &mut Endpoint,
+    header: Header,
+    identifier: u16,
+) -> Result<Vec<u8>, Error> {
+    endpoint.transmit_flows.remove(&identifier);
     Ok(Writer::response(header, RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS)?.finish())
 }

@@ -17,6 +17,11 @@ const PENDING_FINALIZATIONS: usize = 4;
 
 pub use crate::audio::Receipt;
 
+struct Submission {
+    delivery: Delivery,
+    channels: Vec<u64>,
+}
+
 struct Writer {
     directory: PathBuf,
     current: Option<(Owner, u64, Segment)>,
@@ -57,7 +62,13 @@ impl Writer {
         Ok(())
     }
 
-    fn consume(&mut self, delivery: Delivery, current_generation: &AtomicU64) -> Result<Receipt> {
+    fn consume(
+        &mut self,
+        mut delivery: Delivery,
+        channels: &[u64],
+        current_generation: &AtomicU64,
+        channel_generations: &[AtomicU64],
+    ) -> Result<Receipt> {
         delivery.owner.validate()?;
 
         if delivery.frames.len() != quantum_frames(self.format.sample_rate()) {
@@ -71,6 +82,8 @@ impl Writer {
             output_accepted: false,
             received_samples: 0,
             local_silence_samples: 0,
+            channel_generations: channels.to_vec(),
+            received_by_channel: vec![0; channels.len()],
         };
 
         if current_generation.load(Ordering::Acquire) == delivery.owner.stream_generation {
@@ -96,6 +109,16 @@ impl Writer {
             }
 
             if current_generation.load(Ordering::Acquire) == delivery.owner.stream_generation {
+                for frame in &mut delivery.frames {
+                    for (index, generation) in channels.iter().enumerate() {
+                        if *generation == 0
+                            || channel_generations[index].load(Ordering::Acquire) != *generation
+                        {
+                            frame.samples[index] = 0;
+                            frame.received[index] = false;
+                        }
+                    }
+                }
                 segment.append_samples(
                     delivery.frames.iter().flat_map(|frame| frame.samples.iter().copied()),
                     delivery.frames.len(),
@@ -105,6 +128,10 @@ impl Writer {
                     .checked_add(delivery.frames.len() as u64)
                     .context("playback sample coordinate overflow")?;
                 receipt.output_accepted = true;
+                for (index, received) in receipt.received_by_channel.iter_mut().enumerate() {
+                    *received =
+                        delivery.frames.iter().filter(|frame| frame.received[index]).count();
+                }
                 receipt.received_samples = delivery
                     .frames
                     .iter()
@@ -132,9 +159,10 @@ impl Writer {
 }
 
 pub struct WavePlayback {
-    sender: Option<mpsc::Sender<Delivery>>,
+    sender: Option<mpsc::Sender<Submission>>,
     receipts: mpsc::Receiver<Receipt>,
     current_generation: Arc<AtomicU64>,
+    channel_generations: Arc<Vec<AtomicU64>>,
     worker: JoinHandle<Result<()>>,
     finalizer: JoinHandle<Result<()>>,
 }
@@ -150,13 +178,21 @@ impl WavePlayback {
 
             Ok(())
         });
-        let (sender, mut receiver) = mpsc::channel(QUEUED_DELIVERIES);
+        let (sender, mut receiver) = mpsc::channel::<Submission>(QUEUED_DELIVERIES);
         let (receipt_sender, receipts) = mpsc::channel(QUEUED_DELIVERIES);
         let current_generation = Arc::new(AtomicU64::new(0));
         let worker_generation = current_generation.clone();
+        let channel_generations =
+            Arc::new((0..format.slot_count()).map(|_| AtomicU64::new(0)).collect::<Vec<_>>());
+        let worker_channels = channel_generations.clone();
         let worker = super::platform::spawn_background(move || {
             while let Some(delivery) = receiver.blocking_recv() {
-                let receipt = writer.consume(delivery, &worker_generation)?;
+                let receipt = writer.consume(
+                    delivery.delivery,
+                    &delivery.channels,
+                    &worker_generation,
+                    &worker_channels,
+                )?;
 
                 if receipt_sender.blocking_send(receipt).is_err() {
                     break;
@@ -170,6 +206,7 @@ impl WavePlayback {
             sender: Some(sender),
             receipts,
             current_generation,
+            channel_generations,
             worker,
             finalizer,
         })
@@ -179,8 +216,21 @@ impl WavePlayback {
         self.current_generation.store(stream_generation, Ordering::Release);
     }
 
-    pub fn submit(&self, delivery: Delivery) -> Result<()> {
-        self.sender.as_ref().context("playback is closing")?.try_send(delivery)?;
+    pub fn select_channels(&self, generations: &[u64]) -> Result<()> {
+        if generations.len() != self.channel_generations.len() {
+            bail!("playback channel ownership geometry differs from its adapter");
+        }
+        for (channel, generation) in self.channel_generations.iter().zip(generations) {
+            channel.store(*generation, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    pub fn submit(&self, delivery: Delivery, channels: Vec<u64>) -> Result<()> {
+        self.sender.as_ref().context("playback is closing")?.try_send(Submission {
+            delivery,
+            channels,
+        })?;
         Ok(())
     }
 
@@ -220,10 +270,17 @@ impl Playback {
         }
     }
 
-    pub fn submit(&mut self, delivery: Delivery) -> Result<()> {
+    pub fn select_channels(&self, generations: &[u64]) -> Result<()> {
         match self {
-            Self::Wave(playback) => playback.submit(delivery),
-            Self::Native(playback) => playback.submit(delivery),
+            Self::Wave(playback) => playback.select_channels(generations),
+            Self::Native(playback) => playback.select_channels(generations),
+        }
+    }
+
+    pub fn submit(&mut self, delivery: Delivery, channels: Vec<u64>) -> Result<()> {
+        match self {
+            Self::Wave(playback) => playback.submit(delivery, channels),
+            Self::Native(playback) => playback.submit(delivery, channels),
         }
     }
 

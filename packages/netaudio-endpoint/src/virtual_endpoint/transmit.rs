@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::net::SocketAddrV4;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use netaudio_core::native_audio::clock::discipline::{NetworkInstant, SampleClock};
@@ -10,7 +11,7 @@ use netaudio_core::native_audio::endpoint_control::{
 use netaudio_core::native_audio::{Format, SampleTime, encode, is_reverse_keepalive};
 use tokio::net::UdpSocket;
 
-use super::pcm::{Capture, Frame};
+use super::pcm::Frame;
 use super::sockets::Monotonic;
 use netaudio_core::native_audio::playout::quantum_frames;
 
@@ -37,8 +38,7 @@ pub struct Flow {
     quantum_frames: usize,
     pipeline_frames: u64,
     maximum_packet_age_frames: u64,
-    capture: Capture,
-    frames: VecDeque<Frame>,
+    frames: VecDeque<(u64, Arc<Frame>)>,
     schedule: Option<Schedule>,
     ended: bool,
     suspended: bool,
@@ -51,7 +51,6 @@ impl Flow {
         state: &TransmitFlow,
         port_index: usize,
         output_generation: u64,
-        capture: Capture,
         profile: Profile,
     ) -> Result<Self> {
         let slots = u16::try_from(state.channels.len()).context("source slot count overflow")?;
@@ -75,7 +74,6 @@ impl Flow {
             maximum_packet_age_frames: (u64::from(profile.sample_rate)
                 * u64::from(TRANSMIT_LATENCY_NANOSECONDS))
                 / 1_000_000_000,
-            capture,
             frames: VecDeque::with_capacity(3 * quantum_frames(profile.sample_rate)),
             schedule: None,
             ended: false,
@@ -89,17 +87,24 @@ impl Flow {
         !self.suspended && !self.ended && self.frames.len() <= 2 * self.quantum_frames
     }
 
-    pub async fn receive_capture(&mut self) -> Result<()> {
-        if !self.needs_capture() {
-            bail!("capture requested without room for a complete quantum");
+    pub fn capture(&mut self, first_tick: u64, frames: &[Arc<Frame>]) -> Result<()> {
+        if self.suspended || self.ended {
+            return Ok(());
         }
-
-        match self.capture.next_quantum().await? {
-            Some(frames) => self.frames.extend(frames),
-            None => self.ended = true,
+        if !self.needs_capture() || frames.len() != self.quantum_frames {
+            bail!("source flow cannot retain another complete capture quantum");
         }
-
+        self.frames.extend(
+            frames
+                .iter()
+                .enumerate()
+                .map(|(index, frame)| (first_tick + index as u64, frame.clone())),
+        );
         Ok(())
+    }
+
+    pub fn end_capture(&mut self) {
+        self.ended = true;
     }
 
     pub fn keepalive(&mut self, generation: u64, peer: SocketAddrV4, bytes: &[u8], now: u64) {
@@ -127,7 +132,6 @@ impl Flow {
         }
 
         self.output_generation = output_generation;
-        self.capture.pause();
         self.suspended = true;
         self.schedule = None;
         self.frames.clear();
@@ -140,7 +144,6 @@ impl Flow {
             bail!("source cannot resume without a retired output and available capture");
         }
 
-        self.capture.resume()?;
         self.channels = channels.to_vec();
         self.suspended = false;
         self.resumed_keepalive_deadline = if self.previously_submitted {
@@ -193,13 +196,7 @@ impl Flow {
                 return Ok(None);
             }
 
-            let current_tick = reading.sample_tick(self.format.sample_rate())?;
-            let quantum_frames = self.quantum_frames as u64;
-            let first_tick = current_tick
-                .checked_add(self.pipeline_frames)
-                .context("source pipeline sample coordinate overflow")?
-                .div_ceil(quantum_frames)
-                * quantum_frames;
+            let first_tick = self.frames.front().context("source capture is unavailable")?.0;
             self.schedule = Some(Schedule {
                 clock_generation: reading.generation,
                 next_sample_tick: first_tick,
@@ -265,7 +262,15 @@ impl Flow {
         let mut samples =
             Vec::with_capacity(usize::from(self.frames_per_packet) * self.channels.len());
 
-        for frame in self.frames.iter().take(usize::from(self.frames_per_packet)) {
+        for (index, (tick, frame)) in
+            self.frames.iter().take(usize::from(self.frames_per_packet)).enumerate()
+        {
+            if *tick
+                != self.schedule.as_ref().context("source schedule unavailable")?.next_sample_tick
+                    + index as u64
+            {
+                bail!("shared capture supplied a discontinuous sample coordinate");
+            }
             for channel in &self.channels {
                 samples.push(if *channel == 0 {
                     0
@@ -335,10 +340,6 @@ impl Flow {
             .checked_add(u64::from(self.frames_per_packet))
             .context("source sample coordinate overflow")?;
         Ok(submitted.saturating_sub(deadline))
-    }
-
-    pub async fn close(self) -> Result<()> {
-        self.capture.close().await
     }
 }
 

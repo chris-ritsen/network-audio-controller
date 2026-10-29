@@ -1,8 +1,8 @@
 # Linux audio endpoint
 
 `netaudio audio serve --configuration endpoint.json` runs a bidirectional
-native-v2 endpoint. The network format is 48 kHz signed 24-bit PCM, with one
-owned transmit flow and one receive flow per endpoint. Native audio adapters
+native-v2 endpoint. The profile selects 8000–192000 Hz signed 16-, 24- or 32-bit PCM,
+with independently owned transmit and receive flows. Native audio adapters
 and explicit WAVE files are separate input/output choices. Linux wheels include
 the JACK adapter; it dynamically loads the installed JACK library and never
 starts a JACK server or connects ports automatically.
@@ -59,9 +59,13 @@ The optional `profile` object has these fields:
 ```json
 {
   "profile": {
+    "sample_rate": 48000,
+    "sample_bits": 24,
     "transmit_channels": 8,
     "receive_channels": 8,
-    "flow_slots": 8,
+    "flow_slots": 2,
+    "transmit_flows": 4,
+    "receive_flows": 4,
     "frames_per_packet": 48,
     "receive_latency_nanoseconds": 20000000,
     "maximum_media_payload_bytes": 1472
@@ -71,12 +75,20 @@ The optional `profile` object has these fields:
 
 This example describes configuration, not a guaranteed capacity. Channel
 inventory, receive mappings, flow bitmaps, discovery and native adapters use
-the same profile. Directional channel counts may differ. One receive flow can
-use its slots for multiple local receiver channels; independent source flows
-are not yet supported.
+the same profile. Directional channel and flow capacities may differ. Each
+flow has its own allocation handle, port, generation and lifecycle. Flow
+capacities default to eight and describe configured resources, not throughput.
+
+Receive grouping uses source identity and blocks of local channels bounded by
+`flow_slots`; smaller advertised source slot capacity splits those blocks. A
+source slot can feed multiple receivers in its group. One capture adapter feeds
+all transmit flows. Received flows are placed on a common sample timeline into
+their configured host channels. Clearing a group leaves sibling groups running.
+Each directional flow reserves two media ports for independent reuse quarantine.
 
 Packetization must fit the selected payload budget and declared range of
-6–48 frames. With a 1472-byte payload budget, 24-bit samples and six frames per
+6–48 frames, with the minimum increasing at higher sample rates to preserve
+the sender spacing budget. With a 1472-byte payload budget, 24-bit samples and six frames per
 packet, at most 81 slots fit one packet. That is packet geometry, not measured
 throughput or a universal Dante channel limit. Control-record geometry and
 bounded audio storage impose separate validated limits. Increasing channel
@@ -87,10 +99,18 @@ JACK publishes unconnected `send_1` through `send_N` inputs and `receive_1`
 through `receive_N` outputs. The adapter requires its configured device rate and
 callback size to match the running JACK server. Independent device clocks use
 resampling; they do not change the network format. Network-synchronized mode
-requires a 48 kHz device clock already synchronized by the caller.
+requires a device clock at the configured network rate already synchronized by
+the caller. Native float callbacks and resampling do not preserve all 32-bit
+integer precision.
 
 Changing format, channel geometry or the selected device requires an explicit
-process replacement. Automatic device reopening, multiple flows, other network
-sample rates/widths and macOS/Windows network endpoint support remain separate
-work. Short isolated runs do not qualify sustained hardware performance or
+process replacement. Automatic device reopening and macOS/Windows network endpoint support remain
+separate work. Short isolated runs do not qualify sustained hardware performance or
 physical round-trip latency.
+
+Partial receive changes preserve the common host sample timeline. Native
+independent-clock conversion fences changed channels until the resampler has
+replaced its retained input history, emitting local silence at that boundary.
+Sibling channels retain their filter state and pacing. This bounded transition
+is separate from network loss and from the native floating-point precision
+limit; output receipts retain per-channel received and silence accounting.

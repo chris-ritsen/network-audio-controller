@@ -46,7 +46,6 @@ struct Channel {
 
 #[derive(Clone, Debug)]
 pub struct Selection {
-    generation: u64,
     device: String,
     channels: Vec<Channel>,
     routing_name: Name,
@@ -73,7 +72,6 @@ pub struct RoutingService {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CandidateContext {
-    pub route_generation: u64,
     pub device: String,
     pub target: String,
     pub control_endpoint: SocketAddrV4,
@@ -93,6 +91,20 @@ pub struct Candidate {
 }
 
 impl Candidate {
+    pub fn matches_routes(&self, endpoint: &Endpoint) -> bool {
+        self.context.slots.iter().all(|slot| {
+            slot.receivers.iter().all(|identifier| {
+                endpoint
+                    .receive_channels
+                    .get(usize::from(*identifier - 1))
+                    .and_then(|channel| channel.desired.as_ref())
+                    .is_some_and(|route| {
+                        route.device == self.context.device && route.channel == slot.channel_name
+                    })
+            })
+        })
+    }
+
     pub fn same_context(&self, other: &Self) -> bool {
         self.discovery_generation == other.discovery_generation
             && (Arc::ptr_eq(&self.context, &other.context) || self.context == other.context)
@@ -100,51 +112,95 @@ impl Candidate {
 }
 
 impl Selection {
-    pub fn from_request(request: &Request) -> Result<Option<Self>> {
-        let mut selection: Option<Self> = None;
-
+    pub fn from_request(request: &Request) -> (Vec<Self>, Vec<String>) {
+        let mut selections: Vec<Self> = Vec::new();
+        let mut unavailable = Vec::new();
         for (index, route) in request.routes.iter().enumerate() {
             let Some(route) = route else {
                 continue;
             };
-
-            let routing_name = service_name(route.device.as_bytes(), ROUTING_SERVICE)?;
-            let selected = selection.get_or_insert_with(|| Self {
-                generation: request.generation,
-                device: route.device.clone(),
-                channels: Vec::new(),
-                routing_name,
-                profile: request.profile,
-            });
-
-            if route.device != selected.device {
-                bail!("the single receive flow cannot combine routes from different devices");
-            }
-
-            let instance = format!("{}@{}", route.channel, route.device);
-            let name = service_name(instance.as_bytes(), CHANNEL_SERVICE)?;
-            let receiver_identifier = u16::try_from(index + 1)?;
-
-            if let Some(channel) = selected.channels.iter_mut().find(|channel| channel.name == name)
-            {
-                channel.receivers.push(receiver_identifier);
-            } else {
-                selected.channels.push(Channel {
-                    name,
-                    label: route.channel.clone(),
-                    receivers: vec![receiver_identifier],
+            let result = (|| -> Result<()> {
+                let routing_name = service_name(route.device.as_bytes(), ROUTING_SERVICE)?;
+                let name = service_name(
+                    format!("{}@{}", route.channel, route.device).as_bytes(),
+                    CHANNEL_SERVICE,
+                )?;
+                let receiver_identifier = u16::try_from(index + 1)?;
+                let block = index / usize::from(request.profile.flow_slots);
+                let position = selections.iter().position(|selection| {
+                    selection.device == route.device
+                        && selection.channels.first().is_some_and(|channel| {
+                            usize::from(channel.receivers[0] - 1)
+                                / usize::from(request.profile.flow_slots)
+                                == block
+                        })
                 });
+                let position = match position {
+                    Some(position) => position,
+                    None => {
+                        selections.push(Self {
+                            device: route.device.clone(),
+                            channels: Vec::new(),
+                            routing_name,
+                            profile: request.profile,
+                        });
+                        selections.len() - 1
+                    }
+                };
+                let selected = &mut selections[position];
+                if let Some(channel) =
+                    selected.channels.iter_mut().find(|channel| channel.name == name)
+                {
+                    channel.receivers.push(receiver_identifier);
+                } else {
+                    selected.channels.push(Channel {
+                        name,
+                        label: route.channel.clone(),
+                        receivers: vec![receiver_identifier],
+                    });
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                unavailable
+                    .push(format!("receiver {} source name is unavailable: {error:#}", index + 1));
             }
         }
+        (selections, unavailable)
+    }
 
-        if selection.as_ref().is_some_and(|selection| {
-            selection.channels.len() > usize::from(request.profile.flow_slots)
-        }) {
-            bail!(
-                "selected distinct source channels exceed the configured receive flow slot capacity"
-            );
+    pub fn resolve_groups(
+        &self,
+        mut resolve: impl FnMut(&Name) -> Result<ResolvedService>,
+    ) -> Result<Vec<Candidate>> {
+        let capacity = self
+            .channels
+            .iter()
+            .map(|channel| -> Result<usize> {
+                Ok(usize::from(Source::decode(&resolve(&channel.name)?.text)?.slot_capacity))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .min()
+            .context("source selection has no channels")?;
+        if capacity == 0 {
+            bail!("source advertises no flow slots");
         }
-        Ok(selection)
+        let mut groups = std::collections::BTreeMap::<usize, Vec<Channel>>::new();
+        for channel in &self.channels {
+            groups
+                .entry(usize::from(channel.receivers[0] - 1) / capacity)
+                .or_default()
+                .push(channel.clone());
+        }
+        groups
+            .into_values()
+            .map(|channels| {
+                let mut selection = self.clone();
+                selection.channels = channels;
+                selection.resolve(&mut resolve)
+            })
+            .collect()
     }
 
     pub fn names(&self) -> impl Iterator<Item = Name> + '_ {
@@ -175,7 +231,6 @@ impl Selection {
         }
 
         let mut context = CandidateContext {
-            route_generation: self.generation,
             device: self.device.clone(),
             target: first.target.to_utf8(),
             control_endpoint: first.endpoint,

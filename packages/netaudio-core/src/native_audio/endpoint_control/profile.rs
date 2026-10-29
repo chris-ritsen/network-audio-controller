@@ -20,6 +20,10 @@ pub struct Profile {
     pub transmit_channels: u16,
     pub receive_channels: u16,
     pub flow_slots: u16,
+    #[serde(default = "default_flow_capacity")]
+    pub transmit_flows: u16,
+    #[serde(default = "default_flow_capacity")]
+    pub receive_flows: u16,
     #[serde(default = "default_frames_per_packet")]
     pub frames_per_packet: u16,
     pub receive_latency_nanoseconds: u32,
@@ -34,6 +38,8 @@ impl Default for Profile {
             transmit_channels: CHANNEL_COUNT,
             receive_channels: CHANNEL_COUNT,
             flow_slots: CHANNEL_COUNT,
+            transmit_flows: default_flow_capacity(),
+            receive_flows: default_flow_capacity(),
             frames_per_packet: FRAMES_PER_PACKET,
             receive_latency_nanoseconds: RECEIVE_LATENCY_NANOSECONDS,
             maximum_media_payload_bytes: 1472,
@@ -58,8 +64,17 @@ impl Profile {
             return Err(Error("flow slots cannot fit the minimum packetization in the configured UDP payload budget"));
         }
 
+        if self.transmit_flows == 0
+            || self.receive_flows == 0
+            || u32::from(self.transmit_flows) + u32::from(self.receive_flows) > 4096
+        {
+            return Err(Error("flow capacities require positive counts within the 8192 reserved media port budget"));
+        }
+
         let bitmap_bytes = usize::from(self.receive_channels).div_ceil(16) * 2;
-        let record_end = (38 + usize::from(self.flow_slots) * 2).next_multiple_of(4);
+        let record_end =
+            (36 + usize::from(self.receive_flows.min(16)) * 2 + usize::from(self.flow_slots) * 2)
+                .next_multiple_of(4);
         let receive_record_bytes =
             (record_end + 8 + usize::from(self.flow_slots) * bitmap_bytes).next_multiple_of(4) + 16;
         if receive_record_bytes > MAXIMUM_CONTROL_BYTES {
@@ -132,4 +147,8 @@ fn default_sample_bits() -> u16 {
 
 fn default_frames_per_packet() -> u16 {
     FRAMES_PER_PACKET
+}
+
+fn default_flow_capacity() -> u16 {
+    8
 }
