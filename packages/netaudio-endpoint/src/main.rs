@@ -76,6 +76,13 @@ enum Command {
     },
     #[command(about = "Print the configured H.264 receiver session JSON schema")]
     VideoSessionSchema,
+    #[command(about = "Print the H.264 multicast endpoint JSON schema")]
+    VideoMulticastSchema,
+    #[command(about = "Run a configured H.264 multicast source or receiver endpoint")]
+    VideoServeMulticast {
+        #[arg(long)]
+        configuration: PathBuf,
+    },
     #[command(about = "Print the configured H.264 source session JSON schema")]
     VideoTransmitSchema,
     #[command(
@@ -210,6 +217,7 @@ fn main() -> std::process::ExitCode {
             | Command::VideoTransmit { .. }
             | Command::VideoListen { .. }
             | Command::VideoShare { .. }
+            | Command::VideoServeMulticast { .. }
     );
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
@@ -372,6 +380,32 @@ async fn execute(arguments: Arguments) -> Result<()> {
                 bail!(
                     "H.264 transmission requires Linux and a video-enabled NetAudio build; rebuild with NETAUDIO_VIDEO=1"
                 );
+            }
+        }
+        Command::VideoMulticastSchema => {
+            #[cfg(all(feature = "video", target_os = "linux"))]
+            {
+                serde_json::to_writer_pretty(
+                    std::io::stdout().lock(),
+                    &video::owned_multicast::Runtime::schema(),
+                )?;
+                println!();
+                Ok(())
+            }
+            #[cfg(not(all(feature = "video", target_os = "linux")))]
+            bail!("owned H.264 multicast endpoint requires a Linux video-enabled build");
+        }
+        Command::VideoServeMulticast {
+            configuration,
+        } => {
+            #[cfg(all(feature = "video", target_os = "linux"))]
+            {
+                video::owned_multicast::run(&configuration).await
+            }
+            #[cfg(not(all(feature = "video", target_os = "linux")))]
+            {
+                let _ = configuration;
+                bail!("owned H.264 multicast endpoint requires a Linux video-enabled build");
             }
         }
         Command::VideoSessionSchema => {

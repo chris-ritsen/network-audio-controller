@@ -7,7 +7,7 @@ use crate::commands::{
 };
 use crate::protocol::{OPCODE_CHANNEL_COUNT, RESULT_CODE_MORE_PAGES, RESULT_CODE_SUCCESS};
 
-use super::{discovery::H264_SUBTYPE, Error};
+use super::{Error, discovery::H264_SUBTYPE};
 
 const MINIMUM_REVISION: u16 = 0x2802;
 const MAXIMUM_REVISION: u16 = 0x280f;
@@ -34,7 +34,7 @@ const IPV4_FAMILY: u8 = 2;
 const OBJECT_ALIGNMENT: usize = 4;
 const WORD_ALIGNMENT: usize = 2;
 const MAXIMUM_ENDPOINTS: usize = 2;
-const SINGLE_CHANNEL_CAPACITY: u8 = 1;
+const QUERY_BYTES: usize = 34;
 
 #[derive(Clone, Copy)]
 pub struct Context {
@@ -138,6 +138,35 @@ impl Writer {
     }
 }
 
+pub struct Capacity {
+    pub current: u16,
+    pub ceiling: NonZeroU16,
+}
+
+impl Capacity {
+    fn validate(&self) -> Result<(), Error> {
+        if self.current > self.ceiling.get() {
+            return Err(Error("video resource current count exceeds its ceiling"));
+        }
+
+        Ok(())
+    }
+}
+
+pub struct Resources {
+    pub channels: Capacity,
+    pub flows: Capacity,
+    pub slots_per_flow: Capacity,
+}
+
+impl Resources {
+    fn validate(&self) -> Result<(), Error> {
+        self.channels.validate()?;
+        self.flows.validate()?;
+        self.slots_per_flow.validate()
+    }
+}
+
 pub struct Capability {
     pub capability_word: u16,
     pub raw_status: u32,
@@ -146,8 +175,9 @@ pub struct Capability {
     pub display_group_upper_identifier: u16,
     pub raw_compatibility_flags: u32,
     pub message_flags: u32,
-    pub transmitter_provisioned: bool,
-    pub receiver_provisioned: bool,
+    pub interfaces: Capacity,
+    pub transmitter: Option<Resources>,
+    pub receiver: Option<Resources>,
     pub raw_extension_before_scalar: [u8; 2],
     pub raw_extension_scalar: u16,
     pub raw_extension_after_scalar: [u8; 2],
@@ -156,9 +186,11 @@ pub struct Capability {
 
 impl Capability {
     pub fn encode(&self, context: Context) -> Result<Vec<u8>, Error> {
+        let transmitter = self.transmitter.as_ref();
+        let receiver = self.receiver.as_ref();
         if self.capability_word & MEDIA_AWARE_CAPABILITY == 0
-            || !(self.transmitter_provisioned || self.receiver_provisioned)
-            || (!self.receiver_provisioned && self.receiver_format_capacity != 0)
+            || transmitter.is_none() && receiver.is_none()
+            || (receiver.is_none() && self.receiver_format_capacity != 0)
             || (context.revision < DISPLAY_GROUP_REVISION
                 && self.display_group_upper_identifier != 0)
             || (context.revision < COMPATIBILITY_FLAGS_REVISION
@@ -169,6 +201,13 @@ impl Capability {
                 "video capability inputs contradict the selected provisioned profile",
             ));
         }
+        self.interfaces.validate()?;
+        if let Some(resources) = transmitter {
+            resources.validate()?;
+        }
+        if let Some(resources) = receiver {
+            resources.validate()?;
+        }
 
         let mut writer = Writer::new(
             context,
@@ -177,7 +216,7 @@ impl Capability {
             CAPABILITY_BASE_BYTES + CAPABILITY_EXTENSION_BYTES,
         )?;
         writer.word(10, self.capability_word);
-        writer.word(30, 1);
+        writer.word(30, self.interfaces.current);
         writer.double_word(32, self.raw_status);
         writer.word(36, self.receiver_error_fields[0]);
         writer.word(38, self.receiver_error_fields[1]);
@@ -192,16 +231,33 @@ impl Capability {
         writer.bytes[extension + 1] = CAPABILITY_EXTENSION_WORDS;
         writer.word(extension + 2, MEDIA_SELECTOR);
 
-        for offset in [4, 6] {
-            writer.word(extension + offset, 1);
-        }
-
-        for offset in [8, 10, 16, 18, 24, 26] {
-            writer.word(extension + offset, u16::from(self.transmitter_provisioned));
-        }
-
-        for offset in [12, 14, 20, 22, 28, 30] {
-            writer.word(extension + offset, u16::from(self.receiver_provisioned));
+        writer.word(extension + 4, self.interfaces.current);
+        writer.word(extension + 6, self.interfaces.ceiling.get());
+        for (offset, value) in [(8, transmitter), (12, receiver)] {
+            writer.word(
+                extension + offset,
+                value.map_or(0, |value| value.channels.current),
+            );
+            writer.word(
+                extension + offset + 2,
+                value.map_or(0, |value| value.channels.ceiling.get()),
+            );
+            writer.word(
+                extension + offset + 8,
+                value.map_or(0, |value| value.flows.current),
+            );
+            writer.word(
+                extension + offset + 10,
+                value.map_or(0, |value| value.flows.ceiling.get()),
+            );
+            writer.word(
+                extension + offset + 16,
+                value.map_or(0, |value| value.slots_per_flow.current),
+            );
+            writer.word(
+                extension + offset + 18,
+                value.map_or(0, |value| value.slots_per_flow.ceiling.get()),
+            );
         }
 
         writer.bytes[extension + 32..extension + 34]
@@ -278,7 +334,7 @@ pub enum Row<'a> {
     ReceiverFlow(ReceiverFlow<'a>),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Table {
     TransmitterChannels,
     ReceiverChannels,
@@ -294,6 +350,56 @@ impl Table {
             Self::TransmitterFlows => OPCODE_QUERY_TX_FLOWS_2809,
             Self::ReceiverFlows => OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809,
         }
+    }
+}
+
+pub struct Query {
+    pub context: Context,
+    pub table: Table,
+    pub first: u16,
+    pub last: u16,
+}
+
+impl Query {
+    pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.len() != QUERY_BYTES {
+            return Err(Error("video inventory query has an invalid packet extent"));
+        }
+        let word = |offset| -> Result<u16, Error> {
+            let value = bytes
+                .get(offset..offset + 2)
+                .ok_or(Error("video inventory query is truncated"))?;
+            Ok(u16::from_be_bytes(value.try_into().unwrap()))
+        };
+        let context = Context {
+            revision: word(0)?,
+            transaction: word(4)?,
+        };
+        if !(MINIMUM_REVISION..=MAXIMUM_REVISION).contains(&context.revision)
+            || word(2)? as usize != bytes.len()
+            || word(8)? != 0
+            || bytes[10..16] != [0; 6]
+            || word(16)? != 1
+            || word(18)? != MEDIA_SELECTOR
+            || bytes[24..34] != [0; 10]
+        {
+            return Err(Error(
+                "video inventory query is outside the selected Media-4 profile",
+            ));
+        }
+        let table = match word(6)? {
+            OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809 => Table::TransmitterChannels,
+            OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809 => Table::ReceiverChannels,
+            OPCODE_QUERY_TX_FLOWS_2809 => Table::TransmitterFlows,
+            OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809 => Table::ReceiverFlows,
+            _ => return Err(Error("video inventory query has an unsupported operation")),
+        };
+        Ok(Self {
+            context,
+            table,
+            first: word(20)?,
+            last: word(22)?,
+        })
     }
 }
 
@@ -490,9 +596,25 @@ pub fn page(
     row: Option<&Row<'_>>,
     partial: bool,
 ) -> Result<Vec<u8>, Error> {
-    if capacity > SINGLE_CHANNEL_CAPACITY || (capacity == 0 && row.is_some()) {
+    page_rows(
+        context,
+        table,
+        capacity,
+        row.map(std::slice::from_ref).unwrap_or_default(),
+        partial,
+    )
+}
+
+pub fn page_rows(
+    context: Context,
+    table: Table,
+    capacity: u8,
+    rows: &[Row<'_>],
+    partial: bool,
+) -> Result<Vec<u8>, Error> {
+    if rows.len() > usize::from(capacity) {
         return Err(Error(
-            "video inventory capacity does not admit the selected row",
+            "video inventory rows exceed the reserved directory capacity",
         ));
     }
 
@@ -508,8 +630,9 @@ pub fn page(
         PAGE_BASE_BYTES + usize::from(capacity) * size_of::<u16>(),
     )?;
     writer.bytes[16] = capacity;
+    writer.bytes[17] = rows.len() as u8;
 
-    if let Some(row) = row {
+    for (index, row) in rows.iter().enumerate() {
         let pointer = match (table, row) {
             (Table::TransmitterChannels, Row::TransmitterChannel(value)) => {
                 channel(&mut writer, value, false)?
@@ -524,11 +647,10 @@ pub fn page(
             _ => {
                 return Err(Error(
                     "video inventory row does not belong to the selected table",
-                ))
+                ));
             }
         };
-        writer.bytes[17] = 1;
-        writer.word(PAGE_BASE_BYTES, pointer as u16);
+        writer.word(PAGE_BASE_BYTES + index * size_of::<u16>(), pointer as u16);
     }
 
     Ok(writer.finish())

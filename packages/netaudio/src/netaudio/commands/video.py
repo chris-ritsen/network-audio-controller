@@ -133,6 +133,23 @@ def session_schema() -> NoReturn:
     execute(["video-session-schema"])
 
 
+@app.command(help="Print the H.264 multicast endpoint JSON schema.")
+def multicast_schema() -> NoReturn:
+    execute(["video-multicast-schema"])
+
+
+@app.command(help="Run a configured H.264 multicast source or receiver endpoint.")
+def serve_multicast(
+    configuration: Path = typer.Option(
+        ...,
+        exists=True,
+        dir_okay=False,
+        help="Endpoint JSON with an explicit interface, media authority, named channels, source/group, finite limits and output paths. See multicast-schema and docs/video-endpoint.md.",
+    ),
+) -> NoReturn:
+    execute(["video-serve-multicast", "--configuration", str(configuration)])
+
+
 @app.command(help="Receive an existing configured H.264 stream into NV12 frames and an identity/timing manifest.")
 def receive(
     configuration: Path = typer.Option(

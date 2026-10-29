@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use serde::Serialize;
 
-use super::{source_control, Error};
+use super::{Error, source_control};
 
 pub use crate::protocol::SERVICE_VIDEO as CHANNEL_SERVICE;
 pub const FLOW_SERVICE: &str = "_dantevid-flow._udp.local.";
@@ -289,7 +289,7 @@ impl Flow {
                 _ => {
                     return Err(Error(
                         "named video flow has an incomplete address and port pair",
-                    ))
+                    ));
                 }
             }
         }
@@ -342,6 +342,7 @@ fn field(key: &[u8], value: impl ToString) -> Entry {
 
 pub struct ChannelPublication<'a> {
     pub source_service_channel: NonZeroU16,
+    pub channel_count: NonZeroU16,
     pub codec_identifier: u32,
     pub transport_peer_metadata: Option<Ipv4Addr>,
     pub multicast_flow_label: Option<&'a [u8]>,
@@ -353,7 +354,7 @@ impl ChannelPublication<'_> {
             field(b"txtvers", CHANNEL_TEXT_REVISION),
             field(b"dbcp1", format!("{:#06x}", source_control::REVISION)),
             field(b"id", self.source_service_channel),
-            field(b"nchan", 1),
+            field(b"nchan", self.channel_count),
             field(b"codec", format!("H264:{}", self.codec_identifier)),
         ];
 

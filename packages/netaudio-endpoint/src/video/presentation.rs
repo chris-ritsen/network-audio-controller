@@ -41,6 +41,10 @@ struct Camera {
 }
 
 impl Presentation {
+    pub fn has_sink(&self) -> bool {
+        self.camera.is_some() || self.display_frames.is_some()
+    }
+
     pub async fn start(options: &Options, configuration: &Configuration) -> Result<Self> {
         let (failure_sender, failure) = watch::channel(None);
         let (closed_sender, closed) = watch::channel(false);

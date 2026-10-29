@@ -1,5 +1,6 @@
 mod configuration;
 pub mod live;
+pub mod owned_multicast;
 mod parameters;
 pub mod presentation;
 mod provider;
@@ -7,7 +8,7 @@ mod recording;
 pub mod transmit;
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -57,6 +58,25 @@ pub struct Summary {
     physical_presentation_verified: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub(crate) struct Observation {
+    pub configured: bool,
+    pub socket_owned: bool,
+    pub multicast_joined: bool,
+    pub decoder_ready: bool,
+    pub admitted_packet: bool,
+    pub decoded_frame: bool,
+    pub output_queued: bool,
+    pub terminal: Option<Terminal>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Terminal {
+    Retired,
+    QuiescenceUnknown,
+}
+
 #[derive(Serialize)]
 struct FrameIdentity {
     owner: String,
@@ -86,12 +106,33 @@ pub struct Session {
     pub configuration: Configuration,
     pub output: PathBuf,
     pub duration: Duration,
-    pub socket: UdpSocket,
+    pub socket: ReceiverSocket,
     pub presentation: presentation::Options,
     pub record_frames: bool,
     pub ready: Option<oneshot::Sender<()>>,
     pub cancellation: Option<watch::Receiver<bool>>,
     pub idle_timeout: Option<Duration>,
+    pub observation: Option<watch::Sender<Observation>>,
+}
+
+pub(crate) struct ReceiverSocket {
+    socket: UdpSocket,
+    destination: SocketAddrV4,
+    multicast_membership: Option<(std::net::Ipv4Addr, std::net::Ipv4Addr)>,
+}
+
+impl ReceiverSocket {
+    pub(crate) fn unicast(socket: UdpSocket) -> Self {
+        let destination = match socket.local_addr() {
+            Ok(SocketAddr::V4(address)) => address,
+            _ => SocketAddrV4::new(std::net::Ipv4Addr::UNSPECIFIED, 0),
+        };
+        Self {
+            socket,
+            destination,
+            multicast_membership: None,
+        }
+    }
 }
 
 pub async fn cancelled(receiver: &mut Option<watch::Receiver<bool>>) {
@@ -120,6 +161,7 @@ pub async fn run(
         ready: None,
         cancellation: None,
         idle_timeout: None,
+        observation: None,
     })
     .await
 }
@@ -135,8 +177,28 @@ pub async fn run_session(session: Session) -> Result<Summary> {
         ready: ready_signal,
         mut cancellation,
         idle_timeout,
+        mut observation,
     } = session;
     configuration.validate()?;
+    observe(&mut observation, |value| value.configured = true);
+    observe(&mut observation, |value| value.socket_owned = true);
+    ensure!(
+        socket.destination == configuration.destination,
+        "owned receiver socket does not match the configured destination"
+    );
+    let expected_membership = configuration
+        .destination
+        .ip()
+        .is_multicast()
+        .then_some((*configuration.destination.ip(), configuration.interface_address));
+    ensure!(
+        socket.multicast_membership == expected_membership,
+        "owned receiver socket membership does not match the configured group and interface"
+    );
+    if socket.multicast_membership.is_some() {
+        observe(&mut observation, |value| value.multicast_joined = true);
+    }
+    let socket = socket.socket;
     let parameters = Parameters::new(&configuration)?;
     let origin = Instant::now();
     let authority_deadline = origin
@@ -181,6 +243,7 @@ pub async fn run_session(session: Session) -> Result<Summary> {
             return Err(error);
         }
     };
+    observe(&mut observation, |value| value.decoder_ready = true);
 
     let mut presentation = match presentation::Presentation::start(&options, &configuration).await {
         Ok(presentation) => presentation,
@@ -286,9 +349,13 @@ pub async fn run_session(session: Session) -> Result<Summary> {
                         }
 
                         presentation.publish(frame.bytes.clone())?;
+                        let has_output_sink = presentation.has_sink() || recording.records_frames();
 
                         if recording.publish(frame, origin, &configuration)? {
                             summary.published_frames += 1;
+                            if has_output_sink && summary.published_frames == 1 {
+                                observe(&mut observation, |value| value.output_queued = true);
+                            }
                         } else {
                             summary.late_frames_dropped += 1;
                         }
@@ -306,6 +373,9 @@ pub async fn run_session(session: Session) -> Result<Summary> {
                         .context("decoder output has no matching owned submission")?;
                     ensure!(Instant::now() <= job.expires, "decoder output arrived after its operation deadline");
                     summary.decoded_frames += 1;
+                    if summary.decoded_frames == 1 {
+                        observe(&mut observation, |value| value.decoded_frame = true);
+                    }
                     let key = (job.identity.deadline_nanoseconds, job.identity.access_unit);
                     ensure!(
                         ready
@@ -349,6 +419,9 @@ pub async fn run_session(session: Session) -> Result<Summary> {
                         }
                     };
                     summary.packets_admitted += 1;
+                    if summary.packets_admitted == 1 {
+                        observe(&mut observation, |value| value.admitted_packet = true);
+                    }
                     idle_deadline = idle_timeout.and_then(|timeout| Instant::now().checked_add(timeout));
 
                     if !configuration.destination.ip().is_multicast()
@@ -438,8 +511,10 @@ pub async fn run_session(session: Session) -> Result<Summary> {
     summary.retirement_failure = retired.as_ref().err().map(|error| format!("{error:#}"));
     drop(decoder_output);
     summary.state = if retired.is_ok() {
+        observe(&mut observation, |value| value.terminal = Some(Terminal::Retired));
         "stopped"
     } else {
+        observe(&mut observation, |value| value.terminal = Some(Terminal::QuiescenceUnknown));
         "quiescence_unknown"
     }
     .to_owned();
@@ -457,7 +532,7 @@ pub async fn run_session(session: Session) -> Result<Summary> {
     Ok(summary)
 }
 
-fn bind(configuration: &Configuration) -> Result<UdpSocket> {
+pub(crate) fn bind(configuration: &Configuration) -> Result<ReceiverSocket> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     socket.bind_device(Some(configuration.interface.as_bytes())).context(
         "bind video socket to the selected interface; the OS must permit interface binding",
@@ -470,13 +545,20 @@ fn bind(configuration: &Configuration) -> Result<UdpSocket> {
         .bind(&SocketAddr::V4(configuration.destination).into())
         .context("bind configured video destination")?;
 
-    if configuration.destination.ip().is_multicast() {
+    let multicast_membership = if configuration.destination.ip().is_multicast() {
         socket
             .join_multicast_v4(configuration.destination.ip(), &configuration.interface_address)?;
-    }
+        Some((*configuration.destination.ip(), configuration.interface_address))
+    } else {
+        None
+    };
 
     socket.set_nonblocking(true)?;
-    UdpSocket::from_std(socket.into()).context("register configured video socket")
+    Ok(ReceiverSocket {
+        socket: UdpSocket::from_std(socket.into()).context("register configured video socket")?,
+        destination: configuration.destination,
+        multicast_membership,
+    })
 }
 
 fn clock_sample(origin: Instant) -> Result<i64> {
@@ -492,6 +574,17 @@ fn instant_at(origin: Instant, nanoseconds: i64) -> Result<Instant> {
 
 fn reject(summary: &mut Summary, reason: &str) {
     *summary.rejected.entry(reason.to_owned()).or_default() += 1;
+}
+
+fn observe(
+    observer: &mut Option<watch::Sender<Observation>>,
+    update: impl FnOnce(&mut Observation),
+) {
+    if let Some(observer) = observer {
+        let mut snapshot = *observer.borrow();
+        update(&mut snapshot);
+        observer.send_replace(snapshot);
+    }
 }
 
 async fn interruption() -> Result<()> {

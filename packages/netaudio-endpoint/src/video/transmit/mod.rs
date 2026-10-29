@@ -1,5 +1,5 @@
 pub mod capture;
-pub(super) mod configuration;
+pub(crate) mod configuration;
 mod encoder;
 
 use std::fs::{File, OpenOptions};
@@ -61,6 +61,23 @@ pub struct Summary {
     remote_decode_verified: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub(crate) struct Observation {
+    pub configured: bool,
+    pub socket_owned: bool,
+    pub provider_ready: bool,
+    pub encoded_frame: bool,
+    pub sent_frame: bool,
+    pub terminal: Option<Terminal>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Terminal {
+    Retired,
+    QuiescenceUnknown,
+}
+
 struct Source {
     input: SourceInput,
     frames: u64,
@@ -72,6 +89,7 @@ struct Source {
     read_task: Option<tokio::task::JoinHandle<Result<Vec<u8>>>>,
     description: Option<Description>,
     peer: Option<Peer>,
+    observation: Option<watch::Sender<Observation>>,
 }
 
 pub enum SourceInput {
@@ -94,6 +112,7 @@ pub struct Session {
     pub socket: Option<UdpSocket>,
     pub peer: Option<Peer>,
     pub cancellation: Option<watch::Receiver<bool>>,
+    pub observation: Option<watch::Sender<Observation>>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -144,6 +163,7 @@ pub async fn run(
         socket,
         peer: None,
         cancellation: None,
+        observation: None,
     })
     .await
 }
@@ -159,9 +179,14 @@ pub async fn run_session(session: Session) -> Result<Summary> {
         socket,
         peer,
         mut cancellation,
+        mut observation,
     } = session;
     configuration.validate()?;
-    let mut source = Source::new(input, frames, directory, &configuration)?;
+    observe(&mut observation, |value| value.configured = true);
+    if socket.is_some() {
+        observe(&mut observation, |value| value.socket_owned = true);
+    }
+    let mut source = Source::new(input, frames, directory, &configuration, observation)?;
     source.peer = peer;
     let origin = Instant::now();
     let deadline = origin
@@ -187,6 +212,7 @@ pub async fn run_session(session: Session) -> Result<Summary> {
             return Err(error);
         }
     };
+    observe(&mut source.observation, |value| value.provider_ready = true);
     let mut return_bytes = vec![0; RETURN_BUFFER_BYTES];
     let mut valid_returns = 0;
     let mut rejected_returns = 0;
@@ -211,7 +237,7 @@ pub async fn run_session(session: Session) -> Result<Summary> {
                 _ = interrupt.recv() => break Ok("interrupted"),
                 _ = termination.recv() => break Ok("interrupted"),
                 _ = tokio::time::sleep_until(deadline) => break Ok("duration_or_authority_expired"),
-                _ = tokio::time::sleep_until(return_deadline), if valid_returns > 0 => break Err(anyhow::anyhow!("armed receiver-return deadline expired")),
+                _ = tokio::time::sleep_until(return_deadline), if valid_returns > 0 && !configuration.destination.ip().is_multicast() => break Err(anyhow::anyhow!("armed receiver-return deadline expired")),
                 changed = provider_failure.changed() => {
                     match changed {
                         Ok(()) => {
@@ -223,7 +249,7 @@ pub async fn run_session(session: Session) -> Result<Summary> {
                     }
                 }
                 result = &mut work => break result,
-                received = receive_return(socket.as_ref(), &mut return_bytes) => {
+                received = receive_return(socket.as_ref(), &mut return_bytes), if !configuration.destination.ip().is_multicast() => {
                     match received {
                         Ok((length, peer)) if peer == SocketAddr::V4(configuration.destination) && &return_bytes[..length] == RECEIVE_RETURN => {
                             valid_returns += 1;
@@ -280,8 +306,12 @@ pub async fn run_session(session: Session) -> Result<Summary> {
     let retired = retired.and(capture_retirement);
     summary.retirement_failure = retired.as_ref().err().map(|error| format!("{error:#}"));
     summary.state = if retired.is_ok() {
+        observe(&mut source.observation, |value| value.terminal = Some(Terminal::Retired));
         "stopped"
     } else {
+        observe(&mut source.observation, |value| {
+            value.terminal = Some(Terminal::QuiescenceUnknown)
+        });
         "quiescence_unknown"
     }
     .to_owned();
@@ -297,7 +327,7 @@ pub async fn run_session(session: Session) -> Result<Summary> {
 }
 
 impl SourceInput {
-    fn open(input: &Path, configuration: &Configuration) -> Result<(Self, u64)> {
+    pub(crate) fn open(input: &Path, configuration: &Configuration) -> Result<(Self, u64)> {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NONBLOCK)
@@ -324,6 +354,7 @@ impl Source {
         frames: u64,
         directory: PathBuf,
         configuration: &Configuration,
+        observation: Option<watch::Sender<Observation>>,
     ) -> Result<Self> {
         std::fs::create_dir(&directory).context("create new source output directory")?;
         write_json(&directory.join("configuration.json"), configuration)?;
@@ -346,6 +377,7 @@ impl Source {
             read_task: None,
             description: None,
             peer: None,
+            observation,
         })
     }
 
@@ -427,6 +459,9 @@ impl Source {
             encoder.verify_input(configuration)?;
             self.validate_parameters(configuration, &access_unit, summary)?;
             summary.frames_encoded += 1;
+            if summary.frames_encoded == 1 {
+                observe(&mut self.observation, |value| value.encoded_frame = true);
+            }
 
             if summary.prepare_only {
                 return Ok("prepared_without_transmission");
@@ -476,6 +511,9 @@ impl Source {
             }
 
             summary.frames_sent += 1;
+            if summary.frames_sent == 1 {
+                observe(&mut self.observation, |value| value.sent_frame = true);
+            }
             if live {
                 continue;
             }
@@ -641,7 +679,7 @@ impl Source {
     }
 }
 
-fn bind(configuration: &Configuration) -> Result<UdpSocket> {
+pub(crate) fn bind(configuration: &Configuration) -> Result<UdpSocket> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     socket
         .bind_device(Some(configuration.interface.as_bytes()))
@@ -649,8 +687,22 @@ fn bind(configuration: &Configuration) -> Result<UdpSocket> {
     socket
         .bind(&SocketAddr::V4(configuration.source).into())
         .context("bind exact source media endpoint")?;
+    if configuration.destination.ip().is_multicast() {
+        socket.set_multicast_if_v4(&configuration.interface_address)?;
+    }
     socket.set_nonblocking(true)?;
     UdpSocket::from_std(socket.into()).context("register source media socket")
+}
+
+fn observe(
+    observer: &mut Option<watch::Sender<Observation>>,
+    update: impl FnOnce(&mut Observation),
+) {
+    if let Some(observer) = observer {
+        let mut snapshot = *observer.borrow();
+        update(&mut snapshot);
+        observer.send_replace(snapshot);
+    }
 }
 
 async fn receive_return(

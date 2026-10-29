@@ -1,8 +1,10 @@
 pub mod discovery;
 pub mod h264;
 pub mod inventory;
+pub mod multicast;
 pub mod rtp;
 pub mod source_control;
+pub mod subscription;
 
 pub const RECEIVE_RETURN: &[u8; 11] = b"KEEP ALIVE\0";
 pub const RETURN_INTERVAL_NANOSECONDS: i64 = 250_000_000;

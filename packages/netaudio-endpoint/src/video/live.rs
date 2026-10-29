@@ -174,12 +174,13 @@ pub async fn listen(options: Listen) -> Result<super::Summary> {
         configuration,
         output: options.output,
         duration: options.duration,
-        socket,
+        socket: super::ReceiverSocket::unicast(socket),
         presentation: options.presentation,
         record_frames: false,
         ready: Some(ready_sender),
         cancellation: Some(cancellation),
         idle_timeout: Some(Duration::from_millis(u64::from(PROVIDER_TIMEOUT_MILLISECONDS))),
+        observation: None,
     });
     let control = async {
         tokio::time::timeout(SETUP_TIMEOUT, ready)
@@ -287,6 +288,7 @@ pub async fn share(options: Share) -> Result<transmit::Summary> {
             ready,
         }),
         cancellation: Some(cancellation),
+        observation: None,
     });
     let control = async {
         let description = tokio::time::timeout(SETUP_TIMEOUT, prepared)
