@@ -114,3 +114,17 @@ replaced its retained input history, emitting local silence at that boundary.
 Sibling channels retain their filter state and pacing. This bounded transition
 is separate from network loss and from the native floating-point precision
 limit; output receipts retain per-channel received and silence accounting.
+
+Receive recovery invalidates buffered samples by generation without scanning
+the full ring on the media thread. Each receive flow uses an additional 64 KiB
+of generation storage. Retired samples remain inaccessible; missing output
+still produces explicit silence, and capture-age and playback deadlines remain
+enforced.
+
+The shutdown summary includes event-loop scheduling measurements. Preparation
+measures reconciliation and deadline setup. Each selected event measures the
+interval from entering selection through completing its handler, including
+waiting and other tasks on that runtime. Wall time, thread CPU time and deadline
+overrun are recorded together. These measurements help distinguish expensive
+work from scheduling delay; they do not establish an operating-system latency
+guarantee.

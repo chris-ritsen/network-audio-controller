@@ -84,6 +84,7 @@ impl Configuration {
 
 #[derive(Default, Serialize)]
 pub struct Summary {
+    pub scheduling: super::scheduling::Measurements,
     pub initialization_canceled: bool,
     pub routing_replies: u64,
     pub source_replies: u64,
@@ -539,6 +540,8 @@ impl Server {
                 continue;
             }
 
+            let preparation_started = super::scheduling::Started::now(&self.time)?;
+
             if let Err(error) = self.receive.synchronize(
                 &mut self.endpoint,
                 &self.receiver_discovery.candidates(),
@@ -577,7 +580,17 @@ impl Server {
                 .map(|pending| pending.due);
             status_deadline.arm(status_due)?;
 
+            let next_deadline = receive_due.into_iter().chain(due).min();
+            self.summary.scheduling.finish(
+                "preparation",
+                preparation_started,
+                &self.time,
+                next_deadline,
+            )?;
+
             let selected_clock = self.clock.current();
+            let selection_started = super::scheduling::Started::now(&self.time)?;
+            let operation;
             tokio::select! {
                 biased;
                 _ = &mut stopped => return Ok(()),
@@ -586,8 +599,12 @@ impl Server {
                         Some(audio) => audio.next_event().await,
                         None => std::future::pending().await,
                     }
-                } => self.audio_event(event)?,
+                } => {
+                    operation = "audio_event";
+                    self.audio_event(event)?;
+                }
                 result = receive_deadline.expired(), if receive_due.is_some() => {
+                    operation = "receive_dispatch";
                     result?;
                     let lateness = self.time.now().saturating_sub(receive_due.unwrap());
                     self.summary.maximum_receive_deadline_lateness_nanoseconds =
@@ -603,6 +620,7 @@ impl Server {
                     }
                 }
                 result = media_deadline.expired(), if due.is_some() => {
+                    operation = "source_dispatch";
                     result?;
 
                     if let Err(error) = self.source.send(&mut self.endpoint, self.clock.current().as_ref(), &self.time) {
@@ -612,14 +630,17 @@ impl Server {
                     }
                 }
                 result = self.clock.changed() => {
+                    operation = "clock_observation";
                     result?;
                     let clock = self.clock.current().snapshot(self.time.now())?;
                     self.service.status(clock.usable, &clock.reason)?;
                 }
                 result = self.receiver_discovery.changed() => {
+                    operation = "discovery";
                     result?;
                 }
                 event = self.receive.next_event() => {
+                    operation = "receive_event";
                     match event {
                         Ok(event) => {
                             if let Err(error) = self.receive.event(event, &mut self.endpoint) {
@@ -638,6 +659,7 @@ impl Server {
                     }
                 }
                 result = self.source.next_event(&mut self.endpoint, &self.time, selected_clock.as_ref()) => {
+                    operation = "source_event";
                     match result {
                         Ok(Some(response)) => {
                             reply(&self.sockets.source, response.peer, &response.bytes)?;
@@ -648,6 +670,7 @@ impl Server {
                     }
                 }
                 datagram = self.datagrams.recv() => {
+                    operation = "datagram";
                     let datagram = datagram.context("endpoint receive provider stopped")?;
                     let started = self.time.now();
                     self.summary.maximum_observed_datagram_queue =
@@ -667,8 +690,12 @@ impl Server {
                         eprintln!("endpoint {channel:?} datagram rejected: {error:#}");
                     }
                 }
-                event = monitor.recv_async() => self.publication.check_event(event?)?,
+                event = monitor.recv_async() => {
+                    operation = "publication";
+                    self.publication.check_event(event?)?;
+                }
                 result = status_deadline.expired(), if status_due.is_some() => {
+                    operation = "status_dispatch";
                     result?;
                     self.prepare_status()?;
                 }
@@ -678,6 +705,7 @@ impl Server {
                         None => std::future::pending().await,
                     }
                 } => {
+                    operation = "status_observation";
                     let observation = observation??;
 
                     if let Err(error) = self.status_ready(observation) {
@@ -691,6 +719,7 @@ impl Server {
                     bail!("selected network interface changed from {:?} to {observed:?}; endpoint identity must be re-established", self.interface);
                 }
                 reader = self.readers.join_next() => {
+                    operation = "reader_completion";
                     let (channel, result) = reader.context("endpoint socket readers stopped")??;
                     let reason = result.err().map_or_else(|| "reader stopped".to_owned(), |error| format!("{error:#}"));
 
@@ -708,6 +737,12 @@ impl Server {
                     }
                 }
             }
+            self.summary.scheduling.finish(
+                operation,
+                selection_started,
+                &self.time,
+                next_deadline,
+            )?;
         }
     }
 
