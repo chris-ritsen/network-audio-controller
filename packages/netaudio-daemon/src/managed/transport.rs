@@ -7,6 +7,22 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
+mod pinned;
+
+pub(super) fn controller_pin(value: Option<&str>) -> Result<Option<[u8; 32]>, Error> {
+    value
+        .map(|value| {
+            let mut pin = [0; 32];
+            hex::decode_to_slice(value.trim().replace(':', ""), &mut pin).map_err(|_| {
+                Error::Invalid(
+                    "The DDM controller certificate pin must be a SHA-256 fingerprint in hexadecimal",
+                )
+            })?;
+            Ok(pin)
+        })
+        .transpose()
+}
+
 #[derive(Clone, Debug)]
 pub enum Error {
     Invalid(&'static str),
@@ -97,7 +113,10 @@ impl Transport {
         }
     }
 
-    pub fn new(certificate_file: Option<&Path>) -> Result<Self, Error> {
+    pub fn new(
+        certificate_file: Option<&Path>,
+        controller_certificate: Option<&str>,
+    ) -> Result<Self, Error> {
         let bytes = certificate_file
             .map(|path| {
                 super::resources::read_file(path, 1024 * 1024).map_err(|_| {
@@ -105,10 +124,14 @@ impl Transport {
                 })
             })
             .transpose()?;
-        Self::from_certificate_bytes(bytes.as_deref())
+        Self::from_certificate_bytes(bytes.as_deref(), controller_certificate)
     }
 
-    pub(super) fn from_certificate_bytes(certificate_bytes: Option<&[u8]>) -> Result<Self, Error> {
+    pub(super) fn from_certificate_bytes(
+        certificate_bytes: Option<&[u8]>,
+        controller_certificate: Option<&str>,
+    ) -> Result<Self, Error> {
+        let pin = controller_pin(controller_certificate)?;
         let mut roots = RootCertStore::empty();
         let native = rustls_native_certs::load_native_certs();
 
@@ -150,11 +173,20 @@ impl Transport {
             ));
         }
 
-        let configuration = ClientConfig::builder_with_provider(Arc::new(ring::default_provider()))
+        let provider = Arc::new(ring::default_provider());
+        let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
             .with_safe_default_protocol_versions()
-            .map_err(|_| Error::Tls("Managed service TLS configuration failed"))?
-            .with_root_certificates(roots)
-            .with_no_client_auth();
+            .map_err(|_| Error::Tls("Managed service TLS configuration failed"))?;
+        let configuration = match pin {
+            Some(pin) => {
+                let verifier = pinned::Controller::new(pin, roots, provider)?;
+                builder
+                    .dangerous()
+                    .with_custom_certificate_verifier(Arc::new(verifier))
+                    .with_no_client_auth()
+            }
+            None => builder.with_root_certificates(roots).with_no_client_auth(),
+        };
         let client = reqwest::Client::builder()
             .use_preconfigured_tls(configuration.clone())
             .redirect(reqwest::redirect::Policy::none())

@@ -12,7 +12,7 @@ use crate::{
     },
     monitoring::requests::StatusQuery,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 pub fn configuration(operation: &Operation) -> Result<Option<analog::Configuration>, ControlError> {

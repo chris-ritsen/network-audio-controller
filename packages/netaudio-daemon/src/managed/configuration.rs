@@ -18,13 +18,14 @@ pub struct Settings {
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Server {
-    pub url: Option<String>,
+    pub controller_certificate_sha256: Option<String>,
     pub credential_file: Option<PathBuf>,
-    pub trust_certificate_file: Option<PathBuf>,
     #[serde(default, deserialize_with = "optional_boolean")]
     pub enabled: Option<bool>,
     #[serde(default = "default_interval", deserialize_with = "interval")]
     pub refresh_interval: f64,
+    pub trust_certificate_file: Option<PathBuf>,
+    pub url: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
@@ -65,6 +66,8 @@ impl Settings {
             if let Some(path) = &mut server.trust_certificate_file {
                 *path = resolve_path(path, directory)?;
             }
+
+            super::transport::controller_pin(server.controller_certificate_sha256.as_deref())?;
 
             if server.enabled != Some(false) {
                 match (&server.url, &server.credential_file) {
