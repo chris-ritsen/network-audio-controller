@@ -1,6 +1,6 @@
 mod configuration;
 pub mod live;
-pub mod owned_multicast;
+pub mod owned;
 mod parameters;
 pub mod presentation;
 mod provider;
