@@ -2386,8 +2386,10 @@ dependencies = [
 name = "netaudio-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "caseless",
  "crypto_secretbox",
+ "h264-reader",
  "libc",
  "num-bigint",
  "num-rational",
@@ -2477,7 +2479,6 @@ dependencies = [
  "gstreamer",
  "gstreamer-app",
  "gstreamer-video",
- "h264-reader",
  "hickory-proto",
  "if-addrs",
  "jack",
