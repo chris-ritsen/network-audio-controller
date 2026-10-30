@@ -1,5 +1,7 @@
 pub mod discovery;
 pub mod h264;
+pub mod h264_bootstrap;
+pub mod h264_parameters;
 pub mod inventory;
 pub mod multicast;
 pub mod rtp;

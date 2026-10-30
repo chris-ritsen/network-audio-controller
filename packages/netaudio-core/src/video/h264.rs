@@ -52,6 +52,7 @@ pub struct Receiver {
     next_identifier: u64,
     next_sequence: Option<u16>,
     hunting: bool,
+    parameter_units_allowed: bool,
     assembly: Option<Assembly>,
 }
 
@@ -69,14 +70,31 @@ impl Receiver {
             next_identifier: 1,
             next_sequence: None,
             hunting: true,
+            parameter_units_allowed: false,
             assembly: None,
         })
+    }
+
+    pub(super) fn bootstrap(limits: Limits) -> Result<Self, Error> {
+        let mut receiver = Self::new(limits)?;
+        receiver.parameter_units_allowed = true;
+        receiver.hunting = false;
+        Ok(receiver)
     }
 
     pub fn invalidate(&mut self) {
         self.assembly = None;
         self.next_sequence = None;
-        self.hunting = true;
+        self.hunting = !self.parameter_units_allowed;
+    }
+
+    pub(super) fn pending_nals(&self) -> impl Iterator<Item = &[u8]> {
+        self.assembly.iter().flat_map(|assembly| {
+            assembly
+                .nal_ranges
+                .iter()
+                .map(|range| &assembly.bytes[range.clone()])
+        })
     }
 
     pub fn expiration_nanoseconds(&self) -> Option<i64> {
@@ -153,11 +171,11 @@ impl Receiver {
         }
 
         let assembly = self.assembly.as_mut().unwrap();
-        assembly.packets += 1;
-
-        if assembly.packets > self.limits.maximum_packets {
-            return Err(Error("H.264 access unit exceeds its packet limit"));
-        }
+        assembly.packets = assembly
+            .packets
+            .checked_add(1)
+            .filter(|packets| *packets <= self.limits.maximum_packets)
+            .ok_or(Error("H.264 access unit exceeds its packet limit"))?;
 
         assembly.last_arrival_nanoseconds = arrival_nanoseconds;
         assembly.append(payload, self.limits.maximum_access_unit_bytes, self.hunting)?;
@@ -168,7 +186,7 @@ impl Receiver {
         }
 
         if assembly.fragment.is_some()
-            || !assembly.has_slice
+            || (!assembly.has_slice && !self.parameter_units_allowed)
             || (self.hunting && !assembly.random_access)
         {
             return Err(Error(

@@ -13,6 +13,18 @@ const EXTENSION_WORD_BYTES: usize = 4;
 const ONE_BYTE_EXTENSION_PROFILE: u16 = 0xbede;
 const RESERVED_EXTENSION_IDENTIFIER: u8 = 15;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Identity {
+    pub payload_type: u8,
+    pub synchronization_source: u32,
+}
+
+#[derive(Debug)]
+pub struct StructuralPacket<'a> {
+    pub identity: Identity,
+    pub packet: Packet<'a>,
+}
+
 #[derive(Debug)]
 pub struct Packet<'a> {
     pub sequence: u16,
@@ -45,6 +57,24 @@ impl<'a> Packet<'a> {
             ));
         }
 
+        Ok(StructuralPacket::parse_payload(bytes)?.packet)
+    }
+}
+
+impl<'a> StructuralPacket<'a> {
+    pub fn parse(bytes: &'a [u8]) -> Result<Self, Error> {
+        if bytes.len() < HEADER_BYTES || bytes.len() > MAXIMUM_DATAGRAM_BYTES {
+            return Err(Error("invalid RTP datagram extent"));
+        }
+        if bytes[0] >> 6 != VERSION || bytes[0] & (PADDING_FLAG | CONTRIBUTING_SOURCE_MASK) != 0 {
+            return Err(Error(
+                "unsupported RTP version, padding or contributing sources",
+            ));
+        }
+        Self::parse_payload(bytes)
+    }
+
+    fn parse_payload(bytes: &'a [u8]) -> Result<Self, Error> {
         let mut payload_offset = HEADER_BYTES;
 
         if bytes[0] & EXTENSION_FLAG != 0 {
@@ -72,10 +102,16 @@ impl<'a> Packet<'a> {
         }
 
         Ok(Self {
-            sequence: u16::from_be_bytes([bytes[2], bytes[3]]),
-            timestamp: u32::from_be_bytes(bytes[4..8].try_into().unwrap()),
-            marker: bytes[1] & MARKER_FLAG != 0,
-            payload,
+            identity: Identity {
+                payload_type: bytes[1] & PAYLOAD_TYPE_MASK,
+                synchronization_source: u32::from_be_bytes(bytes[8..12].try_into().unwrap()),
+            },
+            packet: Packet {
+                sequence: u16::from_be_bytes([bytes[2], bytes[3]]),
+                timestamp: u32::from_be_bytes(bytes[4..8].try_into().unwrap()),
+                marker: bytes[1] & MARKER_FLAG != 0,
+                payload,
+            },
         })
     }
 }

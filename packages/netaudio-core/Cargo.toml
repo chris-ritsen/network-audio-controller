@@ -9,6 +9,8 @@ name = "netaudio_core"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
+anyhow = "1"
+h264-reader = "0.8"
 caseless = "0.2.2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["raw_value"] }
