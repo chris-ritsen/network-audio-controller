@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
+use super::recording;
 use super::transmit::{self, Observation as TransmitObservation};
 use super::{Configuration as ReceiveConfiguration, Observation as ReceiveObservation};
 use publication::Publication;
@@ -120,6 +121,8 @@ struct ReceiverState {
     failure_subscription_status: u16,
     observation: ReceiveObservation,
     failure: Option<String>,
+    media_finished: bool,
+    recording_pending: bool,
 }
 
 #[derive(Serialize)]
@@ -143,6 +146,8 @@ pub struct Runtime {
     events: mpsc::Receiver<workers::Event>,
     event_sender: mpsc::Sender<workers::Event>,
     jobs: JoinSet<workers::Completion>,
+    recording_jobs: JoinSet<workers::Completion>,
+    recordings: BTreeMap<(NonZeroU16, u64), recording::Supervisor>,
     stopping: bool,
 }
 
@@ -224,8 +229,28 @@ pub async fn run(configuration_path: &Path) -> Result<()> {
                     evidence.emit("lifecycle", &runtime, None)?;
                 }
                 completed = runtime.jobs.join_next(), if !runtime.jobs.is_empty() => {
-                    runtime.complete(completed.context("owned video worker set ended")?.context("owned video worker panicked")?).await?;
+                    match completed {
+                        Some(Ok(completed)) => runtime.complete(completed).await?,
+                        Some(Err(error)) => {
+                            runtime.mark_active_media_unknown();
+                            return Err(anyhow::Error::from(error).context("owned video worker panicked; provider quiescence is unknown"));
+                        }
+                        None => bail!("owned video worker set ended unexpectedly"),
+                    }
                     evidence.emit("worker_completed", &runtime, None)?;
+                }
+                completed = runtime.recording_jobs.join_next(), if !runtime.recording_jobs.is_empty() => {
+                    match completed {
+                        Some(Ok(completion)) => {
+                            runtime.complete(completion).await?;
+                            evidence.emit("recording_completed", &runtime, None)?;
+                        }
+                        Some(Err(error)) => {
+                            runtime.refresh_recording_watchers()?;
+                            evidence.emit("recording_watcher_restarted", &runtime, Some(&error.to_string()))?;
+                        }
+                        None => {}
+                    }
                 }
                 received = socket.recv_from(&mut bytes) => {
                     let (length, peer) = received.context("receive owned video ARC request")?;
@@ -260,13 +285,41 @@ pub async fn run(configuration_path: &Path) -> Result<()> {
             {
                 receiver.observation.terminal = Some(super::Terminal::QuiescenceUnknown);
             }
-            runtime.advance()?;
-            evidence.emit(
+            let mut cleanup_failures = Vec::new();
+            if let Err(error) = runtime.advance() {
+                cleanup_failures.push(format!("cannot advance timeout state: {error:#}"));
+            }
+            if let Err(error) = evidence.emit(
                 "retirement_unknown",
                 &runtime,
                 Some("owned video worker retirement exceeded its configured deadline"),
-            )?;
-            Err(anyhow::Error::from(error).context("owned video worker retirement exceeded its configured deadline; provider quiescence is unknown"))
+            ) {
+                cleanup_failures
+                    .push(format!("cannot emit retirement timeout evidence: {error:#}"));
+            }
+            runtime.collect_retired(&mut cleanup_failures).await;
+            if !runtime.recordings.is_empty() {
+                cleanup_failures
+                    .push("owned recording supervisors remain after retirement timeout".to_owned());
+            }
+            if let Err(error) = evidence.emit(
+                "retired_after_timeout",
+                &runtime,
+                (!cleanup_failures.is_empty()).then(|| cleanup_failures.join("; ")).as_deref(),
+            ) {
+                cleanup_failures
+                    .push(format!("cannot emit post-timeout retirement evidence: {error:#}"));
+            }
+            let deadline = anyhow::Error::from(error)
+                .context("owned video worker retirement exceeded its configured deadline; provider quiescence is unknown");
+            if cleanup_failures.is_empty() {
+                Err(deadline)
+            } else {
+                Err(deadline.context(format!(
+                    "post-timeout recording retirement also failed: {}",
+                    cleanup_failures.join("; ")
+                )))
+            }
         }
     };
     match (execution, retirement) {
@@ -303,6 +356,8 @@ impl Runtime {
             events,
             event_sender,
             jobs: JoinSet::new(),
+            recording_jobs: JoinSet::new(),
+            recordings: BTreeMap::new(),
             stopping: false,
         })
     }
@@ -493,7 +548,7 @@ impl Runtime {
                     }
                 }
                 self.advance()?;
-                self.reconcile();
+                self.reconcile().await?;
                 Ok(request.acknowledgement().to_vec())
             }
             netaudio_core::commands::OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809
@@ -506,13 +561,16 @@ impl Runtime {
         }
     }
 
-    fn reconcile(&mut self) {
+    async fn reconcile(&mut self) -> Result<()> {
         if self.stopping {
-            return;
+            return Ok(());
         }
         for definition in &self.configuration.receivers {
             let state = self.receivers.get_mut(&definition.identifier).unwrap();
-            if state.worker_generation.is_some() || state.phase != ReceiverPhase::Unresolved {
+            if state.worker_generation.is_some()
+                || state.recording_pending
+                || state.phase != ReceiverPhase::Unresolved
+            {
                 continue;
             }
             let Some(desired) = &state.desired else {
@@ -528,19 +586,63 @@ impl Runtime {
                 state.failure = Some("the previous group membership retired, but that does not prove old network traffic is drained; supply fresh source/group authority before another receive context".to_owned());
                 continue;
             }
+            let generation = state.generation;
+            let origin = tokio::time::Instant::now();
+            let session_generation = uuid::Uuid::new_v4().to_string();
+            ensure!(
+                !self.recordings.contains_key(&(definition.identifier, generation)),
+                "receiver recording generation already has an owner"
+            );
+            let (mut supervisor, client) = recording::Supervisor::start(
+                definition.output.clone(),
+                definition.configuration.clone(),
+                definition.record_frames,
+                origin,
+            )?;
+            let terminal = match supervisor.watcher() {
+                Ok(Some(terminal)) => terminal,
+                failure => {
+                    drop(client);
+                    let retired = supervisor.terminal().await;
+                    let failure = failure.err().unwrap_or_else(|| {
+                        anyhow::anyhow!(
+                            "new recording supervisor did not provide a terminal watcher"
+                        )
+                    });
+                    return match retired {
+                        Ok(_) => Err(failure),
+                        Err(retirement) => Err(failure
+                            .context(format!("recording retirement also failed: {retirement:#}"))),
+                    };
+                }
+            };
+            self.recordings.insert((definition.identifier, generation), supervisor);
+            self.recording_jobs.spawn(workers::recording(
+                definition.identifier,
+                generation,
+                terminal,
+            ));
             let (cancellation, cancelled) = watch::channel(false);
-            state.worker_generation = Some(state.generation);
+            state.worker_generation = Some(generation);
             state.phase = ReceiverPhase::Resolving;
             state.observation = ReceiveObservation::default();
+            state.media_finished = false;
+            state.recording_pending = true;
             self.receiver_cancellation.insert(definition.identifier, cancellation);
             self.jobs.spawn(workers::receiver(
                 definition.clone(),
-                state.generation,
+                generation,
                 self.event_sender.clone(),
                 cancelled,
                 Duration::from_secs(self.configuration.run_duration_seconds),
+                recording::Session {
+                    client,
+                    origin,
+                    generation: session_generation,
+                },
             ));
         }
+        Ok(())
     }
 
     fn observe(&mut self, event: workers::Event) -> Result<()> {
@@ -609,21 +711,100 @@ impl Runtime {
                 receiver.group_previously_joined |= observation.multicast_joined;
                 receiver.worker_generation = None;
                 receiver.failure_subscription_status = failure_subscription_status;
-                receiver.failure = failure;
-                receiver.phase = if receiver.desired.is_none() {
-                    ReceiverPhase::Retired
-                } else if receiver.generation != generation {
-                    ReceiverPhase::Unresolved
-                } else if receiver.failure.is_some() {
-                    ReceiverPhase::Failed
-                } else {
-                    ReceiverPhase::Retired
+                receiver.failure = match (receiver.failure.take(), failure) {
+                    (Some(previous), Some(current)) => {
+                        Some(format!("{previous}; receiver worker: {current}"))
+                    }
+                    (previous, current) => previous.or(current),
                 };
+                receiver.media_finished = true;
+                receiver.phase = ReceiverPhase::Retiring;
                 self.receiver_cancellation.remove(&identifier);
+                if !receiver.recording_pending {
+                    Self::settle_receiver(receiver, generation);
+                }
+            }
+            workers::Completion::Recording {
+                identifier,
+                generation,
+            } => {
+                let terminal = self
+                    .recordings
+                    .get_mut(&(identifier, generation))
+                    .context("recording completion has no owned supervisor")?
+                    .join();
+                self.recordings
+                    .remove(&(identifier, generation))
+                    .context("joined recording supervisor disappeared")?;
+                self.recording_finished(identifier, generation, terminal)?;
             }
         }
         self.advance()?;
-        self.reconcile();
+        self.reconcile().await?;
+        Ok(())
+    }
+
+    fn recording_finished(
+        &mut self,
+        identifier: NonZeroU16,
+        generation: u64,
+        terminal: Result<recording::Terminal>,
+    ) -> Result<()> {
+        let cancellation = self.receiver_cancellation.get(&identifier).cloned();
+        let receiver =
+            self.receivers.get_mut(&identifier).context("unknown receiver recording completion")?;
+        receiver.recording_pending = false;
+        if let Err(error) = terminal {
+            let current = format!("recording worker: {error:#}");
+            receiver.failure = match receiver.failure.take() {
+                Some(previous) => Some(format!("{previous}; {current}")),
+                None => Some(current),
+            };
+            if let Some(cancellation) = cancellation {
+                cancellation.send_replace(true);
+            }
+        }
+        if receiver.media_finished {
+            Self::settle_receiver(receiver, generation);
+        }
+        Ok(())
+    }
+
+    fn mark_active_media_unknown(&mut self) {
+        if self.source.worker_active {
+            self.source.observation.terminal = Some(transmit::Terminal::QuiescenceUnknown);
+        }
+        for receiver in
+            self.receivers.values_mut().filter(|receiver| receiver.worker_generation.is_some())
+        {
+            receiver.observation.terminal = Some(super::Terminal::QuiescenceUnknown);
+        }
+    }
+
+    fn settle_receiver(receiver: &mut ReceiverState, generation: u64) {
+        if receiver.worker_generation.is_some() || receiver.recording_pending {
+            receiver.phase = ReceiverPhase::Retiring;
+        } else if receiver.desired.is_none() {
+            receiver.phase = ReceiverPhase::Retired;
+        } else if receiver.generation != generation {
+            receiver.phase = ReceiverPhase::Unresolved;
+        } else if receiver.failure.is_some() {
+            receiver.phase = ReceiverPhase::Failed;
+        } else {
+            receiver.phase = ReceiverPhase::Retired;
+        }
+    }
+
+    fn refresh_recording_watchers(&mut self) -> Result<()> {
+        let mut watchers = Vec::new();
+        for ((identifier, generation), supervisor) in &self.recordings {
+            if let Some(watcher) = supervisor.watcher()? {
+                watchers.push((*identifier, *generation, watcher));
+            }
+        }
+        for (identifier, generation, watcher) in watchers {
+            self.recording_jobs.spawn(workers::recording(identifier, generation, watcher));
+        }
         Ok(())
     }
 
@@ -652,19 +833,9 @@ impl Runtime {
         if let Err(error) = self.withdraw().await {
             failures.push(format!("{error:#}"));
         }
-        while !self.jobs.is_empty() {
-            tokio::select! {
-                event = self.events.recv() => {
-                    if let Some(event) = event { self.observe(event)?; }
-                }
-                completion = self.jobs.join_next() => {
-                    match completion {
-                        Some(Ok(completion)) => { if let Err(error) = self.complete(completion).await { failures.push(format!("{error:#}")); } }
-                        Some(Err(error)) => failures.push(format!("video worker quiescence is unknown after a task failure: {error}")),
-                        None => break,
-                    }
-                }
-            }
+        self.collect_retired(&mut failures).await;
+        if !self.recordings.is_empty() {
+            failures.push("owned recording supervisors remain after retirement".to_owned());
         }
         if self.source.observation.terminal == Some(transmit::Terminal::QuiescenceUnknown)
             || self.receivers.values().any(|receiver| {
@@ -681,6 +852,81 @@ impl Runtime {
         )?;
         ensure!(failures.is_empty(), "{}", failures.join("; "));
         Ok(())
+    }
+
+    async fn collect_retired(&mut self, failures: &mut Vec<String>) {
+        while !self.jobs.is_empty()
+            || !self.recording_jobs.is_empty()
+            || !self.recordings.is_empty()
+        {
+            if self.recording_jobs.is_empty() && !self.recordings.is_empty() {
+                if let Err(error) = self.refresh_recording_watchers() {
+                    failures.push(format!("video recording watcher recovery failed: {error:#}"));
+                    break;
+                }
+                if self.recording_jobs.is_empty() {
+                    failures.push("recording supervisor has no terminal watcher".to_owned());
+                    break;
+                }
+                continue;
+            }
+            tokio::select! {
+                event = self.events.recv() => {
+                    if let Some(event) = event
+                        && let Err(error) = self.observe(event) {
+                            failures.push(format!("video retirement observation failed: {error:#}"));
+                    }
+                }
+                completion = self.jobs.join_next(), if !self.jobs.is_empty() => {
+                    match completion {
+                        Some(Ok(completion)) => { if let Err(error) = self.complete(completion).await { failures.push(format!("{error:#}")); } }
+                        Some(Err(error)) => {
+                            self.mark_active_media_unknown();
+                            failures.push(format!("video worker quiescence is unknown after a task failure: {error}"));
+                        }
+                        None => {},
+                    }
+                }
+                completion = self.recording_jobs.join_next(), if !self.recording_jobs.is_empty() => {
+                    match completion {
+                        Some(Ok(completion)) => { if let Err(error) = self.complete(completion).await { failures.push(format!("{error:#}")); } }
+                        Some(Err(error)) => {
+                            failures.push(format!("video recording worker quiescence is unknown after a task failure: {error}"));
+                            if let Err(error) = self.refresh_recording_watchers() {
+                                failures.push(format!("video recording watcher recovery failed: {error:#}"));
+                            }
+                        }
+                        None => {},
+                    }
+                }
+            }
+        }
+        if !self.jobs.is_empty() {
+            self.mark_active_media_unknown();
+            self.jobs.abort_all();
+            while let Some(completion) = self.jobs.join_next().await {
+                match completion {
+                    Ok(completion) => {
+                        if let Err(error) = self.complete(completion).await {
+                            failures.push(format!("media retirement completion failed: {error:#}"));
+                        }
+                    }
+                    Err(error) => failures.push(format!("media retirement task failed: {error}")),
+                }
+            }
+        }
+        self.recording_jobs.abort_all();
+        while self.recording_jobs.join_next().await.is_some() {}
+        while let Some(key) = self.recordings.keys().next().copied() {
+            let terminal = self.recordings.get_mut(&key).unwrap().terminal().await;
+            self.recordings.remove(&key);
+            if let Err(error) = self.recording_finished(key.0, key.1, terminal) {
+                failures.push(format!("recording retirement completion failed: {error:#}"));
+            }
+            if let Err(error) = self.advance() {
+                failures.push(format!("recording retirement revision failed: {error:#}"));
+            }
+        }
     }
 }
 

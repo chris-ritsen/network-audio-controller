@@ -162,6 +162,7 @@ pub async fn listen(options: Listen) -> Result<super::Summary> {
             maximum_reference_frames: MAXIMUM_REFERENCE_FRAMES,
             provider_timeout_milliseconds: PROVIDER_TIMEOUT_MILLISECONDS,
         },
+        recording: None,
         playout: Playout {
             delay_milliseconds: PLAYOUT_DELAY_MILLISECONDS,
             allowed_lateness_nanoseconds: PLAYOUT_LATENESS_NANOSECONDS,

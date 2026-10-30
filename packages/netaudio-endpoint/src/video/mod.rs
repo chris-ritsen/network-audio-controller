@@ -23,7 +23,7 @@ use tokio::time::Instant;
 use configuration::{Configuration, LatePolicy};
 use parameters::Parameters;
 use provider::Decoder;
-use recording::{Recording, write_json};
+use recording::{Client as RecordingClient, Supervisor as RecordingSupervisor};
 
 const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 const RECEIVE_BUFFER_BYTES: usize = 65_536;
@@ -32,7 +32,7 @@ pub fn session_schema() -> schemars::Schema {
     schemars::schema_for!(Configuration)
 }
 
-#[derive(Default, Serialize)]
+#[derive(Clone, Default, Serialize)]
 pub struct Summary {
     owner: String,
     generation: String,
@@ -47,6 +47,13 @@ pub struct Summary {
     provider_submissions: u64,
     decoded_frames: u64,
     published_frames: usize,
+    selected_frames: u64,
+    recording_queued_frames: u64,
+    recording_payload_written_frames: u64,
+    recording_index_written_frames: u64,
+    recording_drained_frames: u64,
+    recording_drained: bool,
+    recording_ingress_rejection: Option<recording::RecordingIngressRejection>,
     late_frames_dropped: u64,
     cancelled_frames: usize,
     returns_attempted: u64,
@@ -56,6 +63,30 @@ pub struct Summary {
     retirement_failure: Option<String>,
     last_rejection: Option<String>,
     physical_presentation_verified: bool,
+}
+
+impl Summary {
+    pub(crate) fn failure(&self) -> Option<&str> {
+        self.failure.as_deref()
+    }
+
+    pub(crate) fn selected_frames(&self) -> u64 {
+        self.selected_frames
+    }
+
+    pub(crate) fn apply_recording_status(&mut self, status: &recording::Status) {
+        self.recording_queued_frames = status.queued;
+        self.recording_payload_written_frames = status.payload_written;
+        self.recording_index_written_frames = status.index_written;
+        self.recording_drained_frames = status.drained_frames;
+        self.recording_drained = status.drained;
+    }
+
+    pub(crate) fn recording_ingress_rejection(
+        &self,
+    ) -> Option<&recording::RecordingIngressRejection> {
+        self.recording_ingress_rejection.as_ref()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -77,19 +108,19 @@ pub(crate) enum Terminal {
     QuiescenceUnknown,
 }
 
-#[derive(Serialize)]
-struct FrameIdentity {
-    owner: String,
-    generation: String,
-    monotonic_clock: String,
-    access_unit: u64,
-    source: std::net::SocketAddrV4,
-    payload_type: u8,
-    synchronization_source: u32,
-    rtp_timestamp: u32,
-    arrival_nanoseconds: i64,
-    deadline_nanoseconds: i64,
-    random_access: bool,
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct FrameIdentity {
+    pub(crate) owner: String,
+    pub(crate) generation: String,
+    pub(crate) monotonic_clock: String,
+    pub(crate) access_unit: u64,
+    pub(crate) source: std::net::SocketAddrV4,
+    pub(crate) payload_type: u8,
+    pub(crate) synchronization_source: u32,
+    pub(crate) rtp_timestamp: u32,
+    pub(crate) arrival_nanoseconds: i64,
+    pub(crate) deadline_nanoseconds: i64,
+    pub(crate) random_access: bool,
 }
 
 struct Pending {
@@ -166,10 +197,50 @@ pub async fn run(
     .await
 }
 
-pub async fn run_session(session: Session) -> Result<Summary> {
+pub(crate) async fn run_session(session: Session) -> Result<Summary> {
+    let origin = Instant::now();
+    let generation = uuid::Uuid::new_v4().to_string();
+    let (mut supervisor, recording) = RecordingSupervisor::start(
+        session.output.clone(),
+        session.configuration.clone(),
+        session.record_frames,
+        origin,
+    )?;
+    let result = run_session_with_recording(
+        session,
+        recording::Session {
+            client: recording,
+            origin,
+            generation,
+        },
+    )
+    .await;
+    let retired = supervisor.terminal().await;
+    match (result, retired) {
+        (Ok(mut summary), Ok(terminal)) => {
+            summary.apply_recording_status(&terminal.status);
+            Ok(summary)
+        }
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(retirement)) => {
+            Err(error.context(format!("recording retirement also failed: {retirement:#}")))
+        }
+    }
+}
+
+pub(crate) async fn run_session_with_recording(
+    session: Session,
+    recording: recording::Session,
+) -> Result<Summary> {
+    let recording::Session {
+        client: mut recording,
+        origin,
+        generation,
+    } = recording;
     let Session {
         configuration,
-        output,
+        output: _,
         duration,
         socket,
         presentation: options,
@@ -200,13 +271,12 @@ pub async fn run_session(session: Session) -> Result<Summary> {
     }
     let socket = socket.socket;
     let parameters = Parameters::new(&configuration)?;
-    let origin = Instant::now();
-    let authority_deadline = origin
+    let session_started = Instant::now();
+    let authority_deadline = session_started
         .checked_add(configuration.authority_remaining()?)
         .context("authority deadline overflow")?;
-    let run_deadline = origin.checked_add(duration).context("recording deadline overflow")?;
-    let mut recording = Recording::begin(output, &configuration, record_frames)?;
-    let generation = uuid::Uuid::new_v4().to_string();
+    let run_deadline =
+        session_started.checked_add(duration).context("recording deadline overflow")?;
     let mut summary = Summary {
         owner: configuration.owner.clone(),
         monotonic_clock: format!("process-monotonic:{generation}"),
@@ -239,7 +309,7 @@ pub async fn run_session(session: Session) -> Result<Summary> {
         Err(error) => {
             summary.state = "setup_failed".to_owned();
             summary.failure = Some(format!("{error:#}"));
-            write_json(&recording.directory.join("manifest.json"), &summary)?;
+            finish_recording(&mut recording, &summary)?;
             return Err(error);
         }
     };
@@ -252,7 +322,7 @@ pub async fn run_session(session: Session) -> Result<Summary> {
             summary.failure = Some(format!("{error:#}"));
             summary.retirement_failure = retired.err().map(|error| format!("{error:#}"));
             summary.state = "setup_failed".to_owned();
-            write_json(&recording.directory.join("manifest.json"), &summary)?;
+            finish_recording(&mut recording, &summary)?;
             return Err(error);
         }
     };
@@ -266,8 +336,15 @@ pub async fn run_session(session: Session) -> Result<Summary> {
         }
 
         let mut idle_deadline = idle_timeout.and_then(|timeout| Instant::now().checked_add(timeout));
+        let mut recording_status = recording.status();
         summary.state = "active".to_owned();
-        write_json(&recording.directory.join("active.json"), &summary)?;
+        tokio::select! {
+            activated = recording.activate(summary.clone()) => activated.context("activate recording artifact owner")?,
+            _ = &mut interrupted => return Ok("interrupted"),
+            _ = cancelled(&mut cancellation) => return Ok("cancelled"),
+            _ = tokio::time::sleep_until(authority_deadline) => return Ok("authority_expired"),
+            _ = tokio::time::sleep_until(run_deadline) => return Ok("duration_complete"),
+        }
 
         if let Some(ready) = ready_signal {
             ready.send(()).map_err(|_| anyhow::anyhow!("peer setup closed before receiver became ready"))?;
@@ -305,6 +382,12 @@ pub async fn run_session(session: Session) -> Result<Summary> {
 
                     if let Some(failure) = decoder_output.failure.borrow().as_ref() {
                         bail!("decoder failed: {failure}");
+                    }
+                }
+                changed = recording_status.changed() => {
+                    changed.context("recording writer status channel closed")?;
+                    if let Some(failure) = recording_status.borrow().failure.as_ref() {
+                        bail!("recording writer failed: {failure}");
                     }
                 }
                 _ = tokio::time::sleep_until(deadline) => {
@@ -348,19 +431,44 @@ pub async fn run_session(session: Session) -> Result<Summary> {
                             continue;
                         }
 
-                        presentation.publish(frame.bytes.clone())?;
-                        let has_output_sink = presentation.has_sink() || recording.records_frames();
-
-                        if recording.publish(frame, origin, &configuration)? {
-                            summary.published_frames += 1;
-                            if has_output_sink && summary.published_frames == 1 {
-                                observe(&mut observation, |value| value.output_queued = true);
-                            }
-                        } else {
+                        let selected_nanoseconds = clock_sample(origin)?;
+                        if matches!(configuration.playout.late_policy, LatePolicy::Drop)
+                            && selected_nanoseconds > last_allowed
+                        {
                             summary.late_frames_dropped += 1;
+                            continue;
                         }
 
-                        if summary.published_frames == configuration.limits.maximum_recorded_frames {
+                        summary.selected_frames = summary.selected_frames.checked_add(1).context("video selection count exhausted")?;
+                        if presentation.has_sink() {
+                            presentation.publish(frame.bytes.clone())?;
+                            summary.published_frames = summary.published_frames.checked_add(1).context("video presentation count exhausted")?;
+                            if summary.published_frames == 1 {
+                                observe(&mut observation, |value| value.output_queued = true);
+                            }
+                        }
+                        if record_frames {
+                            let ordinal = summary.recording_queued_frames;
+                            if let Err(rejection) = recording.enqueue(
+                                ordinal,
+                                recording::FrameDescriptor {
+                                    identity: frame.identity,
+                                    width: configuration.width,
+                                    height: configuration.height,
+                                    colorimetry: configuration.colorimetry.clone(),
+                                    selected_nanoseconds,
+                                },
+                                frame.bytes,
+                            ) {
+                                summary.recording_ingress_rejection = Some((*rejection).clone());
+                                return Err(anyhow::Error::new(*rejection));
+                            }
+                            summary.recording_queued_frames = summary.recording_queued_frames.checked_add(1).context("recording acceptance count exhausted")?;
+                            if summary.recording_queued_frames == 1 {
+                                observe(&mut observation, |value| value.output_queued = true);
+                            }
+                        }
+                        if summary.selected_frames == u64::try_from(configuration.limits.maximum_recorded_frames)? {
                             return Ok("frame_limit_reached");
                         }
                     }
@@ -521,15 +629,25 @@ pub async fn run_session(session: Session) -> Result<Summary> {
     summary.stop_reason = collected.as_ref().copied().unwrap_or("failed").to_owned();
     let result = collected.map(|_| ()).and(retired).and_then(|_| {
         ensure!(
-            summary.published_frames > 0,
-            "no complete H.264 frames were published; inspect the recording manifest"
+            summary.selected_frames > 0,
+            "no complete H.264 frames were selected; inspect the recording manifest"
         );
         Ok(())
     });
     summary.failure = result.as_ref().err().map(|error| format!("{error:#}"));
-    write_json(&recording.directory.join("manifest.json"), &summary)?;
-    result?;
-    Ok(summary)
+    let recording_result = finish_recording(&mut recording, &summary);
+    match (result, recording_result) {
+        (Ok(()), Ok(())) => Ok(summary),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(error)) => Err(error),
+        (Err(error), Err(retirement)) => {
+            Err(error.context(format!("recording finalization also failed: {retirement:#}")))
+        }
+    }
+}
+
+fn finish_recording(recording: &mut RecordingClient, summary: &Summary) -> Result<()> {
+    recording.finish(summary.clone())
 }
 
 pub(crate) fn bind(configuration: &Configuration) -> Result<ReceiverSocket> {
