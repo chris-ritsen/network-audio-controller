@@ -5,7 +5,7 @@ use netaudio_core::video::inventory::{
     self, Capacity, Context as WireContext, Resources, Row, Table,
 };
 
-use super::{ReceiverPhase, Runtime};
+use super::{Acquisition, ReceiverPhase, Runtime};
 
 fn positive(value: u16) -> NonZeroU16 {
     NonZeroU16::new(value).unwrap()
@@ -177,19 +177,34 @@ impl Runtime {
                 {
                     let subscription_status = if state.desired.is_none() {
                         0
-                    } else if active
-                        && state.observation.decoded_frame
-                        && state.observation.output_queued
-                    {
-                        10
+                    } else if active {
+                        match definition.acquisition {
+                            Acquisition::Multicast {
+                                ..
+                            } => 10,
+                            Acquisition::Unicast {
+                                ..
+                            } => 9,
+                        }
                     } else if state.phase == ReceiverPhase::Failed {
                         state.failure_subscription_status
-                    } else if state.phase == ReceiverPhase::Receiving
+                    } else if state
+                        .source_control
+                        .as_ref()
+                        .is_some_and(super::unicast::State::outcome_unknown)
+                        || state.phase == ReceiverPhase::Receiving
                         || state.phase == ReceiverPhase::Retired
+                        || state.phase == ReceiverPhase::Retiring
+                        || state.phase == ReceiverPhase::FreshAuthorityRequired
                     {
                         7
-                    } else if state.phase == ReceiverPhase::Retiring {
+                    } else if matches!(
+                        state.source_control,
+                        Some(super::unicast::State::AllocationPending { .. })
+                    ) {
                         8
+                    } else if state.phase == ReceiverPhase::Preparing {
+                        2
                     } else {
                         1
                     };
@@ -217,14 +232,19 @@ impl Runtime {
                             .as_ref()
                             .map(|source| (source.channel.as_slice(), source.device.as_slice())),
                         raw_subscription_status: subscription_status,
-                        raw_availability: 0,
-                        raw_asserted_state: 0,
+                        raw_availability: 1,
+                        raw_asserted_state: u8::from(active && state.observation.admitted_packet),
                     }));
                 }
                 Table::ReceiverFlows
                     if selected(definition.local_flow, query.first, query.last, bound)
                         && state.worker_generation.is_some()
-                        && state.observation.multicast_joined
+                        && (state.observation.multicast_joined
+                            || (state.observation.socket_owned
+                                && state
+                                    .source_control
+                                    .as_ref()
+                                    .is_some_and(super::unicast::State::is_allocated)))
                         && state.observation.terminal.is_none() =>
                 {
                     rows.push(Row::ReceiverFlow(inventory::ReceiverFlow {

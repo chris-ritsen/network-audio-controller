@@ -5,7 +5,7 @@ use anyhow::{Context, Result, ensure};
 use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo, TxtProperty};
 use netaudio_core::video::discovery::{self, ChannelPublication, FlowPublication};
 
-use super::{Configuration, Source};
+use super::{Configuration, Source, SourceTransport};
 
 pub(super) struct Publication {
     daemon: ServiceDaemon,
@@ -20,15 +20,36 @@ impl Publication {
             channel_count: source.channel_count,
             codec_identifier: source.channel_codec_identifier,
             transport_peer_metadata: None,
-            multicast_flow_label: Some(source.flow_name.as_bytes()),
+            multicast_flow_label: matches!(source.transport, SourceTransport::Multicast)
+                .then_some(source.flow_name.as_bytes()),
         }
         .encode()?;
-        let flow = FlowPublication {
-            identifier: source.local_flow,
-            latency_nanoseconds: source.latency_nanoseconds,
-            destination: source.configuration.destination,
+        let mut services = vec![(
+            discovery::CHANNEL_SERVICE,
+            &source.channel_name,
+            match &source.transport {
+                SourceTransport::Multicast => 4321,
+                SourceTransport::Unicast {
+                    control_bind,
+                    ..
+                } => control_bind.port(),
+            },
+            channel,
+        )];
+        if matches!(source.transport, SourceTransport::Multicast) {
+            let flow = FlowPublication {
+                identifier: source.local_flow,
+                latency_nanoseconds: source.latency_nanoseconds,
+                destination: source.configuration.destination,
+            }
+            .encode()?;
+            services.push((
+                discovery::FLOW_SERVICE,
+                &source.flow_name,
+                discovery::FLOW_SERVICE_PORT,
+                flow,
+            ));
         }
-        .encode()?;
         let daemon = ServiceDaemon::new()?;
         let mut publication = Self {
             daemon,
@@ -42,10 +63,7 @@ impl Publication {
             )))?;
             publication.daemon.set_ip_check_interval(0)?;
             let host = format!("{}.local.", configuration.device_name);
-            for (service_type, label, port, text) in [
-                (discovery::CHANNEL_SERVICE, &source.channel_name, 4321, channel),
-                (discovery::FLOW_SERVICE, &source.flow_name, discovery::FLOW_SERVICE_PORT, flow),
-            ] {
+            for (service_type, label, port, text) in services {
                 let service = ServiceInfo::new(
                     service_type,
                     &format!("{label}@{}", configuration.device_name),

@@ -76,10 +76,10 @@ enum Command {
     },
     #[command(about = "Print the configured H.264 receiver session JSON schema")]
     VideoSessionSchema,
-    #[command(about = "Print the H.264 multicast endpoint JSON schema")]
-    VideoMulticastSchema,
-    #[command(about = "Run a configured H.264 multicast source or receiver endpoint")]
-    VideoServeMulticast {
+    #[command(about = "Print the H.264 endpoint JSON schema")]
+    VideoEndpointSchema,
+    #[command(about = "Run a configured H.264 source or receiver endpoint")]
+    VideoServe {
         #[arg(long)]
         configuration: PathBuf,
     },
@@ -217,7 +217,7 @@ fn main() -> std::process::ExitCode {
             | Command::VideoTransmit { .. }
             | Command::VideoListen { .. }
             | Command::VideoShare { .. }
-            | Command::VideoServeMulticast { .. }
+            | Command::VideoServe { .. }
     );
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
@@ -382,30 +382,30 @@ async fn execute(arguments: Arguments) -> Result<()> {
                 );
             }
         }
-        Command::VideoMulticastSchema => {
+        Command::VideoEndpointSchema => {
             #[cfg(all(feature = "video", target_os = "linux"))]
             {
                 serde_json::to_writer_pretty(
                     std::io::stdout().lock(),
-                    &video::owned_multicast::Runtime::schema(),
+                    &video::owned::Runtime::schema(),
                 )?;
                 println!();
                 Ok(())
             }
             #[cfg(not(all(feature = "video", target_os = "linux")))]
-            bail!("owned H.264 multicast endpoint requires a Linux video-enabled build");
+            bail!("owned H.264 endpoint requires a Linux video-enabled build");
         }
-        Command::VideoServeMulticast {
+        Command::VideoServe {
             configuration,
         } => {
             #[cfg(all(feature = "video", target_os = "linux"))]
             {
-                video::owned_multicast::run(&configuration).await
+                video::owned::run(&configuration).await
             }
             #[cfg(not(all(feature = "video", target_os = "linux")))]
             {
                 let _ = configuration;
-                bail!("owned H.264 multicast endpoint requires a Linux video-enabled build");
+                bail!("owned H.264 endpoint requires a Linux video-enabled build");
             }
         }
         Command::VideoSessionSchema => {

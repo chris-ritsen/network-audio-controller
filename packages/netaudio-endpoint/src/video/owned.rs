@@ -1,17 +1,18 @@
 mod discovery;
 mod inventory;
 mod publication;
+mod unicast;
 mod workers;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
-use std::net::SocketAddrV4;
-use std::num::NonZeroU16;
+use std::net::{SocketAddr, SocketAddrV4};
+use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
-use netaudio_core::video::{inventory as wire_inventory, multicast, subscription};
+use netaudio_core::video::{inventory as wire_inventory, multicast, source_control, subscription};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
@@ -44,6 +45,7 @@ pub struct Evidence {
 #[derive(Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
+    pub transport: SourceTransport,
     pub global_flow: NonZeroU16,
     pub local_flow: NonZeroU16,
     pub global_channel: NonZeroU16,
@@ -60,8 +62,34 @@ pub struct Source {
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceTransport {
+    Multicast,
+    Unicast {
+        control_bind: SocketAddrV4,
+        permitted_requester: SocketAddrV4,
+        receiver_host_label: String,
+        ownership_value: NonZeroU32,
+    },
+}
+
+#[derive(Clone, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Acquisition {
+    Multicast {
+        source_flow: String,
+        source_local_flow: NonZeroU16,
+        source_association_slot: NonZeroU16,
+    },
+    Unicast {
+        control: unicast::Configuration,
+    },
+}
+
+#[derive(Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Receiver {
+    pub acquisition: Acquisition,
     pub identifier: NonZeroU16,
     pub global_identifier: NonZeroU16,
     pub local_flow: NonZeroU16,
@@ -69,11 +97,8 @@ pub struct Receiver {
     pub channel_name: String,
     pub source_device: String,
     pub source_channel: String,
-    pub source_flow: String,
     pub source_service_channel: NonZeroU16,
     pub source_channel_count: NonZeroU16,
-    pub source_local_flow: NonZeroU16,
-    pub source_association_slot: NonZeroU16,
     pub discovery_timeout_milliseconds: u64,
     pub output: PathBuf,
     pub record_frames: bool,
@@ -90,6 +115,8 @@ struct NamedSource {
 struct SourceState {
     generation: u64,
     allocated: bool,
+    allocation_ownership_value: Option<u32>,
+    reserved_socket_owned: bool,
     used: bool,
     worker_active: bool,
     publication_requested: bool,
@@ -104,6 +131,7 @@ enum ReceiverPhase {
     Idle,
     Unresolved,
     Resolving,
+    Preparing,
     Receiving,
     Retiring,
     Retired,
@@ -117,7 +145,9 @@ struct ReceiverState {
     desired: Option<NamedSource>,
     worker_generation: Option<u64>,
     phase: ReceiverPhase,
-    group_previously_joined: bool,
+    destination_previously_owned: bool,
+    source_control: Option<unicast::State>,
+    source_control_history: Vec<unicast::Event>,
     failure_subscription_status: u16,
     observation: ReceiveObservation,
     failure: Option<String>,
@@ -139,6 +169,8 @@ pub struct Runtime {
     incarnation: uuid::Uuid,
     revision: u64,
     source: SourceState,
+    source_socket: Option<tokio::net::UdpSocket>,
+    source_exchanges: BTreeMap<u16, Exchange>,
     receivers: BTreeMap<NonZeroU16, ReceiverState>,
     source_cancellation: Option<watch::Sender<bool>>,
     receiver_cancellation: BTreeMap<NonZeroU16, watch::Sender<bool>>,
@@ -149,6 +181,11 @@ pub struct Runtime {
     recording_jobs: JoinSet<workers::Completion>,
     recordings: BTreeMap<(NonZeroU16, u64), recording::Supervisor>,
     stopping: bool,
+}
+
+struct Exchange {
+    request: Vec<u8>,
+    reply: Vec<u8>,
 }
 
 struct EvidenceWriter {
@@ -209,6 +246,18 @@ pub async fn run(configuration_path: &Path) -> Result<()> {
     let socket = tokio::net::UdpSocket::bind(configuration.arc_bind)
         .await
         .context("bind explicit owned video ARC endpoint")?;
+    let source_control_socket = match configuration.source.as_ref() {
+        Some(Source {
+            transport:
+                SourceTransport::Unicast {
+                    control_bind,
+                    ..
+                },
+            configuration,
+            ..
+        }) => Some(bind_control(*control_bind, &configuration.interface)?),
+        _ => None,
+    };
     let deadline = tokio::time::Instant::now()
         .checked_add(Duration::from_secs(configuration.run_duration_seconds))
         .context("owned video runtime deadline overflow")?;
@@ -217,7 +266,9 @@ pub async fn run(configuration_path: &Path) -> Result<()> {
     let mut termination =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut bytes = vec![0; 65_536];
+    let mut control_bytes = vec![0; source_control::MAXIMUM_DATAGRAM_BYTES + 1];
     let execution = async {
+        runtime.prepare_source().await?;
         evidence.emit("listening", &runtime, None)?;
         loop {
             tokio::select! {
@@ -261,8 +312,24 @@ pub async fn run(configuration_path: &Path) -> Result<()> {
                                 Ok(_) => evidence.emit("reply_delivery_unknown", &runtime, Some("ARC datagram was not sent completely"))?,
                                 Err(error) => evidence.emit("reply_delivery_unknown", &runtime, Some(&error.to_string()))?,
                             }
+                            runtime.reconcile().await?;
+                            evidence.emit("intent_reconciled", &runtime, None)?;
                         }
                         Err(error) => evidence.emit("control_discarded", &runtime, Some(&format!("{error:#}")))?,
+                    }
+                }
+                received = receive_control(source_control_socket.as_ref(), &mut control_bytes) => {
+                    let (length, peer) = received.context("receive owned video source-control request")?;
+                    match runtime.apply_source_control(&control_bytes[..length], peer).await {
+                        Ok(reply) => {
+                            let socket = source_control_socket.as_ref().unwrap();
+                            match socket.send_to(&reply, peer).await {
+                                Ok(sent) if sent == reply.len() => evidence.emit("source_control_accepted", &runtime, None)?,
+                                Ok(_) => evidence.emit("source_reply_delivery_unknown", &runtime, Some("source-control datagram was not sent completely"))?,
+                                Err(error) => evidence.emit("source_reply_delivery_unknown", &runtime, Some(&error.to_string()))?,
+                            }
+                        }
+                        Err(error) => evidence.emit("source_control_discarded", &runtime, Some(&format!("{error:#}")))?,
                     }
                 }
             }
@@ -349,6 +416,8 @@ impl Runtime {
             incarnation: uuid::Uuid::new_v4(),
             revision: 0,
             source: SourceState::default(),
+            source_socket: None,
+            source_exchanges: BTreeMap::new(),
             receivers,
             source_cancellation: None,
             receiver_cancellation: BTreeMap::new(),
@@ -377,6 +446,170 @@ impl Runtime {
         Ok(())
     }
 
+    async fn prepare_source(&mut self) -> Result<()> {
+        let Some(source) = self.configuration.source.as_ref() else {
+            return Ok(());
+        };
+        if matches!(source.transport, SourceTransport::Unicast { .. }) {
+            self.source_socket = Some(transmit::bind(&source.configuration)?);
+            self.source.reserved_socket_owned = true;
+            let publication = Publication::start(&self.configuration, source).await?;
+            self.publication = Some(publication);
+            self.source.publication_requested = true;
+            self.advance()?;
+        }
+        Ok(())
+    }
+
+    async fn apply_source_control(&mut self, bytes: &[u8], peer: SocketAddr) -> Result<Vec<u8>> {
+        ensure!(!self.stopping, "owned video endpoint is stopping");
+        let source = self.configuration.source.as_ref().context("endpoint owns no source")?;
+        let SourceTransport::Unicast {
+            permitted_requester,
+            receiver_host_label,
+            ownership_value,
+            ..
+        } = &source.transport
+        else {
+            bail!("source is not configured for unicast allocation");
+        };
+        ensure!(
+            peer == SocketAddr::V4(*permitted_requester),
+            "source-control peer is outside the supplied authority"
+        );
+        let operation = word(bytes, 6)?;
+        let transaction = word(bytes, 4)?;
+        if let Some(exchange) = self.source_exchanges.get(&transaction) {
+            ensure!(
+                exchange.request == bytes,
+                "source-control transaction was reused with different request bytes"
+            );
+            return Ok(exchange.reply.clone());
+        }
+        match operation {
+            source_control::ALLOCATION_OPERATION => {
+                let request = source_control::decode_allocation_request(bytes)?;
+                ensure!(
+                    !self.source.used,
+                    "owned source allocation was already consumed; fresh authority is required"
+                );
+                let allocation = &request.allocation;
+                ensure!(
+                    allocation.receiver_host_label == receiver_host_label.as_bytes()
+                        && allocation.source_service_channel == source.service_channel
+                        && allocation.destination == source.configuration.destination,
+                    "allocation does not match the supplied owned source and receiver authority"
+                );
+                ensure!(
+                    allocation.optional.raw_at_8 == Some(0)
+                        && allocation.optional.raw_at_28 == Some(0)
+                        && allocation.optional.raw_option == Some(0)
+                        && allocation.optional.opaque_span.is_none(),
+                    "allocation contains unsupported optional semantics"
+                );
+                source.configuration.validate()?;
+                ensure!(!source.output.exists(), "source output directory already exists");
+                let (input, frames) =
+                    transmit::SourceInput::open(&source.input, &source.configuration)?;
+                let generation =
+                    self.source.generation.checked_add(1).context("source generation exhausted")?;
+                self.revision.checked_add(1).context("owned video revision exhausted")?;
+                let reply = source_control::encode_allocation_reply(
+                    transaction,
+                    1,
+                    Some(source_control::AllocationOutcome {
+                        allocation: source_control::AllocationHandle {
+                            global_flow_identifier: source.global_flow.get(),
+                            ownership_value: ownership_value.get(),
+                        },
+                        interface_outcomes: &[1],
+                    }),
+                )?;
+                let socket = self
+                    .source_socket
+                    .take()
+                    .context("owned source media socket is not reserved")?;
+                let (cancellation, cancelled) = watch::channel(false);
+                self.source_cancellation = Some(cancellation);
+                self.source.generation = generation;
+                self.source.allocated = true;
+                self.source.allocation_ownership_value = Some(ownership_value.get());
+                self.source.reserved_socket_owned = false;
+                self.source.used = true;
+                self.source.worker_active = true;
+                self.jobs.spawn(workers::source(
+                    transmit::Session {
+                        configuration: source.configuration.clone(),
+                        input,
+                        frames,
+                        directory: source.output.clone(),
+                        duration: Duration::from_secs(self.configuration.run_duration_seconds),
+                        prepare_only: false,
+                        socket: Some(socket),
+                        peer: None,
+                        cancellation: Some(cancelled),
+                        observation: None,
+                    },
+                    generation,
+                    self.event_sender.clone(),
+                ));
+                self.source_exchanges.insert(
+                    transaction,
+                    Exchange {
+                        request: bytes.to_vec(),
+                        reply: reply.clone(),
+                    },
+                );
+                self.advance()?;
+                Ok(reply)
+            }
+            source_control::STOP_OPERATION => {
+                let request = source_control::decode_stop_request(bytes)?;
+                let result = if request.allocation.global_flow_identifier
+                    != source.global_flow.get()
+                    || !self.source.allocated
+                {
+                    0x0102
+                } else if self.source.allocation_ownership_value
+                    != Some(request.allocation.ownership_value)
+                {
+                    0x0103
+                } else {
+                    self.revision.checked_add(1).context("owned video revision exhausted")?;
+                    self.source.allocated = false;
+                    self.source.allocation_ownership_value = None;
+                    if let Some(cancellation) = &self.source_cancellation {
+                        cancellation.send_replace(true);
+                    }
+                    self.advance()?;
+                    match self.withdraw().await {
+                        Ok(()) => 1,
+                        Err(error) => {
+                            self.source.failure = Some(format!(
+                                "source STOP publication withdrawal failed: {error:#}"
+                            ));
+                            0x03f0
+                        }
+                    }
+                };
+                let reply = source_control::StopReply {
+                    transaction,
+                    result,
+                }
+                .encode()?;
+                self.source_exchanges.insert(
+                    transaction,
+                    Exchange {
+                        request: bytes.to_vec(),
+                        reply: reply.clone(),
+                    },
+                );
+                Ok(reply)
+            }
+            _ => bail!("source-control operation is outside the configured owned video role"),
+        }
+    }
+
     async fn apply(&mut self, bytes: &[u8]) -> Result<Vec<u8>> {
         ensure!(!self.stopping, "owned video endpoint is stopping");
         let operation = word(bytes, 6)?;
@@ -394,6 +627,10 @@ impl Runtime {
                 );
                 let source =
                     self.configuration.source.as_ref().context("this endpoint owns no source")?;
+                ensure!(
+                    matches!(source.transport, SourceTransport::Multicast),
+                    "ARC multicast creation does not select a unicast source"
+                );
                 ensure!(
                     request.media_local_flow == source.local_flow
                         && request.media_local_channels == [source.local_channel],
@@ -456,6 +693,10 @@ impl Runtime {
                 let request = multicast::DeleteRequest::decode(bytes)?;
                 let source =
                     self.configuration.source.as_ref().context("this endpoint owns no source")?;
+                ensure!(
+                    matches!(source.transport, SourceTransport::Multicast),
+                    "ARC multicast deletion does not select a unicast source"
+                );
                 ensure!(
                     request.media_local_flow == source.local_flow && self.source.allocated,
                     "delete does not select an allocated owned source flow"
@@ -548,7 +789,6 @@ impl Runtime {
                     }
                 }
                 self.advance()?;
-                self.reconcile().await?;
                 Ok(request.acknowledgement().to_vec())
             }
             netaudio_core::commands::OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809
@@ -557,7 +797,7 @@ impl Runtime {
             | netaudio_core::commands::OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809 => {
                 self.inventory(wire_inventory::Query::decode(bytes)?)
             }
-            _ => bail!("video control operation is outside the configured multicast role"),
+            _ => bail!("video control operation is outside the configured endpoint role"),
         }
     }
 
@@ -565,6 +805,7 @@ impl Runtime {
         if self.stopping {
             return Ok(());
         }
+        let mut changed = false;
         for definition in &self.configuration.receivers {
             let state = self.receivers.get_mut(&definition.identifier).unwrap();
             if state.worker_generation.is_some()
@@ -581,9 +822,10 @@ impl Runtime {
             {
                 continue;
             }
-            if state.group_previously_joined {
+            changed = true;
+            if state.destination_previously_owned {
                 state.phase = ReceiverPhase::FreshAuthorityRequired;
-                state.failure = Some("the previous group membership retired, but that does not prove old network traffic is drained; supply fresh source/group authority before another receive context".to_owned());
+                state.failure = Some("the previous destination was owned; local retirement does not prove old network traffic is drained; supply fresh source/destination authority before another receive context".to_owned());
                 continue;
             }
             let generation = state.generation;
@@ -593,27 +835,41 @@ impl Runtime {
                 !self.recordings.contains_key(&(definition.identifier, generation)),
                 "receiver recording generation already has an owner"
             );
-            let (mut supervisor, client) = recording::Supervisor::start(
-                definition.output.clone(),
-                definition.configuration.clone(),
-                definition.record_frames,
-                origin,
-            )?;
-            let terminal = match supervisor.watcher() {
-                Ok(Some(terminal)) => terminal,
-                failure => {
-                    drop(client);
-                    let retired = supervisor.terminal().await;
-                    let failure = failure.err().unwrap_or_else(|| {
-                        anyhow::anyhow!(
-                            "new recording supervisor did not provide a terminal watcher"
-                        )
-                    });
-                    return match retired {
-                        Ok(_) => Err(failure),
-                        Err(retirement) => Err(failure
-                            .context(format!("recording retirement also failed: {retirement:#}"))),
-                    };
+            let prepared = async {
+                let (mut supervisor, client) = recording::Supervisor::start(
+                    definition.output.clone(),
+                    definition.configuration.clone(),
+                    definition.record_frames,
+                    origin,
+                )?;
+                let terminal = match supervisor.watcher() {
+                    Ok(Some(terminal)) => terminal,
+                    failure => {
+                        drop(client);
+                        let retired = supervisor.terminal().await;
+                        let failure = failure.err().unwrap_or_else(|| {
+                            anyhow::anyhow!(
+                                "new recording supervisor did not provide a terminal watcher"
+                            )
+                        });
+                        return match retired {
+                            Ok(_) => Err(failure),
+                            Err(retirement) => Err(failure.context(format!(
+                                "recording retirement also failed: {retirement:#}"
+                            ))),
+                        };
+                    }
+                };
+                Ok((supervisor, client, terminal))
+            }
+            .await;
+            let (supervisor, client, terminal) = match prepared {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    state.phase = ReceiverPhase::Failed;
+                    state.failure_subscription_status = 19;
+                    state.failure = Some(format!("receiver recording setup failed: {error:#}"));
+                    continue;
                 }
             };
             self.recordings.insert((definition.identifier, generation), supervisor);
@@ -626,6 +882,8 @@ impl Runtime {
             state.worker_generation = Some(generation);
             state.phase = ReceiverPhase::Resolving;
             state.observation = ReceiveObservation::default();
+            state.source_control = None;
+            state.source_control_history.clear();
             state.media_finished = false;
             state.recording_pending = true;
             self.receiver_cancellation.insert(definition.identifier, cancellation);
@@ -642,11 +900,25 @@ impl Runtime {
                 },
             ));
         }
+        if changed {
+            self.advance()?;
+        }
         Ok(())
     }
 
     fn observe(&mut self, event: workers::Event) -> Result<()> {
         match event {
+            workers::Event::SourceResolved(identifier, generation) => {
+                let receiver =
+                    self.receivers.get_mut(&identifier).context("unknown resolved receiver")?;
+                if receiver.worker_generation != Some(generation)
+                    || receiver.generation != generation
+                    || receiver.phase == ReceiverPhase::Retiring
+                {
+                    return Ok(());
+                }
+                receiver.phase = ReceiverPhase::Preparing;
+            }
             workers::Event::Source(generation, observation)
                 if self.source.worker_active && self.source.generation == generation =>
             {
@@ -659,10 +931,35 @@ impl Runtime {
                     return Ok(());
                 }
                 receiver.observation = observation;
-                receiver.group_previously_joined |= observation.multicast_joined;
+                receiver.destination_previously_owned |= observation.socket_owned;
                 if receiver.generation == generation
                     && receiver.phase != ReceiverPhase::Retiring
-                    && observation.multicast_joined
+                    && (observation.multicast_joined
+                        || (observation.socket_owned
+                            && receiver
+                                .source_control
+                                .as_ref()
+                                .is_some_and(unicast::State::is_allocated)
+                            && observation.configured))
+                {
+                    receiver.phase = ReceiverPhase::Receiving;
+                }
+            }
+            workers::Event::SourceControl(identifier, generation, state) => {
+                let receiver = self
+                    .receivers
+                    .get_mut(&identifier)
+                    .context("unknown receiver source-control observation")?;
+                if receiver.worker_generation != Some(generation) {
+                    return Ok(());
+                }
+                let allocated = state.is_allocated();
+                receiver.source_control = Some(state);
+                if receiver.generation == generation
+                    && receiver.phase != ReceiverPhase::Retiring
+                    && allocated
+                    && receiver.observation.socket_owned
+                    && receiver.observation.configured
                 {
                     receiver.phase = ReceiverPhase::Receiving;
                 }
@@ -700,6 +997,8 @@ impl Runtime {
                 observation,
                 failure,
                 failure_subscription_status,
+                source_control,
+                source_control_history,
             } => {
                 let receiver =
                     self.receivers.get_mut(&identifier).context("unknown receiver completion")?;
@@ -708,9 +1007,11 @@ impl Runtime {
                     "receiver completion does not belong to its active generation"
                 );
                 receiver.observation = observation;
-                receiver.group_previously_joined |= observation.multicast_joined;
+                receiver.destination_previously_owned |= observation.socket_owned;
                 receiver.worker_generation = None;
                 receiver.failure_subscription_status = failure_subscription_status;
+                receiver.source_control = source_control;
+                receiver.source_control_history = source_control_history;
                 receiver.failure = match (receiver.failure.take(), failure) {
                     (Some(previous), Some(current)) => {
                         Some(format!("{previous}; receiver worker: {current}"))
@@ -823,6 +1124,8 @@ impl Runtime {
 
     async fn shutdown(&mut self, evidence: &mut EvidenceWriter) -> Result<()> {
         self.stopping = true;
+        self.source_socket.take();
+        self.source.reserved_socket_owned = false;
         if let Some(cancellation) = &self.source_cancellation {
             cancellation.send_replace(true);
         }
@@ -930,6 +1233,28 @@ impl Runtime {
     }
 }
 
+fn bind_control(address: SocketAddrV4, interface: &str) -> Result<tokio::net::UdpSocket> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::DGRAM,
+        Some(socket2::Protocol::UDP),
+    )?;
+    socket.bind_device(Some(interface.as_bytes()))?;
+    socket.bind(&SocketAddr::V4(address).into())?;
+    socket.set_nonblocking(true)?;
+    tokio::net::UdpSocket::from_std(socket.into()).context("register owned video control socket")
+}
+
+async fn receive_control(
+    socket: Option<&tokio::net::UdpSocket>,
+    bytes: &mut [u8],
+) -> std::io::Result<(usize, SocketAddr)> {
+    match socket {
+        Some(socket) => socket.recv_from(bytes).await,
+        None => std::future::pending().await,
+    }
+}
+
 fn context(bytes: &[u8]) -> Result<wire_inventory::Context> {
     ensure!(
         bytes.len() >= 10 && word(bytes, 2)? as usize == bytes.len() && word(bytes, 8)? == 0,
@@ -991,10 +1316,37 @@ fn validate(configuration: &Configuration) -> Result<()> {
             "source names must be complete"
         );
         source.configuration.validate()?;
-        ensure!(
-            source.configuration.destination.ip().is_multicast(),
-            "owned source requires an explicitly reserved multicast group"
-        );
+        match &source.transport {
+            SourceTransport::Multicast => ensure!(
+                source.configuration.destination.ip().is_multicast(),
+                "multicast source requires an explicitly reserved group"
+            ),
+            SourceTransport::Unicast {
+                control_bind,
+                permitted_requester,
+                receiver_host_label,
+                ..
+            } => {
+                ensure!(
+                    !source.configuration.destination.ip().is_multicast(),
+                    "unicast source cannot use a multicast destination"
+                );
+                ensure!(
+                    *control_bind.ip() == source.configuration.interface_address
+                        && control_bind.port() != 0
+                        && *control_bind != configuration.arc_bind
+                        && *control_bind != source.configuration.source,
+                    "unicast source-control socket must be separately reserved on its interface"
+                );
+                ensure!(
+                    !permitted_requester.ip().is_unspecified()
+                        && !permitted_requester.ip().is_multicast()
+                        && permitted_requester.port() != 0
+                        && valid_name(receiver_host_label),
+                    "unicast source requires explicit requester and receiver-host authority"
+                );
+            }
+        }
         ensure!(
             source.configuration.interface_address == *configuration.arc_bind.ip(),
             "source and ARC must belong to the configured endpoint interface"
@@ -1032,21 +1384,47 @@ fn validate(configuration: &Configuration) -> Result<()> {
         );
         receiver.configuration.validate()?;
         ensure!(
-            receiver.configuration.interface_address == *configuration.arc_bind.ip()
-                && receiver.configuration.destination.ip().is_multicast(),
-            "receiver must use the configured local interface and explicit multicast group"
+            receiver.configuration.interface_address == *configuration.arc_bind.ip(),
+            "receiver must use the configured local interface"
         );
+        match &receiver.acquisition {
+            Acquisition::Multicast {
+                source_flow,
+                source_association_slot,
+                ..
+            } => {
+                ensure!(
+                    receiver.configuration.destination.ip().is_multicast()
+                        && valid_name(source_flow)
+                        && source_association_slot.get() == 1,
+                    "multicast receiver requires a named group and selected source association"
+                );
+            }
+            Acquisition::Unicast {
+                control,
+            } => {
+                control.validate()?;
+                ensure!(
+                    !receiver.configuration.destination.ip().is_multicast()
+                        && control.source_control != receiver.configuration.source
+                        && *receiver.configuration.destination.ip()
+                            == receiver.configuration.interface_address
+                        && *control.control_bind.ip() == receiver.configuration.interface_address
+                        && control.control_bind != configuration.arc_bind
+                        && control.control_bind != receiver.configuration.destination,
+                    "unicast receiver requires separate owned control and media sockets on its interface"
+                );
+            }
+        }
         ensure!(
             valid_name(&receiver.channel_name)
                 && valid_name(&receiver.source_device)
-                && valid_name(&receiver.source_channel)
-                && valid_name(&receiver.source_flow),
+                && valid_name(&receiver.source_channel),
             "receiver and source names must be complete"
         );
         ensure!(
-            receiver.discovery_timeout_milliseconds > 0
-                && receiver.source_association_slot.get() == 1,
-            "receiver requires a bounded discovery deadline and qualified slot one"
+            receiver.discovery_timeout_milliseconds > 0,
+            "receiver requires a bounded discovery deadline"
         );
     }
     Ok(())

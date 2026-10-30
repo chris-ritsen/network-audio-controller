@@ -6,7 +6,7 @@ use mdns_sd::{IfKind, ResolvedService, ServiceDaemon, ServiceEvent, TxtPropertie
 use netaudio_core::video::discovery;
 use tokio::sync::watch;
 
-use super::Receiver;
+use super::{Acquisition, Receiver};
 
 const CHANNEL_PORT: u16 = 4321;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
@@ -36,15 +36,27 @@ pub(super) async fn watch_source(
         daemon.set_ip_check_interval(0)?;
         let channels = daemon.browse(discovery::CHANNEL_SERVICE)?;
         channel_browse_started = true;
-        let flows = daemon.browse(discovery::FLOW_SERVICE)?;
-        flow_browse_started = true;
+        let flows = if matches!(receiver.acquisition, Acquisition::Multicast { .. }) {
+            let flows = daemon.browse(discovery::FLOW_SERVICE)?;
+            flow_browse_started = true;
+            Some(flows)
+        } else {
+            None
+        };
         let channel_name = service_name(
             &receiver.source_channel,
             &receiver.source_device,
             discovery::CHANNEL_SERVICE,
         );
-        let flow_name =
-            service_name(&receiver.source_flow, &receiver.source_device, discovery::FLOW_SERVICE);
+        let flow_name = match &receiver.acquisition {
+            Acquisition::Multicast {
+                source_flow,
+                ..
+            } => service_name(source_flow, &receiver.source_device, discovery::FLOW_SERVICE),
+            Acquisition::Unicast {
+                ..
+            } => String::new(),
+        };
         let target = format!("{}.local.", receiver.source_device);
         let deadline = tokio::time::Instant::now()
             .checked_add(Duration::from_millis(receiver.discovery_timeout_milliseconds))
@@ -55,7 +67,7 @@ pub(super) async fn watch_source(
     let result = match setup {
         Ok((channels, flows, channel_name, flow_name, target, deadline)) => {
             let mut channel_ready = false;
-            let mut flow_ready = false;
+            let mut flow_ready = flows.is_none();
             loop {
                 tokio::select! {
                     _ = cancelled(&mut cancellation) => break Ok(()),
@@ -83,7 +95,7 @@ pub(super) async fn watch_source(
                             Err(error) => break Err(error).context("H.264 channel discovery stream ended"),
                         }
                     }
-                    event = flows.recv_async() => {
+                    event = async { match &flows { Some(flows) => flows.recv_async().await, None => std::future::pending().await } } => {
                         match event {
                             Ok(ServiceEvent::ServiceResolved(info)) if info.get_fullname() == flow_name => {
                                 if let Err(error) = flow_matches(&receiver, &target, &info) {
@@ -153,20 +165,15 @@ fn validate_receiver(receiver: &Receiver) -> Result<()> {
         receiver.discovery_timeout_milliseconds > 0,
         "H.264 receiver discovery timeout is required"
     );
-    ensure!(
-        receiver.source_association_slot.get() == 1,
-        "H.264 receiver source association must select slot one"
-    );
-    for value in [&receiver.source_device, &receiver.source_channel, &receiver.source_flow] {
+    for value in [&receiver.source_device, &receiver.source_channel] {
         ensure!(
             !value.is_empty() && !value.as_bytes().contains(&0),
             "H.264 receiver source names must be complete and NUL-free"
         );
     }
     ensure!(
-        receiver.configuration.destination.ip().is_multicast()
-            && receiver.configuration.destination.port() != 0,
-        "H.264 receiver discovery requires an explicit multicast destination"
+        receiver.configuration.destination.port() != 0,
+        "H.264 receiver discovery requires an explicit destination"
     );
     Ok(())
 }
@@ -176,13 +183,21 @@ fn service_name(label: &str, device: &str, service: &str) -> String {
 }
 
 fn channel_matches(receiver: &Receiver, target: &str, info: &ResolvedService) -> Result<()> {
-    ensure!(info.get_port() == CHANNEL_PORT, "unexpected channel service port");
+    let (address, port) = match &receiver.acquisition {
+        Acquisition::Multicast {
+            ..
+        } => (*receiver.configuration.source.ip(), CHANNEL_PORT),
+        Acquisition::Unicast {
+            control,
+        } => (*control.source_control.ip(), control.source_control.port()),
+    };
+    ensure!(info.get_port() == port, "unexpected channel source-control service port");
     ensure!(
         info.get_hostname() == target,
         "channel service target hostname differs from the configured source"
     );
     ensure!(
-        exact_source_address(info, *receiver.configuration.source.ip()),
+        exact_source_address(info, address),
         "channel service does not resolve to the configured source IPv4 address"
     );
     let channel = discovery::Channel::decode(&txt(info.get_properties())?)
@@ -200,20 +215,44 @@ fn channel_matches(receiver: &Receiver, target: &str, info: &ResolvedService) ->
         !channel.protection_metadata_present,
         "channel service has unsupported protection metadata"
     );
-    let association =
-        channel.association.context("channel service lacks the configured flow association")?;
-    ensure!(
-        association.flow_label == receiver.source_flow.as_bytes(),
-        "channel service association flow differs from the configured source"
-    );
-    ensure!(
-        association.one_based_slot == receiver.source_association_slot,
-        "channel service association slot differs from the configured source"
-    );
+    match &receiver.acquisition {
+        Acquisition::Multicast {
+            source_flow,
+            source_association_slot,
+            ..
+        } => {
+            let association = channel
+                .association
+                .context("channel service lacks the configured flow association")?;
+            ensure!(
+                association.flow_label == source_flow.as_bytes(),
+                "channel service flow differs from the configured source"
+            );
+            ensure!(
+                association.one_based_slot == *source_association_slot,
+                "channel service slot differs from the configured source"
+            );
+        }
+        Acquisition::Unicast {
+            ..
+        } => {
+            ensure!(
+                channel.association.is_none(),
+                "unicast source unexpectedly advertises a multicast flow association"
+            );
+        }
+    }
     Ok(())
 }
 
 fn flow_matches(receiver: &Receiver, target: &str, info: &ResolvedService) -> Result<()> {
+    let Acquisition::Multicast {
+        source_local_flow,
+        ..
+    } = &receiver.acquisition
+    else {
+        return Err(anyhow!("unicast source has no multicast flow record"));
+    };
     ensure!(info.get_port() == discovery::FLOW_SERVICE_PORT, "unexpected flow service port");
     ensure!(
         info.get_hostname() == target,
@@ -226,7 +265,7 @@ fn flow_matches(receiver: &Receiver, target: &str, info: &ResolvedService) -> Re
     let flow =
         discovery::Flow::decode(&txt(info.get_properties())?).map_err(|error| anyhow!(error.0))?;
     ensure!(
-        flow.identifier == receiver.source_local_flow,
+        flow.identifier == *source_local_flow,
         "flow service identifier differs from the configured source"
     );
     ensure!(
