@@ -1,0 +1,254 @@
+--- a/ext/libav/gstavviddec.c
++++ b/ext/libav/gstavviddec.c
+@@ -25,6 +25,7 @@
+ #include <string.h>
+ 
+ #include <libavcodec/avcodec.h>
++#include <libavutil/opt.h>
+ #include <libavutil/stereo3d.h>
+ #include <libavutil/mastering_display_metadata.h>
+ 
+@@ -65,6 +66,8 @@
+   PROP_OUTPUT_CORRUPT,
+   PROP_THREAD_TYPE,
+   PROP_STD_COMPLIANCE,
++  PROP_REQUIRE_PARAMETER_CONFIGURATION,
++  PROP_PARAMETER_CONFIGURATION,
+   PROP_LAST
+ };
+ 
+@@ -320,6 +323,19 @@
+ 
+   gobject_class->set_property = gst_ffmpegviddec_set_property;
+   gobject_class->get_property = gst_ffmpegviddec_get_property;
++
++  if (in_plugin->id == AV_CODEC_ID_H264) {
++    g_object_class_install_property (gobject_class,
++        PROP_REQUIRE_PARAMETER_CONFIGURATION,
++        g_param_spec_boolean ("require-parameter-configuration",
++            "Require parameter configuration",
++            "Require native single-pair H.264 configuration acceptance with one decode thread", FALSE,
++            G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
++    g_object_class_install_property (gobject_class, PROP_PARAMETER_CONFIGURATION,
++        g_param_spec_boxed ("parameter-configuration", "Parameter configuration",
++            "Current native configuration receipt or NULL", GST_TYPE_STRUCTURE,
++            G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
++  }
+ 
+   g_object_class_install_property (gobject_class, PROP_SKIPFRAME,
+       g_param_spec_enum ("skip-frame", "Skip frames",
+@@ -410,6 +426,7 @@
+   GstFFMpegVidDec *ffmpegdec = GST_FFMPEGVIDDEC (object);
+ 
+   av_frame_free (&ffmpegdec->picture);
++  g_clear_pointer (&ffmpegdec->parameter_configuration, gst_structure_free);
+   if (ffmpegdec->context)
+     av_freep (&ffmpegdec->context->extradata);
+   avcodec_free_context (&ffmpegdec->context);
+@@ -448,6 +465,8 @@
+   guint i;
+ 
+   GST_LOG_OBJECT (ffmpegdec, "closing ffmpeg codec");
++
++  g_clear_pointer (&ffmpegdec->parameter_configuration, gst_structure_free);
+ 
+   gst_caps_replace (&ffmpegdec->last_caps, NULL);
+ 
+@@ -499,6 +518,28 @@
+ }
+ 
+ static void
++gst_ffmpegviddec_check_parameter_configuration (GstFFMpegVidDec * ffmpegdec)
++{
++  gint64 accepted = 0;
++  gboolean revoked = FALSE;
++
++  if (!ffmpegdec->require_parameter_configuration)
++    return;
++  GST_OBJECT_LOCK (ffmpegdec);
++  if (ffmpegdec->context
++      && av_opt_get_int (ffmpegdec->context, "parameter_configuration_accepted",
++          AV_OPT_SEARCH_CHILDREN, &accepted) >= 0 && accepted == 1) {
++    GST_OBJECT_UNLOCK (ffmpegdec);
++    return;
++  }
++  revoked = ffmpegdec->parameter_configuration != NULL;
++  g_clear_pointer (&ffmpegdec->parameter_configuration, gst_structure_free);
++  GST_OBJECT_UNLOCK (ffmpegdec);
++  if (revoked)
++    g_object_notify (G_OBJECT (ffmpegdec), "parameter-configuration");
++}
++
++static void
+ gst_ffmpegviddec_get_palette (GstFFMpegVidDec * ffmpegdec,
+     GstVideoCodecState * state)
+ {
+@@ -562,7 +603,10 @@
+ 
+   GST_OBJECT_LOCK (ffmpegdec);
+ 
+-  if (!gst_ffmpegviddec_needs_reset (ffmpegdec, state)) {
++  if (!gst_ffmpegviddec_needs_reset (ffmpegdec, state)
++      && (!ffmpegdec->require_parameter_configuration
++          || (ffmpegdec->parameter_configuration && ffmpegdec->last_caps
++              && gst_caps_is_equal (ffmpegdec->last_caps, state->caps)))) {
+     if (ffmpegdec->last_caps) {
+       gint last_fps_n, last_fps_d, fps_n, fps_d;
+ 
+@@ -601,6 +645,22 @@
+     ffmpegdec->cur_multiview_flags = GST_VIDEO_MULTIVIEW_FLAGS_NONE;
+   }
+ 
++  if (ffmpegdec->require_parameter_configuration) {
++    const GstStructure *structure = gst_caps_get_structure (state->caps, 0);
++    const gchar *stream_format = gst_structure_get_string (structure, "stream-format");
++    const gchar *alignment = gst_structure_get_string (structure, "alignment");
++    gint numerator = 0, denominator = 0;
++
++    if (!gst_caps_is_fixed (state->caps)
++        || g_strcmp0 (stream_format, "avc") != 0
++        || g_strcmp0 (alignment, "au") != 0
++        || !gst_structure_get_fraction (structure, "framerate", &numerator, &denominator)
++        || numerator <= 0 || denominator <= 0
++        || ffmpegdec->parameter_configuration_generation == G_MAXUINT64)
++      goto done;
++    ffmpegdec->parameter_configuration_generation++;
++  }
++
+   ffmpegdec->context = avcodec_alloc_context3 (oclass->in_plugin);
+   if (ffmpegdec->context == NULL) {
+     GST_DEBUG_OBJECT (ffmpegdec, "Failed to allocate context");
+@@ -715,8 +775,42 @@
+   /* open codec - we don't select an output pix_fmt yet,
+    * simply because we don't know! We only get it
+    * during playback... */
++  if (ffmpegdec->require_parameter_configuration) {
++    ffmpegdec->context->thread_count = 1;
++    if (ffmpegdec->lowres != 0
++        || av_opt_set_int (ffmpegdec->context,
++            "require_parameter_configuration", 1, AV_OPT_SEARCH_CHILDREN) < 0)
++      goto open_failed;
++  }
+   if (!gst_ffmpegviddec_open (ffmpegdec))
+     goto open_failed;
++  if (ffmpegdec->require_parameter_configuration) {
++    gint64 accepted = 0, width = 0, height = 0;
++    GstBuffer *parameters;
++    if (av_opt_get_int (ffmpegdec->context, "parameter_configuration_accepted",
++            AV_OPT_SEARCH_CHILDREN, &accepted) < 0 || accepted != 1
++        || av_opt_get_int (ffmpegdec->context, "parameter_configuration_width",
++            AV_OPT_SEARCH_CHILDREN, &width) < 0
++        || av_opt_get_int (ffmpegdec->context, "parameter_configuration_height",
++            AV_OPT_SEARCH_CHILDREN, &height) < 0
++        || width <= 0 || height <= 0 || width > G_MAXINT || height > G_MAXINT
++        || width != GST_VIDEO_INFO_WIDTH (&state->info)
++        || height != GST_VIDEO_INFO_HEIGHT (&state->info)) {
++      gst_ffmpegviddec_close (ffmpegdec);
++      goto open_failed;
++    }
++    parameters = gst_buffer_new_memdup (ffmpegdec->context->extradata,
++        ffmpegdec->context->extradata_size);
++    ffmpegdec->parameter_configuration = gst_structure_new (
++        "netaudio-h264-parameter-configuration-v1",
++        "generation", G_TYPE_UINT64, ffmpegdec->parameter_configuration_generation,
++        "codec-data", GST_TYPE_BUFFER, parameters,
++        "width", G_TYPE_INT, (gint) width,
++        "height", G_TYPE_INT, (gint) height,
++        "threads", G_TYPE_INT, ffmpegdec->context->thread_count,
++        "native-version", G_TYPE_STRING, av_version_info (), NULL);
++    gst_buffer_unref (parameters);
++  }
+ 
+ update_state:
+   if (ffmpegdec->input_state)
+@@ -760,6 +854,9 @@
+ done:
+   GST_OBJECT_UNLOCK (ffmpegdec);
+ 
++  if (ffmpegdec->require_parameter_configuration)
++    g_object_notify (G_OBJECT (ffmpegdec), "parameter-configuration");
++
+   if (GST_CLOCK_TIME_IS_VALID (latency))
+     gst_video_decoder_set_latency (decoder, latency, latency);
+ 
+@@ -769,9 +866,7 @@
+ open_failed:
+   {
+     GST_DEBUG_OBJECT (ffmpegdec, "Failed to open");
+-    if (ffmpegdec->context)
+-      av_freep (&ffmpegdec->context->extradata);
+-    avcodec_free_context (&ffmpegdec->context);
++    gst_ffmpegviddec_close (ffmpegdec);
+     goto done;
+   }
+ nal_only_slice:
+@@ -2027,6 +2122,7 @@
+    * Release lock here */
+   GST_VIDEO_DECODER_STREAM_UNLOCK (ffmpegdec);
+   res = avcodec_receive_frame (ffmpegdec->context, ffmpegdec->picture);
++  gst_ffmpegviddec_check_parameter_configuration (ffmpegdec);
+   GST_VIDEO_DECODER_STREAM_LOCK (ffmpegdec);
+ 
+   /* No frames available at this time */
+@@ -2336,6 +2432,7 @@
+ 
+   GST_VIDEO_DECODER_STREAM_UNLOCK (ffmpegdec);
+   if (avcodec_send_packet (ffmpegdec->context, NULL)) {
++    gst_ffmpegviddec_check_parameter_configuration (ffmpegdec);
+     GST_VIDEO_DECODER_STREAM_LOCK (ffmpegdec);
+     goto send_packet_failed;
+   }
+@@ -2465,6 +2562,7 @@
+    */
+   GST_VIDEO_DECODER_STREAM_UNLOCK (ffmpegdec);
+   if (avcodec_send_packet (ffmpegdec->context, packet) < 0) {
++    gst_ffmpegviddec_check_parameter_configuration (ffmpegdec);
+     GST_VIDEO_DECODER_STREAM_LOCK (ffmpegdec);
+     av_packet_free (&packet);
+     goto send_packet_failed;
+@@ -2522,6 +2620,8 @@
+   av_frame_free (&ffmpegdec->picture);
+   gst_ffmpegviddec_close (ffmpegdec);
+   GST_OBJECT_UNLOCK (ffmpegdec);
++  if (ffmpegdec->require_parameter_configuration)
++    g_object_notify (G_OBJECT (ffmpegdec), "parameter-configuration");
+   g_free (ffmpegdec->padded);
+   ffmpegdec->padded = NULL;
+   ffmpegdec->padded_size = 0;
+@@ -2890,6 +2990,9 @@
+   GstFFMpegVidDec *ffmpegdec = GST_FFMPEGVIDDEC (object);
+ 
+   switch (prop_id) {
++    case PROP_REQUIRE_PARAMETER_CONFIGURATION:
++      ffmpegdec->require_parameter_configuration = g_value_get_boolean (value);
++      break;
+     case PROP_LOWRES:
+       ffmpegdec->lowres = g_value_get_enum (value);
+       break;
+@@ -2929,6 +3032,14 @@
+   GstFFMpegVidDec *ffmpegdec = GST_FFMPEGVIDDEC (object);
+ 
+   switch (prop_id) {
++    case PROP_REQUIRE_PARAMETER_CONFIGURATION:
++      g_value_set_boolean (value, ffmpegdec->require_parameter_configuration);
++      break;
++    case PROP_PARAMETER_CONFIGURATION:
++      GST_OBJECT_LOCK (ffmpegdec);
++      g_value_set_boxed (value, ffmpegdec->parameter_configuration);
++      GST_OBJECT_UNLOCK (ffmpegdec);
++      break;
+     case PROP_LOWRES:
+       g_value_set_enum (value, ffmpegdec->lowres);
+       break;
+--- a/ext/libav/gstavviddec.h
++++ b/ext/libav/gstavviddec.h
+@@ -84,6 +84,9 @@
+   gboolean output_corrupt;
+   guint thread_type;
+   GstAvCodecCompliance std_compliance;
++  gboolean require_parameter_configuration;
++  guint64 parameter_configuration_generation;
++  GstStructure *parameter_configuration;
+ 
+   GstCaps *last_caps;
+ 
