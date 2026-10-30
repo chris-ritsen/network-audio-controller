@@ -1,0 +1,198 @@
+--- a/libavcodec/h264dec.c
++++ b/libavcodec/h264dec.c
+@@ -381,6 +381,88 @@
+ 
+ static AVOnce h264_vlc_init = AV_ONCE_INIT;
+ 
++static int decode_parameter_configuration(AVCodecContext *context, H264Context *decoder)
++{
++    const uint8_t *data = context->extradata;
++    int size = context->extradata_size;
++    int offset = 6;
++    int result = AVERROR_INVALIDDATA;
++    const SPS *sequence = NULL;
++    const PPS *picture = NULL;
++
++    if (!data || size < 11 || data[0] != 1 || data[4] != 255 || data[5] != 225)
++        return AVERROR_INVALIDDATA;
++
++    for (int index = 0; index < 2; index++) {
++        H2645Packet packet = { 0 };
++        H2645NAL *unit;
++        int length;
++
++        if (index == 1 && (offset >= size || data[offset++] != 1))
++            return AVERROR_INVALIDDATA;
++        if (size - offset < 2)
++            return AVERROR_INVALIDDATA;
++        length = AV_RB16(data + offset);
++        if (length < 2 || length > size - offset - 2 || length > 4096)
++            return AVERROR_INVALIDDATA;
++        if ((data[offset + 2] & 0x80) || !(data[offset + 2] & 0x60))
++            return AVERROR_INVALIDDATA;
++        result = ff_h2645_packet_split(&packet, data + offset, length + 2,
++                                      context, 2, AV_CODEC_ID_H264,
++                                      H2645_FLAG_IS_NALFF | H2645_FLAG_SMALL_PADDING);
++        if (result < 0)
++            goto release_packet;
++        result = AVERROR_INVALIDDATA;
++        if (packet.nb_nals != 1)
++            goto release_packet;
++        unit = &packet.nals[0];
++        if (unit->raw_size != length ||
++            unit->type != (index == 0 ? H264_NAL_SPS : H264_NAL_PPS))
++            goto release_packet;
++        if (index == 0) {
++            if (length < 4 || memcmp(data + 1, data + offset + 3, 3))
++                goto release_packet;
++            result = ff_h264_decode_seq_parameter_set(&unit->gb, context, &decoder->ps, 0);
++        } else {
++            result = ff_h264_decode_picture_parameter_set(&unit->gb, context,
++                                                          &decoder->ps, unit->size_bits);
++        }
++        if (result >= 0 && (get_bits_left(&unit->gb) != 0
++                           || unit->data[unit->size - 1] == 0))
++            result = AVERROR_INVALIDDATA;
++release_packet:
++        ff_h2645_packet_uninit(&packet);
++        if (result < 0)
++            return result;
++        offset += length + 2;
++    }
++    if (offset != size)
++        return AVERROR_INVALIDDATA;
++    for (int index = 0; index < MAX_SPS_COUNT; index++) {
++        if (decoder->ps.sps_list[index]) {
++            if (sequence)
++                return AVERROR_INVALIDDATA;
++            sequence = decoder->ps.sps_list[index];
++        }
++    }
++    for (int index = 0; index < MAX_PPS_COUNT; index++) {
++        if (decoder->ps.pps_list[index]) {
++            if (picture)
++                return AVERROR_INVALIDDATA;
++            picture = decoder->ps.pps_list[index];
++        }
++    }
++    if (!sequence || !picture || picture->sps != sequence || picture->sps_id != sequence->sps_id)
++        return AVERROR_INVALIDDATA;
++    decoder->parameter_configuration_width = sequence->mb_width * 16 - sequence->crop_left - sequence->crop_right;
++    decoder->parameter_configuration_height = sequence->mb_height * 16 - sequence->crop_top - sequence->crop_bottom;
++    if (decoder->parameter_configuration_width <= 0 || decoder->parameter_configuration_height <= 0)
++        return AVERROR_INVALIDDATA;
++    decoder->is_avc = 1;
++    decoder->nal_length_size = 4;
++    return 0;
++}
++
+ static av_cold int h264_decode_init(AVCodecContext *avctx)
+ {
+     H264Context *h = avctx->priv_data;
+@@ -397,7 +479,14 @@
+     }
+ 
+     if (!avctx->internal->is_copy) {
+-        if (avctx->extradata_size > 0 && avctx->extradata) {
++        if (h->require_parameter_configuration) {
++            h->parameter_configuration_accepted = 0;
++            if (avctx->thread_count != 1)
++                return AVERROR(EINVAL);
++            ret = decode_parameter_configuration(avctx, h);
++            if (ret < 0)
++                return ret;
++        } else if (avctx->extradata_size > 0 && avctx->extradata) {
+             ret = ff_h264_decode_extradata(avctx->extradata, avctx->extradata_size,
+                                            &h->ps, &h->is_avc, &h->nal_length_size,
+                                            avctx->err_recognition, avctx);
+@@ -429,6 +518,7 @@
+                "Use it at your own risk\n");
+     }
+ 
++    h->parameter_configuration_accepted = h->require_parameter_configuration;
+     return 0;
+ }
+ 
+@@ -599,7 +689,7 @@
+         }
+     }
+ 
+-    if (h->nal_length_size == 4) {
++    if (!h->require_parameter_configuration && h->nal_length_size == 4) {
+         if (buf_size > 8 && AV_RB32(buf) == 1 && AV_RB32(buf+5) > (unsigned)buf_size) {
+             h->is_avc = 0;
+         }else if(buf_size > 3 && AV_RB32(buf) > 1 && AV_RB32(buf) <= (unsigned)buf_size)
+@@ -611,7 +701,33 @@
+     if (ret < 0) {
+         av_log(avctx, AV_LOG_ERROR,
+                "Error splitting the input into NAL units.\n");
++        if (h->require_parameter_configuration)
++            h->parameter_configuration_accepted = 0;
+         return ret;
++    }
++
++    if (h->require_parameter_configuration) {
++        int sequence_length = AV_RB16(avctx->extradata + 6);
++        int picture_offset = 9 + sequence_length;
++        int picture_length = AV_RB16(avctx->extradata + picture_offset);
++        for (int index = 0; index < h->pkt.nb_nals; index++) {
++            H2645NAL *unit = &h->pkt.nals[index];
++            const uint8_t *expected = NULL;
++            int length = 0;
++            if (unit->type == H264_NAL_SPS) {
++                expected = avctx->extradata + 8;
++                length = sequence_length;
++            } else if (unit->type == H264_NAL_PPS) {
++                expected = avctx->extradata + picture_offset + 2;
++                length = picture_length;
++            }
++            if (unit->type == H264_NAL_SPS_EXT
++                || (expected && (unit->raw_size != length
++                    || memcmp(unit->raw_data, expected, length)))) {
++                h->parameter_configuration_accepted = 0;
++                return AVERROR_INVALIDDATA;
++            }
++        }
+     }
+ 
+     if (avctx->active_thread_type & FF_THREAD_FRAME)
+@@ -1025,6 +1141,15 @@
+     int buf_index;
+     int ret;
+ 
++    if (h->require_parameter_configuration
++        && (!h->parameter_configuration_accepted
++            || av_packet_get_side_data(avpkt, AV_PKT_DATA_NEW_EXTRADATA, NULL)
++            || (buf_size >= 9 && buf[0] == 1 && buf[2] == 0 && (buf[4] & 0xfc) == 0xfc
++                && is_avcc_extradata(buf, buf_size)))) {
++        h->parameter_configuration_accepted = 0;
++        return AVERROR_INVALIDDATA;
++    }
++
+     h->flags = avctx->flags;
+     h->setup_finished = 0;
+     h->nb_slice_ctx_queued = 0;
+@@ -1090,6 +1215,10 @@
+ #define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
+ #define VDX VD | AV_OPT_FLAG_EXPORT
+ static const AVOption h264_options[] = {
++    { "require_parameter_configuration", "Require canonical single-pair parameter configuration before decoding", OFFSET(require_parameter_configuration), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
++    { "parameter_configuration_accepted", "Native parameter configuration accepted", OFFSET(parameter_configuration_accepted), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VDX | AV_OPT_FLAG_READONLY },
++    { "parameter_configuration_width", "Accepted parameter display width", OFFSET(parameter_configuration_width), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, VDX | AV_OPT_FLAG_READONLY },
++    { "parameter_configuration_height", "Accepted parameter display height", OFFSET(parameter_configuration_height), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, VDX | AV_OPT_FLAG_READONLY },
+     { "is_avc", "is avc", OFFSET(is_avc), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VDX },
+     { "nal_length_size", "nal_length_size", OFFSET(nal_length_size), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 4, VDX },
+     { "enable_er", "Enable error resilience on damaged frames (unsafe)", OFFSET(enable_er), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, VD },
+--- a/libavcodec/h264dec.h
++++ b/libavcodec/h264dec.h
+@@ -451,6 +451,10 @@
+     /**
+      * Used to parse AVC variant of H.264
+      */
++    int require_parameter_configuration;
++    int parameter_configuration_accepted;
++    int parameter_configuration_width;
++    int parameter_configuration_height;
+     int is_avc;           ///< this flag is != 0 if codec is avc1
+     int nal_length_size;  ///< Number of bytes used for nal length (1, 2 or 4)
+ 

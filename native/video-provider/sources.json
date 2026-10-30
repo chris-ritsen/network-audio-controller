@@ -1,0 +1,24 @@
+{
+  "schema": "netaudio-video-provider-sources-v1",
+  "contract": "netaudio-h264-parameter-configuration-v1",
+  "sources": [
+    {
+      "file": "ffmpeg.tar.xz",
+      "url": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+      "bytes": 12040788,
+      "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
+      "directory": "ffmpeg-9.0.2",
+      "patch": "ffmpeg-9.0.2-parameter-configuration.patch",
+      "patch_sha256": "8dae6b8183a74993bb5ccc889b28d0b325c15b7a43bf06864679e844cee4e440"
+    },
+    {
+      "file": "gst-libav.tar.xz",
+      "url": "https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-1.28.8.tar.xz",
+      "bytes": 224460,
+      "sha256": "98ad3d7f8932c495e268708903f1c3388d5f26a0db34727a9f861ee23b724177",
+      "directory": "gst-libav-1.28.8",
+      "patch": "gst-libav-1.28.8-parameter-configuration.patch",
+      "patch_sha256": "8f1883a17929d3851b69b43a2175fb6c4b54b46a3e6597dc04c07e3dab4e352e"
+    }
+  ]
+}
