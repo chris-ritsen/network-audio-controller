@@ -6,6 +6,7 @@ use tokio::sync::{mpsc, watch};
 
 use super::Receiver;
 use super::discovery::{self, DiscoveryState};
+use crate::video::recording;
 use crate::video::transmit::{self, Observation as TransmitObservation};
 use crate::video::{self, Observation as ReceiveObservation};
 
@@ -26,6 +27,10 @@ pub(super) enum Completion {
         observation: ReceiveObservation,
         failure: Option<String>,
         failure_subscription_status: u16,
+    },
+    Recording {
+        identifier: NonZeroU16,
+        generation: u64,
     },
 }
 
@@ -65,6 +70,7 @@ pub(super) async fn receiver(
     events: mpsc::Sender<Event>,
     mut cancellation: watch::Receiver<bool>,
     duration: Duration,
+    recording: recording::Session,
 ) -> Completion {
     let identifier = receiver.identifier;
     let (discovery_cancel, discovery_cancellation) = watch::channel(false);
@@ -97,7 +103,7 @@ pub(super) async fn receiver(
         receiver.configuration.validate()?;
         let socket = video::bind(&receiver.configuration)?;
         media_started = true;
-        let session = video::run_session(video::Session {
+        let session = video::run_session_with_recording(video::Session {
             configuration: receiver.configuration.clone(),
             output: receiver.output.clone(),
             duration,
@@ -108,7 +114,7 @@ pub(super) async fn receiver(
             cancellation: Some(media_cancellation),
             idle_timeout: None,
             observation: Some(observation),
-        });
+        }, recording);
         tokio::pin!(session);
         let forwarding = forward(observations.clone(), events, move |snapshot| Event::Receiver(identifier, generation, snapshot));
         tokio::pin!(forwarding);
@@ -193,4 +199,16 @@ async fn forward<Observation: Copy>(
         events.send(event(snapshot)).await.context("endpoint observation receiver ended")?;
     }
     Ok(())
+}
+
+pub(super) async fn recording(
+    identifier: NonZeroU16,
+    generation: u64,
+    terminal: recording::TerminalWatcher,
+) -> Completion {
+    let _ = terminal.wait().await;
+    Completion::Recording {
+        identifier,
+        generation,
+    }
 }

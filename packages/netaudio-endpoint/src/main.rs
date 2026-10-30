@@ -103,7 +103,7 @@ enum Command {
     },
     #[command(
         about = "Receive an explicitly configured H.264 stream into NV12 frames",
-        long_about = "Receive an explicitly configured H.264 stream into NV12 frame files and an identity/timing manifest. Requires a video-enabled build, GStreamer with h264parse, avdec_h264 and videoconvert, current session JSON, exact peer/PT/SSRC and compatible SPS/PPS. Supports progressive eight-bit 4:2:0 I/P pictures, single NAL, STAP-A and FU-A. This command neither discovers nor allocates a Dante stream. Publication uses local arrival time; it does not display video or establish synchronized presentation."
+        long_about = "Receive an explicitly configured H.264 stream into one append-only NV12 payload artifact with a paired identity, timing and byte-offset index, plus a completion manifest. Recording requires explicit bounded pending-frame and pending-byte limits in the session JSON. Requires a video-enabled build, GStreamer with h264parse, avdec_h264 and videoconvert, current session JSON, exact peer/PT/SSRC and compatible SPS/PPS. Supports progressive eight-bit 4:2:0 I/P pictures, single NAL, STAP-A and FU-A. This command neither discovers nor allocates a Dante stream. Publication uses local arrival time; it does not display video or establish synchronized presentation."
     )]
     VideoReceive {
         #[arg(long)]

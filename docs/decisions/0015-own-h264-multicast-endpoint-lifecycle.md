@@ -38,7 +38,16 @@ observation. Lost control replies leave the outcome unknown and require current
 readback; mutations are never blindly replayed.
 
 This decision excludes ordinary Controller-selected unicast route-to-session
-construction. That role still lacks reviewed response/finalization and fresh
-unicast-session semantics. It also excludes H.265, audio header reuse,
+construction. It also excludes H.265, audio header reuse,
 unicast receiver returns, synchronized physical presentation, and claims about
 third-party admission.
+
+Scope clarification, October 30, 2026: the original explanation incorrectly
+treated reviewed own-unicast response/finalization and session semantics as
+missing. `dante-studio-own-h264-session-join` revision 3 and
+`dante-studio-own-h264-lifecycle-acceptance` revision 3 are ready and complete
+for their selected own-unicast, supplied-authority scope. The multicast-only
+implementation decision remains unchanged. The unresolved foreign-source
+contract is the association of a current allocation with its permitted RTP
+sender IPv4 address and UDP source port before first-packet admission, as
+bounded by session-join clause VJ12.

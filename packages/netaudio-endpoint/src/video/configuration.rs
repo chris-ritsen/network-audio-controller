@@ -32,6 +32,7 @@ pub struct Configuration {
     pub sequence_parameters_hex: String,
     pub picture_parameters_hex: String,
     pub limits: Limits,
+    pub recording: Option<RecordingLimits>,
     pub playout: Playout,
 }
 
@@ -58,6 +59,13 @@ pub struct Limits {
     pub maximum_recorded_frames: usize,
     pub maximum_reference_frames: u32,
     pub provider_timeout_milliseconds: u32,
+}
+
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordingLimits {
+    pub maximum_pending_frames: usize,
+    pub maximum_pending_bytes: usize,
 }
 
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
@@ -185,6 +193,16 @@ impl Configuration {
         self.frame_bytes()?
             .checked_mul(limits.maximum_recorded_frames)
             .context("recording byte bound overflow")?;
+        if let Some(recording) = &self.recording {
+            ensure!(
+                recording.maximum_pending_frames > 0 && recording.maximum_pending_bytes > 0,
+                "recording queue frame and byte limits must be positive"
+            );
+            ensure!(
+                self.frame_bytes()? <= recording.maximum_pending_bytes,
+                "recording queue byte limit cannot admit one complete frame"
+            );
+        }
         i64::try_from(self.playout.allowed_lateness_nanoseconds)
             .context("allowed lateness exceeds the signed clock range")?;
         decode_hex(&self.sequence_parameters_hex)?;

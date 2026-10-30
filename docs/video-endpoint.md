@@ -8,10 +8,19 @@ RTP packetizer, libav decoder and video conversion plugins.
 
 This profile supports one ordinary unprotected IPv4 H.264 source and configured
 receivers. The source reads tightly packed 1920×1080 BGRA frames at 30 fps.
-Receivers write decoded NV12 frames when `record_frames` is true. It does not
-automatically configure a desktop source, a display, a virtual camera, or a
+When `record_frames` is true, a receiver writes one append-only decoded NV12
+payload artifact and paired JSONL descriptor/completion index. Its receiver
+configuration must set positive `recording.maximum_pending_frames` and
+`recording.maximum_pending_bytes`; these are independent of decoder limits.
+It does not automatically configure a desktop source, a display, a virtual camera, or a
 third-party device. Existing `video share` and `video listen` commands provide
 the separate desktop/display adapter workflow.
+
+At this geometry, the raw source requires 248,832,000 bytes per second and each
+recorded NV12 receiver produces 93,312,000 bytes per second. Packet archives,
+indexes and filesystem synchronization add work beyond those payload rates.
+Qualify the complete storage path with the intended concurrent streams; nominal
+device bandwidth alone does not establish that frame deadlines will be met.
 
 ## Configuration and operation
 
@@ -47,8 +56,13 @@ row, and repeated unchanged intent does not restart a worker.
 Source publication uses the channel and flow service types from the clean
 protocol contract. The ARC listener and advertised video service ports are
 different contracts. The runtime does not implement the separate advertised
-video session negotiation service. Automatic Controller device admission and
-ordinary unicast route construction remain unqualified.
+video session negotiation service. The ready own-H.264 session-join and
+lifecycle-acceptance contracts, both revision 3, already specify selected own
+unicast construction with supplied source authority. That is an implementation
+gap in this multicast runtime. Automatic foreign-source acquisition has a
+narrower contract gap: associating the current allocation with the permitted
+RTP sender IPv4 address and UDP source port before first-packet admission.
+Automatic Controller device admission remains unqualified.
 
 ## State and retirement
 
@@ -60,7 +74,14 @@ does not claim output readiness. Cumulative observations describe what occurred
 within a generation; `terminal` and worker ownership describe its retirement.
 They are not proof of current physical display output.
 
-Clear cancels only the selected receiver and awaits its provider retirement.
+Clear cancels only the selected receiver and awaits its provider retirement and
+recording-writer join. A recording writer retains its generation output path
+until it has ended and joined; a successor generation cannot reuse it. A writer
+failure creates an incomplete manifest with its accepted and paired-record
+boundaries. An ingress rejection records its unaccepted frame separately from
+accepted-but-unwritten work. A retirement deadline records unknown quiescence
+and still waits for the owned writer to join before the endpoint returns an
+error.
 While an old worker still owns a joined socket, current receive-flow inventory
 can retain that flow; receiver channel state independently reports cleared or
 replacement intent. Another receiver remains independent. Source deletion via
@@ -87,5 +108,42 @@ decoded frame hashes, discovery withdrawal and resource retirement. This is a
 bounded lifecycle qualification, not sustained reliability or hardware
 interoperability. An earlier fixture run hit the source send-deadline guard;
 that failure remains relevant to throughput qualification. No media guard was
-relaxed. Controller/Studio interoperability, live display/camera output for this
-role and user acceptance remain outstanding.
+relaxed.
+
+The recording-supervisor candidate also completed an isolated 600-second,
+18,000-frame source interval. Both software receivers retained 17,970
+consecutive reference-matching frames after joining, with every accepted frame
+paired in the index and drained. Two receiver-A recording completions exceeded
+the unchanged 50-millisecond allowance, with a maximum lateness of 53.699263
+milliseconds. This is complete media-integrity evidence but failed timing
+qualification.
+
+A subsequent private recording-stage diagnostic completed the same source
+interval. Each receiver again retained 17,970 consecutive frames, all matching
+the independently decoded packet archive. The maximum recording completion
+lateness was 30.237088 and 36.983894 milliseconds, below the unchanged
+50-millisecond allowance. Both recordings drained and all owned processes
+exited cleanly. No timing witness triggered, so this observation does not
+explain the earlier intermittent delays. It used a diagnostic binary, and each
+receiver's first-to-last timestamp span was 598.966667 seconds after joining;
+it does not qualify a common full 600-second receiver interval. Controller/Studio
+interoperability, live display/camera output for this role and user acceptance
+remain outstanding.
+
+A clean recording-supervisor build subsequently passed a predeclared common
+600-second receiver interval at 1920×1080 and 30 fps. After a 1,920-frame startup
+allowance, both receivers retained the same 18,001 consecutive RTP timestamps
+through source frame 19,920. All 19,891 retained frames per receiver, including
+their accepted startup suffixes, matched the independently decoded packet
+archive. All 19,921 source frames and 31,895 archived datagrams reconciled, and
+the complete source file matched its generated hash after capture. Maximum
+recording completion lateness was 27.611529 and 26.007805 milliseconds; no frame
+exceeded the unchanged 50-millisecond allowance. Both recordings drained and
+the owned fixture processes retired.
+
+This qualifies that finite private software and storage profile. It does not
+explain the earlier intermittent source or recording delays, qualify hardware
+or other storage, or establish Controller/Studio interoperability. An offline
+cadence-report error was corrected against the retained capture; the original
+failed analysis and separate corrected result were preserved without a media
+rerun. User acceptance remains outstanding.

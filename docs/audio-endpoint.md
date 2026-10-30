@@ -162,3 +162,20 @@ When a timer's monotonic target has elapsed, the endpoint first attempts to cons
 its nonblocking kernel expiration directly. Other ready work cannot make it wait
 solely for the runtime's cached I/O readiness to refresh. One-shot validation,
 capture-age limits and missed-playout rejection remain enforced.
+
+## Sustained qualification
+
+One isolated Linux software-fixture run of the clean `c18374d` endpoint passed
+a 600.103-second armed interval. Three endpoints each used eight transmit and
+receive channels, four flows per direction, two slots per flow, 48 kHz PCM24,
+48-frame packets, 128-frame dummy-JACK callbacks, 960 buffered frames and
+10 ms receive latency. The endpoint and JACK processes used `SCHED_FIFO`
+priority 20, with network-synchronized native clocks. All 24 recorded channels
+matched their sources exactly through 28,804,864 frames per channel
+(600.101 seconds). Recorder xruns and final endpoint fault counters were zero.
+
+The preceding run of the same production binary stopped on a shared-output
+sample deadline after 436.066 seconds. The successful interval does not explain
+or repair that intermittent failure. It qualifies only this finite private
+software profile; hardware, other rates, higher channel counts, other platforms
+and user acceptance remain separate.
