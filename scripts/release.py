@@ -175,12 +175,20 @@ def actions_enabled():
     return json.loads(output(["gh", "api", f"repos/{GITHUB_REPOSITORY}/actions/permissions"]))["enabled"]
 
 
-def set_actions_enabled(enabled):
-    arguments = ["gh", "api", "--method", "PUT", f"repos/{GITHUB_REPOSITORY}/actions/permissions"]
-    arguments += ["-F", f"enabled={str(enabled).lower()}"]
-    if enabled:
-        arguments += ["-f", "allowed_actions=all"]
-    run(arguments)
+def enable_actions():
+    run(
+        [
+            "gh",
+            "api",
+            "--method",
+            "PUT",
+            f"repos/{GITHUB_REPOSITORY}/actions/permissions",
+            "-F",
+            "enabled=true",
+            "-f",
+            "allowed_actions=all",
+        ]
+    )
 
 
 def workflow_state():
@@ -252,21 +260,12 @@ def wait_for_run(tag_name):
 
 
 def publish(tag_name):
-    actions_enabled_here = not actions_enabled()
-    if actions_enabled_here:
-        set_actions_enabled(True)
-    enabled_here = False
+    if not actions_enabled():
+        enable_actions()
     if workflow_state() != "active":
         run(["gh", "workflow", "enable", RELEASE_WORKFLOW, "--repo", GITHUB_REPOSITORY])
-        enabled_here = True
-    try:
-        run(github_git(["push", "--quiet", GITHUB_URL, "master", f"refs/tags/{tag_name}"]))
-        return wait_for_run(tag_name)
-    finally:
-        if enabled_here:
-            run(["gh", "workflow", "disable", RELEASE_WORKFLOW, "--repo", GITHUB_REPOSITORY])
-        if actions_enabled_here:
-            set_actions_enabled(False)
+    run(github_git(["push", "--quiet", GITHUB_URL, "master", f"refs/tags/{tag_name}"]))
+    return wait_for_run(tag_name)
 
 
 def wait_for_pypi(version):
