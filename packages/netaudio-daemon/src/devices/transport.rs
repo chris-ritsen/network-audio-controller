@@ -132,7 +132,7 @@ impl DeviceTransport {
         Ok(Self {
             socket,
             address,
-            host_mac: netaudio_core::netif::host_mac_for_ipv4(local_address),
+            host_mac: Some(netaudio_core::netif::command_host_mac(local_address)),
             next_identifier: 0,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             read_attempts: DEFAULT_READ_ATTEMPTS,
