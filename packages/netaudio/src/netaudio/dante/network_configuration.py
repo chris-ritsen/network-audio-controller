@@ -68,7 +68,8 @@ async def set_interface(
         if mode not in interface_configuration_modes(selected, device):
             raise NetworkConfigurationError("Network configuration is unavailable for this interface")
 
-        if all(selected["configured"].get(key) == value for key, value in expected.items()):
+        configured = selected.get("configured") or {}
+        if all(configured.get(key) == value for key, value in expected.items()):
             return before
 
         try:
