@@ -22,6 +22,12 @@ pub fn source_ipv4_for(destination: Ipv4Addr) -> Option<Ipv4Addr> {
     }
 }
 
+pub const FALLBACK_HOST_MAC: [u8; 6] = [0x02, 0x00, 0x5E, 0x00, 0x00, 0x01];
+
+pub fn command_host_mac(address: Ipv4Addr) -> [u8; 6] {
+    host_mac_for_ipv4(address).unwrap_or(FALLBACK_HOST_MAC)
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub fn discover_host_mac() -> Option<[u8; 6]> {
     host_mac_for_ipv4(local_ipv4()?)
