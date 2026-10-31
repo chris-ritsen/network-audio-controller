@@ -48,9 +48,8 @@ impl FlowDeviceFacts {
                 if deletion { "deletions" } else { "writes" }
             ));
         }
-        match self.locked {
-            Some(true) => reasons.push("device is locked".into()),
-            None | Some(false) => {}
+        if self.locked == Some(true) {
+            reasons.push("device is locked".into());
         }
         reasons
     }
