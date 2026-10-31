@@ -87,13 +87,11 @@ impl Operation {
             ));
         }
 
-        match record["is_locked"].as_bool() {
-            Some(false) => Ok(()),
-            Some(true) => Err(ControlError::Conflict("device is locked".to_owned())),
-            None => Err(ControlError::ObservationUnavailable(
-                "device lock state is unknown; no maintenance command was sent".to_owned(),
-            )),
+        if record["is_locked"] == true {
+            return Err(ControlError::Conflict("device is locked".to_owned()));
         }
+
+        Ok(())
     }
 
     pub fn effect(&self) -> &'static str {

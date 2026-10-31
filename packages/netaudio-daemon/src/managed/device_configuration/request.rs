@@ -81,22 +81,12 @@ impl<'a> Configuration<'a> {
 
     pub fn preflight_queries(&self) -> Vec<Query> {
         match self {
-            Self::Channel(_) => vec![StatusQuery::Lock.into()],
-            Self::Latency(_) => vec![StatusQuery::Lock.into(), Query::Latency],
-            Self::MulticastPrefix(_) => vec![
-                StatusQuery::Lock.into(),
-                StatusQuery::Aes67.into(),
-                Query::MulticastPrefix,
-            ],
+            Self::Channel(_) => Vec::new(),
+            Self::Latency(_) => vec![Query::Latency],
+            Self::MulticastPrefix(_) => vec![StatusQuery::Aes67.into(), Query::MulticastPrefix],
             Self::Status(configuration) => Query::preflight(configuration.query()),
-            Self::Audio(configuration) => {
-                vec![StatusQuery::Lock.into(), configuration.kind.query().into()]
-            }
-            Self::Network(_) => vec![
-                StatusQuery::Lock.into(),
-                StatusQuery::Platform.into(),
-                StatusQuery::Interface.into(),
-            ],
+            Self::Audio(configuration) => vec![configuration.kind.query().into()],
+            Self::Network(_) => vec![StatusQuery::Platform.into(), StatusQuery::Interface.into()],
         }
     }
 

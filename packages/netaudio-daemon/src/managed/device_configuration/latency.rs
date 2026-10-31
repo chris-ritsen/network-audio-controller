@@ -9,14 +9,8 @@ pub(super) fn command(milliseconds: f64, record: &Value) -> Result<Option<Value>
             "The selected managed device is not currently ready".into(),
         ));
     }
-    match record["is_locked"].as_bool() {
-        Some(false) => {}
-        Some(true) => return Err(ControlError::Conflict("device is locked".into())),
-        None => {
-            return Err(ControlError::ObservationUnavailable(
-                "Device lock state is unknown; no latency command was sent".into(),
-            ));
-        }
+    if record["is_locked"] == true {
+        return Err(ControlError::Conflict("device is locked".into()));
     }
     Ok(Some(
         json!({"command": "set_latency", "latency": milliseconds}),

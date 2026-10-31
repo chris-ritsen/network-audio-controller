@@ -58,14 +58,8 @@ impl<'a> Change<'a> {
                 "The selected managed device is not currently ready".into(),
             ));
         }
-        match record["is_locked"].as_bool() {
-            Some(false) => {}
-            Some(true) => return Err(ControlError::Conflict("device is locked".into())),
-            None => {
-                return Err(ControlError::ObservationUnavailable(
-                    "Device lock state is unknown; no channel-name command was sent".into(),
-                ));
-            }
+        if record["is_locked"] == true {
+            return Err(ControlError::Conflict("device is locked".into()));
         }
         let mut command = self.requested();
         command["command"] = json!("set_channel_name");

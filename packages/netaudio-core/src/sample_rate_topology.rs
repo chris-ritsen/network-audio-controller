@@ -228,7 +228,11 @@ pub fn topology_impact(request: TopologyImpactRequest) -> Result<TopologyImpact,
 
 impl TopologySnapshot {
     fn validate(&self) -> Result<(), String> {
-        let (_, modern) = crate::flow_readback::readback_protocol(self.flow_protocol_identifier)?;
+        let modern = if self.transmitter_flows.is_empty() {
+            false
+        } else {
+            crate::flow_readback::readback_protocol(self.flow_protocol_identifier)?.1
+        };
         let mut seen = HashSet::new();
 
         for flow in &self.transmitter_flows {

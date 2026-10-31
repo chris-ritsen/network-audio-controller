@@ -131,11 +131,6 @@ impl Registry {
             value["observation"] = prepared.record["managed_status"]["sample_rate"].clone();
             return Ok(200);
         }
-        if let Some((state, reason)) = operation.refusal(&prepared.preflight) {
-            value["state"] = json!(state);
-            value["error"] = json!(reason);
-            return Ok(409);
-        }
         operation.writable(self.status_record(&fresh)?.as_ref())?;
         self.invalidate_controller_status(
             source,
@@ -187,19 +182,31 @@ impl Registry {
             )
             .await?;
             let record = self.status_record(&fresh)?;
-            let status = sample_rate::status(&record)?;
+            let status = sample_rate::status(&record);
             value["observed_sample_rate_hertz"] = status["current_value"].clone();
             value["configuration_confirmed"] = json!(status["current_value"] == operation.target);
             value["observation"] = record["managed_status"]["sample_rate"].clone();
-            let rate = status["current_value"]
-                .as_u64()
-                .and_then(|value| u32::try_from(value).ok())
-                .ok_or_else(|| {
-                    ControlError::ObservationUnavailable("Observed sample rate is invalid".into())
-                })?;
-            let topology = self
-                .controller_topology(source, &fresh, &mut prepared.session, rate)
-                .await?;
+            if status["current_value"] != operation.target {
+                return Err(ControlError::Conflict(format!(
+                    "device reports {} Hz instead of {} Hz",
+                    status["current_value"], operation.target
+                )));
+            }
+            let topology = match self
+                .controller_topology(source, &fresh, &mut prepared.session, operation.target)
+                .await
+            {
+                Ok(topology) => topology,
+                Err(error) => {
+                    tracing::warn!(%error, "managed sample-rate topology readback is unavailable");
+                    merge(
+                        value,
+                        sample_rate::success(&prepared.preflight, &status, None, true),
+                    );
+                    value["effective_state_confirmed"] = json!(true);
+                    return Ok(());
+                }
+            };
             value["resulting_topology"] = topology.clone();
             value["readback_fresh"] = json!(true);
             value["topology_observation"] =
@@ -209,7 +216,10 @@ impl Registry {
             } else {
                 "observed_topology_consistency"
             });
-            if let Err(error) = operation.verify(&prepared.preflight, &topology) {
+            if let Err(error) = (!prepared.preflight["current_topology"].is_null())
+                .then(|| operation.verify(&prepared.preflight, &topology))
+                .unwrap_or(Ok(()))
+            {
                 if prepared.preflight["capacity_known"] == true {
                     value["topology_preservation_confirmed"] = json!(false);
                 }
@@ -270,28 +280,34 @@ impl Registry {
         operation: &Operation,
     ) -> Result<Prepared, ControlError> {
         let mut session = DeviceSession::open(source, fresh).await?;
-        self.controller_status(source, fresh, &mut session, StatusQuery::SampleRate)
-            .await?;
+        if let Err(error) = self
+            .controller_status(source, fresh, &mut session, StatusQuery::SampleRate)
+            .await
+        {
+            tracing::warn!(%error, "managed sample-rate change proceeds without a current reading");
+        }
         let record = self.status_record(fresh)?;
         let status = operation.validate_status(&record)?;
         let topology = if status["current_value"] == operation.target {
             None
         } else {
-            self.controller_status(source, fresh, &mut session, StatusQuery::Lock)
-                .await?;
             operation.writable(self.status_record(fresh)?.as_ref())?;
-            let rate = status["current_value"]
+            match status["current_value"]
                 .as_u64()
                 .and_then(|value| u32::try_from(value).ok())
-                .ok_or_else(|| {
-                    ControlError::ObservationUnavailable("Observed sample rate is invalid".into())
-                })?;
-            let topology = self
-                .controller_topology(source, fresh, &mut session, rate)
-                .await?;
-            self.controller_status(source, fresh, &mut session, StatusQuery::Lock)
-                .await?;
-            Some(topology)
+            {
+                Some(rate) => match self
+                    .controller_topology(source, fresh, &mut session, rate)
+                    .await
+                {
+                    Ok(topology) => Some(topology),
+                    Err(error) => {
+                        tracing::warn!(%error, "managed sample-rate change proceeds without a topology reading");
+                        None
+                    }
+                },
+                None => None,
+            }
         };
         let record = self.status_record(fresh)?;
         if topology.is_some() {

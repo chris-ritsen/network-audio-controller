@@ -83,8 +83,6 @@ impl DeviceRegistry {
             ));
         }
 
-        self.read_status(device, transport, generation, StatusQuery::Lock)
-            .await?;
 
         if !operation.is_delete() {
             for query in [StatusQuery::SampleRate, StatusQuery::Encoding] {

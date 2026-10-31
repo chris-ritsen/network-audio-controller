@@ -67,21 +67,13 @@ impl DeviceRegistry {
         }
 
         for query in [
-            StatusQuery::Lock,
             StatusQuery::Aes67,
-            StatusQuery::SampleRate,
             StatusQuery::Encoding,
+            StatusQuery::SampleRate,
         ] {
-            self.read_status(device, transport, generation, query)
-                .await
-                .map_err(|error| match error {
-                    ControlError::ObservationUnavailable(message) => {
-                        ControlError::Conflict(format!(
-                            "fresh flow preconditions unavailable: {message}; no request was sent"
-                        ))
-                    }
-                    error => error,
-                })?;
+            if let Err(error) = self.read_status(device, transport, generation, query).await {
+                tracing::warn!(query = ?query, %error, "external subscription proceeds without a fresh status reading");
+            }
         }
 
         Ok(ReceiverBaseline {

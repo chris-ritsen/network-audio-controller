@@ -33,13 +33,9 @@ impl DeviceRegistry {
                     .await;
             }
             Inspection::Latency => {
-                self.read_status(device, transport, generation, StatusQuery::Lock)
-                    .await?;
                 self.read_latency(device, transport, generation).await?;
             }
             Inspection::Status(query) => {
-                self.read_status(device, transport, generation, StatusQuery::Lock)
-                    .await?;
                 self.read_status(device, transport, generation, query)
                     .await?;
             }
@@ -69,11 +65,6 @@ impl DeviceRegistry {
                 }
             }
             Inspection::Network | Inspection::NetworkConfiguration | Inspection::Redundancy => {
-                if matches!(inspection, Inspection::NetworkConfiguration) {
-                    self.read_status(device, transport, generation, StatusQuery::Lock)
-                        .await?;
-                }
-
                 self.read_status(device, transport, generation, StatusQuery::Interface)
                     .await?;
                 let support = {

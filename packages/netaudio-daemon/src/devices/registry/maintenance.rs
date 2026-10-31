@@ -3,7 +3,7 @@ use crate::devices::audit::Audit;
 use crate::devices::maintenance::Operation;
 use crate::devices::operations::{ControlCompletion, ControlError, ControlOperation};
 use crate::devices::transport::DeviceTransport;
-use crate::monitoring::requests::{self, StatusQuery};
+use crate::monitoring::requests;
 use crate::monitoring::status::StatusKind;
 use anyhow::Context;
 use serde_json::{Value, json};
@@ -36,8 +36,6 @@ impl DeviceRegistry {
         requests::register(transport, expected_identity.as_deref())
             .await
             .map_err(|error| ControlError::ObservationUnavailable(error.to_string()))?;
-        self.read_status(device, transport, generation, StatusQuery::Lock)
-            .await?;
         let (key, identity) = {
             let state = device
                 .state

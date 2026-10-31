@@ -3,7 +3,6 @@ use crate::devices::audit::Audit;
 use crate::devices::operations::{ControlCompletion, ControlError, ControlOperation};
 use crate::devices::status_configuration::Configuration;
 use crate::devices::transport::DeviceTransport;
-use crate::monitoring::requests::StatusQuery;
 use anyhow::Context;
 use serde_json::Value;
 
@@ -17,8 +16,6 @@ impl DeviceRegistry {
         precondition: Option<&Value>,
         audit: Option<&mut Audit>,
     ) -> Result<ControlCompletion, ControlError> {
-        self.read_status(device, transport, generation, StatusQuery::Lock)
-            .await?;
         self.read_status(device, transport, generation, requested.query())
             .await?;
         let (command, before, key) = {

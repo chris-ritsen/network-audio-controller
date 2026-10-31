@@ -33,12 +33,10 @@ impl Registry {
             Ok(session) => session,
             Err(error) => {
                 let queries: Vec<Query> = match inspection {
-                    Inspection::MulticastPrefix => vec![
-                        StatusQuery::Lock.into(),
-                        StatusQuery::Aes67.into(),
-                        Query::MulticastPrefix,
-                    ],
-                    Inspection::Latency => vec![StatusQuery::Lock.into(), Query::Latency],
+                    Inspection::MulticastPrefix => {
+                        vec![StatusQuery::Aes67.into(), Query::MulticastPrefix]
+                    }
+                    Inspection::Latency => vec![Query::Latency],
                     Inspection::Lock => vec![StatusQuery::Lock.into()],
                     Inspection::Status(query) => Query::preflight(query),
                     Inspection::Network | Inspection::Redundancy => {
@@ -48,7 +46,6 @@ impl Registry {
                         ]
                     }
                     Inspection::NetworkConfiguration => vec![
-                        StatusQuery::Lock.into(),
                         StatusQuery::Platform.into(),
                         StatusQuery::Interface.into(),
                         StatusQuery::SwitchConfiguration.into(),
@@ -68,18 +65,12 @@ impl Registry {
         let mut readback_errors = Vec::new();
         match inspection {
             Inspection::MulticastPrefix => {
-                for query in [
-                    StatusQuery::Lock.into(),
-                    StatusQuery::Aes67.into(),
-                    Query::MulticastPrefix,
-                ] {
+                for query in [StatusQuery::Aes67.into(), Query::MulticastPrefix] {
                     self.controller_status(source, &fresh, &mut session, query)
                         .await?;
                 }
             }
             Inspection::Latency => {
-                self.controller_status(source, &fresh, &mut session, StatusQuery::Lock)
-                    .await?;
                 self.controller_status(source, &fresh, &mut session, Query::Latency)
                     .await?;
             }
@@ -95,8 +86,6 @@ impl Registry {
             }
             Inspection::Network | Inspection::NetworkConfiguration | Inspection::Redundancy => {
                 if matches!(inspection, Inspection::NetworkConfiguration) {
-                    self.controller_status(source, &fresh, &mut session, StatusQuery::Lock)
-                        .await?;
                     self.controller_status(source, &fresh, &mut session, StatusQuery::Platform)
                         .await?;
                 }

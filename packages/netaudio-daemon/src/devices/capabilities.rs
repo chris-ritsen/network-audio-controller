@@ -186,16 +186,14 @@ pub fn network(record: &Value) -> Result<Value> {
     let mut modes = Map::new();
 
     for interface in &interfaces {
-        if let Some(name @ ("primary" | "secondary")) = interface["interface"].as_str()
-            && !interface["configured"].is_null()
-        {
+        if let Some(name @ ("primary" | "secondary")) = interface["interface"].as_str() {
             modes.insert(
                 name.to_owned(),
                 json!(
                     network_state(
                         record,
                         Some(interface),
-                        interface_availability.writable,
+                        interface_availability.write_permitted,
                         None
                     )?
                     .configuration_modes

@@ -39,9 +39,7 @@ impl MeteringLease {
         let std::net::IpAddr::V4(address) = transport.local_address()?.ip() else {
             anyhow::bail!("metering requires an IPv4 source address");
         };
-        let identity = netaudio_core::netif::host_mac_for_ipv4(address)
-            .context("metering source interface has no hardware identity")?;
-        let identity = hex::encode(identity);
+        let identity = hex::encode(netaudio_core::netif::command_host_mac(address));
         let start = json!({
             "command": "metering_start",
             "device_name": target.name,

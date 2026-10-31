@@ -144,10 +144,6 @@ impl Device {
             "managed routing changed during preset inventory observation"
         );
         record["is_locked"] = current["is_locked"].clone();
-        ensure!(
-            record["is_locked"].is_boolean(),
-            "fresh managed lock state is unavailable"
-        );
         Ok(record)
     }
 }

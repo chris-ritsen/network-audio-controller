@@ -45,7 +45,7 @@ impl Configuration {
             readback: None,
         });
 
-        if !availability.writable || !control.reasons.is_empty() {
+        if !availability.write_permitted {
             return Err(ControlError::Conflict(format!(
                 "Dante redundancy is not writable: {}",
                 availability

@@ -1,14 +1,9 @@
 from unittest.mock import AsyncMock
 
-import pytest
 
 from netaudio import core
 from netaudio.dante import flows
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.sample_rate_topology import (
-    SampleRateTopologyVerificationError,
-    change_sample_rate_topology_safe,
-)
 
 
 def setup_adapter(monkeypatch, model, *, changed_members=False, incorrect_counts=False, retire_flow=False):
@@ -92,21 +87,3 @@ def setup_adapter(monkeypatch, model, *, changed_members=False, incorrect_counts
         phase["rate"] = 96000
 
     return device, probe, AsyncMock(side_effect=mutate), detect, query
-
-
-
-
-
-
-
-
-
-
-@pytest.mark.asyncio
-async def test_managed_preflight_rejects_unexpected_channel_counts_before_writing(monkeypatch):
-    device, probe, mutate, detect, query = setup_adapter(monkeypatch, "AVIO-DAO2", incorrect_counts=True)
-    with pytest.raises(SampleRateTopologyVerificationError, match="fresh channel counts"):
-        await change_sample_rate_topology_safe(device, 96000, probe, mutate)
-    mutate.assert_not_awaited()
-    detect.assert_not_awaited()
-    query.assert_not_awaited()

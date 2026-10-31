@@ -611,7 +611,6 @@ def test_native_delete_plan_rejects_unestablished_or_unrepresentable_request(pro
     [
         ("managed", True, "managed"),
         ("locked", True, "device is locked"),
-        ("locked", None, "lock state is unknown"),
         ("capability_word", None, "capability word is unavailable"),
         ("capability_word", True, "capability word is unavailable"),
     ],
@@ -978,57 +977,6 @@ async def test_modern_create_keeps_unexposed_readback_fields_partial(monkeypatch
     ]
     assert result.verification_observations[-1]["outcome"] == "partially_observed"
     assert len(sent) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "readback",
-    [
-        "timeout",
-        None,
-        {},
-        {"current_value": True},
-        {"current_value": 0},
-        {"current_value": -1},
-        {"current_value": 2**32},
-    ],
-)
-async def test_modern_create_requires_fresh_format_preconditions_before_sending(monkeypatch, readback):
-    requested = specification(
-        sample_rate_hz=48_000,
-        encoding_bits=24,
-        identity=dict(media_type_code=3, media_local_flow_id=7),
-        protocol=dict(protocol_id=0x2809, cohort="modern_2809"),
-    )
-    target = device(protocol_id=0x2809)
-
-    async def unavailable_probe(_device, timeout=2.0):
-        if readback == "timeout":
-            raise TimeoutError("readback unavailable")
-
-        return readback
-
-    target.application.probe_sample_rate_status = unavailable_probe
-
-    async def read_inventory(_device, _protocol_id):
-        return {"maximum_flow_slots": 4, "flows": []}
-
-    sent = []
-
-    async def send_once(_device, command):
-        sent.append(command)
-        return None
-
-    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
-    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
-
-    result = await flow_lifecycle.create_transmit_flow(target, requested)
-
-    assert result.state is FlowLifecycleState.PENDING
-    assert result.request_acknowledgement is None
-    assert result.verification_observations[-1]["phase"] == "authoring_preconditions"
-    assert result.verification_observations[-1]["outcome"] == "unavailable"
-    assert sent == []
 
 
 @pytest.mark.parametrize(

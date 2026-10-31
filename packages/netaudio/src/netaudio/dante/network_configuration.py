@@ -140,9 +140,9 @@ def network_configuration_modes(device) -> dict:
 
 
 def interface_configuration_modes(entry, device) -> list[str]:
-    return _network_control_state(device, entry=entry, writable=operation_availability(device, "static_ipv4").writable)[
-        "configuration_modes"
-    ]
+    return _network_control_state(
+        device, entry=entry, writable=operation_availability(device, "static_ipv4").write_permitted
+    )["configuration_modes"]
 
 
 def _network_control_state(device, *, entry=None, writable=False, support=None) -> _types.NetworkControlState:

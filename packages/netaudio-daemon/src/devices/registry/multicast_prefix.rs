@@ -22,8 +22,6 @@ impl DeviceRegistry {
         precondition: Option<&Value>,
         audit: Option<&mut Audit>,
     ) -> Result<ControlCompletion, ControlError> {
-        self.read_status(device, transport, generation, StatusQuery::Lock)
-            .await?;
         self.read_status(device, transport, generation, StatusQuery::Aes67)
             .await?;
         let identity = {

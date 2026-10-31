@@ -130,11 +130,11 @@ pub fn plan(record: &Value, operation: &ControlOperation) -> Result<Control, Con
                     })
                 });
             if same {
-                if channel["managed_can_subscribe_self"] != true
-                    || channel["managed_can_subscribe_self_fresh"] != true
+                if channel["managed_can_subscribe_self"] == false
+                    && channel["managed_can_subscribe_self_fresh"] == true
                 {
                     return Err(ControlError::Conflict(format!(
-                        "receiver channel {number} does not report current managed self-connection support"
+                        "receiver channel {number} does not support self-connections"
                     )));
                 }
                 subscription.transmitter_device = ".".into();
