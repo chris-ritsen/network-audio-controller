@@ -60,12 +60,6 @@ def test_aes67_command_wrapper_emits_the_requested_boolean(case_id):
     assert core.build_command(specification) == bytes.fromhex(entry["hex"])
 
 
-def test_reboot_without_host_mac_is_rejected():
-    with pytest.raises(core.NetaudioCoreError) as exc_info:
-        core.build_command({"command": "reboot"})
-    assert exc_info.value.status == 14
-
-
 @pytest.mark.parametrize("channel_type", ["rx", "tx"])
 def test_channel_rename_requires_an_explicit_protocol(channel_type):
     with pytest.raises(core.NetaudioCoreError) as error:

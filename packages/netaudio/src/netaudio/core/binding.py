@@ -744,6 +744,13 @@ def host_mac() -> bytes | None:
     return None
 
 
+FALLBACK_HOST_MAC = bytes.fromhex("02005e000001")
+
+
+def command_host_mac(local_ip: str) -> bytes:
+    return host_mac_for_ipv4(local_ip) or FALLBACK_HOST_MAC
+
+
 def host_mac_for_ipv4(local_ip: str) -> bytes | None:
     address = str(ipaddress.IPv4Address(local_ip))
     lib = _load()

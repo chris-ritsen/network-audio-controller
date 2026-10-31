@@ -1645,8 +1645,12 @@ class DanteApplication:
         from netaudio.dante.panel_state import panel_snapshot
 
         if permission(device, write=False) is None:
-            status = await self.probe_codec_status(device, timeout=timeout)
-            self._apply_codec_status(device, status)
+            try:
+                status = await self.probe_codec_status(device, timeout=timeout)
+            except CapabilityProbeTimeout as error:
+                logger.info(f"Codec status unavailable from {device.ipv4}: {error}")
+            else:
+                self._apply_codec_status(device, status)
         result = await self.panels.inspect(device, timeout=timeout) if panel_family(device) else panel_snapshot(device)
         result["analog"] = {
             "status": device.codec_status,

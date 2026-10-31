@@ -223,8 +223,8 @@ pub fn profile(facts: &PanelProfileRequest) -> PanelProfile {
     let write_unavailable_reason = read_unavailable_reason.or_else(|| {
         if !facts.write_allowed {
             Some("Panel write permission is unavailable.")
-        } else if facts.locked != Some(false) {
-            Some("Device is locked or its lock state is unknown.")
+        } else if facts.locked == Some(true) {
+            Some("Device is locked.")
         } else {
             None
         }

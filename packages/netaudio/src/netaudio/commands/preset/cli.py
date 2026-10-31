@@ -97,7 +97,7 @@ def preset_load(
     confirm_destructive: bool = typer.Option(
         False,
         "--confirm-destructive",
-        help="Confirm permanent transmitter-flow membership loss caused by sample-rate restoration.",
+        hidden=True,
     ),
     store_current_configuration: bool = typer.Option(
         False,

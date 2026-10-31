@@ -213,17 +213,20 @@ pub fn availability(request: AvailabilityRequest) -> Availability {
         }
     }
 
-    // Unknown advertised capabilities do not establish support, but ordinary
-    // controls may still be attempted. Explicit denials always block writes;
-    // redundancy additionally requires affirmative, fresh evidence.
-    let write_permitted = reasons.is_empty()
-        || (request.operation != Redundancy
-            && reasons.iter().all(|reason| {
-                matches!(
-                    *reason,
-                    "capability_unknown" | "lock_state_unknown" | "update_mode_unknown"
-                )
-            }));
+    let write_permitted = reasons.iter().all(|reason| {
+        matches!(
+            *reason,
+            "available_modes_stale"
+                | "available_modes_unknown"
+                | "capability_unknown"
+                | "lock_state_unknown"
+                | "managed_permission_missing"
+                | "read_only_unknown"
+                | "state_stale"
+                | "state_unavailable"
+                | "update_mode_unknown"
+        )
+    });
 
     Availability {
         supported,

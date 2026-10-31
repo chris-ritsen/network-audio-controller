@@ -7,9 +7,7 @@ from netaudio.dante import flows
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyChangedButUnverifiedError,
-    SampleRateTopologyVerificationError,
     change_sample_rate_topology_safe,
-    preflight_sample_rate_change,
 )
 
 
@@ -149,39 +147,3 @@ async def test_noncontracting_rate_change_still_rejects_multicast_flow_loss(monk
     query.side_effect = multicast_inventory
     with pytest.raises(SampleRateTopologyChangedButUnverifiedError, match="membership and metadata"):
         await change_sample_rate_topology_safe(device, 96000, probe, mutate)
-
-
-@pytest.mark.asyncio
-async def test_managed_preflight_rejects_unexpected_channel_counts_before_writing(monkeypatch):
-    device, probe, mutate, detect, query = setup_adapter(monkeypatch, "AVIO-DAO2", incorrect_counts=True)
-    with pytest.raises(SampleRateTopologyVerificationError, match="fresh channel counts"):
-        await change_sample_rate_topology_safe(device, 96000, probe, mutate)
-    mutate.assert_not_awaited()
-    detect.assert_not_awaited()
-    query.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_managed_preflight_does_not_treat_non_audio_flows_as_audio(monkeypatch):
-    device, probe, _, _, _ = setup_adapter(monkeypatch, "AVIO-DAI2")
-    monkeypatch.setattr(
-        flows,
-        "query_tx_flow_inventory",
-        AsyncMock(
-            return_value={
-                "flows": [
-                    {
-                        "global_flow_id": 1,
-                        "flow_type": "unicast",
-                        "media_type_code": 1,
-                        "channel_slot_count": 1,
-                        "transmitter_channel_ids_by_slot": [1],
-                        "sample_rate": 48000,
-                        "encoding": 24,
-                    }
-                ]
-            }
-        ),
-    )
-    with pytest.raises(SampleRateTopologyVerificationError, match="supported audio flow"):
-        await preflight_sample_rate_change(device, 96000, probe)

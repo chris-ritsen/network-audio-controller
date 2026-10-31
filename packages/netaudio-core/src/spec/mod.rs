@@ -107,7 +107,10 @@ pub fn build_routed_command(
 }
 
 pub fn build_command_from_json(json: &str) -> Result<Vec<u8>, SpecError> {
-    build_command(parse_command_spec(json)?, None)
+    build_command(
+        parse_command_spec(json)?,
+        Some(crate::netif::FALLBACK_HOST_MAC),
+    )
 }
 
 mod command_spec;

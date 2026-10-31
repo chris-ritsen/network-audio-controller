@@ -88,8 +88,9 @@ pub fn build_managed_command(request: ManagedCommandRequest) -> Result<ManagedCo
         .host_mac
         .as_deref()
         .map(parse_mac_required)
-        .transpose()?;
-    let packet = build_command(spec, host_mac)?;
+        .transpose()?
+        .unwrap_or(crate::netif::FALLBACK_HOST_MAC);
+    let packet = build_command(spec, Some(host_mac))?;
 
     if target == Target::Arc && !packet.starts_with(&PROTOCOL_ARC_2809.to_be_bytes()) {
         return Err(NetaudioError::UnsupportedProtocolOperation.into());

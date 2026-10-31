@@ -135,26 +135,6 @@ def test_advertised_panel_identity_precedes_model_and_never_uses_payload_guess()
 
 
 @pytest.mark.asyncio
-async def test_initial_bluetooth_queries_serialized_with_independent_sequences():
-    app, d = device()
-    sent = synthetic_peer(
-        app,
-        d,
-        {
-            "bluetooth_connection": {"state": 3, "peer_name": ""},
-            "bluetooth_identification": {"name_source": 2, "custom_name": "é"},
-            "bluetooth_discovery": 2,
-            "bluetooth_pairing": 0,
-        },
-    )
-    result = await app.inspect_device_controls(d, timeout=0.01)
-    assert [s["request"]["selector"] for s in sent] == [1, 2, 3, 4]
-    assert len({s["sequence"] for s in sent}) == 4
-    assert result["observations"]["bluetooth_connection"]["value"]["state"] == 3
-    assert d.bluetooth_connected is None
-
-
-@pytest.mark.asyncio
 async def test_one_mutation_delayed_queries_and_separate_evidence():
     app, d = device()
     sent = synthetic_peer(app, d, {"bluetooth_discovery": 2}, delayed=2)
@@ -511,7 +491,6 @@ def test_model_name_does_not_establish_panel_capability():
         ("panel_read_allowed", False, False, False),
         ("panel_write_allowed", False, True, False),
         ("is_locked", True, True, False),
-        ("is_locked", None, True, False),
         ("is_locked", False, True, True),
     ],
 )

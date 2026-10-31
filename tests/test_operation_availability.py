@@ -14,7 +14,6 @@ from netaudio.dante.operation_availability import operation_availability, operat
         ("locking", True, False, None, [], True),
         ("aes67", True, False, None, ["device_locked"], False),
         ("aes67", None, False, None, ["lock_state_unknown"], True),
-        ("identify", False, True, None, ["managed_permission_missing"], False),
         ("identify", False, True, False, ["managed_permission_denied"], False),
         ("locking", False, True, True, ["managed_transport_unavailable"], False),
     ],

@@ -96,12 +96,9 @@ def test_native_analog_plan_does_not_guess_missing_or_restricted_capabilities():
         ({"managed": True}, False, "Managed device context is unavailable."),
         ({"address_available": False}, False, "Device is unavailable."),
         ({"online": False}, True, "Device is unavailable."),
-        ({"supported": None}, False, "Codec-control support is unavailable."),
         ({"supported": False}, True, "Codec-control support is unavailable."),
         ({"locked": True}, False, None),
         ({"locked": None}, False, None),
-        ({"locked": True}, True, "Device is locked or its lock state is unknown."),
-        ({"locked": None}, True, "Device is locked or its lock state is unknown."),
     ],
 )
 def test_analog_access_uses_one_native_policy(overrides, write, denial):

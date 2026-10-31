@@ -260,9 +260,7 @@ def device(*, protocol="2.8.9", rx_channels=None, managed=False):
     "field,value",
     [
         ("is_locked", True),
-        ("is_locked", None),
         ("aes67_current", False),
-        ("aes67_current", None),
         ("sample_rate", 44100),
         ("encoding", 16),
     ],

@@ -50,8 +50,7 @@ impl FlowDeviceFacts {
         }
         match self.locked {
             Some(true) => reasons.push("device is locked".into()),
-            None => reasons.push("device lock state is unknown".into()),
-            Some(false) => {}
+            None | Some(false) => {}
         }
         reasons
     }

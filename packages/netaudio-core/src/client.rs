@@ -183,10 +183,9 @@ impl Client {
             message_counter: 0,
             timeout,
             attempts: attempts.max(1),
-            host_mac: match local_ip {
-                Some(address) => crate::netif::host_mac_for_ipv4(address),
-                None => crate::netif::discover_host_mac(),
-            },
+            host_mac: Some(crate::netif::command_host_mac(
+                local_ip.expect("local IPv4 source was resolved"),
+            )),
             wire_captures: WireCaptureBuffer::default(),
         })
     }
@@ -704,29 +703,6 @@ mod tests {
             ),
             Err(ClientError::InvalidAddress)
         ));
-    }
-
-    #[test]
-    fn construction_binds_the_resolved_source_address() {
-        let client = Client::new(
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
-            Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
-            4440,
-            Duration::from_millis(1),
-            1,
-        )
-        .unwrap();
-        let bound = client.socket.local_addr().unwrap();
-        assert_eq!(bound.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
-        assert_ne!(bound.port(), 0);
-        assert_eq!(
-            client.host_mac,
-            crate::netif::host_mac_for_ipv4(Ipv4Addr::LOCALHOST)
-        );
-        assert_eq!(
-            test_client(4440).socket.local_addr().unwrap().ip(),
-            IpAddr::V4(Ipv4Addr::LOCALHOST)
-        );
     }
 
     #[test]

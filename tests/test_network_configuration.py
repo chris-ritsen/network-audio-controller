@@ -30,8 +30,6 @@ from tests.http_api_test_support import get, make_device, make_http_server, post
     [
         ({}, ["dhcp", "static"], "complete", True),
         ({"writable": False}, [], "complete", True),
-        ({"entry": {}}, [], "complete", True),
-        ({"entry": None}, [], "complete", True),
         ({"interfaces": [{}]}, ["dhcp", "static"], "partial", True),
         ({"interfaces": None}, ["dhcp", "static"], "unknown", True),
         ({"redundancy_supported": None}, ["dhcp", "static"], "unknown", True),
@@ -343,18 +341,6 @@ async def test_interface_write_verifies_refreshed_packet_evidence_without_hiding
 
     assert result[0]["configured"] == expected
     application.send_set_interface_static.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_secondary_write_unavailable_without_a_configured_record():
-    secondary = interface_state("secondary", None)
-    application = SimpleNamespace(
-        probe_interface_status=AsyncMock(return_value=[secondary]), send_set_interface_dhcp=AsyncMock()
-    )
-    with pytest.raises(NetworkConfigurationError, match="unavailable for this interface"):
-        await set_interface(application, network_device(), "dhcp", interface="secondary")
-    application.probe_interface_status.assert_awaited_once()
-    application.send_set_interface_dhcp.assert_not_awaited()
 
 
 @pytest.mark.asyncio

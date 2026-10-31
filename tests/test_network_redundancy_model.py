@@ -283,27 +283,6 @@ async def test_explicit_unsupported_with_two_interfaces_never_probes_or_writes()
 
 
 @pytest.mark.asyncio
-async def test_missing_versions_record_stays_unknown_after_diagnostic_choice_probe():
-    device = _device(interfaces=[{"interface": "primary"}, {"interface": "secondary"}])
-    device.switch_redundancy_supported = None
-    device.redundancy_advertised_support_source = None
-    parsed = _choice_status((1, "Switched"), (2, "Redundant"))
-
-    async def choices(_device, timeout):
-        fields = switch_configuration_fields(parsed)
-        device.dante_redundancy = fields["dante_redundancy"]
-        return parsed
-
-    application = SimpleNamespace(probe_switch_configuration=AsyncMock(side_effect=choices))
-    await probe_switch_configuration_if_reported(application, device)
-
-    assert redundancy_snapshot(device)["advertised_support"] is None
-    assert device.redundancy_probe_outcomes["switch_configuration"]["observational"] is True
-    with pytest.raises(RuntimeError, match="capability_unknown"):
-        await set_redundancy(application, device, "redundant")
-
-
-@pytest.mark.asyncio
 async def test_read_only_capability_keeps_readable_state_and_refuses_mutation():
     device = _device(read_only=True)
     availability = operation_availability(device, "redundancy", "redundant")

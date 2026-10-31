@@ -607,12 +607,7 @@ pub struct NetworkControlState {
 }
 
 pub fn network_control_state(facts: NetworkControlFacts) -> NetworkControlState {
-    let configured = facts
-        .entry
-        .as_ref()
-        .and_then(|entry| entry.get("configured"))
-        .is_some_and(|value| !value.is_null());
-    let configuration_modes = if configured && facts.writable {
+    let configuration_modes = if facts.writable {
         vec!["dhcp", "static"]
     } else {
         Vec::new()

@@ -23,10 +23,10 @@ impl AnalogAccess {
             self.managed_denial()
         } else if !self.address_available || self.online == Some(false) {
             Some("Device is unavailable.")
-        } else if self.supported != Some(true) {
+        } else if self.supported == Some(false) {
             Some("Codec-control support is unavailable.")
-        } else if self.write && self.locked != Some(false) {
-            Some("Device is locked or its lock state is unknown.")
+        } else if self.write && self.locked == Some(true) {
+            Some("Device is locked.")
         } else {
             None
         }
@@ -39,7 +39,7 @@ impl AnalogAccess {
             Some("Device is unavailable.")
         } else if self.supported == Some(false) {
             Some("Codec-control support is unavailable.")
-        } else if self.write && self.managed_write_permitted != Some(true) {
+        } else if self.write && self.managed_write_permitted == Some(false) {
             Some("Managed codec-control write permission is unavailable.")
         } else if self.write && self.locked == Some(true) {
             Some("Device is locked.")

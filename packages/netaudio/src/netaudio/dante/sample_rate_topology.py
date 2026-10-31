@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from copy import deepcopy
 from typing import Awaitable, Callable
@@ -9,6 +10,8 @@ from netaudio.core import _requests, _types
 from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante import flows
 from netaudio.dante.operation_availability import require_writable
+
+logger = logging.getLogger("netaudio")
 
 
 class SampleRateTopologyError(RuntimeError):
@@ -53,7 +56,7 @@ class SampleRateTopologyChangedButUnverifiedError(SampleRateTopologyError):
 @dataclass(frozen=True)
 class SampleRateTopologyPreflight:
     device_name: str
-    current_sample_rate_hertz: int
+    current_sample_rate_hertz: int | None
     target_sample_rate_hertz: int
     current_snapshot: _requests.TopologySnapshot | None
     target_capacity: _requests.ChannelCapacity | None
@@ -95,7 +98,7 @@ class SampleRateTopologyPreflight:
 class SampleRateTopologyChangeResult:
     changed: bool
     preflight: SampleRateTopologyPreflight
-    observed_sample_rate_hertz: int
+    observed_sample_rate_hertz: int | None
     observed_supported_sample_rates_hertz: tuple[int, ...]
     resulting_snapshot: _requests.TopologySnapshot | None
 
@@ -287,15 +290,25 @@ async def preflight_sample_rate_change(
     load_channel_capacities: Callable[[], Awaitable[None]] | None = None,
 ) -> SampleRateTopologyPreflight:
     target_sample_rate_hertz = _positive_integer(target_sample_rate_hertz, "target sample rate")
-    status = await probe_sample_rate_status()
+    try:
+        status = await probe_sample_rate_status()
+    except (OSError, RuntimeError, TimeoutError, NetaudioCoreError) as error:
+        logger.warning("sample-rate reading failed: %s", error)
+        status = None
+    current_sample_rate_hertz = None
+    supported_sample_rates_hertz = ()
 
     if status is None:
-        raise SampleRateTopologyReadbackError("sample-rate readback was unavailable")
-
-    current_sample_rate_hertz, supported_sample_rates_hertz = _validated_sample_rate_status(status)
-    device.sample_rate = current_sample_rate_hertz
-    device.supported_sample_rates = list(supported_sample_rates_hertz)
-    device.sample_rate_update_mode = status.get("update_mode")
+        logger.warning("sample-rate change proceeds without a current reading")
+    else:
+        try:
+            current_sample_rate_hertz, supported_sample_rates_hertz = _validated_sample_rate_status(status)
+        except SampleRateTopologyError as error:
+            logger.warning("sample-rate change proceeds without a valid current reading: %s", error)
+        else:
+            device.sample_rate = current_sample_rate_hertz
+            device.supported_sample_rates = list(supported_sample_rates_hertz)
+        device.sample_rate_update_mode = status.get("update_mode")
     restrictions = core.audio_capability_control(
         device.sample_rate_update_mode, list(supported_sample_rates_hertz), target_sample_rate_hertz
     )
@@ -321,8 +334,19 @@ async def preflight_sample_rate_change(
     if "fixed" in restrictions:
         raise SampleRateTopologyUnsupportedError("device reports a fixed sample-rate update mode")
 
-    if "update_mode_unknown" in restrictions:
-        raise SampleRateTopologyReadbackError("device did not report a known writable sample-rate update mode")
+    unknown_impact = SampleRateTopologyPreflight(
+        device_name=_device_label(device),
+        current_sample_rate_hertz=current_sample_rate_hertz,
+        target_sample_rate_hertz=target_sample_rate_hertz,
+        current_snapshot=None,
+        target_capacity=None,
+        reversible_receiver_clipping=[],
+        destructive_transmitter_membership_loss=[],
+        uncharacterized_transmitter_flows=[],
+        requires_destructive_confirmation=False,
+    )
+    if current_sample_rate_hertz is None:
+        return unknown_impact
 
     if (
         load_channel_capacities is not None
@@ -330,13 +354,14 @@ async def preflight_sample_rate_change(
         and _capacity_for_rate(device, target_sample_rate_hertz) is None
     ):
         await load_channel_capacities()
-    current_capacity = _capacity_for_rate(device, current_sample_rate_hertz)
-    target_capacity = _capacity_for_rate(device, target_sample_rate_hertz)
-    current_snapshot = await capture_sample_rate_topology(device, current_capacity, current_sample_rate_hertz)
     try:
+        current_capacity = _capacity_for_rate(device, current_sample_rate_hertz)
+        target_capacity = _capacity_for_rate(device, target_sample_rate_hertz)
+        current_snapshot = await capture_sample_rate_topology(device, current_capacity, current_sample_rate_hertz)
         impact = core.sample_rate_topology_impact(current_snapshot, target_capacity)
-    except NetaudioCoreError as exception:
-        raise SampleRateTopologyVerificationError(str(exception)) from exception
+    except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as error:
+        logger.warning("sample-rate change proceeds without a topology reading: %s", error)
+        return unknown_impact
 
     return SampleRateTopologyPreflight(
         device_name=_device_label(device),
@@ -377,8 +402,6 @@ async def change_sample_rate_topology_safe(
     confirm_destructive: bool = False,
     load_channel_capacities: Callable[[], Awaitable[None]] | None = None,
 ) -> SampleRateTopologyChangeResult:
-    if not isinstance(confirm_destructive, bool):
-        raise ValueError("confirm_destructive must be a boolean")
     preflight = await preflight_sample_rate_change(
         device,
         target_sample_rate_hertz,
@@ -393,20 +416,6 @@ async def change_sample_rate_topology_safe(
             observed_supported_sample_rates_hertz=tuple(device.supported_sample_rates),
             resulting_snapshot=None,
         )
-    if preflight.uncharacterized_transmitter_flows:
-        raise SampleRateTopologyUnsupportedError(
-            "sample-rate contraction affects transmitter flows whose membership transition is not proven",
-            preflight,
-        )
-    if preflight.requires_destructive_confirmation and not confirm_destructive:
-        if preflight.capacity_known:
-            message = "sample-rate change would permanently remove transmitter flow members; explicit confirmation is required"
-        else:
-            message = (
-                "the device did not report its channel capacity at the target sample rate, so the effect on its "
-                "transmitter flows cannot be predicted; explicit confirmation is required"
-            )
-        raise SampleRateTopologyConfirmationRequired(message, preflight)
     require_writable(device, "sample_rate", target_sample_rate_hertz)
 
     try:
@@ -428,16 +437,31 @@ async def change_sample_rate_topology_safe(
                 f"device reports {observed_sample_rate_hertz} Hz instead of {preflight.target_sample_rate_hertz} Hz",
                 preflight,
             )
-        resulting_capacity = _capacity_for_rate(device, observed_sample_rate_hertz)
-        resulting_snapshot = await capture_sample_rate_topology(device, resulting_capacity, observed_sample_rate_hertz)
-        _verify_resulting_topology(preflight, resulting_snapshot)
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         raise SampleRateTopologyChangedButUnverifiedError(
-            f"sample-rate change was sent, but complete post-write verification failed: {exception}",
+            f"sample-rate change was sent, but the device did not confirm it: {exception}",
             preflight,
             observed_sample_rate_hertz,
             resulting_snapshot,
         ) from exception
+    if preflight.current_snapshot is not None:
+        try:
+            resulting_capacity = _capacity_for_rate(device, observed_sample_rate_hertz)
+            resulting_snapshot = await capture_sample_rate_topology(
+                device, resulting_capacity, observed_sample_rate_hertz
+            )
+        except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as error:
+            logger.warning("sample-rate topology readback is unavailable: %s", error)
+        else:
+            try:
+                _verify_resulting_topology(preflight, resulting_snapshot)
+            except SampleRateTopologyVerificationError as exception:
+                raise SampleRateTopologyChangedButUnverifiedError(
+                    f"sample-rate change was sent, but complete post-write verification failed: {exception}",
+                    preflight,
+                    observed_sample_rate_hertz,
+                    resulting_snapshot,
+                ) from exception
     return SampleRateTopologyChangeResult(
         changed=True,
         preflight=preflight,

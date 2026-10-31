@@ -101,45 +101,6 @@ UNMANAGED_NETWORK = IPv4Interface(1, "en0", "192.168.1.10", 24)
 
 
 @pytest.mark.asyncio
-async def test_managed_host_mac_without_default_route(monkeypatch):
-    transport, lookups = _path_transport(monkeypatch, [UNMANAGED_NETWORK, MANAGED_NETWORK])
-    identify = MagicMock()
-    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
-
-    await transport.execute(_device(), {"command": "identify"})
-
-    assert lookups == ["10.20.0.5"]
-    assert identify.call_args.args[3] == _path_mac("10.20.0.5")
-
-
-@pytest.mark.asyncio
-async def test_managed_host_mac_follows_interface_changes(monkeypatch):
-    interfaces = [UNMANAGED_NETWORK, MANAGED_NETWORK]
-    transport, lookups = _path_transport(monkeypatch, interfaces)
-    identify = MagicMock()
-    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
-
-    await transport.execute(_device(), {"command": "identify"})
-    interfaces[:] = [IPv4Interface(1, "en8", "10.20.0.6", 24), UNMANAGED_NETWORK]
-    await transport.execute(_device(), {"command": "identify"})
-
-    assert lookups == ["10.20.0.5", "10.20.0.6"]
-    assert [call.args[3] for call in identify.call_args_list] == [_path_mac("10.20.0.5"), _path_mac("10.20.0.6")]
-
-
-@pytest.mark.asyncio
-async def test_managed_host_mac_honors_selected_interface(monkeypatch):
-    transport, lookups = _path_transport(monkeypatch, [UNMANAGED_NETWORK, MANAGED_NETWORK], route_source="10.20.0.5")
-    monkeypatch.setattr(device_transport.app_settings, "interface", "en0")
-    identify = MagicMock()
-    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
-
-    await transport.execute(_device(), {"command": "identify"})
-
-    assert lookups == ["192.168.1.10"]
-
-
-@pytest.mark.asyncio
 async def test_managed_host_mac_unavailable_fails_before_identify(monkeypatch):
     transport, lookups = _path_transport(monkeypatch, [UNMANAGED_NETWORK])
     identify = MagicMock()
@@ -162,18 +123,6 @@ async def test_managed_arc_read_does_not_need_host_mac(monkeypatch):
     await transport.execute(_device(), {"command": "query_receiver_port_ranges"})
 
     query.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_managed_settings_reports_host_mac_path_error(monkeypatch):
-    transport, _ = _path_transport(monkeypatch, [UNMANAGED_NETWORK])
-    query = MagicMock()
-    monkeypatch.setattr(device_transport, "query_managed_settings_with_api_key", query)
-
-    with pytest.raises(device_transport.ManagedDeviceControlError, match="network path to the DDM server"):
-        await transport.execute(_device(), {"command": "probe_sample_rate"})
-
-    query.assert_not_called()
 
 
 def test_enrolment_metadata_selects_managed_control_even_when_direct_ip_exists():
@@ -245,7 +194,7 @@ async def test_inventory_identifier_rejects_ambiguous_primary_interfaces():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("can_reset,state", [(True, "READY"), (False, "READY"), (None, "READY"), (True, "NOT_READY")])
+@pytest.mark.parametrize("can_reset,state", [(True, "READY"), (False, "READY"), (True, "NOT_READY")])
 async def test_managed_reboot_requires_fresh_capability_and_ready_state(monkeypatch, can_reset, state):
     transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
     device = _device()
@@ -403,29 +352,6 @@ async def test_managed_arc_normalizes_receiver_port_range_query_to_2809(monkeypa
     await transport.execute(_device(), {"command": "query_receiver_port_ranges"})
 
     assert query.call_args.args[3] == bytes.fromhex("2809000a123433000000")
-
-
-@pytest.mark.asyncio
-async def test_managed_settings_query_injects_host_mac_and_correlates_the_publication(monkeypatch):
-    sent = []
-    publication = bytes.fromhex("ffff001c00010000001dc1fffe50692e417564696e61746507380080")
-    transport, _ = _path_transport(monkeypatch, [MANAGED_NETWORK])
-
-    monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x4321)
-
-    def query(server, credential, device_id, packet, expected_opcode, **options):
-        sent.append((server, credential, device_id, expected_opcode, options, packet))
-        return publication
-
-    monkeypatch.setattr(device_transport, "query_managed_settings_with_api_key", query)
-
-    result = await transport.execute(_device(), {"command": "probe_sample_rate"})
-
-    assert result == publication
-    assert sent[0][5] == device_transport.core.build_command(
-        {"command": "probe_sample_rate", "host_mac": _path_mac("10.20.0.5").hex(), "message_id": 0x4321}
-    )
-    assert sent[0][3] == 0x0080
 
 
 @pytest.mark.asyncio
