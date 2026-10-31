@@ -71,17 +71,29 @@ impl DeviceRecord {
         }
 
         if let Some(value) = service.property("rate") {
-            let rate: u32 = value.parse().context("invalid advertised sample rate")?;
-            self.properties
-                .insert("sample_rate_hz".to_owned(), json!(rate));
+            match value.parse::<u32>() {
+                Ok(rate) => {
+                    self.properties
+                        .insert("sample_rate_hz".to_owned(), json!(rate));
+                }
+                Err(error) => {
+                    tracing::warn!(service = %service.name, value, %error, "ignoring an invalid advertised sample rate");
+                }
+            }
         }
 
         if let Some(value) = service.property("latency_ns") {
-            let latency: u32 = value.parse().context("invalid advertised latency")?;
-            self.properties.insert(
-                "latency_ms".to_owned(),
-                json!(f64::from(latency) / NANOSECONDS_PER_MILLISECOND),
-            );
+            match value.parse::<u32>() {
+                Ok(latency) => {
+                    self.properties.insert(
+                        "latency_ms".to_owned(),
+                        json!(f64::from(latency) / NANOSECONDS_PER_MILLISECOND),
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(service = %service.name, value, %error, "ignoring an invalid advertised latency");
+                }
+            }
         }
 
         self.online = true;

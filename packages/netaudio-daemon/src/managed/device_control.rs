@@ -68,7 +68,7 @@ impl Action {
                     )));
                 }
             }
-            Self::Reboot if record["ddm_capabilities"]["can_reset"] != true => {
+            Self::Reboot if record["ddm_capabilities"]["can_reset"] == false => {
                 return Err(ControlError::Conflict(
                     "The managed server does not currently permit resetting this device".into(),
                 ));

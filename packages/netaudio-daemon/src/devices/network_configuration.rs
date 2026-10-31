@@ -84,35 +84,22 @@ impl Configuration {
     }
 
     pub fn command(&self, record: &Value) -> Result<Option<Value>, ControlError> {
-        let network = capabilities::network(record)?;
-        let name = json!(self.interface);
-        let name = name.as_str().expect("interface enum string");
         let mode = self.request["mode"]
             .as_str()
             .expect("validated network mode");
         let available = capabilities::operation(record, "static_ipv4")?;
 
-        if !available.writable {
+        if !available.write_permitted {
             return Err(ControlError::Conflict(format!(
                 "network configuration is not writable: {}",
                 available.reasons.join(", ")
             )));
         }
 
-        if !network["interface_configuration_modes"][name]
-            .as_array()
-            .is_some_and(|modes| modes.iter().any(|value| value == mode))
+        if self
+            .selected(&record["interfaces"])
+            .is_some_and(|selected| self.matches(&selected["configured"]))
         {
-            return Err(ControlError::Conflict(format!(
-                "{mode} configuration is unavailable for the {name} interface"
-            )));
-        }
-
-        let selected = self.selected(&record["interfaces"]).ok_or_else(|| {
-            ControlError::Conflict("interface identity is unavailable or ambiguous".to_owned())
-        })?;
-
-        if self.matches(&selected["configured"]) {
             return Ok(None);
         }
 

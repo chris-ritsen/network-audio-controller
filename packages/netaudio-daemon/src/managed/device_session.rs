@@ -177,9 +177,7 @@ async fn connection(source: &Source) -> Result<(Session, Credential, [u8; 6]), E
     let IpAddr::V4(address) = session.notification_address()?.ip() else {
         return Err(Error::Transport);
     };
-    let host_mac = netaudio_core::netif::host_mac_for_ipv4(address).ok_or(Error::Conflict(
-        "The Controller connection has no local hardware address",
-    ))?;
+    let host_mac = netaudio_core::netif::command_host_mac(address);
     let credential = source
         .credential
         .clone()

@@ -455,17 +455,12 @@ impl ControlOperation {
                     .get("identify_supported")
                     .and_then(Value::as_bool)
                 {
-                    Some(true) => {}
                     Some(false) => {
                         return Err(ControlError::Conflict(
                             "device does not support identification".to_owned(),
                         ));
                     }
-                    None => {
-                        return Err(ControlError::Unavailable(
-                            "device identification capability is unavailable".to_owned(),
-                        ));
-                    }
+                    Some(true) | None => {}
                 }
 
                 (
@@ -499,17 +494,12 @@ impl ControlOperation {
 
                 if *direction == ChannelDirection::Receiver {
                     match channel.get("can_rename").and_then(Value::as_bool) {
-                        Some(true) => {}
                         Some(false) => {
                             return Err(ControlError::Conflict(format!(
                                 "receiver channel {number} rename capability prohibits renaming"
                             )));
                         }
-                        None => {
-                            return Err(ControlError::Unavailable(format!(
-                                "receiver channel {number} rename capability is unavailable"
-                            )));
-                        }
+                        Some(true) | None => {}
                     }
                 }
 
@@ -554,17 +544,12 @@ impl ControlOperation {
 
                         if self_connection {
                             match channel.get("can_subscribe_self").and_then(Value::as_bool) {
-                                Some(true) => {}
                                 Some(false) => {
                                     return Err(ControlError::Conflict(format!(
                                         "receiver channel {receiver_channel} does not support self-connections"
                                     )));
                                 }
-                                None => {
-                                    return Err(ControlError::Unavailable(format!(
-                                        "receiver channel {receiver_channel} self-connection capability is unavailable"
-                                    )));
-                                }
+                                Some(true) | None => {}
                             }
                         }
                     }

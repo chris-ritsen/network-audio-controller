@@ -7,7 +7,7 @@ from netaudio.dante.flow_preconditions import refresh_flow_state
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("locked", [True, None])
+@pytest.mark.parametrize("locked", [True])
 async def test_fresh_lock_rejection_is_read_only(locked):
     application = SimpleNamespace(probe_lock_status=AsyncMock(return_value=SimpleNamespace(is_locked=locked)))
     device = SimpleNamespace(

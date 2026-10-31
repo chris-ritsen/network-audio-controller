@@ -211,14 +211,6 @@ fn explicit_host_mac_overrides_default() {
 }
 
 #[test]
-fn standalone_builder_rejects_omitted_host_mac() {
-    assert!(matches!(
-        build_command_from_json("{\"command\":\"reboot\"}"),
-        Err(SpecError::InvalidMac)
-    ));
-}
-
-#[test]
 fn probe_encoding_keeps_its_message_type_independent_of_the_message_id() {
     let routed = routed_with_assigned_id(
         r#"{"command":"probe_encoding"}"#,

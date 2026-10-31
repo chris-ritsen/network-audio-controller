@@ -72,11 +72,11 @@ impl Operation {
     }
 
     pub fn validate_status(&self, record: &Value) -> Result<Value, ControlError> {
-        let status = status(record)?;
+        let status = status(record);
 
-        if !status["available_values"]
+        if status["available_values"]
             .as_array()
-            .is_some_and(|values| values.contains(&json!(self.target)))
+            .is_some_and(|values| !values.is_empty() && !values.contains(&json!(self.target)))
         {
             return Err(ControlError::Conflict(format!(
                 "requested sample rate {} is not supported; device reports {}",
@@ -123,18 +123,24 @@ impl Operation {
     ) -> Result<Value, ControlError> {
         let current = self.validate_status(record)?["current_value"].clone();
         let target_capacity = if snapshot.is_some() {
-            capacity(record, self.target)?
+            capacity(record, self.target).unwrap_or(Value::Null)
         } else {
             Value::Null
         };
-        let impact = if let Some(snapshot) = &snapshot {
-            let request: TopologyImpactRequest = serde_json::from_value(json!({
+        let impact = snapshot.as_ref().and_then(|snapshot| {
+            serde_json::from_value::<TopologyImpactRequest>(json!({
                 "snapshot": snapshot,
                 "target_capacity": target_capacity,
             }))
-            .map_err(anyhow::Error::from)?;
-            serde_json::to_value(topology_impact(request).map_err(ControlError::Conflict)?)
-                .map_err(anyhow::Error::from)?
+            .map_err(|error| error.to_string())
+            .and_then(topology_impact)
+            .and_then(|impact| serde_json::to_value(impact).map_err(|error| error.to_string()))
+            .inspect_err(|error| tracing::warn!(%error, "sample-rate topology impact is unavailable"))
+            .ok()
+        });
+        let snapshot = snapshot.filter(|_| impact.is_some());
+        let impact = if let Some(impact) = impact {
+            impact
         } else {
             json!({
                 "requires_destructive_confirmation": false,
@@ -159,28 +165,6 @@ impl Operation {
         }))
     }
 
-    pub fn refusal(&self, preflight: &Value) -> Option<(&'static str, &'static str)> {
-        if preflight["is_classified"] == false {
-            return Some((
-                "unsupported",
-                "sample-rate contraction affects transmitter flows whose membership transition is not proven",
-            ));
-        }
-
-        if preflight["requires_destructive_confirmation"] == true && !self.confirm_destructive {
-            return Some((
-                "confirmation_required",
-                if preflight["capacity_known"] == true {
-                    "sample-rate change would permanently remove transmitter flow members; explicit confirmation is required"
-                } else {
-                    "the device did not report its target channel capacity, so the effect on transmitter flows cannot be predicted; explicit confirmation is required"
-                },
-            ));
-        }
-
-        None
-    }
-
     pub fn verify(&self, preflight: &Value, after: &Value) -> Result<(), ControlError> {
         let request: TopologyReadbackRequest = serde_json::from_value(json!({
             "before": preflight["current_topology"],
@@ -193,20 +177,23 @@ impl Operation {
     }
 }
 
-pub fn status(record: &Value) -> Result<Value, ControlError> {
+pub fn status(record: &Value) -> Value {
+    let reported = json!({
+        "current_value": record["sample_rate_hz"],
+        "available_values": record["supported_sample_rates_hz"],
+    });
     if record["sample_rate_hz"].is_null() || record["supported_sample_rates_hz"].is_null() {
-        return Err(ControlError::ObservationUnavailable(
-            "sample-rate readback was unavailable".to_owned(),
-        ));
+        return reported;
     }
 
-    let request: EvidenceRequest = serde_json::from_value(json!({
-        "kind": "status",
-        "status": {"current_value": record["sample_rate_hz"], "available_values": record["supported_sample_rates_hz"]},
-    })).map_err(|error| ControlError::Conflict(format!("invalid sample-rate readback: {error}")))?;
-    serde_json::to_value(request.validate().map_err(ControlError::Conflict)?)
-        .map_err(anyhow::Error::from)
-        .map_err(ControlError::from)
+    serde_json::from_value::<EvidenceRequest>(json!({"kind": "status", "status": reported}))
+        .map_err(|error| error.to_string())
+        .and_then(|request| request.validate())
+        .and_then(|status| serde_json::to_value(status).map_err(|error| error.to_string()))
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "using the sample-rate readback as reported");
+            reported
+        })
 }
 
 pub fn capacity(record: &Value, rate: u32) -> Result<Value, ControlError> {

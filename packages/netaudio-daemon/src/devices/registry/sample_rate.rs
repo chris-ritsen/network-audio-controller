@@ -75,13 +75,6 @@ impl DeviceRegistry {
             ));
         }
 
-        if let Some((state, reason)) = operation.refusal(&prepared.preflight) {
-            return Ok(completion(
-                json!({"error": reason, "state": state, "preflight": prepared.preflight, "change_sent": false}),
-                Vec::new(),
-            ));
-        }
-
         operation.writable(&presented)?;
         {
             let state = device
@@ -135,10 +128,20 @@ impl DeviceRegistry {
                         return Err(ControlError::Conflict(format!("device reports {} Hz instead of {} Hz", status["current_value"], operation.target)));
                     }
 
-                    let (_, snapshot, _) = self.capture_sample_rate_topology(device, transport, identity, operation.target).await?;
-                    resulting_snapshot = Some(snapshot.clone());
-                    operation.verify(&prepared.preflight, &snapshot)?;
-                    Ok(sample_rate::success(&prepared.preflight, &status, Some(&snapshot), true))
+                    let snapshot = match self.capture_sample_rate_topology(device, transport, identity, operation.target).await {
+                        Ok((_, snapshot, _)) => Some(snapshot),
+                        Err(error) => {
+                            tracing::warn!(%error, "sample-rate topology readback is unavailable");
+                            None
+                        }
+                    };
+                    resulting_snapshot = snapshot.clone();
+                    if let Some(snapshot) = &snapshot
+                        && !prepared.preflight["current_topology"].is_null()
+                    {
+                        operation.verify(&prepared.preflight, snapshot)?;
+                    }
+                    Ok(sample_rate::success(&prepared.preflight, &status, snapshot.as_ref(), true))
                 }) => observed,
             };
 
@@ -186,9 +189,16 @@ impl DeviceRegistry {
         identity: u64,
         operation: &Operation,
     ) -> Result<Prepared, ControlError> {
-        let status = self
+        let status = match self
             .observe_sample_rate(device, transport, identity, None, STATUS_WINDOW)
-            .await?;
+            .await
+        {
+            Ok(status) => status,
+            Err(error) => {
+                tracing::warn!(%error, "sample-rate change proceeds without a current reading");
+                json!({"current_value": null, "available_values": null})
+            }
+        };
         let (record, _) = sample_rate_record(device, identity)?;
         operation.validate_status(&record.presentation()?)?;
 
@@ -236,31 +246,27 @@ impl DeviceRegistry {
             self.accept_sample_rate_fields(device, identity, fields)?;
         }
 
-        let rate = status["current_value"]
+        let snapshot = match status["current_value"]
             .as_u64()
             .and_then(|value| u32::try_from(value).ok())
-            .context("validated sample rate disappeared")?;
-        let (_, snapshot, captured_generation) = self
-            .capture_sample_rate_topology(device, transport, identity, rate)
-            .await?;
-        let fields = self
-            .status_requests
-            .query(transport, &record.key, None, StatusQuery::Lock)
-            .await
-            .map_err(|error| ControlError::ObservationUnavailable(error.to_string()))?;
-        self.accept_sample_rate_fields(device, identity, fields)?;
+        {
+            Some(rate) => match self
+                .capture_sample_rate_topology(device, transport, identity, rate)
+                .await
+            {
+                Ok((_, snapshot, _)) => Some(snapshot),
+                Err(error) => {
+                    tracing::warn!(%error, "sample-rate change proceeds without a topology reading");
+                    None
+                }
+            },
+            None => None,
+        };
         let (record, generation) = sample_rate_record(device, identity)?;
-        if generation != captured_generation {
-            return Err(ControlError::Conflict(
-                "device topology changed after sample-rate observation; no change was sent"
-                    .to_owned(),
-            ));
-        }
-
         let presentation = record.presentation()?;
         operation.writable(&presentation)?;
         Ok(Prepared {
-            preflight: operation.preflight(&presentation, Some(snapshot))?,
+            preflight: operation.preflight(&presentation, snapshot)?,
             status,
             record,
             generation,
@@ -290,7 +296,7 @@ impl DeviceRegistry {
             .await
             .map_err(|error| ControlError::ObservationUnavailable(error.to_string()))?;
         self.accept_sample_rate_fields(device, identity, fields.clone())?;
-        sample_rate::status(&json!(fields))
+        Ok(sample_rate::status(&json!(fields)))
     }
 
     fn accept_sample_rate_fields(

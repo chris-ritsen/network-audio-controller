@@ -174,16 +174,6 @@ impl DeviceRegistry {
             let preflight = &observed["preflight"];
             let current = preflight["current_sample_rate_hertz"].clone();
             let mut action = request.compare(current.clone(), current == operation.target);
-            if action.state == ActionState::Change
-                && let Some((state, reason)) = operation.refusal(preflight)
-            {
-                action.state = if state == "unsupported" {
-                    ActionState::Unsupported
-                } else {
-                    ActionState::Unavailable
-                };
-                action.reason = reason.into();
-            }
             action.details = observed;
             return Ok(action);
         }

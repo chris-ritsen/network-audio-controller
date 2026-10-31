@@ -34,8 +34,8 @@ pub(super) async fn prepare(
     let mut warnings =
         vec!["Other devices on affected routes must use the same sample rate.".to_owned()];
 
-    if let Some((_, reason)) = operation.refusal(&observation["preflight"]) {
-        warnings.push(reason.to_owned());
+    if observation["preflight"]["requires_destructive_confirmation"] == true {
+        warnings.push("This change removes members from transmitter flows.".to_owned());
     }
 
     let operation = ControlOperation::SampleRate(operation);

@@ -340,7 +340,7 @@ def sample_rate(
     confirm_destructive: bool = typer.Option(
         False,
         "--confirm-destructive",
-        help="Confirm permanent removal of out-of-capacity transmitter flow members.",
+        hidden=True,
     ),
 ):
     """Get or set the sample rate."""

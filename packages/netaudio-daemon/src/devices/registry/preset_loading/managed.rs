@@ -46,16 +46,6 @@ impl DeviceRegistry {
                 .context("managed sample-rate preview unavailable")?;
             let current = observed["preflight"]["current_sample_rate_hertz"].clone();
             let mut action = request.compare(current.clone(), current == operation.target);
-            if action.state == ActionState::Change
-                && let Some((state, reason)) = operation.refusal(&observed["preflight"])
-            {
-                action.state = if state == "unsupported" {
-                    ActionState::Unsupported
-                } else {
-                    ActionState::Unavailable
-                };
-                action.reason = reason.into();
-            }
             action.details = observed;
             return Ok(action);
         }

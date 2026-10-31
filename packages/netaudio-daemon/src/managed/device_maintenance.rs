@@ -31,14 +31,8 @@ pub(super) fn validate(record: &Value, operation: &Operation) -> Result<(), Cont
             "The selected managed device is not currently ready".into(),
         ));
     }
-    match record["is_locked"].as_bool() {
-        Some(false) => {}
-        Some(true) => return Err(ControlError::Conflict("device is locked".into())),
-        None => {
-            return Err(ControlError::ObservationUnavailable(
-                "device lock state is unknown; no clear command was sent".into(),
-            ));
-        }
+    if record["is_locked"] == true {
+        return Err(ControlError::Conflict("device is locked".into()));
     }
     if matches!(
         operation,
@@ -288,7 +282,7 @@ impl Registry {
         operation: &Operation,
     ) -> Result<(FreshTarget, DeviceSession), ControlError> {
         let fresh = self.fresh_target(request, source, revision).await?;
-        let mut session = match DeviceSession::open(source, &fresh).await {
+        let session = match DeviceSession::open(source, &fresh).await {
             Ok(session) => session,
             Err(error) => {
                 self.invalidate_controller_status(
@@ -300,8 +294,6 @@ impl Registry {
                 return Err(error);
             }
         };
-        self.controller_status(source, &fresh, &mut session, StatusQuery::Lock)
-            .await?;
         let record = self.status_record(&fresh)?;
         validate(&record, operation)?;
         let mut current = request.operation.precondition(&record);

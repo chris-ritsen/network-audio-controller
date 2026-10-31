@@ -143,13 +143,7 @@ class ManagedDeviceTransport:
             raise ManagedDeviceControlError(
                 f"no network path to the DDM server {self.server}: {exception}"
             ) from exception
-        host_mac = core.host_mac_for_ipv4(path.source_address)
-        if host_mac is None:
-            raise ManagedDeviceControlError(
-                f"could not determine the MAC address of {path.interface.name} ({path.source_address}), "
-                "which reaches the DDM server"
-            )
-        return host_mac
+        return core.command_host_mac(path.source_address)
 
     async def _default_host_mac(self) -> tuple[bytes | None, ManagedDeviceControlError | None]:
         try:
@@ -162,9 +156,9 @@ class ManagedDeviceTransport:
         command = specification.get("command")
         if command == "reboot":
             fresh = await self.fetch_device(device)
-            if fresh.capabilities is None or fresh.capabilities.can_reset is not True:
-                raise ManagedDeviceControlError("The device does not report managed reboot support")
-            if fresh.connection is None or fresh.connection.state != "READY":
+            if fresh.capabilities is not None and fresh.capabilities.can_reset is False:
+                raise ManagedDeviceControlError("The managed server does not permit resetting this device")
+            if fresh.connection is not None and fresh.connection.state not in (None, "READY"):
                 raise ManagedDeviceControlError("The device is not ready for a managed reboot")
             host_mac = await asyncio.to_thread(self._host_mac)
             await asyncio.to_thread(

@@ -21,8 +21,6 @@ impl DeviceRegistry {
         precondition: Option<&Value>,
         audit: Option<&mut Audit>,
     ) -> Result<ControlCompletion, ControlError> {
-        self.read_status(device, transport, generation, StatusQuery::Lock)
-            .await?;
         self.inspect_status(device, transport, generation, Inspection::Network)
             .await?;
         let before = self.network_snapshot(device, generation)?;

@@ -34,8 +34,6 @@ impl DeviceRegistry {
             ControlError::Unavailable("device_lock_key not configured".to_owned())
         })?;
         let key = settings.key()?;
-        self.read_status(device, transport, generation, StatusQuery::Lock)
-            .await?;
         let device_key = {
             let state = device
                 .state

@@ -121,15 +121,14 @@ pub fn plan_external_subscription(
     request: ExternalSubscriptionPlanRequest,
 ) -> Result<ExternalSubscriptionCommand, SpecError> {
     let reject = |reason: &str| SpecError::InvalidJson(reason.to_owned());
-    if request.receiver.locked != Some(false) {
-        return Err(reject("receiver lock state is locked or unknown"));
+    if request.receiver.locked == Some(true) {
+        return Err(reject("receiver is locked"));
     }
-    if request.receiver.aes67_supported != Some(true)
-        || request.receiver.aes67_enabled != Some(true)
-    {
-        return Err(reject(
-            "receiver AES67 support and current enablement must be confirmed",
-        ));
+    if request.receiver.aes67_supported == Some(false) {
+        return Err(reject("receiver does not support AES67"));
+    }
+    if request.receiver.aes67_enabled == Some(false) {
+        return Err(reject("receiver has AES67 turned off"));
     }
     if !matches!(
         request.source_direction.as_deref(),
@@ -137,23 +136,24 @@ pub fn plan_external_subscription(
     ) {
         return Err(reject("announcement direction is inactive or unsupported"));
     }
-    if request.source_sample_rate.is_none()
-        || request.source_sample_rate != request.receiver.sample_rate
-    {
-        return Err(reject(
-            "source and receiver sample rates are unavailable or incompatible",
-        ));
+    if matches!(
+        (request.source_sample_rate, request.receiver.sample_rate),
+        (Some(source), Some(receiver)) if source != receiver
+    ) {
+        return Err(reject("source and receiver sample rates differ"));
     }
     let encoding = match request.source_encoding.as_deref() {
+        None => None,
         Some("L16") => Some(16),
         Some("L24") => Some(24),
         Some("L32") => Some(32),
-        _ => None,
+        Some(_) => return Err(reject("source encoding is not PCM")),
     };
-    if encoding.is_none() || encoding != request.receiver.encoding {
-        return Err(reject(
-            "source and receiver PCM encodings are unavailable or incompatible",
-        ));
+    if matches!(
+        (encoding, request.receiver.encoding),
+        (Some(source), Some(receiver)) if source != receiver
+    ) {
+        return Err(reject("source and receiver PCM encodings differ"));
     }
     let advertised = request.secondary_address.zip(request.secondary_port);
     let multiple_interfaces = request.receiver_supports_multiple_interfaces

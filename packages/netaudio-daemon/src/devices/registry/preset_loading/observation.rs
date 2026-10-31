@@ -116,17 +116,6 @@ impl DeviceRegistry {
             !report.superseded,
             "device changed during the fresh preset inventory read"
         );
-        self.read_status(target.direct()?, transport, generation, StatusQuery::Lock)
-            .await?;
-        ensure!(
-            target
-                .record()?
-                .0
-                .properties
-                .get("is_locked")
-                .is_some_and(Value::is_boolean),
-            "fresh lock state is unavailable"
-        );
         Ok(InventoryEvidence {
             generation: json!(generation),
             managed: None,
