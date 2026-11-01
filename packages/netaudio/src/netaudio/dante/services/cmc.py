@@ -30,7 +30,11 @@ class DanteCMCService:
         from netaudio import core
 
         source_address = self._transport.path(device_ip).source_address
-        host_mac = self._host_media_access_control_address or core.command_host_mac(source_address)
+        host_mac = self._host_media_access_control_address or core.host_mac_for_ipv4(source_address)
+        if host_mac is None:
+            raise RuntimeError(
+                f"Metering needs the MAC address of the interface using {source_address}, which is unavailable"
+            )
         return source_address, host_mac
 
     @property

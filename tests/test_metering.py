@@ -10,6 +10,7 @@ from netaudio.daemon import metering as metering_module
 from netaudio.daemon.metering import MeteringManager
 from netaudio.dante.events import EventType
 from netaudio.dante.metering import classify_signal_presence, metering_value_dbfs, parse_metering_levels
+from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from tests.http_api_test_support import make_http_server
 
@@ -105,6 +106,28 @@ def make_manager():
         dispatcher=SimpleNamespace(emit_nowait=MagicMock()),
     )
     return MeteringManager(application), application, device
+
+
+def make_cmc_service(monkeypatch, interface_mac, host_mac=None):
+    from netaudio import core
+
+    monkeypatch.setattr(core, "host_mac_for_ipv4", MagicMock(return_value=interface_mac))
+    transport = SimpleNamespace(path=MagicMock(return_value=SimpleNamespace(source_address="192.0.2.62")))
+    return DanteCMCService(transport, host_mac), core
+
+
+def test_metering_identity_is_the_selected_interface_mac(monkeypatch):
+    service, core = make_cmc_service(monkeypatch, bytes.fromhex("842f5774e86d"))
+
+    assert service.controller_identity("192.0.2.10") == ("192.0.2.62", bytes.fromhex("842f5774e86d"))
+    core.host_mac_for_ipv4.assert_called_once_with("192.0.2.62")
+
+
+def test_metering_refuses_a_placeholder_when_the_interface_mac_is_unavailable(monkeypatch):
+    service, _ = make_cmc_service(monkeypatch, None)
+
+    with pytest.raises(RuntimeError, match="MAC address of the interface using 192.0.2.62"):
+        service.controller_identity("192.0.2.10")
 
 
 def test_new_meter_sample_releases_previous_channel_vectors(monkeypatch):
