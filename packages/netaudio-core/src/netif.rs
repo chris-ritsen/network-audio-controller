@@ -2,6 +2,9 @@ use std::net::{Ipv4Addr, UdpSocket};
 
 use crate::protocol::MULTICAST_GROUP_CONTROL_MONITORING;
 
+#[cfg(target_os = "macos")]
+mod hardware_address;
+
 pub fn local_ipv4() -> Option<Ipv4Addr> {
     let socket = UdpSocket::bind(("0.0.0.0", 0)).ok()?;
     socket
@@ -24,6 +27,15 @@ pub fn source_ipv4_for(destination: Ipv4Addr) -> Option<Ipv4Addr> {
 
 pub const FALLBACK_HOST_MAC: [u8; 6] = [0x02, 0x00, 0x5E, 0x00, 0x00, 0x01];
 
+// Recent macOS and iOS releases report this for every interface through getifaddrs.
+const MASKED_INTERFACE_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x00];
+
+fn is_interface_mac(mac_address: &[u8; 6]) -> bool {
+    mac_address.iter().any(|byte| *byte != 0)
+        && *mac_address != MASKED_INTERFACE_MAC
+        && mac_address[0] & 0x01 == 0
+}
+
 pub fn command_host_mac(address: Ipv4Addr) -> [u8; 6] {
     host_mac_for_ipv4(address).unwrap_or(FALLBACK_HOST_MAC)
 }
@@ -45,8 +57,18 @@ pub fn host_mac_for_ipv4(address: Ipv4Addr) -> Option<[u8; 6]> {
         .entries()
         .filter(|entry| interface_name(entry) == name)
         .filter_map(link_mac_address)
-        .find(|mac_address| mac_address.iter().any(|byte| *byte != 0));
-    mac_address
+        .find(is_interface_mac);
+    mac_address.or_else(|| platform_interface_mac(name))
+}
+
+#[cfg(target_os = "macos")]
+fn platform_interface_mac(name: &std::ffi::CStr) -> Option<[u8; 6]> {
+    hardware_address::interface_mac(name).filter(is_interface_mac)
+}
+
+#[cfg(any(target_os = "linux", target_os = "ios"))]
+fn platform_interface_mac(_name: &std::ffi::CStr) -> Option<[u8; 6]> {
+    None
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
@@ -150,4 +172,31 @@ pub fn discover_host_mac() -> Option<[u8; 6]> {
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
 pub fn host_mac_for_ipv4(_address: Ipv4Addr) -> Option<[u8; 6]> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_real_unicast_address_identifies_an_interface() {
+        assert!(is_interface_mac(&[0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D]));
+        assert!(is_interface_mac(&[0xCE, 0x9B, 0x7A, 0x19, 0x26, 0x88]));
+        assert!(!is_interface_mac(&[0; 6]));
+        assert!(!is_interface_mac(&MASKED_INTERFACE_MAC));
+        assert!(!is_interface_mac(&[0x01, 0x00, 0x5E, 0x00, 0x00, 0xE7]));
+    }
+
+    #[test]
+    fn a_settings_command_still_has_an_identity_without_an_interface() {
+        let unassigned = Ipv4Addr::new(192, 0, 2, 254);
+        assert_eq!(host_mac_for_ipv4(unassigned), None);
+        assert_eq!(command_host_mac(unassigned), FALLBACK_HOST_MAC);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_unknown_interface_has_no_hardware_address() {
+        assert_eq!(hardware_address::interface_mac(c"netaudio-none"), None);
+    }
 }
