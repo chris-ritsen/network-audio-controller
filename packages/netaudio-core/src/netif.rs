@@ -2,6 +2,7 @@ use std::net::{Ipv4Addr, UdpSocket};
 
 use crate::protocol::MULTICAST_GROUP_CONTROL_MONITORING;
 
+/// cbindgen:ignore
 #[cfg(target_os = "macos")]
 mod hardware_address;
 
