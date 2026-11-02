@@ -3,6 +3,9 @@ use std::net::{Ipv4Addr, UdpSocket};
 use crate::protocol::MULTICAST_GROUP_CONTROL_MONITORING;
 
 /// cbindgen:ignore
+#[cfg(any(windows, test))]
+mod adapter_addresses;
+/// cbindgen:ignore
 #[cfg(target_os = "macos")]
 mod hardware_address;
 
@@ -165,12 +168,22 @@ fn link_mac_address(entry: &libc::ifaddrs) -> Option<[u8; 6]> {
     Some(mac_address)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
+#[cfg(windows)]
+pub fn discover_host_mac() -> Option<[u8; 6]> {
+    host_mac_for_ipv4(local_ipv4()?)
+}
+
+#[cfg(windows)]
+pub fn host_mac_for_ipv4(address: Ipv4Addr) -> Option<[u8; 6]> {
+    adapter_addresses::interface_mac(address).filter(is_interface_mac)
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos", target_os = "ios")))]
 pub fn discover_host_mac() -> Option<[u8; 6]> {
     None
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos", target_os = "ios")))]
 pub fn host_mac_for_ipv4(_address: Ipv4Addr) -> Option<[u8; 6]> {
     None
 }
