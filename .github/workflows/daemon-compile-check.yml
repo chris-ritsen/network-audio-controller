@@ -1,0 +1,31 @@
+name: daemon-compile-check
+
+on:
+  push:
+    branches: [ci/darwin-multicast-join]
+
+permissions:
+  contents: read
+
+jobs:
+  daemon:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-22.04-arm, windows-latest, macos-15, macos-15-intel]
+    timeout-minutes: 45
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libjack-jackd2-dev libpulse-dev pkg-config
+      - if: runner.os == 'Linux'
+        run: ip -4 -o addr
+      - if: runner.os == 'macOS'
+        run: ifconfig | grep -E '^[a-z0-9]+:|inet '
+      - if: runner.os == 'Windows'
+        run: ipconfig
+      - run: rustc -vV
+      - run: cargo build --locked -p netaudio-daemon
+      - run: cargo test --locked -p netaudio-daemon --lib transport::datagram -- --nocapture --test-threads=1
