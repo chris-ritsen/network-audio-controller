@@ -1,3 +1,5 @@
+#[cfg(target_vendor = "apple")]
+mod apple;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -8,7 +10,9 @@ use unix::PacketReceiver;
 #[cfg(windows)]
 use windows::PacketReceiver;
 
-use socket2::{Domain, InterfaceIndexOrAddress, Protocol, SockRef, Socket, Type};
+#[cfg(not(target_vendor = "apple"))]
+use socket2::{InterfaceIndexOrAddress, SockRef};
+use socket2::{Domain, Protocol, Socket, Type};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::io::Interest;
@@ -56,11 +60,23 @@ impl DatagramSocket {
         self.socket.local_addr()
     }
 
+    #[cfg(target_vendor = "apple")]
+    pub fn join(&self, group: Ipv4Addr, interface_index: u32) -> io::Result<()> {
+        apple::join(&self.socket, group, interface_index)
+    }
+
+    #[cfg(not(target_vendor = "apple"))]
     pub fn join(&self, group: Ipv4Addr, interface_index: u32) -> io::Result<()> {
         SockRef::from(&self.socket)
             .join_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))
     }
 
+    #[cfg(target_vendor = "apple")]
+    pub fn leave(&self, group: Ipv4Addr, interface_index: u32) -> io::Result<()> {
+        apple::leave(&self.socket, group, interface_index)
+    }
+
+    #[cfg(not(target_vendor = "apple"))]
     pub fn leave(&self, group: Ipv4Addr, interface_index: u32) -> io::Result<()> {
         SockRef::from(&self.socket)
             .leave_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))
@@ -77,4 +93,60 @@ impl DatagramSocket {
 
 fn invalid_packet(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    const GROUP: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 192);
+    const UNKNOWN_INTERFACE: u32 = 60_000;
+
+    fn loopback_interface() -> u32 {
+        if_addrs::get_if_addrs()
+            .unwrap()
+            .into_iter()
+            .find(|interface| interface.is_loopback() && interface.ip().is_ipv4())
+            .and_then(|interface| interface.index)
+            .unwrap()
+    }
+
+    fn other_interface() -> Option<u32> {
+        if_addrs::get_if_addrs()
+            .unwrap()
+            .into_iter()
+            .find(|interface| !interface.is_loopback() && interface.ip().is_ipv4())
+            .and_then(|interface| interface.index)
+    }
+
+    #[tokio::test]
+    async fn a_join_uses_the_requested_interface() {
+        let socket = DatagramSocket::bind(0).unwrap();
+
+        let unknown = socket.join(GROUP, UNKNOWN_INTERFACE);
+        assert!(unknown.is_err(), "joined an interface that does not exist");
+
+        let loopback = loopback_interface();
+        socket.join(GROUP, loopback).unwrap();
+        assert_eq!(
+            socket.join(GROUP, loopback).unwrap_err().kind(),
+            io::ErrorKind::AddrInUse
+        );
+        socket.leave(GROUP, loopback).unwrap();
+        assert!(socket.leave(GROUP, loopback).is_err());
+    }
+
+    #[tokio::test]
+    async fn one_socket_joins_a_group_on_each_interface() {
+        let Some(other) = other_interface() else {
+            return;
+        };
+        let loopback = loopback_interface();
+        let socket = DatagramSocket::bind(0).unwrap();
+
+        socket.join(GROUP, loopback).unwrap();
+        socket.join(GROUP, other).unwrap();
+        socket.leave(GROUP, loopback).unwrap();
+        socket.leave(GROUP, other).unwrap();
+    }
 }
