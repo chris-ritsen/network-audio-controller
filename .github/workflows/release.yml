@@ -129,6 +129,7 @@ jobs:
               mkdir -p dist/unrepaired
               mv "$original_wheel" dist/unrepaired/
               auditwheel repair --plat "manylinux_2_28_$(uname -m)" \
+                --exclude libasound.so.2 --exclude libpulse.so.0 \
                 --wheel-dir dist "dist/unrepaired/${original_wheel##*/}"
               repaired_wheel=(dist/*.whl)
               test "${#repaired_wheel[@]}" -eq 1
