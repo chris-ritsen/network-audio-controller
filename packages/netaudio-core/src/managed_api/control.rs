@@ -1,6 +1,6 @@
 use super::Response;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Subscription {

@@ -1005,10 +1005,7 @@ impl Follower {
 
         if let Some(output) = &self.output {
             let current = output.time(now)?;
-            let last = candidate
-                .back()
-                .ok_or(Error::Unavailable)?
-                .local_midpoint();
+            let last = candidate.back().ok_or(Error::Unavailable)?.local_midpoint();
             let error = estimate_error(&fit, current, &last, now);
 
             if error > integer(MAXIMUM_ESTIMATED_ERROR_NANOSECONDS) {

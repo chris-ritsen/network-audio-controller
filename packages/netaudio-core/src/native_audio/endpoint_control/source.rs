@@ -37,7 +37,9 @@ pub enum Action {
 }
 
 fn reply(header: Header, result: u16) -> Result<Action, Error> {
-    Ok(Action::Reply(Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish()))
+    Ok(Action::Reply(
+        Writer::response(header, RESPONSE_HEADER_SIZE, result)?.finish(),
+    ))
 }
 
 pub fn unavailable(header: Header) -> Result<Vec<u8>, Error> {
@@ -53,7 +55,9 @@ fn checked_region(
 ) -> Result<(), Error> {
     if offset < minimum
         || offset % alignment != 0
-        || offset.checked_add(length).is_none_or(|end| end > bytes.len())
+        || offset
+            .checked_add(length)
+            .is_none_or(|end| end > bytes.len())
     {
         return Err(Error(
             "source object is incomplete, overlaps the fixed directory or is misaligned",
@@ -180,8 +184,12 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
         return reply(header, RESOURCE_UNAVAILABLE);
     }
 
-    let (channels, result) =
-        selected_channels(request, 24 + 2 * interfaces, count, endpoint.profile.transmit_channels)?;
+    let (channels, result) = selected_channels(
+        request,
+        24 + 2 * interfaces,
+        count,
+        endpoint.profile.transmit_channels,
+    )?;
     if channels.iter().all(|identifier| *identifier == 0) {
         return reply(header, NO_SELECTED_CHANNEL);
     }
@@ -209,7 +217,9 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
 
     let extension = usize::from(word(request, fixed_end - 2)?);
     if extension == 0 {
-        return Err(Error("selected source allocation requires its complete reference extension"));
+        return Err(Error(
+            "selected source allocation requires its complete reference extension",
+        ));
     }
     checked_region(request, extension, 20, fixed_end, 2)?;
     let extension_length = usize::from(request[extension]) * 2;
@@ -228,7 +238,11 @@ fn allocate(endpoint: &Endpoint, request: &[u8], header: Header) -> Result<Actio
 
     let heap_minimum = extension + extension_length;
     let hostname = string(request, usize::from(word(request, 10)?), heap_minimum)?;
-    let flow_name = string(request, usize::from(word(request, extension + 6)?), heap_minimum)?;
+    let flow_name = string(
+        request,
+        usize::from(word(request, extension + 6)?),
+        heap_minimum,
+    )?;
     if hostname.is_empty() || flow_name.is_empty() {
         return Err(Error("source allocation receiver names cannot be empty"));
     }
@@ -260,7 +274,9 @@ pub fn allocation_committed(
         || !(1..=endpoint.profile.transmit_flows).contains(&identifier)
         || endpoint.transmit_flows.contains_key(&identifier)
     {
-        return Err(Error("source allocation commit has no uniquely owned generation or resource"));
+        return Err(Error(
+            "source allocation commit has no uniquely owned generation or resource",
+        ));
     }
     flow.generation = generation;
     let mut response = Writer::response(header, 24, result)?;

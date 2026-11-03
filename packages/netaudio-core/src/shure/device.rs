@@ -1,6 +1,6 @@
-use super::{Protocol, Report, Result, indexed, invalid};
+use super::{indexed, invalid, Protocol, Report, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

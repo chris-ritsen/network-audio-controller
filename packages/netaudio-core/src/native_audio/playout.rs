@@ -197,7 +197,10 @@ impl Buffer {
 
     pub fn reset(&mut self, owner: Owner) -> Result<(), Error> {
         owner.validate()?;
-        let generation = self.generation.checked_add(1).ok_or(Error::GenerationExhausted)?;
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(Error::GenerationExhausted)?;
         self.owner = owner;
         self.generation = generation;
         self.first_received = None;
@@ -225,7 +228,9 @@ impl Buffer {
             .map_err(|_| Error::InvalidTime)?
             .checked_add(self.receive_latency_frames)
             .ok_or(Error::InvalidTime)?;
-        let end = first.checked_add(self.frames_per_packet as u64).ok_or(Error::InvalidTime)?;
+        let end = first
+            .checked_add(self.frames_per_packet as u64)
+            .ok_or(Error::InvalidTime)?;
         let maximum_tick = (u64::from(u32::MAX) + 1) * u64::from(self.format.sample_rate());
 
         if end > maximum_tick {
@@ -250,7 +255,9 @@ impl Buffer {
         }
 
         let cursor = self.cursor.ok_or(Error::NotPrimed)?;
-        let window_end = cursor.checked_add(RING_FRAMES as u64).ok_or(Error::InvalidTime)?;
+        let window_end = cursor
+            .checked_add(RING_FRAMES as u64)
+            .ok_or(Error::InvalidTime)?;
 
         if first < cursor || end > window_end {
             return Err(Error::OutsideWindow);
@@ -343,7 +350,9 @@ impl Buffer {
         }
 
         let first = self.cursor.ok_or(Error::NotPrimed)?;
-        let end = first.checked_add(self.quantum_frames as u64).ok_or(Error::InvalidTime)?;
+        let end = first
+            .checked_add(self.quantum_frames as u64)
+            .ok_or(Error::InvalidTime)?;
 
         if current_tick < first {
             return Err(Error::EarlyDelivery);
@@ -371,7 +380,10 @@ impl Buffer {
                 .zip(&frame.received)
                 .any(|(selected, received)| *selected && !*received);
 
-            if self.first_received.is_some_and(|first_received| tick >= first_received) {
+            if self
+                .first_received
+                .is_some_and(|first_received| tick >= first_received)
+            {
                 self.consecutive_missing = if missing {
                     self.consecutive_missing.saturating_add(1)
                 } else {

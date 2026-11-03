@@ -19,7 +19,9 @@ pub struct Inventory {
 impl Inventory {
     pub fn new(protocol_revision: u16, capacity: u16) -> Result<Self, Error> {
         if capacity == 0 || capacity == u16::MAX {
-            return Err(Error("source flow capacity has no qualified finite traversal"));
+            return Err(Error(
+                "source flow capacity has no qualified finite traversal",
+            ));
         }
         Ok(Self {
             protocol_revision,
@@ -32,7 +34,8 @@ impl Inventory {
     pub fn request(&self, transaction: u16) -> Result<Vec<u8>, Error> {
         commands::build_query_fixed_tx_flows_from(
             self.protocol_revision,
-            self.next.ok_or(Error("source flow inventory is complete"))?,
+            self.next
+                .ok_or(Error("source flow inventory is complete"))?,
             transaction,
         )
         .map_err(|_| Error("source flow query could not be encoded"))
@@ -40,9 +43,12 @@ impl Inventory {
 
     pub fn accept(&mut self, bytes: &[u8]) -> Result<bool, Error> {
         let header = Header::decode(bytes)?;
-        let page = responses::parse_tx_flow_page_with_capacity(bytes, self.capacity)
-            .ok_or(Error("source flow inventory has an unsupported or incomplete layout"))?;
-        let first = self.next.ok_or(Error("source flow inventory is already complete"))?;
+        let page = responses::parse_tx_flow_page_with_capacity(bytes, self.capacity).ok_or(
+            Error("source flow inventory has an unsupported or incomplete layout"),
+        )?;
+        let first = self
+            .next
+            .ok_or(Error("source flow inventory is already complete"))?;
         let mut highest = None;
 
         for flow in page.flows {
@@ -88,14 +94,18 @@ impl Inventory {
         let identifier = u16::from_be_bytes([bytes[0], bytes[1]]);
 
         if identifier == 0 || bytes[2..] == [0; 4] {
-            return Err(Error("source allocation handle has no current resource owner"));
+            return Err(Error(
+                "source allocation handle has no current resource owner",
+            ));
         }
 
         let flow = self
             .flows
             .iter()
             .find(|flow| flow.flow_number == identifier)
-            .ok_or(Error("owned audio allocation is absent from source inventory"))?;
+            .ok_or(Error(
+                "owned audio allocation is absent from source inventory",
+            ))?;
         let expected_destination = serde_json::json!({
             "address": destination.ip(),
             "port": destination.port(),
@@ -108,7 +118,9 @@ impl Inventory {
             || flow.channels != channels
             || flow.destinations != [expected_destination]
         {
-            return Err(Error("source flow readback differs from the owned audio allocation"));
+            return Err(Error(
+                "source flow readback differs from the owned audio allocation",
+            ));
         }
 
         Ok(())

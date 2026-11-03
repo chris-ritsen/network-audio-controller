@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use serde::Serialize;
 
-use super::{Error, source_control};
+use super::{source_control, Error};
 
 pub use crate::protocol::SERVICE_VIDEO as CHANNEL_SERVICE;
 pub const FLOW_SERVICE: &str = "_dantevid-flow._udp.local.";

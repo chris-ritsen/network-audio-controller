@@ -50,11 +50,15 @@ impl Default for Profile {
 impl Profile {
     pub fn validate(self) -> Result<(), Error> {
         if !(8_000..=192_000).contains(&self.sample_rate) {
-            return Err(Error("endpoint sample rate must be between 8000 and 192000 Hz"));
+            return Err(Error(
+                "endpoint sample rate must be between 8000 and 192000 Hz",
+            ));
         }
         self.sample_width()?;
         if self.transmit_channels == 0 || self.receive_channels == 0 || self.flow_slots == 0 {
-            return Err(Error("endpoint channel counts and flow slot capacity must be positive"));
+            return Err(Error(
+                "endpoint channel counts and flow slot capacity must be positive",
+            ));
         }
 
         if usize::from(self.maximum_media_payload_bytes) > MAXIMUM_UDP_PAYLOAD_BYTES

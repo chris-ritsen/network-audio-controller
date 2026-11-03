@@ -44,10 +44,7 @@ pub enum Stage {
     Identity,
     PropertyDirectory,
     AudioProperties,
-    TransmitChannels {
-        first: u16,
-        last: u16,
-    },
+    TransmitChannels { first: u16, last: u16 },
 }
 
 impl Stage {
@@ -58,9 +55,7 @@ impl Stage {
             Self::Identity => commands::OPCODE_DEVICE_INFO,
             Self::PropertyDirectory => commands::OPCODE_PROPERTY_DIRECTORY,
             Self::AudioProperties => commands::OPCODE_DEVICE_SETTINGS,
-            Self::TransmitChannels {
-                ..
-            } => OPCODE_TX_CHANNEL_INFO,
+            Self::TransmitChannels { .. } => OPCODE_TX_CHANNEL_INFO,
         }
     }
 }
@@ -113,15 +108,14 @@ impl Request {
                 &AUDIO_PROPERTY_IDENTIFIERS,
                 self.transaction,
             ),
-            Stage::TransmitChannels {
-                first,
-                last,
-            } => commands::build_transmitters_range_for_protocol(
-                self.protocol_revision,
-                first,
-                last,
-                self.transaction,
-            ),
+            Stage::TransmitChannels { first, last } => {
+                commands::build_transmitters_range_for_protocol(
+                    self.protocol_revision,
+                    first,
+                    last,
+                    self.transaction,
+                )
+            }
         };
 
         packet.map_err(|_| Error("source acquisition request could not be encoded"))
@@ -138,8 +132,9 @@ impl Request {
             read_u16(datagram, DECLARED_LENGTH_OFFSET)
                 .ok_or(Error("source acquisition reply length is absent"))?,
         );
-        let packet =
-            datagram.get(..length).ok_or(Error("source acquisition reply is truncated"))?;
+        let packet = datagram
+            .get(..length)
+            .ok_or(Error("source acquisition reply is truncated"))?;
         let envelope = response_envelope(packet)
             .ok_or(Error("source acquisition reply envelope is invalid"))?;
 
@@ -174,7 +169,9 @@ impl Request {
                     .ok_or(Error("source basic-name reply is incomplete or invalid"))?;
 
                 if name.name_bytes.len() > MAXIMUM_BASIC_NAME_BYTES {
-                    return Err(Error("source basic-name reply exceeds the selected field limit"));
+                    return Err(Error(
+                        "source basic-name reply exceeds the selected field limit",
+                    ));
                 }
 
                 Value::Name(name)
@@ -184,7 +181,9 @@ impl Request {
                     .ok_or(Error("source structured identity is incomplete or invalid"))?;
 
                 if identity.current_name.bytes().is_none() {
-                    return Err(Error("source structured current name is absent or malformed"));
+                    return Err(Error(
+                        "source structured current name is absent or malformed",
+                    ));
                 }
 
                 Value::Identity(identity)
@@ -193,14 +192,12 @@ impl Request {
                 parse_property_directory(packet)
                     .ok_or(Error("source property directory is incomplete or invalid"))?,
             ),
-            Stage::AudioProperties => Value::AudioProperties(Box::new(
-                parse_device_settings(packet)
-                    .ok_or(Error("source audio property reply is incomplete or invalid"))?,
-            )),
-            Stage::TransmitChannels {
-                first,
-                last,
-            } => {
+            Stage::AudioProperties => {
+                Value::AudioProperties(Box::new(parse_device_settings(packet).ok_or(Error(
+                    "source audio property reply is incomplete or invalid",
+                ))?))
+            }
+            Stage::TransmitChannels { first, last } => {
                 let page = parse_transmit_channel_page(packet)
                     .ok_or(Error("source channel page is incomplete or invalid"))?;
 
