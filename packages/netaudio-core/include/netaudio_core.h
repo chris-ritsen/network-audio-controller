@@ -145,6 +145,8 @@ typedef uint16_t NetaudioNotification;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
+typedef struct NamedDomain NamedDomain;
+
 typedef struct NetaudioClient NetaudioClient;
 
 typedef struct NetaudioClockTracker NetaudioClockTracker;
