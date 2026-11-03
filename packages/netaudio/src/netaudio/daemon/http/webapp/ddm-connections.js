@@ -3,7 +3,7 @@ import { Panel } from "./components.js";
 import { Icon } from "./icons.js";
 import { NewDomainDialog } from "./new-domain.js";
 import { html, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
-import { connectionProfiles, managedDomains, selectContext, selectedContext } from "./store.js";
+import { connectionProfiles, managedDomains, reconnect, selectContext, selectedContext } from "./store.js";
 import { t } from "./i18n.js";
 
 export function ContextSelector() {
@@ -88,6 +88,7 @@ export function DdmConnections() {
       connectionProfiles.value = result;
       setServer(body.server);
       setMethod("saved");
+      reconnect();
     } catch (failure) { setError(failure.message); }
     finally { if (secret.current) secret.current.value = ""; setBusy(false); }
   };
@@ -98,6 +99,7 @@ export function DdmConnections() {
       const result = await api.selectDdmContext({ server, domain_id: domainId });
       connectionProfiles.value = result;
       selectContext(result.default_context);
+      reconnect();
     } catch (failure) { setError(failure.message); }
     finally { setBusy(false); }
   };
@@ -107,6 +109,7 @@ export function DdmConnections() {
       connectionProfiles.value = await api.logoutDdm(server);
       setMethod("password");
       selectContext("all");
+      reconnect();
     } catch (failure) { setError(failure.message); }
     finally { setBusy(false); }
   };

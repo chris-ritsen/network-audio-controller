@@ -55,6 +55,7 @@ impl Registry {
         &self,
         request: Request,
         inventory: Option<Inventory>,
+        caller: &super::sessions::Caller,
     ) -> Result<Output, Error> {
         let inventory = match inventory {
             Some(inventory) => inventory,
@@ -73,7 +74,7 @@ impl Registry {
         .await?;
         let mut result = json!({"operation_id": audit.identifier(), "request_attempted": false, "request_sent": false, "accepted": null, "state_verified": false, "state": "unconfirmed", "device": device.device.name, "from_domain_id": before, "requested_domain_id": request.domain_id, "steps": []});
         let outcome = self
-            .enrollment_steps(&request, inventory, audit.identifier(), &mut result)
+            .enrollment_steps(&request, inventory, audit.identifier(), &mut result, caller)
             .await;
         let mut status = match outcome {
             Ok(status) => status,
@@ -120,6 +121,7 @@ impl Registry {
         inventory: Inventory,
         identifier: &str,
         result: &mut Value,
+        caller: &super::sessions::Caller,
     ) -> Result<u16, Error> {
         let original = inventory.device(&request.device_id)?;
         if original.domain_id == request.domain_id {
@@ -155,6 +157,7 @@ impl Registry {
                         correlation_id: Some(identifier.into()),
                     },
                     Some(inventory),
+                    caller,
                 )
                 .await?;
             let accepted = output.value["accepted"] == true;
@@ -204,6 +207,7 @@ impl Registry {
                         correlation_id: Some(identifier.into()),
                     },
                     Some(current),
+                    caller,
                 )
                 .await?;
             let status = output.status;
@@ -233,6 +237,7 @@ impl Registry {
                     correlation_id: Some(identifier.into()),
                 },
                 Some(inventory),
+                caller,
             )
             .await?;
         let status = output.status;

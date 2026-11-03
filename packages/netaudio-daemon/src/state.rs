@@ -249,6 +249,25 @@ impl ReadModel {
         encode(&records)
     }
 
+    pub fn devices_where(
+        &self,
+        context: Option<&str>,
+        visible: impl Fn(&Value) -> bool,
+    ) -> Result<Bytes> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("device state lock poisoned"))?;
+        let records: BTreeMap<_, _> = state
+            .devices
+            .iter()
+            .filter(|(_, record)| {
+                context.is_none_or(|context| in_context(record, context)) && visible(record)
+            })
+            .collect();
+        encode(&records)
+    }
+
     pub fn device_in_context(
         &self,
         name: &str,

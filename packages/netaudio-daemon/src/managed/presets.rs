@@ -75,6 +75,7 @@ impl Device {
         self.session
             .registry
             .control_locked(DeviceRequest {
+                caller: super::sessions::Caller::current(),
                 record,
                 operation: operation.clone(),
                 precondition: None,
@@ -85,6 +86,7 @@ impl Device {
 
     pub(crate) async fn inventory(&self) -> Result<Value> {
         let request = DeviceRequest {
+            caller: super::sessions::Caller::current(),
             record: self.record()?,
             operation: ControlOperation::InspectStatus(Inspection::Lock),
             precondition: None,
@@ -180,6 +182,7 @@ impl Device {
         let fresh = registry
             .fresh_target(
                 &DeviceRequest {
+                    caller: super::sessions::Caller::current(),
                     record: observed.clone(),
                     operation: ControlOperation::InspectStatus(Inspection::Lock),
                     precondition: None,

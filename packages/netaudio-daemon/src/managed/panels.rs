@@ -110,6 +110,7 @@ impl Registry {
             return Ok(completion(result, errors));
         }
         let configure = DeviceRequest {
+            caller: request.caller.clone(),
             record: request.record.clone(),
             operation: status,
             precondition: request.precondition.clone(),

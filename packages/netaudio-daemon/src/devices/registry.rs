@@ -796,6 +796,7 @@ impl DeviceRegistry {
             })?;
             return managed
                 .control(crate::managed::control::DeviceRequest {
+                    caller: crate::managed::sessions::Caller::current(),
                     record: record.as_ref().clone(),
                     operation,
                     precondition,

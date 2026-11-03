@@ -44,6 +44,7 @@ pub enum Change {
         name: String,
         domain_id: String,
         domain_name: Option<String>,
+        select: bool,
     },
 }
 
@@ -179,10 +180,11 @@ impl Store {
                     name,
                     domain_id,
                     domain_name,
+                    select,
                 } => {
                     require_server(settings, &server)?;
                     validate_name(&name)?;
-                    if !settings.servers[&server].enabled() {
+                    if select && !settings.servers[&server].enabled() {
                         return Err(Error::Invalid("The selected DDM server is not configured"));
                     }
                     if settings.contexts.get(&name).is_some_and(|context| {
@@ -202,7 +204,9 @@ impl Store {
                             context.remove("domain_name");
                         }
                     }
-                    managed.insert("default_context", value(name));
+                    if select {
+                        managed.insert("default_context", value(name));
+                    }
                 }
             }
             if let Some(path) = &credential_file {

@@ -374,9 +374,12 @@ impl Service {
             "refresh_ddm" => {
                 let output = self
                     .managed
-                    .execute(crate::managed::operations::Operation::Refresh {
-                        context: arguments["context"].as_str().map(str::to_owned),
-                    })
+                    .execute(
+                        crate::managed::operations::Operation::Refresh {
+                            context: arguments["context"].as_str().map(str::to_owned),
+                        },
+                        crate::managed::sessions::Caller::Owner,
+                    )
                     .await
                     .map_err(|error| CallError::invalid(error.to_string()))?;
                 if output.status >= 400 {

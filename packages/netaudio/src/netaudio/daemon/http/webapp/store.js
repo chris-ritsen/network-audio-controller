@@ -202,13 +202,10 @@ function applyEvent(payload) {
     return;
   }
   if (kind === "managed_status") {
-    if (payload.managed) {
-      batch(() => {
-        managedState.value = payload.managed.status;
-        managedDomains.value = payload.managed.domains || [];
-        connectionProfiles.value = payload.managed.connections;
-      });
-    }
+    batch(() => {
+      managedState.value = payload.managed ?? null;
+      managedDomains.value = payload.managed_domains || [];
+    });
     return;
   }
   if (kind === "settings_updated") {
@@ -229,11 +226,8 @@ function applyEvent(payload) {
     }
     setMeteringScale(payload.metering_scale);
     batch(() => {
-      if (payload.managed) {
-        managedState.value = payload.managed.status;
-        managedDomains.value = payload.managed.domains || [];
-        connectionProfiles.value = payload.managed.connections;
-      }
+      managedState.value = payload.managed ?? null;
+      managedDomains.value = payload.managed_domains || [];
       devices.value = payload.devices || {};
       externalFlows.value = payload.external_flows || {};
       const incomingShure = payload.shure_devices || {};
@@ -353,8 +347,11 @@ export function receiveEvent(payload) {
   }
 }
 
+let eventSource = null;
+
 export function connect() {
   const source = new EventSource(EVENT_STREAM_PATH);
+  eventSource = source;
 
   source.addEventListener("open", () => {
     connectionState.value = "open";
@@ -372,10 +369,16 @@ export function connect() {
   });
 
   source.addEventListener("error", () => {
-    connectionState.value = "closed";
     source.close();
+    if (eventSource !== source) return;
+    connectionState.value = "closed";
     setTimeout(connect, RECONNECT_DELAY_MILLISECONDS);
   });
+}
+
+export function reconnect() {
+  eventSource?.close();
+  connect();
 }
 
 export function deviceRequestName(device) {
