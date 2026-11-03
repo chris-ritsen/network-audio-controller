@@ -7,12 +7,13 @@ RUST_TEST ?=
 LINT_FILES ?=
 BOUNDED := python3 scripts/run_bounded_tests.py
 
-.PHONY: help test-python-full test-webapp-full test-full test-rust test-browser lint audit audit-fix release release-status
+.PHONY: help test-python-full test-webapp-full test-full test-rust test-browser test-lab lint audit audit-fix release release-status
 help:
 	@echo "test TEST_CASES='tests/test_name.py::test_name'  Focused Python checks; no build or dependency sync"
 	@echo "test-webapp WEB_TESTS='tests/webapp/name.test.mjs'  Focused JavaScript checks"
 	@echo "test-rust RUST_TEST='test_name'                  Focused Rust checks"
 	@echo "test-browser WEB_TESTS='path/to/browser.test.mjs'  Explicit browser UI checks"
+	@echo "test-lab LAB=path/to/lab.toml [LAB_REPORT=report.xml]  Regression checks against lab devices"
 	@echo "lint LINT_FILES='path/to/changed.py'             Focused Python lint"
 	@echo "test-full / quality                           Explicit broad checks; not routine"
 	@echo "check-local                                   Shared local/CI checks with a report; five-minute limit"
@@ -77,6 +78,10 @@ test-webapp:
 test-rust:
 	@test -n "$(strip $(RUST_TEST))" || { echo "Set RUST_TEST to the affected Rust test name."; exit 2; }
 	$(BOUNDED) cargo test --locked --offline --manifest-path $(CORE_DIR)/Cargo.toml $(RUST_TEST)
+
+test-lab:
+	@test -n "$(strip $(LAB))" || { echo "Set LAB to a lab file naming the devices to test."; exit 2; }
+	NETAUDIO_LAB="$(LAB)" $(PYTHON) -m pytest -q -p no:cacheprovider tests/lab $(if $(LAB_REPORT),--junitxml="$(LAB_REPORT)")
 
 test-browser:
 	@test -n "$(strip $(WEB_TESTS))" || { echo "Set WEB_TESTS to the affected browser test files."; exit 2; }

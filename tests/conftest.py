@@ -1,8 +1,11 @@
+import os
 import pathlib
 
 import pytest
 
 FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
+
+collect_ignore = [] if os.environ.get("NETAUDIO_LAB") else ["lab"]
 
 
 @pytest.fixture(autouse=True)
