@@ -65,10 +65,6 @@ impl IntoResponse for ApiError {
             header::CACHE_CONTROL,
             header::HeaderValue::from_static("no-store"),
         );
-        response.headers_mut().insert(
-            header::ACCESS_CONTROL_ALLOW_ORIGIN,
-            header::HeaderValue::from_static("*"),
-        );
         response
     }
 }
