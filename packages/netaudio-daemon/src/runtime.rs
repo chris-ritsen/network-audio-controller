@@ -311,7 +311,8 @@ pub async fn run(
             assets,
             crate::http::web::serve,
         ))
-        .layer(middleware::from_fn(crate::http::versioning::select));
+        .layer(middleware::from_fn(crate::http::versioning::select))
+        .layer(middleware::from_fn(crate::http::origin::protect));
     let plain = Listener::bind(
         http_address(port, identity.is_some()),
         None,

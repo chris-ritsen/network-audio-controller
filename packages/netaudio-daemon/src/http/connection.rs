@@ -1,4 +1,4 @@
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, Uri};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use url::Url;
@@ -31,8 +31,24 @@ impl ConnectionContext {
     }
 
     pub fn base_url(&self, headers: &HeaderMap) -> Result<Url, super::ApiError> {
+        self.base_url_for(headers, None)
+    }
+
+    pub fn request_base_url(
+        &self,
+        headers: &HeaderMap,
+        uri: &Uri,
+    ) -> Result<Url, super::ApiError> {
+        self.base_url_for(headers, uri.authority().map(|authority| authority.as_str()))
+    }
+
+    fn base_url_for(
+        &self,
+        headers: &HeaderMap,
+        authority: Option<&str>,
+    ) -> Result<Url, super::ApiError> {
         let mut scheme = if self.encrypted { "https" } else { "http" };
-        let mut host = first_header(headers, "host");
+        let mut host = first_header(headers, "host").or(authority);
 
         if self.trusts_forwarding() {
             if let Some(forwarded) = first_header(headers, "x-forwarded-proto") {

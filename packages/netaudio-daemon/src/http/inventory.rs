@@ -76,10 +76,6 @@ async fn events(
         HeaderValue::from_static("text/event-stream"),
     );
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    headers.insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_static("*"),
-    );
     headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
     Ok(response)
 }
@@ -92,10 +88,6 @@ pub fn json_bytes(bytes: Bytes) -> Response {
         HeaderValue::from_static("application/json"),
     );
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    headers.insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_static("*"),
-    );
     response
 }
 
@@ -103,10 +95,6 @@ pub fn json_value(value: Arc<Value>) -> Response {
     let mut response = Json(value).into_response();
     let headers = response.headers_mut();
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    headers.insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_static("*"),
-    );
     response
 }
 

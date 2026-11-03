@@ -8,6 +8,7 @@ pub mod inventory;
 pub mod journal;
 pub mod managed;
 pub mod mcp;
+pub mod origin;
 pub mod presets;
 mod response;
 pub mod versioning;
