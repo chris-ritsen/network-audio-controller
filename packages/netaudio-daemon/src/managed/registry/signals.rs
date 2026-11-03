@@ -182,7 +182,7 @@ impl Registry {
         }
         let mut plans = BTreeMap::new();
         for (server, entry) in &state.servers {
-            if !entry.source.configuration.enabled() || entry.source.client.is_none() {
+            if !entry.source.enabled() || entry.source.client.is_none() {
                 continue;
             }
             let membership = entry.inventory.signal_membership();

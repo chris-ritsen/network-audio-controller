@@ -20,6 +20,22 @@ pub struct Snapshot {
 }
 
 pub enum Change {
+    Add {
+        name: String,
+        url: String,
+    },
+    Context {
+        server: String,
+        name: String,
+        domain_id: String,
+        domain_name: Option<String>,
+        select: bool,
+    },
+    Edit {
+        current_name: String,
+        name: String,
+        url: String,
+    },
     Login {
         name: String,
         url: String,
@@ -28,23 +44,11 @@ pub enum Change {
     Logout {
         name: String,
     },
-    Edit {
-        current_name: String,
-        name: String,
-        url: String,
-    },
     Remove {
         name: String,
     },
     Select {
         name: String,
-    },
-    Context {
-        server: String,
-        name: String,
-        domain_id: String,
-        domain_name: Option<String>,
-        select: bool,
     },
 }
 
@@ -94,39 +98,48 @@ impl Store {
             let settings = &snapshot.settings;
             let managed = table_mut(document.as_table_mut(), "ddm")?;
             match change {
-                Change::Login {
-                    name,
-                    url,
-                    credential,
-                } => {
+                Change::Add { name, url } => {
                     validate_name(&name)?;
                     super::client::endpoint(&url)?;
-                    netaudio_core::managed_api::validate_credential(&credential)
-                        .map_err(Error::Credential)?;
-                    if settings
-                        .servers
-                        .get(&name)
-                        .is_some_and(|server| server.url.as_deref() != Some(&url))
-                    {
-                        return Err(Error::Invalid(
-                            "That profile belongs to a different server; choose a new profile name",
-                        ));
+                    if settings.servers.contains_key(&name) {
+                        return Err(Error::Invalid("A profile with that name already exists"));
                     }
-                    let path = write_credential(directory, &name, &credential)?;
-                    credential_file = Some(path.clone());
-                    let servers = table_mut(managed, "servers")?;
-                    let server = table_mut(servers, &name)?;
-                    server.insert("url", value(url));
-                    server.insert("credential_file", value(path_text(&path)?));
-                    server.insert("enabled", value(true));
-                    server.remove("credential");
-                }
-                Change::Logout { name } => {
-                    require_server(settings, &name)?;
                     let server = table_mut(table_mut(managed, "servers")?, &name)?;
-                    server.remove("credential");
-                    server.remove("credential_file");
                     server.insert("enabled", value(false));
+                    server.insert("url", value(url));
+                }
+                Change::Context {
+                    server,
+                    name,
+                    domain_id,
+                    domain_name,
+                    select,
+                } => {
+                    require_server(settings, &server)?;
+                    validate_name(&name)?;
+                    if select && !settings.servers[&server].enabled() {
+                        return Err(Error::Invalid("The selected DDM server is not configured"));
+                    }
+                    if settings.contexts.get(&name).is_some_and(|context| {
+                        context.server != server || context.domain_id != domain_id
+                    }) {
+                        return Err(Error::Invalid("A context with that name already exists"));
+                    }
+                    let contexts = table_mut(managed, "contexts")?;
+                    let context = table_mut(contexts, &name)?;
+                    context.insert("server", value(server));
+                    context.insert("domain_id", value(domain_id));
+                    match domain_name {
+                        Some(name) => {
+                            context.insert("domain_name", value(name));
+                        }
+                        None => {
+                            context.remove("domain_name");
+                        }
+                    }
+                    if select {
+                        managed.insert("default_context", value(name));
+                    }
                 }
                 Change::Edit {
                     current_name,
@@ -164,6 +177,40 @@ impl Store {
                         (!changed_address).then_some(name.as_str()),
                     )?;
                 }
+                Change::Login {
+                    name,
+                    url,
+                    credential,
+                } => {
+                    validate_name(&name)?;
+                    super::client::endpoint(&url)?;
+                    netaudio_core::managed_api::validate_credential(&credential)
+                        .map_err(Error::Credential)?;
+                    if settings
+                        .servers
+                        .get(&name)
+                        .is_some_and(|server| server.url.as_deref() != Some(&url))
+                    {
+                        return Err(Error::Invalid(
+                            "That profile belongs to a different server; choose a new profile name",
+                        ));
+                    }
+                    let path = write_credential(directory, &name, &credential)?;
+                    credential_file = Some(path.clone());
+                    let servers = table_mut(managed, "servers")?;
+                    let server = table_mut(servers, &name)?;
+                    server.insert("url", value(url));
+                    server.insert("credential_file", value(path_text(&path)?));
+                    server.insert("enabled", value(true));
+                    server.remove("credential");
+                }
+                Change::Logout { name } => {
+                    require_server(settings, &name)?;
+                    let server = table_mut(table_mut(managed, "servers")?, &name)?;
+                    server.remove("credential");
+                    server.remove("credential_file");
+                    server.insert("enabled", value(false));
+                }
                 Change::Remove { name } => {
                     require_server(settings, &name)?;
                     table_mut(managed, "servers")?.remove(&name);
@@ -174,39 +221,6 @@ impl Store {
                         return Err(Error::Invalid("Select a saved DDM context"));
                     }
                     managed.insert("default_context", value(name));
-                }
-                Change::Context {
-                    server,
-                    name,
-                    domain_id,
-                    domain_name,
-                    select,
-                } => {
-                    require_server(settings, &server)?;
-                    validate_name(&name)?;
-                    if select && !settings.servers[&server].enabled() {
-                        return Err(Error::Invalid("The selected DDM server is not configured"));
-                    }
-                    if settings.contexts.get(&name).is_some_and(|context| {
-                        context.server != server || context.domain_id != domain_id
-                    }) {
-                        return Err(Error::Invalid("A context with that name already exists"));
-                    }
-                    let contexts = table_mut(managed, "contexts")?;
-                    let context = table_mut(contexts, &name)?;
-                    context.insert("server", value(server));
-                    context.insert("domain_id", value(domain_id));
-                    match domain_name {
-                        Some(name) => {
-                            context.insert("domain_name", value(name));
-                        }
-                        None => {
-                            context.remove("domain_name");
-                        }
-                    }
-                    if select {
-                        managed.insert("default_context", value(name));
-                    }
                 }
             }
             if let Some(path) = &credential_file {
