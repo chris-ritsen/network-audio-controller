@@ -20,7 +20,11 @@ impl PreparedManaged {
 
     pub async fn apply(self, registry: &Registry) -> Result<(Value, bool), CallError> {
         let output = registry
-            .execute_conditionally(self.plan.operation, Some(self.plan.conditions))
+            .execute_conditionally(
+                self.plan.operation,
+                Some(self.plan.conditions),
+                crate::managed::sessions::Caller::Owner,
+            )
             .await
             .map_err(|error| CallError::invalid(error.to_string()))?;
         let mut result = output.value;

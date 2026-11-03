@@ -3,10 +3,13 @@ use super::{
     client::Client,
     configuration::validate_name,
     registry::{Output, Registry},
+    sessions::{Caller, Login as SessionLogin, Session},
     store::{Change, Snapshot},
 };
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct Login {
@@ -164,42 +167,18 @@ impl Registry {
                 ));
             }
             let domain = domains[0];
-            let name = snapshot
-                .settings
-                .contexts
-                .iter()
-                .find(|(_, context)| context.server == server && context.domain_id == domain_id)
-                .map(|(name, _)| name.clone())
-                .unwrap_or_else(|| {
-                    let base: String = format!(
-                        "{server}-{}",
-                        domain["name"]
-                            .as_str()
-                            .filter(|name| !name.is_empty())
-                            .unwrap_or("domain")
-                    )
-                    .chars()
-                    .map(|character| {
-                        if character.is_ascii_alphanumeric() || "_.-".contains(character) {
-                            character
-                        } else {
-                            '-'
-                        }
-                    })
-                    .collect();
-                    let mut name = base.clone();
-                    let mut suffix = 2;
-                    while snapshot.settings.contexts.contains_key(&name) {
-                        name = format!("{base}-{suffix}");
-                        suffix += 1;
-                    }
-                    name
-                });
+            let name = context_name(
+                &snapshot,
+                &server,
+                &domain_id,
+                domain["name"].as_str(),
+            );
             Change::Context {
                 server,
                 name,
                 domain_id,
                 domain_name: domain["name"].as_str().map(str::to_owned),
+                select: true,
             }
         };
         self.save_configuration(snapshot, change).await?;
@@ -249,6 +228,206 @@ impl Registry {
                 .map_err(|_| Error::Conflict("Managed configuration is unavailable"))?,
         })
     }
+}
+
+impl Registry {
+    pub async fn authenticate(&self, request: Login) -> Result<(String, SessionLogin), Error> {
+        validate_name(&request.server)?;
+        let configuration = self
+            .source(&request.server)
+            .map_err(|_| Error::Forbidden("Ask the daemon's owner to add this DDM server"))?
+            .configuration
+            .clone();
+        let url = configuration
+            .url
+            .clone()
+            .ok_or(Error::Invalid("The DDM server has no URL"))?;
+        if request
+            .url
+            .as_deref()
+            .is_some_and(|value| !value.is_empty() && value != url)
+        {
+            return Err(Error::Invalid(
+                "That profile belongs to a different server; choose a new profile name",
+            ));
+        }
+        let certificate = configuration.trust_certificate_file.clone();
+        let pin = configuration.controller_certificate_sha256.clone();
+        let transport = tokio::task::spawn_blocking(move || {
+            Transport::new(certificate.as_deref(), pin.as_deref())
+        })
+        .await
+        .map_err(|_| Error::Persistence("Managed trust configuration worker failed"))??;
+        let credential = match request.authentication {
+            Authentication::Password { username, password } => {
+                Client::authenticate(&url, &username, &password, &transport, Limits::default())
+                    .await?
+            }
+            Authentication::ApiKey { api_key } => Credential::new(api_key)?,
+            Authentication::Saved => {
+                return Err(Error::Invalid(
+                    "Enter your DDM email address and password",
+                ));
+            }
+        };
+        let client = Client::new(&url, credential.clone(), transport.clone(), Limits::default())?;
+        let domains = visible_domains(&request.server, &client).await?;
+        Ok((
+            request.server,
+            SessionLogin {
+                client,
+                credential,
+                domains,
+                transport,
+            },
+        ))
+    }
+
+    pub(super) async fn refresh_session(&self, session: &Session) -> Result<(), Error> {
+        for server in session.servers() {
+            if let Some(mut login) = session.login(&server) {
+                login.domains = visible_domains(&server, &login.client).await?;
+                session.sign_in(server, login);
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) async fn select_session_context(
+        &self,
+        request: Selection,
+        snapshot: Snapshot,
+        session: &Arc<Session>,
+    ) -> Result<Output, Error> {
+        let (server, domain_id) =
+            if let Some(context) = request.context.filter(|context| !context.is_empty()) {
+                let saved = snapshot
+                    .settings
+                    .contexts
+                    .get(&context)
+                    .ok_or(Error::Invalid("Select a saved DDM context"))?;
+                (saved.server.clone(), saved.domain_id.clone())
+            } else {
+                (
+                    request
+                        .server
+                        .ok_or(Error::Invalid("Select a saved DDM server"))?,
+                    request.domain_id.ok_or(Error::Invalid(
+                        "Select a domain reported by the chosen server",
+                    ))?,
+                )
+            };
+        let login = session
+            .login(&server)
+            .ok_or(Error::Forbidden("Log in to this DDM server first"))?;
+        if !login.domains.contains(&domain_id) {
+            return Err(Error::Invalid(
+                "Select a domain reported by the chosen server",
+            ));
+        }
+        let domain_name = self
+            .domains(None)
+            .map_err(|_| Error::Conflict("Managed inventory is unavailable"))?
+            .iter()
+            .find(|domain| domain["ddm_server_profile"] == server && domain["id"] == domain_id)
+            .and_then(|domain| domain["name"].as_str().map(str::to_owned));
+        let name = context_name(&snapshot, &server, &domain_id, domain_name.as_deref());
+        if !snapshot.settings.contexts.contains_key(&name) {
+            self.save_configuration(
+                snapshot,
+                Change::Context {
+                    server,
+                    name: name.clone(),
+                    domain_id,
+                    domain_name,
+                    select: false,
+                },
+            )
+            .await?;
+        }
+        session.select(name);
+        Ok(Output {
+            status: 200,
+            value: self.connections_for(&Caller::Session(Arc::clone(session)))?,
+        })
+    }
+
+    pub fn connections_for(&self, caller: &Caller) -> Result<Value, Error> {
+        if caller.is_owner() {
+            return self
+                .connections()
+                .map_err(|_| Error::Conflict("Managed configuration is unavailable"));
+        }
+        let session = match caller {
+            Caller::Session(session) => Some(session),
+            _ => None,
+        };
+        let state = self.state_snapshot()?;
+        let settings = &state.settings;
+        Ok(json!({
+            "contexts": settings.contexts.iter()
+                .filter(|(_, context)| caller.sees_domain(Some(&context.server), Some(&context.domain_id)))
+                .map(|(name, context)| json!({"domain_id": context.domain_id, "domain_name": context.domain_name, "name": name, "server": context.server}))
+                .collect::<Vec<_>>(),
+            "default_context": session.and_then(|session| session.context()),
+            "servers": settings.servers.iter()
+                .map(|(name, server)| json!({"configured": session.is_some_and(|session| session.login(name).is_some()), "name": name, "url": server.url}))
+                .collect::<Vec<_>>(),
+        }))
+    }
+}
+
+async fn visible_domains(server: &str, client: &Client) -> Result<BTreeSet<String>, Error> {
+    let (response, inventory) = client.inventory().await?;
+    let mut verified = super::inventory::InventoryState::default();
+    if !verified.apply(response, inventory, std::time::Duration::from_secs(30))?
+        || !verified.fresh()
+    {
+        return Err(Error::Invalid(
+            "DDM did not grant access to its device inventory",
+        ));
+    }
+    Ok(verified
+        .domains(server, &BTreeMap::new())
+        .iter()
+        .filter_map(|domain| domain["id"].as_str().map(str::to_owned))
+        .collect())
+}
+
+fn context_name(
+    snapshot: &Snapshot,
+    server: &str,
+    domain_id: &str,
+    domain_name: Option<&str>,
+) -> String {
+    snapshot
+        .settings
+        .contexts
+        .iter()
+        .find(|(_, context)| context.server == server && context.domain_id == domain_id)
+        .map(|(name, _)| name.clone())
+        .unwrap_or_else(|| {
+            let base: String = format!(
+                "{server}-{}",
+                domain_name.filter(|name| !name.is_empty()).unwrap_or("domain")
+            )
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || "_.-".contains(character) {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+            let mut name = base.clone();
+            let mut suffix = 2;
+            while snapshot.settings.contexts.contains_key(&name) {
+                name = format!("{base}-{suffix}");
+                suffix += 1;
+            }
+            name
+        })
 }
 
 pub fn payload<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, Error> {

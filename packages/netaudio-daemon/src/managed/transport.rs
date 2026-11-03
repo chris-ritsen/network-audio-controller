@@ -37,6 +37,7 @@ pub enum Error {
     Busy,
     Persistence(&'static str),
     Conflict(&'static str),
+    Forbidden(&'static str),
     Session(String),
 }
 
@@ -48,6 +49,7 @@ impl fmt::Display for Error {
             | Self::Response(message)
             | Self::Persistence(message)
             | Self::Conflict(message)
+            | Self::Forbidden(message)
             | Self::Tls(message) => formatter.write_str(message),
             Self::Authentication => formatter.write_str("DDM rejected authentication"),
             Self::Status(status) => write!(formatter, "Managed service returned HTTP {status}"),

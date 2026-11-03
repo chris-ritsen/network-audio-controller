@@ -1,5 +1,6 @@
 mod authorization;
 mod body;
+pub mod caller;
 mod connection;
 pub mod devices;
 pub mod documentation;
@@ -12,6 +13,7 @@ pub mod origin;
 pub mod presets;
 mod response;
 pub mod versioning;
+mod visibility;
 pub mod web;
 
 pub use authorization::AuthorizationService;

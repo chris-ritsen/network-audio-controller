@@ -14,6 +14,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 pub struct DeviceRequest {
+    pub caller: super::sessions::Caller,
     pub record: Value,
     pub operation: ControlOperation,
     pub precondition: Option<Value>,
@@ -283,7 +284,10 @@ impl Registry {
         let server = text(&request.record, "ddm_server_profile")?;
         let identifier = text(&request.record, "ddm_device_id")?;
         let domain = text(&request.record, "ddm_domain_id")?;
-        let source = self.source(server).map_err(control_error)?;
+        let source = self
+            .source(server)
+            .and_then(|source| source.acting_as(server, &request.caller))
+            .map_err(control_error)?;
         let client = source.client.as_ref().ok_or_else(|| {
             ControlError::Unavailable("Log in to the selected DDM server first".into())
         })?;
@@ -618,5 +622,11 @@ fn text<'a>(record: &'a Value, field: &str) -> Result<&'a str, ControlError> {
 }
 
 fn control_error(error: Error) -> ControlError {
-    ControlError::Unavailable(error.to_string())
+    match error {
+        Error::Forbidden(message) => ControlError::Managed {
+            status: 403,
+            result: json!({"error": message}),
+        },
+        error => ControlError::Unavailable(error.to_string()),
+    }
 }

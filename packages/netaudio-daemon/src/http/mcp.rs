@@ -154,7 +154,9 @@ async fn handle(
             return None;
         }
 
-        let result = endpoint.service.call(method, parameters, &grant).await;
+        let result = crate::managed::sessions::Caller::Owner
+            .scope(endpoint.service.call(method, parameters, &grant))
+            .await;
         Some(match result {
             Ok(result) => {
                 let result = if modern {

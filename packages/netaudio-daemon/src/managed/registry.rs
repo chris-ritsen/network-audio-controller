@@ -1,5 +1,6 @@
 use super::operations::Operation;
 use super::resources::{ResourceWatch, Resources};
+use super::sessions::Caller;
 use super::{
     Credential, Error, Limits, Transport,
     client::Client,
@@ -59,6 +60,34 @@ pub(super) struct Source {
     resource_revision: [u8; 32],
     resource_paths: BTreeSet<PathBuf>,
     refresh: Semaphore,
+    identity: Arc<()>,
+}
+
+impl Source {
+    pub(super) fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.identity, &other.identity)
+    }
+
+    pub(super) fn acting_as(
+        self: &Arc<Self>,
+        server: &str,
+        caller: &Caller,
+    ) -> Result<Arc<Self>, Error> {
+        let Some(login) = caller.login(server)? else {
+            return Ok(Arc::clone(self));
+        };
+        Ok(Arc::new(Self {
+            configuration: self.configuration.clone(),
+            client: Some(login.client),
+            transport: Some(login.transport),
+            setup_error: None,
+            credential: Some(login.credential),
+            resource_revision: self.resource_revision,
+            resource_paths: BTreeSet::new(),
+            refresh: Semaphore::new(1),
+            identity: Arc::clone(&self.identity),
+        }))
+    }
 }
 
 pub struct Worker {
@@ -77,6 +106,7 @@ pub(super) enum Request {
         >,
     },
     Execute {
+        caller: Caller,
         operation: Operation,
         expected: Option<super::planning::Conditions>,
         response: oneshot::Sender<Result<Output, Error>>,
@@ -155,6 +185,10 @@ impl Registry {
             .connections())
     }
 
+    pub(super) fn state_snapshot(&self) -> Result<Snapshot, Error> {
+        Ok(self.lock()?.snapshot.clone())
+    }
+
     pub fn domains(&self, context: Option<&str>) -> Result<Vec<Value>> {
         let state = self
             .state
@@ -168,18 +202,20 @@ impl Registry {
             .collect())
     }
 
-    pub async fn execute(&self, operation: Operation) -> Result<Output, Error> {
-        self.execute_conditionally(operation, None).await
+    pub async fn execute(&self, operation: Operation, caller: Caller) -> Result<Output, Error> {
+        self.execute_conditionally(operation, None, caller).await
     }
 
     pub async fn execute_conditionally(
         &self,
         operation: Operation,
         expected: Option<super::planning::Conditions>,
+        caller: Caller,
     ) -> Result<Output, Error> {
         let (response, received) = oneshot::channel();
         self.requests
             .try_send(Request::Execute {
+                caller,
                 operation,
                 expected,
                 response,
@@ -199,7 +235,19 @@ impl Registry {
         &self,
         operation: Operation,
         expected: Option<super::planning::Conditions>,
+        caller: Caller,
     ) -> Result<Output, Error> {
+        let owner = caller.is_owner();
+        if !owner
+            && matches!(
+                operation,
+                Operation::Login(_) | Operation::Logout(_) | Operation::Profile(_)
+            )
+        {
+            return Err(Error::Forbidden(
+                "Only the daemon's owner can change saved DDM servers",
+            ));
+        }
         let _configuration = self.configuration_change.lock().await;
         let snapshot = self.load_configuration().await?;
         let inventory = if let Some(expected) = expected {
@@ -217,10 +265,22 @@ impl Registry {
             Operation::Login(request) => self.login(request, snapshot).await,
             Operation::Logout(name) => self.logout(name, snapshot).await,
             Operation::Profile(request) => self.edit_profile(request, snapshot).await,
-            Operation::Context(request) => self.select_context(request, snapshot, inventory).await,
-            Operation::Mutation(request) => self.mutate(request, inventory).await,
-            Operation::Enrollment(request) => self.enroll(request, inventory).await,
+            Operation::Context(request) => match &caller {
+                Caller::Owner => self.select_context(request, snapshot, inventory).await,
+                Caller::Session(session) => {
+                    self.select_session_context(request, snapshot, session)
+                        .await
+                }
+                Caller::Anonymous => Err(Error::Forbidden("Log in to DDM first")),
+            },
+            Operation::Mutation(request) => self.mutate(request, inventory, &caller).await,
+            Operation::Enrollment(request) => self.enroll(request, inventory, &caller).await,
             Operation::Refresh { context } => {
+                if let Caller::Session(session) = &caller {
+                    self.refresh_session(session).await?;
+                } else if !owner {
+                    return Err(Error::Forbidden("Log in to DDM first"));
+                }
                 if !self.enabled()? {
                     return Err(Error::Conflict("Managed API is not configured"));
                 }
@@ -238,7 +298,8 @@ impl Registry {
                 operation_name,
                 context,
             } => {
-                let (_, source) = self.selected_source(context.as_deref())?;
+                let (name, source) = self.caller_source(context.as_deref(), &caller)?;
+                let source = source.acting_as(&name, &caller)?;
                 let client = source.client.as_ref().ok_or_else(|| {
                     source.setup_error.clone().unwrap_or(Error::Conflict(
                         "Managed API is not configured for the selected context",
@@ -279,6 +340,32 @@ impl Registry {
         Ok((name.to_owned(), Arc::clone(&state.servers[name].source)))
     }
 
+    fn caller_source(
+        &self,
+        context: Option<&str>,
+        caller: &Caller,
+    ) -> Result<(String, Arc<Source>), Error> {
+        let Caller::Session(session) = caller else {
+            return self.selected_source(context);
+        };
+        let selected = context.map(str::to_owned).or_else(|| session.context());
+        let server = match selected {
+            Some(context) => {
+                let state = self.lock()?;
+                state
+                    .snapshot
+                    .settings
+                    .selected_server(Some(&context))?
+                    .0
+                    .to_owned()
+            }
+            None => session
+                .only_server()
+                .ok_or(Error::Invalid("No DDM context is selected"))?,
+        };
+        Ok((server.clone(), self.source(&server)?))
+    }
+
     pub(super) fn source(&self, name: &str) -> Result<Arc<Source>, Error> {
         let state = self.lock()?;
         state
@@ -297,7 +384,7 @@ impl Registry {
         let entry = state
             .servers
             .get(name)
-            .filter(|entry| Arc::ptr_eq(&entry.source, source))
+            .filter(|entry| entry.source.same(source))
             .ok_or(Error::Conflict(
                 "Managed configuration changed during the operation",
             ))?;
@@ -608,6 +695,7 @@ impl Registry {
                             resource_revision: entry.source.resource_revision,
                             resource_paths: entry.source.resource_paths.clone(),
                             refresh: Semaphore::new(1),
+                            identity: Arc::new(()),
                         });
                         entry.controller_status = super::status::observations::Cache::default();
                     }
@@ -664,8 +752,8 @@ impl Worker {
                             Request::Control { request, response } => {
                                 let _ = response.send(registry.control_owned(request).await);
                             }
-                            Request::Execute { operation, expected, response } => {
-                                let _ = response.send(registry.perform(operation, expected).await);
+                            Request::Execute { caller, operation, expected, response } => {
+                                let _ = response.send(registry.perform(operation, expected, caller).await);
                             }
                             Request::Prepare { operation, response } => {
                                 let _ = response.send(registry.prepare_owned(operation).await);
@@ -733,6 +821,7 @@ fn entries(
                 resource_revision: resources.revision,
                 resource_paths: resources.paths,
                 refresh: Semaphore::new(1),
+                identity: Arc::new(()),
             };
             let mut inventory = InventoryState::default();
             if configuration.enabled() {
@@ -783,7 +872,7 @@ fn current_entry<'a>(
     state
         .servers
         .get_mut(name)
-        .filter(|entry| Arc::ptr_eq(&entry.source, source))
+        .filter(|entry| entry.source.same(source))
         .ok_or(Error::Conflict(
             "Managed server configuration changed during the request",
         ))

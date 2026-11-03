@@ -1,5 +1,7 @@
 use super::ApiError;
+use super::visibility::{EventFilter, Filtered};
 use crate::events::EventOptions;
+use crate::managed::sessions::Caller;
 use crate::state::{AmbiguousDevice, ReadModel};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, RawQuery, State};
@@ -36,7 +38,13 @@ async fn devices(
     RawQuery(query): RawQuery,
 ) -> Result<Response, ApiError> {
     let context = query_context(query.as_deref());
-    Ok(json_bytes(model.devices_in_context(context.as_deref())?))
+    let caller = Caller::current();
+    if caller.is_owner() {
+        return Ok(json_bytes(model.devices_in_context(context.as_deref())?));
+    }
+    Ok(json_bytes(model.devices_where(context.as_deref(), |record| {
+        caller.sees_device(record)
+    })?))
 }
 
 async fn device(
@@ -57,6 +65,7 @@ async fn device(
                 ApiError::from(error)
             }
         })?
+        .filter(|device| Caller::current().sees_device(device))
         .ok_or_else(|| ApiError::not_found("device not found"))?;
 
     Ok(json_value(device))
@@ -68,7 +77,39 @@ async fn events(
 ) -> Result<Response, ApiError> {
     let options = EventOptions::from_query(query.as_deref().unwrap_or_default());
     let receiver = model.subscribe(options)?;
-    let body = Body::from_stream(receiver.map(|event| Ok::<_, Infallible>(event.encoded)));
+    let caller = Caller::current();
+    let body = if caller.is_owner() {
+        Body::from_stream(receiver.map(|event| Ok::<_, Infallible>(event.encoded)))
+    } else {
+        let ended: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+            match &caller {
+                Caller::Session(session) => {
+                    let mut changes = session.subscribe();
+                    let expires = session.expires();
+                    Box::pin(async move {
+                        tokio::select! {
+                            _ = changes.changed() => {}
+                            _ = tokio::time::sleep_until(expires) => {}
+                        }
+                    })
+                }
+                _ => Box::pin(std::future::pending()),
+            };
+        let mut filter = EventFilter::new(caller);
+        Body::from_stream(
+            receiver
+                .map(move |event| match filter.apply(&event) {
+                    Filtered::Keep => Some(Some(event.encoded)),
+                    Filtered::Replace(encoded) => Some(Some(encoded)),
+                    Filtered::Resynchronize => None,
+                    Filtered::Skip => Some(None),
+                })
+                .take_while(|item| std::future::ready(item.is_some()))
+                .filter_map(|item| std::future::ready(item.flatten()))
+                .take_until(ended)
+                .map(Ok::<_, Infallible>),
+        )
+    };
     let mut response = body.into_response();
     let headers = response.headers_mut();
     headers.insert(

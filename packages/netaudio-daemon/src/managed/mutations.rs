@@ -167,8 +167,11 @@ impl Registry {
         &self,
         request: Request,
         inventory: Option<Inventory>,
+        caller: &super::sessions::Caller,
     ) -> Result<Output, Error> {
-        let source = self.source(&request.server)?;
+        let source = self
+            .source(&request.server)?
+            .acting_as(&request.server, caller)?;
         let client = source.client.as_ref().ok_or_else(|| {
             source
                 .setup_error

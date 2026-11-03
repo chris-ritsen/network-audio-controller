@@ -261,6 +261,7 @@ pub async fn run(
         information,
         cancellation: cancellation.clone(),
     });
+    let sessions = Arc::new(crate::managed::sessions::Sessions::default());
     let mut router = inventory::router(Arc::clone(&model))
         .merge(crate::http::host_audio::router(host_audio.clone()))
         .merge(crate::http::host_audio::signal_router(signal))
@@ -268,6 +269,7 @@ pub async fn run(
         .merge(crate::http::managed::router(
             Arc::clone(&managed),
             Arc::clone(&model),
+            Arc::clone(&sessions),
         ))
         .merge(crate::http::documentation::router()?)
         .merge(crate::http::presets::router(
@@ -312,6 +314,10 @@ pub async fn run(
             crate::http::web::serve,
         ))
         .layer(middleware::from_fn(crate::http::versioning::select))
+        .layer(middleware::from_fn_with_state(
+            sessions,
+            crate::http::caller::identify,
+        ))
         .layer(middleware::from_fn(crate::http::origin::protect));
     let plain = Listener::bind(
         http_address(port, identity.is_some()),

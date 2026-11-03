@@ -14,6 +14,7 @@ mod device_topology;
 pub mod inventory;
 mod panels;
 pub mod registry;
+pub mod sessions;
 pub(crate) mod status;
 pub mod store;
 mod transport;
