@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -28,6 +29,7 @@ from netaudio.commands.virtual_process import (
     _process_exit_waiter,
     _request_process_stop,
 )
+from netaudio.network_path import active_ipv4_interfaces
 
 logger = logging.getLogger("netaudio")
 
@@ -367,6 +369,18 @@ def _validate_configuration(tx: int, rx: int, sample_rate: int, count: int) -> N
         raise typer.BadParameter("--sample-rate must be positive")
 
 
+def _interface_address(interface: Optional[str]) -> Optional[str]:
+    if not interface:
+        return None
+    try:
+        return str(ipaddress.IPv4Address(interface))
+    except ipaddress.AddressValueError:
+        addresses = active_ipv4_interfaces(interface)
+    if not addresses:
+        raise typer.BadParameter(f"interface {interface} has no IPv4 address")
+    return addresses[0].address
+
+
 def _start_background_claimed(
     *,
     name: str,
@@ -605,6 +619,7 @@ def _start_virtual(
     _validate_configuration(tx, rx, sample_rate, count)
     if (ownership_token is None) != (readiness_port is None):
         raise typer.BadParameter("internal startup options must be provided together")
+    interface = _interface_address(interface)
 
     if not foreground:
         _start_background(
