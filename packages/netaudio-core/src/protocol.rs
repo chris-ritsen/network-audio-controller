@@ -129,6 +129,7 @@ pub fn next_message_id(previous: u16) -> u16 {
     previous.wrapping_add(1).max(1)
 }
 
+#[allow(deprecated)]
 pub fn allocate_message_id() -> u16 {
     use std::sync::atomic::{AtomicU16, Ordering};
 
