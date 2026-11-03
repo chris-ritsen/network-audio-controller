@@ -49,8 +49,6 @@ def test_daemon_tls_json_reports_null_when_disabled(monkeypatch):
     assert _json(result) is None
 
 
-
-
 def test_virtual_status_json_when_not_running(monkeypatch):
     monkeypatch.setattr("netaudio.commands.virtual._read_process_record", lambda: None)
     result = runner.invoke(app, ["-j", "virtual", "status"])

@@ -8,8 +8,6 @@ from pathlib import Path
 from cryptography import x509
 
 
-
-
 @dataclass(frozen=True)
 class LoadedNamedCertificate:
     context: ssl.SSLContext
@@ -42,10 +40,6 @@ def load_named_certificate(certificate: Path, key: Path) -> LoadedNamedCertifica
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(certfile=str(certificate), keyfile=str(key))
     return LoadedNamedCertificate(context=context, names=names, not_after=leaf.not_valid_after_utc)
-
-
-
-
 
 
 def named_certificate_status(certificate: Path | None, key: Path | None) -> dict | None:

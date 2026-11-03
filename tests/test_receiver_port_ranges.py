@@ -20,10 +20,6 @@ def _fallback_member(name: str) -> bytes:
     return load_protocol_packet("receiver_port_ranges_fallback", name)
 
 
-
-
-
-
 def test_authentic_fallback_setup_uses_the_same_endpoint_descriptor_layout():
     request = _fallback_member("protocol_1102_opcode_0100_id_15.bin")
     transport_descriptor_pointer = int.from_bytes(request[24:26], "big")

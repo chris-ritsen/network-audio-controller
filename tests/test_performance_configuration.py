@@ -83,8 +83,6 @@ async def test_invalid_performance_query_preserves_cache_and_never_sends(propert
     assert device.specifications == []
 
 
-
-
 @pytest.mark.parametrize("protocol", [0, 0x2602, 0x280B, 0x2810, 0xFFFF])
 @pytest.mark.parametrize(
     "command,fields",
@@ -138,10 +136,6 @@ def test_unknown_revision_never_offers_performance_or_storage_controls(protocol)
     assert all("protocol_unsupported" in operation["reasons"] for operation in capabilities["operations"].values())
 
 
-
-
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("response", [None, b"invalid"])
 async def test_unverified_write_does_not_leave_old_affected_values_in_cache(response):
@@ -152,18 +146,6 @@ async def test_unverified_write_does_not_leave_old_affected_values_in_cache(resp
 
     assert result.effective_state_confirmation is None
     assert device.performance_settings == {0x0303: 4}
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 @pytest.mark.parametrize(
@@ -197,10 +179,6 @@ def test_native_storage_acknowledgement_never_claims_persistence(acknowledgement
 def test_native_performance_completion_rejects_invalid_evidence(evidence):
     with pytest.raises(core.NetaudioCoreError):
         core.performance_completion(evidence)
-
-
-
-
 
 
 @pytest.mark.asyncio

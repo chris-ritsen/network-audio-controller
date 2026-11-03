@@ -61,6 +61,7 @@ def _wait_for_startup(daemon_port, timeout=15):
 def _run_foreground(daemon_port):
     from netaudio.cli import state
     from netaudio.common.app_config import settings as app_settings
+
     effective_port = _effective_daemon_port(daemon_port)
     name = "netaudio-daemon.exe" if sys.platform == "win32" else "netaudio-daemon"
     executable = Path(__file__).resolve().parents[1] / "bin" / name

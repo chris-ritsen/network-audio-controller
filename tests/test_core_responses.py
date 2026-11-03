@@ -39,8 +39,6 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 GOLDEN = json.loads((FIXTURES_DIR / "core_responses_golden.json").read_text())
 
 
-
-
 def _channel_count_response(tx_count=260, rx_count=520):
     response = bytearray(16)
     response[0:2] = (0x27FF).to_bytes(2, "big")

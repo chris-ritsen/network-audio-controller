@@ -99,8 +99,16 @@ class CoreLibraryBuildHook(BuildHookInterface):
         if cargo is not None:
             features = sorted(set(audio_backends) | ({"video"} if video_requested == "1" else set()))
             command = [
-                cargo, "build", "--release", "--locked", "--manifest-path", str(Path(self.root) / "Cargo.toml"),
-                "--target-dir", str(self._target_dir()), "-p", "netaudio-core",
+                cargo,
+                "build",
+                "--release",
+                "--locked",
+                "--manifest-path",
+                str(Path(self.root) / "Cargo.toml"),
+                "--target-dir",
+                str(self._target_dir()),
+                "-p",
+                "netaudio-core",
             ]
             for binary in binaries:
                 command.extend(["-p", binary])

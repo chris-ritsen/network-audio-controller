@@ -22,7 +22,9 @@ def _format_arguments(sample_rate: int, sample_bits: int, slots: int) -> list[st
 
 @app.command(help="List compiled audio backends or the devices and formats of an explicit backend.")
 def devices(
-    backend: str | None = typer.Option(None, help="Audio backend such as jack, alsa, pulseaudio, pipewire, wasapi or coreaudio."),
+    backend: str | None = typer.Option(
+        None, help="Audio backend such as jack, alsa, pulseaudio, pipewire, wasapi or coreaudio."
+    ),
 ) -> NoReturn:
     arguments = ["audio-devices"]
 
@@ -32,7 +34,9 @@ def devices(
     _execute(arguments)
 
 
-@app.command(help="Run a foreground virtual audio endpoint with native audio devices or explicit WAVE adapters on Linux.")
+@app.command(
+    help="Run a foreground virtual audio endpoint with native audio devices or explicit WAVE adapters on Linux."
+)
 def serve(
     configuration: Path = typer.Option(
         ...,
@@ -40,7 +44,9 @@ def serve(
         dir_okay=False,
         help="JSON with endpoint identity, interface, clock_transport, state_directory, profile and audio. Native JACK exposes unconnected send_N and receive_N ports for the configured channels. Wave adapters use explicit input and output files.",
     ),
-    duration: int | None = typer.Option(None, min=1, help="Stop after this many seconds; otherwise run until interrupted."),
+    duration: int | None = typer.Option(
+        None, min=1, help="Stop after this many seconds; otherwise run until interrupted."
+    ),
 ) -> NoReturn:
     if sys.platform != "linux":
         typer.echo("Error: the virtual endpoint currently requires Linux.", err=True)
@@ -56,7 +62,9 @@ def serve(
 
 @app.command(help="Run the shared Linux PTP transport for independent local audio endpoints.")
 def clock_serve(
-    socket: Path = typer.Option(..., help="Absolute Unix socket path in a private directory owned by the endpoint user."),
+    socket: Path = typer.Option(
+        ..., help="Absolute Unix socket path in a private directory owned by the endpoint user."
+    ),
 ) -> NoReturn:
     if sys.platform != "linux":
         typer.echo("Error: the shared clock transport currently requires Linux.", err=True)
