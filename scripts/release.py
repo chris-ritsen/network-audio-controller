@@ -195,7 +195,7 @@ def workflow_state():
     return output(["gh", "api", f"repos/{GITHUB_REPOSITORY}/actions/workflows/{RELEASE_WORKFLOW}", "--jq", ".state"])
 
 
-def find_run(tag_name):
+def find_run(tag_name, commit):
     runs = json.loads(
         output(
             [
@@ -209,17 +209,25 @@ def find_run(tag_name):
                 "--limit",
                 "20",
                 "--json",
-                "databaseId,headBranch,url",
+                "databaseId,headBranch,headSha,url",
             ]
         )
     )
-    return next((workflow_run for workflow_run in runs if workflow_run["headBranch"] == tag_name), None)
+    return next(
+        (
+            workflow_run
+            for workflow_run in runs
+            if workflow_run["headBranch"] == tag_name and workflow_run["headSha"] == commit
+        ),
+        None,
+    )
 
 
 def wait_for_run(tag_name):
+    commit = output(["git", "rev-parse", f"{tag_name}^{{commit}}"])
     deadline = time.monotonic() + RUN_DISCOVERY_SECONDS
     dispatched = False
-    while not (workflow_run := find_run(tag_name)):
+    while not (workflow_run := find_run(tag_name, commit)):
         if time.monotonic() >= deadline:
             if dispatched:
                 raise ReleaseError(f"No {RELEASE_WORKFLOW} run started for {tag_name}.")
