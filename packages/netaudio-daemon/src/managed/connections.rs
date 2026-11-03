@@ -268,12 +268,13 @@ impl Registry {
         })
         .await
         .map_err(|_| Error::Persistence("Managed trust configuration worker failed"))??;
-        let credential = match request.authentication {
-            Authentication::Password { username, password } => {
+        let (credential, username) = match request.authentication {
+            Authentication::Password { username, password } => (
                 Client::authenticate(&url, &username, &password, &transport, Limits::default())
-                    .await?
-            }
-            Authentication::ApiKey { api_key } => Credential::new(api_key)?,
+                    .await?,
+                Some(username),
+            ),
+            Authentication::ApiKey { api_key } => (Credential::new(api_key)?, None),
             Authentication::Saved => {
                 return Err(Error::Invalid(
                     "Enter your DDM email address and password",
@@ -292,6 +293,7 @@ impl Registry {
                 credential,
                 domains,
                 transport,
+                username,
             },
         ))
     }
@@ -406,7 +408,10 @@ impl Registry {
                 .collect::<Vec<_>>(),
             "default_context": session.and_then(|session| session.context()),
             "servers": settings.servers.iter()
-                .map(|(name, server)| json!({"configured": session.is_some_and(|session| session.login(name).is_some()), "name": name, "url": server.url}))
+                .map(|(name, server)| {
+                    let login = session.and_then(|session| session.login(name));
+                    json!({"configured": login.is_some(), "name": name, "url": server.url, "username": login.and_then(|login| login.username)})
+                })
                 .collect::<Vec<_>>(),
         }))
     }
