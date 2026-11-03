@@ -154,7 +154,8 @@ impl Audit {
             "managed_inventory_readback"
         }
         .into();
-        self.request.final_operation_state = result["state"].as_str().map(str::to_owned);
+        self.request.final_operation_state =
+            Some(result["state"].as_str().unwrap_or("unconfirmed").to_owned());
         self.request.effective_values = Some(result.clone());
         journal.operation(self.request).await.map_err(|_| Error::Persistence("Managed operation result could not be recorded; check current state before retrying"))?;
         Ok(())
