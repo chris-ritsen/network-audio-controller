@@ -61,8 +61,6 @@ def test_device_preset_save_projects_observed_performance_values():
     }
 
 
-
-
 @pytest.mark.parametrize(
     "operation,values,expected",
     [

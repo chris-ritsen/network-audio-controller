@@ -154,8 +154,6 @@ def test_virtual_interface_publication_round_trips_the_running_interface():
     assert status["reboot_required"] is False
 
 
-
-
 @pytest.mark.parametrize("command", ["dante_model", "make_model"])
 @pytest.mark.parametrize("damage", [None, "revision", "reserved", "truncated", "extra_bytes"])
 def test_virtual_identity_requests_require_a_complete_supported_envelope(command, damage):
@@ -356,8 +354,6 @@ def test_virtual_transmitter_names_reject_unrepresentable_records(names):
 
     with pytest.raises(core.NetaudioCoreError):
         device._handle_tx_channel_names(7, b"")
-
-
 
 
 @pytest.mark.parametrize("direction", ["tx", "rx"])
@@ -719,8 +715,6 @@ def test_virtual_device_reports_configured_encoding_capabilities():
         "available_values": [20, 24, 32],
         "flags": None,
     }
-
-
 
 
 @pytest.mark.parametrize(

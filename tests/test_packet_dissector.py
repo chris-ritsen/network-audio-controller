@@ -222,10 +222,6 @@ def test_interface_status_packet_12362182_dissects_link_speed_from_protocol_fact
     assert spans_by_name["link_speed_mbps"].detail == "100 Mbps"
 
 
-
-
-
-
 def test_device_settings_preserves_unsupported_property_placeholders():
     properties = [(0x8204, 24), (0x0000, 0x8218), (0x8301, 28)]
     body = bytes([0x03, len(properties)])
@@ -256,8 +252,6 @@ def test_device_settings_request_has_no_core_parser():
 
     assert result.core_kind is None
     assert result.header_summary == "protocol=ARC  18B"
-
-
 
 
 def test_disproved_facts_never_reach_runtime_labeling(tmp_path, monkeypatch):

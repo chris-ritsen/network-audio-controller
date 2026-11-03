@@ -135,8 +135,6 @@ def test_issue_59_partial_receiver_flow_records_and_result_survive_ffi():
             core.parse_response("modern_arc_receiver_flow_status_page", bytes(complete))
 
 
-
-
 @pytest.mark.asyncio
 async def test_partial_flow_readback_is_unavailable_for_effective_state_decisions(monkeypatch):
     from netaudio.dante import flows

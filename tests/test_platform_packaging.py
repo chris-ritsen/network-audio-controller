@@ -44,10 +44,6 @@ def _load_build_hook(monkeypatch):
     return module
 
 
-
-
-
-
 def test_install_built_library_copies_into_the_python_package(monkeypatch, tmp_path):
     module = _load_build_hook(monkeypatch)
     built_library = tmp_path / "libnetaudio_core.so"
@@ -142,8 +138,6 @@ def _pe(machine: int = 0x8664) -> bytes:
     return bytes(data)
 
 
-
-
 def test_wheel_policy_rejects_glibc_newer_than_claimed_floor(tmp_path):
     wheel = _write_test_wheel(tmp_path, native_data=_elf(glibc=b"GLIBC_2.29"))
 
@@ -158,8 +152,6 @@ def test_wheel_policy_rejects_foreign_native_artifacts(tmp_path):
         _load_artifact_verifier().verify_wheel(wheel, "linux", "x86_64")
 
 
-
-
 def test_wheel_policy_rejects_macos_binary_newer_than_tag(tmp_path):
     wheel = _write_test_wheel(
         tmp_path,
@@ -170,8 +162,6 @@ def test_wheel_policy_rejects_macos_binary_newer_than_tag(tmp_path):
 
     with pytest.raises(RuntimeError, match="above the 11.0 wheel tag"):
         _load_artifact_verifier().verify_wheel(wheel, "macos", "arm64")
-
-
 
 
 def test_build_hook_reads_branch_and_worktree_revisions(monkeypatch, tmp_path):

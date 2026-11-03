@@ -43,10 +43,6 @@ def receiver_pages(protocol):
     return first, bytes(terminal), 16, list(range(1, 17))
 
 
-
-
-
-
 @pytest.mark.parametrize("protocol", [0x2729, 0x2809])
 def test_receiver_inventory_bounds_incomplete_queries(protocol):
     first, terminal, _, _ = receiver_pages(protocol)

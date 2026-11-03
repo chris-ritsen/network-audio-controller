@@ -383,8 +383,6 @@ async def test_subscription_writes_never_guess_an_unknown_revision(version, acti
     device.execute.assert_not_awaited()
 
 
-
-
 def test_native_subscription_plan_rejects_unknown_revision():
     with pytest.raises(RuntimeError):
         core.plan_subscription_commands(
