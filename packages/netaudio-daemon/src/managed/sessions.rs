@@ -86,6 +86,7 @@ pub struct Login {
     pub credential: Credential,
     pub domains: BTreeSet<String>,
     pub transport: Transport,
+    pub username: Option<String>,
 }
 
 pub struct Session {
