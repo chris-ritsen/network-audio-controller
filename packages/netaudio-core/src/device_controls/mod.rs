@@ -19,6 +19,7 @@ pub const SERIAL_BAUD_RATES: &[u32] =
 pub const BANDWIDTH_MAXIMUM: u32 = 700;
 pub const BLUETOOTH_NAME_LIMIT: usize = 32;
 
+#[allow(deprecated)]
 fn next_panel_sequence(counter: &AtomicU32) -> u32 {
     let previous = counter
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {

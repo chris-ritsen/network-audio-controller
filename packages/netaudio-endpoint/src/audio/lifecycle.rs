@@ -96,6 +96,7 @@ pub(super) struct Lifecycle {
 }
 
 impl Lifecycle {
+    #[allow(deprecated)]
     pub fn report(&self, fault: Fault) {
         let _ = self.current.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             if current != 0 && !Fault::decode(current).recoverable() {

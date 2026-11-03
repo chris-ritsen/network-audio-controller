@@ -339,6 +339,7 @@ impl Capture {
         );
     }
 
+    #[allow(deprecated)]
     pub fn resume(&mut self) -> Result<()> {
         self.factory.state.check()?;
 
