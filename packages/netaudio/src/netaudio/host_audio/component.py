@@ -64,6 +64,7 @@ class AudioComponent:
             self.installed = False
             self.reason = problem
             return
+        self.installed = True
         self._loop = asyncio.get_running_loop()
         self._running = True
         await self.connect()
