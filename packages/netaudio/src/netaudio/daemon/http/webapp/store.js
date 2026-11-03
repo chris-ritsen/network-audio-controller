@@ -348,10 +348,15 @@ export function receiveEvent(payload) {
 }
 
 let eventSource = null;
+let reconnectTimer = null;
 
 export function connect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  eventSource?.close();
   const source = new EventSource(EVENT_STREAM_PATH);
   eventSource = source;
+  connectionState.value = "connecting";
 
   source.addEventListener("open", () => {
     connectionState.value = "open";
@@ -372,12 +377,11 @@ export function connect() {
     source.close();
     if (eventSource !== source) return;
     connectionState.value = "closed";
-    setTimeout(connect, RECONNECT_DELAY_MILLISECONDS);
+    reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MILLISECONDS);
   });
 }
 
 export function reconnect() {
-  eventSource?.close();
   connect();
 }
 
