@@ -1,4 +1,4 @@
-use super::{Result, invalid};
+use super::{invalid, Result};
 use serde::{Deserialize, Serialize};
 
 const MAXIMUM_FRAME_BYTES: usize = 65_536;

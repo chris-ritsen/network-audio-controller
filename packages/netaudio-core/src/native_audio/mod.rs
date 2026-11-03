@@ -178,10 +178,17 @@ impl SampleTime {
     }
 
     pub fn advance(self, frames: u64, sample_rate: u32) -> Result<Self, Error> {
-        let ticks = self.ticks(sample_rate)?.checked_add(frames).ok_or(Error::TimestampOverflow)?;
+        let ticks = self
+            .ticks(sample_rate)?
+            .checked_add(frames)
+            .ok_or(Error::TimestampOverflow)?;
         let seconds =
             u32::try_from(ticks / u64::from(sample_rate)).map_err(|_| Error::TimestampOverflow)?;
-        Self::new(seconds, (ticks % u64::from(sample_rate)) as u32, sample_rate)
+        Self::new(
+            seconds,
+            (ticks % u64::from(sample_rate)) as u32,
+            sample_rate,
+        )
     }
 }
 
@@ -278,15 +285,12 @@ impl<'a> Packet<'a> {
     }
 
     pub fn samples(&self) -> impl ExactSizeIterator<Item = i32> + '_ {
-        self.payload.chunks_exact(self.format.sample_width().bytes()).map(|bytes| {
-            match self.format.sample_width() {
+        self.payload
+            .chunks_exact(self.format.sample_width().bytes())
+            .map(|bytes| match self.format.sample_width() {
                 SampleWidth::Signed16 => i32::from(i16::from_be_bytes([bytes[0], bytes[1]])),
                 SampleWidth::Signed24 => i32::from_be_bytes([
-                    if bytes[0] & 0x80 == 0 {
-                        0
-                    } else {
-                        0xff
-                    },
+                    if bytes[0] & 0x80 == 0 { 0 } else { 0xff },
                     bytes[0],
                     bytes[1],
                     bytes[2],
@@ -294,12 +298,12 @@ impl<'a> Packet<'a> {
                 SampleWidth::Signed32 => {
                     i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
                 }
-            }
-        })
+            })
     }
 
     pub fn next_time(&self) -> Result<SampleTime, Error> {
-        self.time.advance(self.frame_count() as u64, self.format.sample_rate())
+        self.time
+            .advance(self.frame_count() as u64, self.format.sample_rate())
     }
 }
 
@@ -322,7 +326,10 @@ pub fn encode(format: Format, time: SampleTime, samples: &[i32]) -> Result<Vec<u
         return Err(Error::PayloadTooLarge);
     }
 
-    if samples.iter().any(|sample| !format.sample_width().contains(*sample)) {
+    if samples
+        .iter()
+        .any(|sample| !format.sample_width().contains(*sample))
+    {
         return Err(Error::SampleOutOfRange);
     }
 

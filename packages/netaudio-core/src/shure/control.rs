@@ -1,6 +1,6 @@
-use super::{Device, Protocol, Report, Result, command, indexed, invalid};
+use super::{command, indexed, invalid, Device, Protocol, Report, Result};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::net::Ipv4Addr;
 
 #[derive(Clone, Debug, Serialize)]

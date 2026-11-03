@@ -476,8 +476,10 @@ impl StatusQuery {
         let operation = word(query, 2)?;
         let supported_revision = matches!(
             (revision, operation),
-            (QUERY_REVISION | LEGACY_QUERY_REVISION | IDENTITY_QUERY_REVISION, VERSION_QUERY)
-                | (QUERY_REVISION | LEGACY_QUERY_REVISION, INTERFACE_QUERY)
+            (
+                QUERY_REVISION | LEGACY_QUERY_REVISION | IDENTITY_QUERY_REVISION,
+                VERSION_QUERY
+            ) | (QUERY_REVISION | LEGACY_QUERY_REVISION, INTERFACE_QUERY)
                 | (QUERY_REVISION | LEGACY_QUERY_REVISION, CLOCK_QUERY)
                 | (QUERY_REVISION | LEGACY_QUERY_REVISION, STATISTICS_QUERY)
         );

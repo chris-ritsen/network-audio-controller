@@ -5,7 +5,7 @@ use std::ops::Range;
 use serde::Serialize;
 
 use crate::bytes::{read_u16, read_u32};
-use crate::protocol::{RESPONSE_HEADER_SIZE, response_envelope};
+use crate::protocol::{response_envelope, RESPONSE_HEADER_SIZE};
 
 use super::Error;
 

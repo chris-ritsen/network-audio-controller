@@ -7,7 +7,7 @@ use crate::commands::{
 };
 use crate::protocol::{OPCODE_CHANNEL_COUNT, RESULT_CODE_MORE_PAGES, RESULT_CODE_SUCCESS};
 
-use super::{Error, discovery::H264_SUBTYPE};
+use super::{discovery::H264_SUBTYPE, Error};
 
 const MINIMUM_REVISION: u16 = 0x2802;
 const MAXIMUM_REVISION: u16 = 0x280f;

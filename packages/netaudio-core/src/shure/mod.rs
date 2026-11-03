@@ -2,9 +2,9 @@ mod control;
 mod device;
 mod wire;
 
-pub use control::{Change, described, setting_key};
+pub use control::{described, setting_key, Change};
 pub use device::Device;
-pub use wire::{Decoder, Message, Protocol, Report, command, indexed, meter_value, sampled};
+pub use wire::{command, indexed, meter_value, sampled, Decoder, Message, Protocol, Report};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error(pub String);

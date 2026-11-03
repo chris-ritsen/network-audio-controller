@@ -695,7 +695,11 @@ impl Publication {
             return Err(NetaudioError::PacketTooLarge);
         }
 
-        let process = if protocol_id == 0xffff { self.process } else { 0 };
+        let process = if protocol_id == 0xffff {
+            self.process
+        } else {
+            0
+        };
         let mut body = Vec::with_capacity(26 + content.len());
         body.extend_from_slice(&process.to_be_bytes());
         body.extend_from_slice(&self.device_id());

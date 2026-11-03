@@ -7,9 +7,9 @@ pub mod observation;
 mod presentation;
 
 pub use build::{HostSnapshot, Input, JackPort, JackView, PulseEntry, PulseView, WirelessLink};
-pub use levels::{Level, Levels, MeterTargets, State, wireless_text};
+pub use levels::{wireless_text, Level, Levels, MeterTargets, State};
 pub use names::{fold, natural, plain_label};
-pub use presentation::{Path, joined, stage_name};
+pub use presentation::{joined, stage_name, Path};
 
 use super::cards::Channel;
 use super::snapshot::Direction as PortDirection;
