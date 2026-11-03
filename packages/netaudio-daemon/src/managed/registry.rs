@@ -1,6 +1,6 @@
 use super::operations::Operation;
 use super::resources::{ResourceWatch, Resources};
-use super::sessions::Caller;
+use super::sessions::{Caller, Session};
 use super::{
     Credential, Error, Limits, Transport,
     client::Client,
@@ -15,12 +15,13 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::{Notify, Semaphore, mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+mod lenders;
 mod signals;
 mod status;
 
@@ -36,12 +37,13 @@ pub struct Registry {
 }
 
 struct State {
-    snapshot: Snapshot,
-    servers: BTreeMap<String, Entry>,
-    status: Value,
-    domains: Vec<Value>,
-    deadline: Option<Instant>,
     configuration_error: Option<String>,
+    deadline: Option<Instant>,
+    domains: Vec<Value>,
+    lenders: BTreeMap<String, Vec<Weak<Session>>>,
+    servers: BTreeMap<String, Entry>,
+    snapshot: Snapshot,
+    status: Value,
 }
 
 struct Entry {
@@ -52,20 +54,25 @@ struct Entry {
 }
 
 pub(super) struct Source {
-    pub configuration: Server,
     pub client: Option<Client>,
-    pub transport: Option<Transport>,
-    pub setup_error: Option<Error>,
+    pub configuration: Server,
     pub credential: Option<Credential>,
-    resource_revision: [u8; 32],
-    resource_paths: BTreeSet<PathBuf>,
-    refresh: Semaphore,
     identity: Arc<()>,
+    lender: Option<Weak<Session>>,
+    refresh: Semaphore,
+    resource_paths: BTreeSet<PathBuf>,
+    resource_revision: [u8; 32],
+    pub setup_error: Option<Error>,
+    pub transport: Option<Transport>,
 }
 
 impl Source {
     pub(super) fn same(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.identity, &other.identity)
+    }
+
+    pub(super) fn enabled(&self) -> bool {
+        self.configuration.enabled() || (self.lender.is_some() && self.client.is_some())
     }
 
     pub(super) fn acting_as(
@@ -74,18 +81,27 @@ impl Source {
         caller: &Caller,
     ) -> Result<Arc<Self>, Error> {
         let Some(login) = caller.login(server)? else {
+            if self.lender.is_some() {
+                return Err(Error::Forbidden(
+                    "Log in to this DDM server on the daemon's machine first",
+                ));
+            }
             return Ok(Arc::clone(self));
         };
+        if !login.client.serves(self.configuration.url.as_deref()) {
+            return Err(Error::Forbidden("Log in to this DDM server first"));
+        }
         Ok(Arc::new(Self {
-            configuration: self.configuration.clone(),
             client: Some(login.client),
-            transport: Some(login.transport),
-            setup_error: None,
+            configuration: self.configuration.clone(),
             credential: Some(login.credential),
-            resource_revision: self.resource_revision,
-            resource_paths: BTreeSet::new(),
-            refresh: Semaphore::new(1),
             identity: Arc::clone(&self.identity),
+            lender: None,
+            refresh: Semaphore::new(1),
+            resource_paths: BTreeSet::new(),
+            resource_revision: self.resource_revision,
+            setup_error: None,
+            transport: Some(login.transport),
         }))
     }
 }
@@ -144,12 +160,13 @@ impl Registry {
         let (requests, receiver) = mpsc::channel(32);
         let registry = Arc::new(Self {
             state: Mutex::new(State {
-                snapshot,
-                servers,
-                status: Value::Null,
-                domains: Vec::new(),
-                deadline: None,
                 configuration_error: None,
+                deadline: None,
+                domains: Vec::new(),
+                lenders: BTreeMap::new(),
+                servers,
+                snapshot,
+                status: Value::Null,
             }),
             store,
             configuration_change: Arc::new(tokio::sync::Mutex::new(())),
@@ -318,10 +335,7 @@ impl Registry {
 
     fn enabled(&self) -> Result<bool, Error> {
         let state = self.lock()?;
-        Ok(state
-            .servers
-            .values()
-            .any(|entry| entry.source.configuration.enabled()))
+        Ok(state.servers.values().any(|entry| entry.source.enabled()))
     }
 
     pub(super) fn selected_source(
@@ -329,11 +343,7 @@ impl Registry {
         context: Option<&str>,
     ) -> Result<(String, Arc<Source>), Error> {
         let state = self.lock()?;
-        if !state
-            .servers
-            .values()
-            .any(|entry| entry.source.configuration.enabled())
-        {
+        if !state.servers.values().any(|entry| entry.source.enabled()) {
             return Err(Error::Conflict("Managed API is not configured"));
         }
         let (name, _) = state.snapshot.settings.selected_server(context)?;
@@ -416,7 +426,7 @@ impl Registry {
         let replacement = tokio::task::spawn_blocking(move || entries(&settings, resources))
             .await
             .map_err(|_| Error::Persistence("Managed configuration worker failed"))?;
-        {
+        let borrowed = {
             let mut state = self.lock()?;
             let reusable = state.configuration_error.take().is_none();
             let previous = std::mem::take(&mut state.servers);
@@ -431,11 +441,15 @@ impl Registry {
                 }
             }
             state.snapshot = snapshot;
+            let servers = state.servers.keys().cloned().collect();
+            let borrowed = self.reassign_locked(&mut state, servers, None)?;
             self.publish_locked(&mut state)
                 .map_err(|_| Error::Conflict("Managed inventory could not be published"))?;
-        }
+            borrowed
+        };
         self.changed.notify_one();
         self.signal_changes.send_replace(());
+        self.refresh_borrowed(borrowed).await;
         Ok(())
     }
 
@@ -448,7 +462,7 @@ impl Registry {
             .lock()?
             .servers
             .iter()
-            .filter(|(_, entry)| entry.source.configuration.enabled())
+            .filter(|(_, entry)| entry.source.enabled())
             .map(|(name, _)| name.clone())
             .collect();
         if names.is_empty() {
@@ -472,7 +486,7 @@ impl Registry {
 
     pub(super) async fn refresh_server(&self, name: &str) -> Result<bool, Error> {
         let source = self.source(name)?;
-        if !source.configuration.enabled() {
+        if !source.enabled() {
             return Ok(false);
         }
         let permit = source.refresh.try_acquire().map_err(|_| Error::Busy)?;
@@ -541,10 +555,12 @@ impl Registry {
             .servers
             .iter()
             .map(|(name, entry)| {
-                let mut status =
-                    entry
-                        .inventory
-                        .status(name, &entry.source.configuration, contexts);
+                let mut status = entry.inventory.status(
+                    name,
+                    &entry.source.configuration,
+                    entry.source.enabled(),
+                    contexts,
+                );
                 status["refreshing"] = json!(entry.source.refresh.available_permits() == 0);
                 status["signal_sessions"] = json!(entry.signals);
                 (name.clone(), status)
@@ -597,6 +613,12 @@ impl Registry {
                 [
                     entry.inventory.deadline_after(now),
                     entry.controller_status.deadline_after(now),
+                    entry
+                        .source
+                        .lender
+                        .as_ref()
+                        .and_then(Weak::upgrade)
+                        .map(|session| session.deadline()),
                 ]
             })
             .flatten()
@@ -687,15 +709,16 @@ impl Registry {
                     for entry in state.servers.values_mut() {
                         entry.inventory.fail(&error);
                         entry.source = Arc::new(Source {
-                            configuration: entry.source.configuration.clone(),
                             client: None,
-                            transport: None,
+                            configuration: entry.source.configuration.clone(),
                             credential: None,
-                            setup_error: Some(error.clone()),
-                            resource_revision: entry.source.resource_revision,
-                            resource_paths: entry.source.resource_paths.clone(),
-                            refresh: Semaphore::new(1),
                             identity: Arc::new(()),
+                            lender: None,
+                            refresh: Semaphore::new(1),
+                            resource_paths: entry.source.resource_paths.clone(),
+                            resource_revision: entry.source.resource_revision,
+                            setup_error: Some(error.clone()),
+                            transport: None,
                         });
                         entry.controller_status = super::status::observations::Cache::default();
                     }
@@ -733,7 +756,14 @@ impl Worker {
             tokio::select! {
                 biased;
                 _ = lifetime.cancelled() => break,
-                _ = wait_deadline(deadline) => self.registry.publish()?,
+                _ = wait_deadline(deadline) => {
+                    let borrowed = self.registry.reassign_expired()?;
+                    self.registry.publish()?;
+                    if !borrowed.is_empty() {
+                        let registry = Arc::clone(&self.registry);
+                        tasks.spawn(async move { registry.refresh_borrowed(borrowed).await });
+                    }
+                }
                 _ = observer.changed.notified() => {
                     self.registry.reload_resources().await?;
                     if observer.update(self.registry.resource_paths()?)? { self.registry.reload_resources().await?; }
@@ -813,15 +843,16 @@ fn entries(
                 .remove(name)
                 .expect("resources were loaded for each configured server");
             let mut source = Source {
-                configuration: configuration.clone(),
                 client: None,
-                transport: None,
-                setup_error: None,
+                configuration: configuration.clone(),
                 credential: None,
-                resource_revision: resources.revision,
-                resource_paths: resources.paths,
-                refresh: Semaphore::new(1),
                 identity: Arc::new(()),
+                lender: None,
+                refresh: Semaphore::new(1),
+                resource_paths: resources.paths,
+                resource_revision: resources.revision,
+                setup_error: None,
+                transport: None,
             };
             let mut inventory = InventoryState::default();
             if configuration.enabled() {

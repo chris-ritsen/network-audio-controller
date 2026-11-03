@@ -4,6 +4,7 @@ use rand::RngCore;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::watch;
@@ -88,10 +89,11 @@ pub struct Login {
 }
 
 pub struct Session {
+    changes: watch::Sender<u64>,
+    ended: AtomicBool,
     expires: Instant,
     last_used: Mutex<Instant>,
     state: Mutex<SessionState>,
-    changes: watch::Sender<u64>,
 }
 
 #[derive(Default)]
@@ -103,19 +105,32 @@ struct SessionState {
 impl Session {
     fn new(now: Instant) -> Self {
         Self {
+            changes: watch::channel(0).0,
+            ended: AtomicBool::new(false),
             expires: now + ABSOLUTE_LIFETIME,
             last_used: Mutex::new(now),
             state: Mutex::new(SessionState::default()),
-            changes: watch::channel(0).0,
         }
     }
 
     fn live(&self, now: Instant) -> bool {
-        now < self.expires
-            && self
-                .last_used
-                .lock()
-                .is_ok_and(|used| now < *used + IDLE_LIFETIME)
+        !self.ended.load(Ordering::Acquire) && now < self.deadline()
+    }
+
+    fn finish(&self) {
+        self.ended.store(true, Ordering::Release);
+        self.changed();
+    }
+
+    pub fn active(&self) -> bool {
+        self.live(Instant::now())
+    }
+
+    pub fn deadline(&self) -> Instant {
+        self.last_used
+            .lock()
+            .map(|used| (*used + IDLE_LIFETIME).min(self.expires))
+            .unwrap_or(self.expires)
     }
 
     pub fn expires(&self) -> Instant {
@@ -191,7 +206,9 @@ impl Sessions {
         let key = digest(token);
         let session = entries.get(&key)?;
         if !session.live(now) {
-            entries.remove(&key);
+            if let Some(session) = entries.remove(&key) {
+                session.finish();
+            }
             return None;
         }
         if let Ok(mut used) = session.last_used.lock() {
@@ -212,7 +229,13 @@ impl Sessions {
             .entries
             .lock()
             .map_err(|_| Error::Conflict("Session store is unavailable"))?;
-        entries.retain(|_, session| session.live(now));
+        entries.retain(|_, session| {
+            let live = session.live(now);
+            if !live {
+                session.finish();
+            }
+            live
+        });
         if entries.len() >= MAXIMUM_SESSIONS {
             let oldest = entries
                 .iter()
@@ -224,8 +247,8 @@ impl Sessions {
                         .unwrap_or(session.expires)
                 })
                 .map(|(key, _)| key.clone());
-            if let Some(oldest) = oldest {
-                entries.remove(&oldest);
+            if let Some(session) = oldest.and_then(|oldest| entries.remove(&oldest)) {
+                session.finish();
             }
         }
         entries.insert(digest(&token), Arc::clone(&session));
@@ -236,7 +259,7 @@ impl Sessions {
         if let Ok(mut entries) = self.entries.lock() {
             entries.retain(|_, entry| !Arc::ptr_eq(entry, session));
         }
-        session.changed();
+        session.finish();
     }
 }
 

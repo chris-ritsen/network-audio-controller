@@ -233,26 +233,36 @@ impl Registry {
 impl Registry {
     pub async fn authenticate(&self, request: Login) -> Result<(String, SessionLogin), Error> {
         validate_name(&request.server)?;
-        let configuration = self
-            .source(&request.server)
-            .map_err(|_| Error::Forbidden("Ask the daemon's owner to add this DDM server"))?
-            .configuration
-            .clone();
-        let url = configuration
-            .url
-            .clone()
-            .ok_or(Error::Invalid("The DDM server has no URL"))?;
-        if request
-            .url
-            .as_deref()
-            .is_some_and(|value| !value.is_empty() && value != url)
-        {
-            return Err(Error::Invalid(
-                "That profile belongs to a different server; choose a new profile name",
-            ));
-        }
-        let certificate = configuration.trust_certificate_file.clone();
-        let pin = configuration.controller_certificate_sha256.clone();
+        let requested = request.url.as_deref().filter(|url| !url.is_empty());
+        let (url, certificate, pin, saved) = match self.source(&request.server) {
+            Ok(source) => {
+                let configuration = &source.configuration;
+                let url = configuration
+                    .url
+                    .clone()
+                    .ok_or(Error::Invalid("The DDM server has no URL"))?;
+                if requested.is_some_and(|value| value != url) {
+                    return Err(Error::Invalid(
+                        "That profile belongs to a different server; choose a new profile name",
+                    ));
+                }
+                (
+                    url,
+                    configuration.trust_certificate_file.clone(),
+                    configuration.controller_certificate_sha256.clone(),
+                    true,
+                )
+            }
+            Err(_) => (
+                requested
+                    .ok_or(Error::Invalid("Enter the DDM server URL"))?
+                    .to_owned(),
+                None,
+                None,
+                false,
+            ),
+        };
+        super::client::endpoint(&url)?;
         let transport = tokio::task::spawn_blocking(move || {
             Transport::new(certificate.as_deref(), pin.as_deref())
         })
@@ -272,6 +282,9 @@ impl Registry {
         };
         let client = Client::new(&url, credential.clone(), transport.clone(), Limits::default())?;
         let domains = visible_domains(&request.server, &client).await?;
+        if !saved {
+            self.add_server(&request.server, &url).await?;
+        }
         Ok((
             request.server,
             SessionLogin {
@@ -283,11 +296,33 @@ impl Registry {
         ))
     }
 
+    async fn add_server(&self, name: &str, url: &str) -> Result<(), Error> {
+        let _configuration = self.configuration_change.lock().await;
+        let snapshot = self.load_configuration().await?;
+        match snapshot.settings.servers.get(name) {
+            Some(server) if server.url.as_deref() == Some(url) => Ok(()),
+            Some(_) => Err(Error::Invalid(
+                "That profile belongs to a different server; choose a new profile name",
+            )),
+            None => {
+                self.save_configuration(
+                    snapshot,
+                    Change::Add {
+                        name: name.to_owned(),
+                        url: url.to_owned(),
+                    },
+                )
+                .await
+            }
+        }
+    }
+
     pub(super) async fn refresh_session(&self, session: &Session) -> Result<(), Error> {
         for server in session.servers() {
             if let Some(mut login) = session.login(&server) {
                 login.domains = visible_domains(&server, &login.client).await?;
-                session.sign_in(server, login);
+                session.sign_in(server.clone(), login);
+                self.choose_lender(&server).await?;
             }
         }
         Ok(())

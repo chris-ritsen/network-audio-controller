@@ -4,7 +4,7 @@ use super::{
 };
 use crate::managed::{
     Error,
-    connections::Login,
+    connections::{Authentication, Login},
     operations::{self, Operation},
     registry::Registry,
     sessions::{Caller, Sessions},
@@ -120,7 +120,7 @@ async fn execute(
             return session_login(&state, caller, &connection, &headers, &uri, request).await;
         }
         Operation::Logout(server) if !caller.is_owner() => {
-            return session_logout(&state, caller, &server);
+            return session_logout(&state, caller, &server).await;
         }
         operation => operation,
     };
@@ -144,6 +144,13 @@ async fn session_login(
             message: "Open the daemon over HTTPS to log in to DDM".into(),
         });
     }
+    if let (Caller::Session(session), Authentication::Saved) = (&caller, &request.authentication)
+        && session.login(&request.server).is_some()
+    {
+        return Ok(json_value(Arc::new(
+            state.managed.connections_for(&caller)?,
+        )));
+    }
     let (server, login) = state.managed.authenticate(request).await?;
     let (session, token) = match caller {
         Caller::Session(session) => (session, None),
@@ -152,7 +159,10 @@ async fn session_login(
             (session, Some(token))
         }
     };
-    session.sign_in(server, login);
+    session.sign_in(server.clone(), login);
+    if let Err(error) = state.managed.lend(&server, &session).await {
+        tracing::error!(%error, server, "a browser's DDM login could not feed the managed inventory");
+    }
     let mut response = json_value(Arc::new(
         state.managed.connections_for(&Caller::Session(session))?,
     ));
@@ -162,7 +172,7 @@ async fn session_login(
     Ok(response)
 }
 
-fn session_logout(
+async fn session_logout(
     state: &ManagedState,
     caller: Caller,
     server: &str,
@@ -172,7 +182,11 @@ fn session_logout(
             state.managed.connections_for(&Caller::Anonymous)?,
         )));
     };
-    if session.sign_out(server) {
+    let remaining = session.sign_out(server);
+    if let Err(error) = state.managed.choose_lender(server).await {
+        tracing::error!(%error, server, "the managed inventory could not leave a browser's DDM login");
+    }
+    if remaining {
         return Ok(json_value(Arc::new(
             state.managed.connections_for(&Caller::Session(session))?,
         )));

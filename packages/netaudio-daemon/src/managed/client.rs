@@ -52,6 +52,11 @@ impl Client {
         })
     }
 
+    pub fn serves(&self, url: Option<&str>) -> bool {
+        url.and_then(|url| endpoint(url).ok())
+            .is_some_and(|url| url == self.endpoint)
+    }
+
     pub async fn execute(
         &self,
         query: &str,

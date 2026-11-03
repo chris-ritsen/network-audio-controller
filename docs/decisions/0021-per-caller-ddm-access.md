@@ -30,7 +30,19 @@ returned as is. The daemon does not copy DDM's role model. A session sees the
 domains DDM reported for its token at login or at an explicit refresh; there
 is no periodic permission check. A caller without a login sees unmanaged
 devices, including devices DDM knows but has not enrolled, and no managed
-devices or domains. Only the owner can add, edit or remove DDM servers.
+devices or domains.
+
+The user's further direction: "you should be able to login and manage
+multiple connections to multiple DDM servers". A browser can be logged in to
+several DDM servers at once and log out of each separately. Logging in to a
+server the daemon does not know yet adds it to the saved list, with its name
+and address only; the browser's token stays in its session. A server with no
+saved owner account gets its device list and DDM signals from a logged-in
+browser's login, preferring the one that sees the most domains, and moves to
+another browser's login when that one logs out or its session ends. That
+borrowed login only reads; the owner cannot write with it, and every other
+caller still writes with its own. Editing or removing a saved server remains
+the owner's.
 
 Requests other than GET, HEAD and OPTIONS are refused when Sec-Fetch-Site is
 not same-origin or none, or, without it, when Origin does not match the
@@ -40,6 +52,10 @@ longer carry `Access-Control-Allow-Origin: *`.
 This changes the public API described in 0006: a caller without a login gets
 403 from managed operations and filtered device, domain and event results.
 The owner's behavior is unchanged. A session's view of a domain lags a DDM
-role change until the user logs in again or refreshes. Journal, preset,
+role change until the user logs in again or refreshes. Without a saved owner
+account, a user who sees domains the borrowed login cannot see does not get
+those domains' devices; a saved Read Only account covering the site avoids
+this. Any browser that can log in to a DDM server can add it to the list
+everyone sees, so the list shows each server's address. Journal, preset,
 metering and diagnostics routes are not yet filtered by caller, and the iOS
 app's DDM login has not been tried with sessions.

@@ -252,10 +252,11 @@ impl InventoryState {
         &self,
         name: &str,
         server: &Server,
+        enabled: bool,
         contexts: &BTreeMap<String, Context>,
     ) -> Value {
         let observations = self.observations(name, contexts);
-        let state = if !server.enabled() {
+        let state = if !enabled {
             "disabled"
         } else if self.last_attempt.is_none() {
             "starting"
@@ -267,7 +268,7 @@ impl InventoryState {
             "ready"
         };
         json!({
-            "enabled": server.enabled(), "state": state, "url": server.url, "server_profile": name,
+            "enabled": enabled, "state": state, "url": server.url, "server_profile": name,
             "refresh_interval": null, "refresh_mode": "explicit", "freshness_seconds": freshness(server).as_secs_f64(),
             "fresh": self.fresh(), "authoritative": self.fresh(), "domains_fresh": self.domains_fresh(), "unenrolled_fresh": self.unenrolled_fresh(),
             "last_attempt": self.last_attempt.map(seconds), "last_success": self.last_success.map(seconds),
