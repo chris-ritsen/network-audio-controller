@@ -1,6 +1,7 @@
 use super::{
     Error,
     configuration::{Context, Server},
+    discovery::DiscoveryState,
 };
 use chrono::{DateTime, Utc};
 use netaudio_core::managed_api::{
@@ -111,14 +112,7 @@ impl InventoryState {
                     let targets = domain.devices.iter().flatten().flatten()
                         .filter(|device| device.connection.as_ref().and_then(|connection| connection.state.as_deref())
                             .is_some_and(|state| state.eq_ignore_ascii_case("READY")))
-                        .map(|device| {
-                            let identifier = netaudio_core::device_identity::managed_device_id(&device.id)
-                                .or_else(|| primary_mac(device).and_then(|address| {
-                                    netaudio_core::device_identity::normalize(
-                                        netaudio_core::device_identity::DeviceIdentityRequest::ManagedPrimary(json!(address)))
-                                }));
-                            (device.id.clone(), identifier)
-                        }).collect();
+                        .map(|device| (device.id.clone(), native_identity(device))).collect();
                     (identifier.clone(), targets)
                 }).collect(),
             };
@@ -134,6 +128,10 @@ impl InventoryState {
         self.errors = response.errors;
         self.update_superseded();
         Ok(true)
+    }
+
+    pub(super) fn attempted(&self) -> bool {
+        self.last_attempt.is_some()
     }
 
     pub fn fresh(&self) -> bool {
@@ -171,10 +169,24 @@ impl InventoryState {
         .min()
     }
 
+    pub(super) fn native_identities(&self, domain: &str) -> BTreeSet<String> {
+        self.domains
+            .get(domain)
+            .into_iter()
+            .flat_map(|domain| domain.devices.iter().flatten().flatten())
+            .filter_map(native_identity)
+            .collect()
+    }
+
+    pub(super) fn domain_ids(&self) -> impl Iterator<Item = &String> {
+        self.domains.keys()
+    }
+
     pub fn observations(
         &self,
         server: &str,
         contexts: &BTreeMap<String, Context>,
+        discovery: &DiscoveryState,
     ) -> Vec<Observation> {
         let mut observations = BTreeMap::new();
         for domain in self.domains.values() {
@@ -194,6 +206,8 @@ impl InventoryState {
                         context_name: context.map(|(name, _)| name.clone()),
                         operation_permissions: context
                             .and_then(|(_, context)| context.operation_permissions.clone()),
+                        discovery: native_identity(device)
+                            .and_then(|identity| discovery.presence(&domain.id, &identity)),
                     },
                 );
             }
@@ -216,6 +230,7 @@ impl InventoryState {
                     server_profile: server.into(),
                     context_name: None,
                     operation_permissions: None,
+                    discovery: None,
                 },
             );
         }
@@ -254,8 +269,9 @@ impl InventoryState {
         server: &Server,
         enabled: bool,
         contexts: &BTreeMap<String, Context>,
+        discovery: &DiscoveryState,
     ) -> Value {
-        let observations = self.observations(name, contexts);
+        let observations = self.observations(name, contexts, discovery);
         let state = if !enabled {
             "disabled"
         } else if self.last_attempt.is_none() {
@@ -297,7 +313,7 @@ impl InventoryState {
             .collect();
         self.superseded
             .retain(|identity| retained.contains(identity));
-        let observations = self.observations("", &BTreeMap::new());
+        let observations = self.observations("", &BTreeMap::new(), &DiscoveryState::default());
         let mut groups = BTreeMap::<String, Vec<&Observation>>::new();
         for observation in &observations {
             if let Some(address) = primary_mac(&observation.device) {
@@ -335,6 +351,18 @@ impl InventoryState {
             }
         }
     }
+}
+
+fn native_identity(device: &Device) -> Option<String> {
+    netaudio_core::device_identity::managed_device_id(&device.id).or_else(|| {
+        primary_mac(device).and_then(|address| {
+            netaudio_core::device_identity::normalize(
+                netaudio_core::device_identity::DeviceIdentityRequest::ManagedPrimary(json!(
+                    address
+                )),
+            )
+        })
+    })
 }
 
 pub fn freshness(server: &Server) -> Duration {

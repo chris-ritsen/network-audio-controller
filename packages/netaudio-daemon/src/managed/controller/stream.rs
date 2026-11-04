@@ -2,7 +2,9 @@ use super::Session;
 use crate::managed::{Credential, Error};
 use chrono::{DateTime, Utc};
 use netaudio_core::dapi::{self, SignalPresencePublication};
-use netaudio_core::managed_session::{self, ManagedOperation, ManagedSessionRequest};
+use netaudio_core::managed_session::{
+    self, DeviceLookupEvent, ManagedOperation, ManagedSessionRequest,
+};
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -17,7 +19,14 @@ pub struct Signal {
     pub received_monotonic: Instant,
 }
 
+pub struct Lookup {
+    pub event: DeviceLookupEvent,
+    pub received_at: DateTime<Utc>,
+}
+
 pub enum StreamEvent {
+    Lookup(Lookup),
+    LookupRejected(String),
     Ready,
     Signal(Signal),
 }
@@ -83,6 +92,20 @@ impl Session {
                 announced = true;
 
                 if receive(StreamEvent::Ready)?.is_break() {
+                    return Ok(());
+                }
+            }
+
+            if let Some(event) = step.device_lookup {
+                let event = StreamEvent::Lookup(Lookup { event, received_at });
+
+                if receive(event)?.is_break() {
+                    return Ok(());
+                }
+            }
+
+            if let Some(error) = step.device_lookup_error {
+                if receive(StreamEvent::LookupRejected(error))?.is_break() {
                     return Ok(());
                 }
             }

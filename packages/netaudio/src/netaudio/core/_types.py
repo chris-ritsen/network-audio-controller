@@ -308,6 +308,62 @@ class Destination(_extensions.TypedDict):
     port: int
 
 
+LookupKind = _typing.Literal["deregistration", "registration", "update"]
+
+
+class LookupRoute(_extensions.TypedDict):
+    client: int
+    component: int
+
+
+class LookupInformation(_extensions.TypedDict):
+    classification: _typing.Union[int, None]
+    first_extension: _typing.Union[int, None]
+    flags: int
+    manufacturer: _typing.Union[str, None]
+    model: _typing.Union[str, None]
+    name: _typing.Union[str, None]
+    route: _typing.Union[LookupRoute, None]
+    second_extension: _typing.Union[int, None]
+
+
+class LookupService(_extensions.TypedDict):
+    extra: _typing.Union[int, None]
+    flags: int
+    name: _typing.Union[str, None]
+    reserved: int
+    txt: _typing.Union[list[int], None]
+
+
+class LookupEntry(_extensions.TypedDict):
+    flags: int
+    information: _typing.Union[LookupInformation, None]
+    name: str
+    services: _typing.Union[list[LookupService], None]
+
+
+class LookupUpdate(_extensions.TypedDict):
+    domain_id: str
+    entry: _typing.Union[LookupEntry, None]
+    flags: int
+    lookup_id: int
+    terminal: bool
+
+
+class LookupMessage(_extensions.TypedDict):
+    destination_component: _typing.Union[int, None]
+    kind: LookupKind
+    request_id: int
+    response: bool
+    status: int
+    update: _typing.Union[LookupUpdate, None]
+
+
+class DeviceLookupEvent(_extensions.TypedDict):
+    lookup_id: int
+    message: LookupMessage
+
+
 class DiagnosticAudioCapabilities(_extensions.TypedDict):
     channel_capacities: list[ChannelCapacity]
     current_sample_rate_hertz: _typing.Union[int, None]
@@ -748,6 +804,8 @@ class SignalPresencePublication(_extensions.TypedDict):
 
 class ManagedSessionStep(_extensions.TypedDict):
     complete: bool
+    device_lookup: _typing.Union[DeviceLookupEvent, None]
+    device_lookup_error: _typing.Union[str, None]
     outgoing: list[list[int]]
     packet_hex: _typing.Union[str, None]
     receive_bytes: int

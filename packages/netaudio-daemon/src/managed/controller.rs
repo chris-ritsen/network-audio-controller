@@ -15,7 +15,7 @@ use tokio::sync::OwnedSemaphorePermit;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
 mod stream;
-pub use stream::{Signal, StreamEvent};
+pub use stream::{Lookup, Signal, StreamEvent};
 
 pub struct Controller {
     origin: Url,

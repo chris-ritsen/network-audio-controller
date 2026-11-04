@@ -13,6 +13,7 @@ pub mod controller_api;
 pub mod dapi;
 pub mod device_controls;
 pub mod device_identity;
+pub mod device_lookup;
 pub mod device_requests;
 pub mod diagnostic_audio;
 pub mod discovery;
