@@ -231,18 +231,20 @@ impl ManagedSessionState {
         outgoing: &mut Vec<Vec<u8>>,
     ) -> Result<Option<String>, String> {
         if let Some(description) = dapi::parse_session_description(frame) {
+            let selected = self
+                .expected_domain_id
+                .clone()
+                .unwrap_or(description.domain_id);
             if self
                 .domain_id
                 .as_ref()
-                .is_some_and(|domain| domain != &description.domain_id)
+                .is_some_and(|domain| domain != &selected)
             {
                 return Err("Controller changed the domain of an initialized session".into());
             }
 
-            check_domain(&description.domain_id, self.expected_domain_id.as_deref())?;
-
             if self.domain_id.is_none() {
-                let domain = u128::from_str_radix(&description.domain_id, 16)
+                let domain = u128::from_str_radix(&selected, 16)
                     .map_err(|_| "invalid Controller domain identifier")?
                     .to_be_bytes();
                 outgoing.push(
@@ -254,7 +256,7 @@ impl ManagedSessionState {
                     )
                     .ok_or("invalid Controller initialization parameters")?,
                 );
-                self.domain_id = Some(description.domain_id);
+                self.domain_id = Some(selected);
             }
         }
 
