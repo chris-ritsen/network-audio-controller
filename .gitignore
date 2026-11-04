@@ -9,6 +9,7 @@ dist/
 __pycache__
 debug.log
 .hypothesis/
+docs/decisions/
 docs/reference/dante-controller-subscription-status-labels.txt
 packages/netaudio/man/
 packages/netaudio-core/target/
