@@ -419,7 +419,7 @@ pub fn parse_session_description(bytes: &[u8]) -> Option<SessionDescription> {
         || frame.message_type != SESSION_DESCRIPTION
         || bytes.len() < 82
         || read_u16(bytes, 12)? != 0x0018
-        || read_u16(bytes, 36)? != 0x007C
+        || usize::from(read_u16(bytes, 36)?) != bytes.len() - 36
         || read_u16(bytes, 42)? != 0x000C
         || read_u16(bytes, 44)? != 0x0003
         || read_u16(bytes, 46)? != 0x0014
