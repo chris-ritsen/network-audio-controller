@@ -21,9 +21,10 @@ impl Registry {
         let contexts = state.snapshot.settings.contexts.clone();
         let entry =
             current_entry(&mut state, &target.server_profile, source).map_err(unavailable)?;
-        let observations = entry
-            .inventory
-            .observations(&target.server_profile, &contexts);
+        let observations =
+            entry
+                .inventory
+                .observations(&target.server_profile, &contexts, &entry.discovery);
         let current = observations
             .iter()
             .find(|current| {

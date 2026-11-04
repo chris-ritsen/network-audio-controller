@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, net::Ipv4Addr, num::NonZeroU16};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{dapi, device_identity, protocol};
+use crate::{dapi, device_identity, device_lookup, protocol};
 
 #[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -114,11 +114,44 @@ pub struct ManagedSessionStep {
     pub complete: bool,
     pub packet_hex: Option<String>,
     pub signal_presence: Option<dapi::SignalPresencePublication>,
+    pub device_lookup: Option<DeviceLookupEvent>,
+    pub device_lookup_error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DeviceLookupEvent {
+    pub lookup_id: u32,
+    pub message: device_lookup::LookupMessage,
 }
 
 impl ManagedSessionState {
     pub fn operation_emitted(&self) -> bool {
         self.sent
+    }
+
+    fn device_lookup(&self, frame: &[u8]) -> Result<Option<DeviceLookupEvent>, String> {
+        let Some(message) = device_lookup::parse(frame)? else {
+            return Ok(None);
+        };
+        let lookup_id = match &message.update {
+            Some(update) if self.domain_id.as_ref() == Some(&update.domain_id) => update.lookup_id,
+            Some(_) => {
+                return Err("Controller sent a device lookup update for another domain".into());
+            }
+            None => message
+                .destination_component
+                .and_then(|component| {
+                    dapi::domain_lookups()
+                        .find(|(registered, _)| *registered == component)
+                        .map(|(_, lookup_id)| lookup_id)
+                })
+                .ok_or("Controller sent a device lookup reply for an unknown component")?,
+        };
+        if !dapi::domain_lookups().any(|(_, registered)| registered == lookup_id) {
+            return Err("Controller sent a device lookup update for an unregistered lookup".into());
+        }
+        Ok(Some(DeviceLookupEvent { lookup_id, message }))
     }
 
     fn receive_bytes(&self) -> Result<usize, String> {
@@ -294,6 +327,8 @@ pub fn advance(request: ManagedSessionRequest) -> Result<ManagedSessionStep, Str
     let mut outgoing = Vec::new();
     let mut packet_hex = None;
     let mut signal_presence = None;
+    let mut device_lookup = None;
+    let mut device_lookup_error = None;
     let state = match request {
         ManagedSessionRequest::Begin {
             state,
@@ -383,6 +418,10 @@ pub fn advance(request: ManagedSessionRequest) -> Result<ManagedSessionStep, Str
                     && matches!(state.operation, Some(ManagedOperation::MonitorSignals))
                 {
                     signal_presence = dapi::parse_signal_presence_publication(&frame);
+                    match state.device_lookup(&frame) {
+                        Ok(event) => device_lookup = event,
+                        Err(error) => device_lookup_error = Some(error),
+                    }
                 }
             }
 
@@ -398,5 +437,7 @@ pub fn advance(request: ManagedSessionRequest) -> Result<ManagedSessionStep, Str
         complete,
         packet_hex,
         signal_presence,
+        device_lookup,
+        device_lookup_error,
     })
 }

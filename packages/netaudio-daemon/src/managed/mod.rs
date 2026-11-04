@@ -11,6 +11,7 @@ mod device_maintenance;
 mod device_sample_rate;
 mod device_session;
 mod device_topology;
+mod discovery;
 pub mod inventory;
 mod panels;
 pub mod registry;

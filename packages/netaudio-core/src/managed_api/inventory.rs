@@ -30,6 +30,24 @@ pub struct Observation {
     pub server_profile: String,
     pub context_name: Option<String>,
     pub operation_permissions: Option<BTreeSet<String>>,
+    pub discovery: Option<Discovery>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscoveryState {
+    Advertised,
+    Historical,
+    ServicesWithdrawn,
+    Unavailable,
+    Withdrawn,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct Discovery {
+    pub observed_at: f64,
+    pub services: BTreeMap<String, bool>,
+    pub state: DiscoveryState,
 }
 
 impl Observation {
@@ -48,16 +66,29 @@ impl Observation {
         let connection = device.connection.as_ref();
         let connection_state = connection.and_then(|connection| connection.state.as_deref());
         let normalized = connection_state.map(str::to_ascii_uppercase);
-        let ready = self.fresh && normalized.as_deref() == Some("READY");
-        let availability = if !self.fresh {
-            "unknown"
-        } else {
-            match normalized.as_deref() {
+        let inventory = self.fresh.then(|| {
+            let availability = match normalized.as_deref() {
                 Some("READY") => "online",
                 Some("DISCONNECTED") => "offline",
                 _ => "unknown",
+            };
+            (self.observed_at.unwrap_or_default(), availability)
+        });
+        let discovery = self.discovery.as_ref().and_then(|discovery| {
+            match discovery.state {
+                DiscoveryState::Advertised => Some("online"),
+                DiscoveryState::Withdrawn => Some("offline"),
+                _ => None,
             }
+            .map(|availability| (discovery.observed_at, availability))
+        });
+        let availability = match (inventory, discovery) {
+            (Some(inventory), Some(discovery)) if inventory.0 > discovery.0 => inventory.1,
+            (_, Some(discovery)) => discovery.1,
+            (Some(inventory), None) => inventory.1,
+            (None, None) => "unknown",
         };
+        let ready = availability == "online";
         let interfaces: Option<Vec<_>> = device
             .interfaces
             .as_ref()
@@ -125,6 +156,9 @@ impl Observation {
             "ddm_connection_state": connection_state,
             "ddm_connection_last_changed": connection.and_then(|item| item.last_changed.as_deref()),
             "ddm_last_sync": self.observed_at, "ddm_fresh": self.fresh,
+            "ddm_discovery_state": self.discovery.as_ref().map(|discovery| discovery.state),
+            "ddm_discovery_services": self.discovery.as_ref().map(|discovery| &discovery.services),
+            "ddm_discovery_observed_at": self.discovery.as_ref().map(|discovery| discovery.observed_at),
             "ddm_identity": device.identity, "ddm_status": device.status, "ddm_capabilities": device.capabilities,
             "ddm_clock_preferences": device.clock_preferences, "ddm_clocking_state": device.clocking_state,
             "ddm_parameters": device.parameters, "ddm_inputs": device.inputs, "ddm_outputs": device.outputs,
