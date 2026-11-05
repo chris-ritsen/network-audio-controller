@@ -1,8 +1,11 @@
+use super::controller::Controller;
 use super::{Credential, Error, Limits, Transport};
+use netaudio_core::controller_api;
 use netaudio_core::managed_api::{self, Response};
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use reqwest::{Method, Url};
 use serde_json::{Map, Value, json};
+use std::num::NonZeroU16;
 
 #[derive(Clone)]
 pub struct Client {
@@ -130,9 +133,23 @@ impl Client {
             ));
         }
 
+        let endpoint = endpoint(url)?;
+
+        if !username.contains('@') {
+            let controller = Controller::new(
+                endpoint
+                    .host_str()
+                    .ok_or(Error::Invalid("DDM hostname is missing"))?,
+                NonZeroU16::new(controller_api::AUTH_PORT).expect("nonzero Controller port"),
+                transport.clone(),
+                limits,
+            )?;
+            return Credential::new(controller.login(username, password).await?.auth_token);
+        }
+
         let response = request(
             transport,
-            endpoint(url)?,
+            endpoint,
             headers(),
             json!({
                 "operationName": managed_api::PASSWORD_OPERATION,
