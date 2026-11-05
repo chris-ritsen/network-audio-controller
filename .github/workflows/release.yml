@@ -121,7 +121,7 @@ jobs:
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
               export PATH="$HOME/.cargo/bin:/opt/python/cp39-cp39/bin:$PATH"
               python -m pip install --disable-pip-version-check uv auditwheel
-              dnf install -y alsa-lib-devel jack-audio-connection-kit-devel pulseaudio-libs-devel pkgconf-pkg-config
+              dnf install -y --setopt=skip_if_unavailable=True alsa-lib-devel jack-audio-connection-kit-devel pulseaudio-libs-devel pkgconf-pkg-config
               uv build --wheel
               wheel=(dist/*.whl)
               test "${#wheel[@]}" -eq 1
