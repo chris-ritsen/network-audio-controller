@@ -9,18 +9,20 @@ use rustls::pki_types::{CertificateDer, ServerName, SubjectPublicKeyInfoDer, Uni
 use rustls::{CertificateError, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use x509_parser::prelude::{FromDer, X509Certificate};
+use x509_parser::prelude::{ASN1Time, FromDer, X509Certificate};
 
 #[derive(Debug)]
-pub(super) struct Controller {
-    pin: [u8; 32],
+pub(super) struct Verifier {
+    certificates: Vec<CertificateDer<'static>>,
+    pin: Option<[u8; 32]>,
     provider: Arc<CryptoProvider>,
     verifier: Arc<WebPkiServerVerifier>,
 }
 
-impl Controller {
+impl Verifier {
     pub(super) fn new(
-        pin: [u8; 32],
+        certificates: Vec<CertificateDer<'static>>,
+        pin: Option<[u8; 32]>,
         roots: RootCertStore,
         provider: Arc<CryptoProvider>,
     ) -> Result<Self, Error> {
@@ -29,6 +31,7 @@ impl Controller {
                 .build()
                 .map_err(|_| Error::Tls("Managed service TLS configuration failed"))?;
         Ok(Self {
+            certificates,
             pin,
             provider,
             verifier,
@@ -36,13 +39,24 @@ impl Controller {
     }
 
     fn pinned(&self, certificate: &CertificateDer<'_>) -> bool {
-        Sha256::digest(certificate.as_ref()).as_slice() == self.pin
+        self.pin
+            .is_some_and(|pin| Sha256::digest(certificate.as_ref()).as_slice() == pin)
+    }
+
+    fn trusted(&self, certificate: &CertificateDer<'_>) -> bool {
+        self.certificates
+            .iter()
+            .any(|trusted| trusted.as_ref() == certificate.as_ref())
     }
 }
 
+fn bad_encoding() -> rustls::Error {
+    rustls::Error::InvalidCertificate(CertificateError::BadEncoding)
+}
+
 fn public_key(certificate: &CertificateDer<'_>) -> Result<Vec<u8>, rustls::Error> {
-    let (_, parsed) = X509Certificate::from_der(certificate.as_ref())
-        .map_err(|_| rustls::Error::InvalidCertificate(CertificateError::BadEncoding))?;
+    let (_, parsed) =
+        X509Certificate::from_der(certificate.as_ref()).map_err(|_| bad_encoding())?;
     Ok(parsed.tbs_certificate.subject_pki.raw.to_vec())
 }
 
@@ -50,7 +64,28 @@ fn bad_signature() -> rustls::Error {
     rustls::Error::InvalidCertificate(CertificateError::BadSignature)
 }
 
-impl ServerCertVerifier for Controller {
+fn verify_trusted(
+    certificate: &CertificateDer<'_>,
+    server_name: &ServerName<'_>,
+    now: UnixTime,
+) -> Result<ServerCertVerified, rustls::Error> {
+    webpki::EndEntityCert::try_from(certificate)
+        .map_err(|_| bad_encoding())?
+        .verify_is_valid_for_subject_name(server_name)
+        .map_err(|_| rustls::Error::InvalidCertificate(CertificateError::NotValidForName))?;
+    let (_, parsed) =
+        X509Certificate::from_der(certificate.as_ref()).map_err(|_| bad_encoding())?;
+    let instant = i64::try_from(now.as_secs())
+        .ok()
+        .and_then(|seconds| ASN1Time::from_timestamp(seconds).ok())
+        .ok_or_else(bad_encoding)?;
+    if !parsed.validity().is_valid_at(instant) {
+        return Err(rustls::Error::InvalidCertificate(CertificateError::Expired));
+    }
+    Ok(ServerCertVerified::assertion())
+}
+
+impl ServerCertVerifier for Verifier {
     fn verify_server_cert(
         &self,
         end_entity: &CertificateDer<'_>,
@@ -62,8 +97,16 @@ impl ServerCertVerifier for Controller {
         if self.pinned(end_entity) {
             return Ok(ServerCertVerified::assertion());
         }
-        self.verifier
-            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+        match self.verifier.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        ) {
+            Err(_) if self.trusted(end_entity) => verify_trusted(end_entity, server_name, now),
+            result => result,
+        }
     }
 
     fn verify_tls12_signature(
@@ -78,8 +121,7 @@ impl ServerCertVerifier for Controller {
         }
         let key = public_key(certificate)?;
         let key = SubjectPublicKeyInfoDer::from(key.as_slice());
-        let entity = webpki::RawPublicKeyEntity::try_from(&key)
-            .map_err(|_| rustls::Error::InvalidCertificate(CertificateError::BadEncoding))?;
+        let entity = webpki::RawPublicKeyEntity::try_from(&key).map_err(|_| bad_encoding())?;
         let candidates = algorithms
             .mapping
             .iter()
