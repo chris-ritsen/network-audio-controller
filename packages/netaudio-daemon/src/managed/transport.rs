@@ -150,21 +150,23 @@ impl Transport {
             );
         }
 
+        let mut trusted = Vec::new();
+
         if let Some(bytes) = certificate_bytes {
             let mut reader = BufReader::new(bytes);
-            let certificates = rustls_pemfile::certs(&mut reader)
+            trusted = rustls_pemfile::certs(&mut reader)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| Error::Tls("Managed service trust certificate file is invalid"))?;
 
-            if certificates.is_empty() {
+            if trusted.is_empty() {
                 return Err(Error::Tls(
                     "Managed service trust certificate file contains no certificates",
                 ));
             }
 
-            for certificate in certificates {
+            for certificate in &trusted {
                 roots
-                    .add(certificate)
+                    .add(certificate.clone())
                     .map_err(|_| Error::Tls("Managed service trust certificate is invalid"))?;
             }
         }
@@ -179,15 +181,14 @@ impl Transport {
         let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
             .with_safe_default_protocol_versions()
             .map_err(|_| Error::Tls("Managed service TLS configuration failed"))?;
-        let configuration = match pin {
-            Some(pin) => {
-                let verifier = pinned::Controller::new(pin, roots, provider)?;
-                builder
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(verifier))
-                    .with_no_client_auth()
-            }
-            None => builder.with_root_certificates(roots).with_no_client_auth(),
+        let configuration = if pin.is_some() || !trusted.is_empty() {
+            let verifier = pinned::Verifier::new(trusted, pin, roots, provider)?;
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(verifier))
+                .with_no_client_auth()
+        } else {
+            builder.with_root_certificates(roots).with_no_client_auth()
         };
         let client = reqwest::Client::builder()
             .use_preconfigured_tls(configuration.clone())
