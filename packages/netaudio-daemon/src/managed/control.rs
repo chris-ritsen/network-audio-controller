@@ -449,6 +449,13 @@ impl Registry {
         }
         let acknowledgement_error = audit.acknowledgement(&self.journal, &value).await.err();
         let acknowledged = value["accepted"] == true;
+        if acknowledged {
+            for event in pending_events(&request.record, &request.operation) {
+                if let Err(error) = self.model.publish(event) {
+                    tracing::warn!(%error, "managed subscription progress was not published");
+                }
+            }
+        }
         let readback = settle(
             || self.command_readback(server, &source, identifier, domain),
             |observed| {
@@ -621,6 +628,38 @@ where
         }
         tokio::time::sleep(interval).await;
     }
+}
+
+fn pending_events(record: &Value, operation: &ControlOperation) -> Vec<Value> {
+    let ControlOperation::Subscriptions { changes } = operation else {
+        return Vec::new();
+    };
+    changes
+        .iter()
+        .map(|change| {
+            let (action, transmitter_device, transmitter_channel) = match change {
+                SubscriptionChange::Set {
+                    transmitter_device,
+                    transmitter_channel,
+                    ..
+                } => (
+                    "add",
+                    transmitter_device.as_str(),
+                    transmitter_channel.as_str(),
+                ),
+                SubscriptionChange::Clear { .. } => ("remove", "", ""),
+            };
+            json!({
+                "event": "subscription_pending",
+                "action": action,
+                "server_name": record["server_name"],
+                "rx_device": record["server_name"],
+                "rx_channel": change.receiver_channel(),
+                "tx_channel": transmitter_channel,
+                "tx_device": transmitter_device,
+            })
+        })
+        .collect()
 }
 
 fn establishing(command: &Control, target: &Observation) -> bool {
@@ -813,6 +852,39 @@ mod tests {
                 &receiver_with_status("transmitter", "01", status)
             ));
         }
+    }
+
+    #[test]
+    fn subscription_changes_announce_their_progress_on_the_receiver() {
+        let record = json!({"server_name": "receiver.local", "name": "receiver"});
+        let operation = ControlOperation::Subscriptions {
+            changes: vec![
+                SubscriptionChange::Set {
+                    receiver_channel: 1,
+                    transmitter_device: "transmitter".into(),
+                    transmitter_channel: "01".into(),
+                },
+                SubscriptionChange::Clear {
+                    receiver_channel: 2,
+                },
+            ],
+        };
+        assert_eq!(
+            pending_events(&record, &operation),
+            vec![
+                json!({"event": "subscription_pending", "action": "add", "server_name": "receiver.local", "rx_device": "receiver.local", "rx_channel": 1, "tx_channel": "01", "tx_device": "transmitter"}),
+                json!({"event": "subscription_pending", "action": "remove", "server_name": "receiver.local", "rx_device": "receiver.local", "rx_channel": 2, "tx_channel": "", "tx_device": ""}),
+            ]
+        );
+        assert!(
+            pending_events(
+                &record,
+                &ControlOperation::RenameDevice {
+                    name: "other".into()
+                }
+            )
+            .is_empty()
+        );
     }
 
     #[test]
