@@ -449,6 +449,13 @@ impl Registry {
         }
         let acknowledgement_error = audit.acknowledgement(&self.journal, &value).await.err();
         let acknowledged = value["accepted"] == true;
+        if acknowledged {
+            for event in pending_events(&request.record, &request.operation) {
+                if let Err(error) = self.model.publish(event) {
+                    tracing::warn!(%error, "managed subscription progress was not published");
+                }
+            }
+        }
         let readback = settle(
             || self.command_readback(server, &source, identifier, domain),
             |observed| {
@@ -621,6 +628,38 @@ where
         }
         tokio::time::sleep(interval).await;
     }
+}
+
+fn pending_events(record: &Value, operation: &ControlOperation) -> Vec<Value> {
+    let ControlOperation::Subscriptions { changes } = operation else {
+        return Vec::new();
+    };
+    changes
+        .iter()
+        .map(|change| {
+            let (action, transmitter_device, transmitter_channel) = match change {
+                SubscriptionChange::Set {
+                    transmitter_device,
+                    transmitter_channel,
+                    ..
+                } => (
+                    "add",
+                    transmitter_device.as_str(),
+                    transmitter_channel.as_str(),
+                ),
+                SubscriptionChange::Clear { .. } => ("remove", "", ""),
+            };
+            json!({
+                "event": "subscription_pending",
+                "action": action,
+                "server_name": record["server_name"],
+                "rx_device": record["server_name"],
+                "rx_channel": change.receiver_channel(),
+                "tx_channel": transmitter_channel,
+                "tx_device": transmitter_device,
+            })
+        })
+        .collect()
 }
 
 fn establishing(command: &Control, target: &Observation) -> bool {
