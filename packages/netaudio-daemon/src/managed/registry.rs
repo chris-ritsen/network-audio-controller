@@ -6,7 +6,7 @@ use super::{
     client::Client,
     configuration::{Server, Settings},
     discovery::DiscoveryState,
-    inventory::{InventoryState, freshness},
+    inventory::InventoryState,
     store::{Snapshot, Store},
 };
 use crate::state::ReadModel;
@@ -535,11 +535,7 @@ impl Registry {
             let mut state = self.lock()?;
             let entry = current_entry(&mut state, name, source)?;
             match result {
-                Ok((response, inventory)) => match entry.inventory.apply(
-                    response,
-                    inventory,
-                    freshness(&source.configuration),
-                ) {
+                Ok((response, inventory)) => match entry.inventory.apply(response, inventory) {
                     Ok(result) => accepted = result,
                     Err(error) => {
                         entry.inventory.fail(&error);
@@ -640,7 +636,6 @@ impl Registry {
             .values()
             .flat_map(|entry| {
                 [
-                    entry.inventory.deadline_after(now),
                     entry.controller_status.deadline_after(now),
                     entry
                         .source

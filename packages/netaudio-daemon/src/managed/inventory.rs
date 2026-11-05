@@ -12,15 +12,14 @@ use netaudio_core::managed_api::{
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
-use tokio::time::Instant;
 
 #[derive(Clone, Default)]
 pub struct InventoryState {
     domains: BTreeMap<String, Domain>,
     unenrolled: BTreeMap<String, Device>,
     superseded: BTreeSet<String>,
-    domains_observed: Option<ObservationTime>,
-    unenrolled_observed: Option<ObservationTime>,
+    domains_observed: Option<DateTime<Utc>>,
+    unenrolled_observed: Option<DateTime<Utc>>,
     domains_current: bool,
     unenrolled_current: bool,
     authoritative: bool,
@@ -36,12 +35,6 @@ pub(super) struct SignalMembership {
     pub revision: u64,
     pub observed_at: Option<DateTime<Utc>>,
     pub domains: BTreeMap<String, BTreeMap<String, Option<String>>>,
-}
-
-#[derive(Clone, Copy)]
-struct ObservationTime {
-    wall: DateTime<Utc>,
-    deadline: Instant,
 }
 
 impl InventoryState {
@@ -61,7 +54,6 @@ impl InventoryState {
         &mut self,
         response: Response,
         inventory: Option<Inventory>,
-        freshness: Duration,
     ) -> Result<bool, Error> {
         let Some(inventory) = inventory else {
             self.fail(&Error::Response("Managed API returned no inventory data"));
@@ -84,10 +76,7 @@ impl InventoryState {
             .map(domain_map)
             .transpose()?;
         let unenrolled = inventory.unenrolled_devices.map(device_map).transpose()?;
-        let now = ObservationTime {
-            wall: Utc::now(),
-            deadline: Instant::now() + freshness,
-        };
+        let now = Utc::now();
         self.domains_current = domains.is_some();
         self.unenrolled_current = unenrolled.is_some();
         if let Some(domains) = domains {
@@ -101,11 +90,11 @@ impl InventoryState {
         self.authoritative =
             response.successful() && self.domains_current && self.unenrolled_current;
         if self.authoritative {
-            self.last_success = Some(now.wall);
+            self.last_success = Some(now);
         }
         if self.authoritative && complete_membership {
             self.signal_membership = SignalMembership {
-                observed_at: Some(now.wall),
+                observed_at: Some(now),
                 revision: self.signal_membership.revision.checked_add(1)
                     .ok_or(Error::Conflict("Managed signal membership revision exhausted"))?,
                 domains: self.domains.iter().map(|(identifier, domain)| {
@@ -143,30 +132,11 @@ impl InventoryState {
     }
 
     fn domains_fresh(&self) -> bool {
-        self.domains_current
-            && self
-                .domains_observed
-                .is_some_and(|time| time.deadline > Instant::now())
+        self.domains_current && self.domains_observed.is_some()
     }
 
     fn unenrolled_fresh(&self) -> bool {
-        self.unenrolled_current
-            && self
-                .unenrolled_observed
-                .is_some_and(|time| time.deadline > Instant::now())
-    }
-
-    pub fn deadline_after(&self, now: Instant) -> Option<Instant> {
-        [
-            (self.domains_current, self.domains_observed),
-            (self.unenrolled_current, self.unenrolled_observed),
-        ]
-        .into_iter()
-        .filter_map(|(current, time)| {
-            time.filter(|time| current && time.deadline > now)
-                .map(|time| time.deadline)
-        })
-        .min()
+        self.unenrolled_current && self.unenrolled_observed.is_some()
     }
 
     pub(super) fn native_identities(&self, domain: &str) -> BTreeSet<String> {
@@ -200,7 +170,7 @@ impl InventoryState {
                         device: device.clone(),
                         domain_id: Some(domain.id.clone()),
                         domain_name: domain.name.clone(),
-                        observed_at: self.domains_observed.map(|time| seconds(time.wall)),
+                        observed_at: self.domains_observed.map(seconds),
                         fresh: self.domains_fresh(),
                         server_profile: server.into(),
                         context_name: context.map(|(name, _)| name.clone()),
@@ -225,7 +195,7 @@ impl InventoryState {
                     device: device.clone(),
                     domain_id: None,
                     domain_name: None,
-                    observed_at: self.unenrolled_observed.map(|time| seconds(time.wall)),
+                    observed_at: self.unenrolled_observed.map(seconds),
                     fresh: self.unenrolled_fresh(),
                     server_profile: server.into(),
                     context_name: None,
@@ -257,7 +227,7 @@ impl InventoryState {
                 );
                 record["ddm_fresh"] = json!(self.domains_fresh());
                 record["ddm_last_sync"] =
-                    json!(self.domains_observed.map(|time| seconds(time.wall)));
+                    json!(self.domains_observed.map(seconds));
                 record
             })
             .collect()
@@ -285,7 +255,7 @@ impl InventoryState {
         };
         json!({
             "enabled": enabled, "state": state, "url": server.url, "server_profile": name,
-            "refresh_interval": null, "refresh_mode": "explicit", "freshness_seconds": freshness(server).as_secs_f64(),
+            "refresh_interval": null, "refresh_mode": "explicit",
             "fresh": self.fresh(), "authoritative": self.fresh(), "domains_fresh": self.domains_fresh(), "unenrolled_fresh": self.unenrolled_fresh(),
             "last_attempt": self.last_attempt.map(seconds), "last_success": self.last_success.map(seconds),
             "observed_at": self.last_success.map(|time| time.to_rfc3339()), "last_error": self.last_error,

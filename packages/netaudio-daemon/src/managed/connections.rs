@@ -88,7 +88,7 @@ impl Registry {
         let client = Client::new(&url, credential.clone(), transport, Limits::default())?;
         let (response, inventory) = client.inventory().await?;
         let mut verified = super::inventory::InventoryState::default();
-        if !verified.apply(response, inventory, std::time::Duration::from_secs(30))?
+        if !verified.apply(response, inventory)?
             || !verified.fresh()
         {
             return Err(Error::Invalid(
@@ -420,7 +420,7 @@ impl Registry {
 async fn visible_domains(server: &str, client: &Client) -> Result<BTreeSet<String>, Error> {
     let (response, inventory) = client.inventory().await?;
     let mut verified = super::inventory::InventoryState::default();
-    if !verified.apply(response, inventory, std::time::Duration::from_secs(30))?
+    if !verified.apply(response, inventory)?
         || !verified.fresh()
     {
         return Err(Error::Invalid(
