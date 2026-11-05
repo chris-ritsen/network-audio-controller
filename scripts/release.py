@@ -268,7 +268,8 @@ def publish(tag_name):
         enable_actions()
     if workflow_state() != "active":
         run(["gh", "workflow", "enable", RELEASE_WORKFLOW, "--repo", GITHUB_REPOSITORY])
-    run(["git", "push", "--quiet", GITHUB_URL, "master", f"refs/tags/{tag_name}"])
+    run(["git", "push", "--quiet", GITHUB_URL, "master"])
+    run(["git", "push", "--quiet", GITHUB_URL, f"refs/tags/{tag_name}"])
     return wait_for_run(tag_name)
 
 
