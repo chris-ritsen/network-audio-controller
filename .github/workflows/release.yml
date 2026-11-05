@@ -99,7 +99,7 @@ jobs:
             platform: windows
             architecture: x86_64
             artifact: windows-x86_64
-    timeout-minutes: 30
+    timeout-minutes: 60
     runs-on: ${{ matrix.runner }}
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
