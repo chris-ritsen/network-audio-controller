@@ -26,7 +26,7 @@ CHECKS = (
     ),
 )
 GITHUB_REPOSITORY = "chris-ritsen/network-audio-controller"
-GITHUB_URL = f"https://github.com/{GITHUB_REPOSITORY}.git"
+GITHUB_URL = f"git@github.com:{GITHUB_REPOSITORY}.git"
 GITOLITE_REMOTE = "local"
 OUTPUT = ROOT / "build" / "release"
 POLL_SECONDS = 60
@@ -93,10 +93,6 @@ def output(arguments):
     return subprocess.run(arguments, cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def github_git(arguments):
-    return ["git", "-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential", *arguments]
-
-
 def project_version():
     match = re.search(r'^version = "([^"]+)"$', (ROOT / "pyproject.toml").read_text(), re.MULTILINE)
     if not match:
@@ -120,7 +116,7 @@ def preflight():
         != 0
     ):
         raise ReleaseError("master is behind gitolite; pull before releasing.")
-    output(github_git(["fetch", "--quiet", GITHUB_URL, "master"]))
+    output(["git", "fetch", "--quiet", GITHUB_URL, "master"])
     if subprocess.run(["git", "merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD"], cwd=ROOT).returncode != 0:
         raise ReleaseError("GitHub master has commits that master lacks.")
 
@@ -133,7 +129,7 @@ def prepare_version(requested):
     if version in published_versions():
         raise ReleaseError(f"netaudio {version} is already on PyPI; pass VERSION= with the next version.")
     tag = f"v{version}"
-    if output(github_git(["ls-remote", "--tags", GITHUB_URL, f"refs/tags/{tag}"])):
+    if output(["git", "ls-remote", "--tags", GITHUB_URL, f"refs/tags/{tag}"]):
         raise ReleaseError(f"GitHub already has tag {tag}.")
     if output(["git", "tag", "--list", tag]) and output(["git", "rev-parse", f"{tag}^{{commit}}"]) != output(
         ["git", "rev-parse", "HEAD"]
@@ -272,7 +268,7 @@ def publish(tag_name):
         enable_actions()
     if workflow_state() != "active":
         run(["gh", "workflow", "enable", RELEASE_WORKFLOW, "--repo", GITHUB_REPOSITORY])
-    run(github_git(["push", "--quiet", GITHUB_URL, "master", f"refs/tags/{tag_name}"]))
+    run(["git", "push", "--quiet", GITHUB_URL, "master", f"refs/tags/{tag_name}"])
     return wait_for_run(tag_name)
 
 
