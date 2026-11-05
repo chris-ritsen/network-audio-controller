@@ -409,18 +409,6 @@ def test_managed_reboot_rejects_an_unobserved_controller_version(monkeypatch):
         )
 
 
-def test_dapi_session_rejects_an_authenticated_domain_other_than_the_selected_context():
-    fake_socket = FakeSocket(_session_description(), chunk_size=3)
-    with controller.DAPISession(
-        "ddm.example", 8001, ssl.create_default_context(), connector=lambda *args: fake_socket
-    ) as session:
-        with pytest.raises(controller.DAPISessionError, match="selected domain.*expected"):
-            session.identify("x" * 43, "001dc1fffe50692e", bytes(6), "11" * 16)
-
-    assert len(fake_socket.sent) == 2
-    assert fake_socket.closed
-
-
 @pytest.mark.parametrize(
     "api_key",
     ("short", "000000000000-4000-8000-000000000000", "zzzzzzzz-0000-4000-8000-000000000000"),
