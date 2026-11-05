@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{command_spec::SubscriptionPageEntry, SpecError};
-use crate::commands::SUBSCRIPTION_PAGE_CAPACITY;
+use crate::commands::{MODERN_ARC_AUDIO_MEDIA_TYPE, SUBSCRIPTION_PAGE_CAPACITY};
 
 #[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -122,11 +122,7 @@ fn plan_grouped_request(
             continue;
         }
 
-        let media = media.ok_or_else(|| {
-            SpecError::InvalidJson(format!(
-                "receiver channel {number} has no advertised media type"
-            ))
-        })?;
+        let media = media.unwrap_or(MODERN_ARC_AUDIO_MEDIA_TYPE);
 
         if let Some((_, records)) = groups.iter_mut().find(|(kind, _)| *kind == media) {
             records.push(record);
