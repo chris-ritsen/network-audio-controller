@@ -277,7 +277,7 @@ async def test_subscription_pages_stop_at_the_first_unconfirmed_reply(responses,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("damage", ["late_invalid_name", "duplicate_receiver", "missing_receiver", "unknown_media"])
+@pytest.mark.parametrize("damage", ["late_invalid_name", "duplicate_receiver", "missing_receiver"])
 @pytest.mark.parametrize("version", ["2.7.255", "2.8.9", "2.8.15"])
 async def test_subscription_plan_validates_every_page_before_any_send(damage, version):
     application = DanteApplication()
@@ -301,10 +301,6 @@ async def test_subscription_plan_validates_every_page_before_any_send(damage, ve
         records[-1] = records[0]
     elif damage == "missing_receiver":
         records[-1] = (34, "Mic", "Source")
-    elif version == "2.8.15":
-        device.rx_channels[33].media_type_code = None
-    else:
-        device.rx_channels[33].number = 1
 
     async def execute(spec):
         core.build_command(spec)

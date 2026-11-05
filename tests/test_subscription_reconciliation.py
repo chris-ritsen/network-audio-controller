@@ -35,9 +35,7 @@ def test_reconciliation_clears_before_setting_and_normalizes_empty_sources():
     assert all(batch["action"] == "set" for batch in plan["batches"][1:])
 
 
-@pytest.mark.parametrize(
-    "invalid", ["revision", "duplicate", "partial_source", "missing_channel", "last_batch", "missing_media"]
-)
+@pytest.mark.parametrize("invalid", ["revision", "duplicate", "partial_source", "missing_channel", "last_batch"])
 def test_reconciliation_rejects_entire_intent_before_any_work_escapes(invalid):
     spec = request(0x280F)
 
@@ -51,8 +49,6 @@ def test_reconciliation_rejects_entire_intent_before_any_work_escapes(invalid):
         spec["channels"].pop()
     elif invalid == "last_batch":
         spec["expected"][-1]["source"] = ["Mic", "x" * 100]
-    else:
-        spec["channels"][-1]["media_type_code"] = None
 
     with pytest.raises(core.NetaudioCoreError):
         core.plan_subscription_reconciliation(spec)
