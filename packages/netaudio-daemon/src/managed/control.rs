@@ -12,6 +12,11 @@ use netaudio_core::managed_api::inventory::Observation;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::Instant;
+
+const READBACK_INTERVAL: Duration = Duration::from_millis(500);
+const READBACK_LIMIT: Duration = Duration::from_secs(10);
 
 pub struct DeviceRequest {
     pub caller: super::sessions::Caller,
@@ -443,19 +448,18 @@ impl Registry {
             }
         }
         let acknowledgement_error = audit.acknowledgement(&self.journal, &value).await.err();
-        let readback = async {
-            if !self.refresh_server(server).await? {
-                return Err(Error::Response("Managed command readback is unavailable"));
-            }
-            let inventory = self.command_inventory(server, &source)?;
-            let target = inventory.device(identifier)?;
-            if target.domain_id.as_deref() != Some(domain) {
-                return Err(Error::Conflict(
-                    "Managed device changed domains during the command",
-                ));
-            }
-            Ok(target.clone())
-        }
+        let acknowledged = value["accepted"] == true;
+        let readback = settle(
+            || self.command_readback(server, &source, identifier, domain),
+            |observed| {
+                !acknowledged
+                    || observed.as_ref().is_ok_and(|target| {
+                        matches(&command, target) && !establishing(&command, target)
+                    })
+            },
+            READBACK_INTERVAL,
+            READBACK_LIMIT,
+        )
         .await;
         match readback {
             Ok(observed) => {
@@ -512,6 +516,26 @@ impl Registry {
                 .collect(),
             observation: Some(value),
         })
+    }
+
+    async fn command_readback(
+        &self,
+        server: &str,
+        source: &Arc<Source>,
+        identifier: &str,
+        domain: &str,
+    ) -> Result<Observation, Error> {
+        if !self.refresh_queued(server).await? {
+            return Err(Error::Response("Managed command readback is unavailable"));
+        }
+        let inventory = self.command_inventory(server, source)?;
+        let target = inventory.device(identifier)?;
+        if target.domain_id.as_deref() != Some(domain) {
+            return Err(Error::Conflict(
+                "Managed device changed domains during the command",
+            ));
+        }
+        Ok(target.clone())
     }
 
     pub(super) async fn fresh_target(
@@ -577,6 +601,51 @@ impl Registry {
             record,
         })
     }
+}
+
+async fn settle<T, R, F>(
+    mut read: R,
+    settled: impl Fn(&T) -> bool,
+    interval: Duration,
+    limit: Duration,
+) -> T
+where
+    R: FnMut() -> F,
+    F: Future<Output = T>,
+{
+    let deadline = Instant::now() + limit;
+    loop {
+        let result = read().await;
+        if settled(&result) || Instant::now() + interval > deadline {
+            return result;
+        }
+        tokio::time::sleep(interval).await;
+    }
+}
+
+fn establishing(command: &Control, target: &Observation) -> bool {
+    let Control::Subscriptions { subscriptions } = command else {
+        return false;
+    };
+    subscriptions
+        .iter()
+        .filter(|subscription| !subscription.transmitter_channel.is_empty())
+        .any(|subscription| {
+            target
+                .device
+                .rx_channels
+                .iter()
+                .flatten()
+                .find(|channel| channel.index == subscription.receiver_channel as i64)
+                .and_then(|channel| channel.status.as_deref())
+                .is_some_and(|status| {
+                    netaudio_core::subscription_status::classification_for_identifier(
+                        &status.trim().to_ascii_uppercase(),
+                    )
+                    .severity
+                        == "progress"
+                })
+        })
 }
 
 fn matches(command: &Control, target: &Observation) -> bool {
