@@ -32,7 +32,6 @@ pub struct TlsSettings {
 
 impl Configuration {
     pub fn load(path: Option<&Path>, profile: Option<&str>) -> Result<Self> {
-        let explicit = path.is_some();
         let path = match path {
             Some(path) => resolve_path(path)?,
             None => default_config_path()?,
@@ -40,11 +39,7 @@ impl Configuration {
         let document: Table = match fs::read_to_string(&path) {
             Ok(content) => toml::from_str(&content)
                 .with_context(|| format!("Failed to parse config {}", path.display()))?,
-            Err(error)
-                if error.kind() == std::io::ErrorKind::NotFound
-                    && !explicit
-                    && profile.is_none() =>
-            {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && profile.is_none() => {
                 Table::new()
             }
             Err(error) => {
