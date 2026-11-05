@@ -138,7 +138,7 @@ pub fn plan(record: &Value, operation: &ControlOperation) -> Result<Control, Con
                         "receiver channel {number} does not support self-connections"
                     )));
                 }
-                subscription.transmitter_device = ".".into();
+                subscription.transmitter_device = text(record, "name")?.into();
             }
         }
     }
@@ -605,8 +605,9 @@ fn matches(command: &Control, target: &Observation) -> bool {
                 return false;
             };
             let source_matches = device == subscription.transmitter_device
-                || subscription.transmitter_device == "."
-                    && device == netaudio_core::managed_api::inventory::device_name(&target.device);
+                || device == "."
+                    && subscription.transmitter_device
+                        == netaudio_core::managed_api::inventory::device_name(&target.device);
             source_matches
                 && channel.subscribed_channel.as_deref()
                     == Some(subscription.transmitter_channel.as_str())
