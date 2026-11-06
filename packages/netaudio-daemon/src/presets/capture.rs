@@ -357,13 +357,18 @@ pub fn routing(
             .is_some_and(Vec::is_empty),
         "transmitter-flow inventory cannot be represented losslessly"
     );
+    let flows = transmit_flows
+        .get("flows")
+        .and_then(Value::as_array)
+        .context("canonical transmit flows are unavailable")?;
     configuration.insert(
         "transmit_flows".into(),
-        transmit_flows
-            .get("flows")
-            .filter(|value| value.is_array())
-            .context("canonical transmit flows are unavailable")?
-            .clone(),
+        json!(
+            flows
+                .iter()
+                .filter(|flow| flow["flow_type"] != "unicast")
+                .collect::<Vec<_>>()
+        ),
     );
     Ok(())
 }

@@ -147,7 +147,11 @@ fn settings(configuration: &Map<String, Value>) -> Vec<Value> {
         .get("transmit_flows")
         .and_then(Value::as_array)
     {
-        entries.push(json!({"label": "Transmit flows", "value": flows.len().to_string()}));
+        let authored = flows
+            .iter()
+            .filter(|flow| flow["flow_type"] != "unicast")
+            .count();
+        entries.push(json!({"label": "Transmit flows", "value": authored.to_string()}));
     }
 
     if let Some(gains) = configuration.get("codec_gain").and_then(Value::as_array) {
