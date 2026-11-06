@@ -10,6 +10,7 @@ const METER_TABLE_INTERVAL_MILLISECONDS = 250;
 const RECONNECT_DELAY_MILLISECONDS = 2000;
 
 const PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS = 10000;
+const SETTLING_SUBSCRIPTION_STATES = new Set(["in_progress", "pending", "resolved", "resolving", "unresolved"]);
 
 export const connectionState = signal("connecting");
 export const devices = signal(readInventoryCache());
@@ -145,9 +146,11 @@ function samePendingChange(entry, payload) {
       || (entry.tx_channel === payload.tx_channel && entry.tx_device === payload.tx_device));
 }
 
+let pendingSequence = 0;
+
 function releasePending(key, entry) {
   const current = pendingSubscriptions.value;
-  if (current[key] === entry) {
+  if (current[key]?.sequence === entry.sequence) {
     const next = { ...current };
     delete next[key];
     pendingSubscriptions.value = next;
@@ -162,6 +165,7 @@ function markPending(payload) {
   }
   const entry = {
     action: payload.action,
+    sequence: ++pendingSequence,
     since: Date.now(),
     tx_channel: payload.tx_channel,
     tx_device: payload.tx_device,
@@ -187,6 +191,11 @@ export function markExternalPending(receiver, channel, sourceKey, slot, clear) {
     external_source_key: sourceKey, external_slot: slot});
 }
 
+function subscriptionSettled(subscription) {
+  const status = subscription?.status;
+  return !status || (status.severity !== "progress" && !SETTLING_SUBSCRIPTION_STATES.has(status.state));
+}
+
 export function clearPendingForDevice(device) {
   const current = pendingSubscriptions.value;
   const names = new Set([device.name, device.server_name].filter(Boolean));
@@ -205,7 +214,12 @@ export function clearPendingForDevice(device) {
       ? !subscription?.tx_device
       : subscription?.tx_device === entry.tx_device && subscription?.tx_channel === entry.tx_channel);
     if (names.has(receiverName) && confirmed) {
-      changed = true;
+      if (!entry.external_source_key && entry.action === "add" && !subscriptionSettled(subscription)) {
+        next[key] = entry.applied ? entry : { ...entry, applied: true };
+        changed ||= !entry.applied;
+      } else {
+        changed = true;
+      }
       continue;
     }
     next[key] = entry;
