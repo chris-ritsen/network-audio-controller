@@ -226,7 +226,8 @@ impl DeviceRegistry {
             .map_err(|_| Error::Busy)?;
         let registry = Arc::clone(self);
         let (sender, receiver) = oneshot::channel();
-        self.tasks.spawn(async move {
+        let caller = crate::managed::sessions::Caller::current();
+        self.tasks.spawn(caller.scope(async move {
             let _permit = permit;
             let _serial = serial;
             let prepare = async {
@@ -265,7 +266,7 @@ impl DeviceRegistry {
             if sender.send(result).is_err() {
                 tracing::info!("preset operation completed after its caller disconnected");
             }
-        });
+        }));
         receiver.await.map_err(|error| {
             Error::Internal(anyhow::anyhow!("preset operation worker stopped: {error}"))
         })?

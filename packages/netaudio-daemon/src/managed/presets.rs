@@ -177,7 +177,8 @@ impl Device {
     ) -> Result<crate::presets::capture::CapturedDevice> {
         use super::{device_session::DeviceSession, device_topology, status::Query};
         use crate::{monitoring::requests::StatusQuery, presets::capture};
-        let observed = self.inventory().await?;
+        let observed = self.inventory().await.context("managed inventory")?;
+        let name = observed["name"].as_str().unwrap_or_default().to_owned();
         let registry = &self.session.registry;
         let source = registry.source(
             observed["ddm_server_profile"]
@@ -196,8 +197,11 @@ impl Device {
                 &source,
                 &self.session.revision,
             )
-            .await?;
-        let mut session = DeviceSession::open(&source, &fresh).await?;
+            .await
+            .with_context(|| format!("{name}: managed inventory"))?;
+        let mut session = DeviceSession::open(&source, &fresh)
+            .await
+            .with_context(|| format!("{name}: Controller session"))?;
         let mut captured = capture::identity(&observed);
         if request.sections.contains("routing") {
             let protocol = netaudio_core::protocol::arc_protocol(None, true)
@@ -205,7 +209,9 @@ impl Device {
                 .context("managed routing protocol unavailable")?
                 .protocol_id;
             let first =
-                device_topology::query(&mut session, json!({"command": "channel_count"})).await?;
+                device_topology::query(&mut session, json!({"command": "channel_count"}))
+                    .await
+                    .with_context(|| format!("{name}: channel counts"))?;
             let counts = device_topology::counts(&first)?;
             ensure!(
                 observed["channels"]["receivers"]
@@ -228,7 +234,9 @@ impl Device {
                     "segmented" => "segmented_rx_flows",
                     _ => anyhow::bail!("managed receiver inventory family unavailable"),
                 };
-                let inventory = device_topology::inventory(&mut session, kind, protocol).await?;
+                let inventory = device_topology::inventory(&mut session, kind, protocol)
+                    .await
+                    .with_context(|| format!("{name}: receive flows"))?;
                 ensure!(
                     netaudio_core::flow_readback::inventory_complete(inventory.clone()),
                     "managed receiver inventory incomplete"
@@ -238,12 +246,15 @@ impl Device {
             let flows = if counts.tx_count == 0 {
                 json!({"flows": [], "unparsed_records": []})
             } else {
-                let inventory =
-                    device_topology::inventory(&mut session, "tx_flows", protocol).await?;
+                let inventory = device_topology::inventory(&mut session, "tx_flows", protocol)
+                    .await
+                    .with_context(|| format!("{name}: transmit flows"))?;
                 crate::devices::flows::canonical_inventory(&inventory, protocol)?
             };
             let last =
-                device_topology::query(&mut session, json!({"command": "channel_count"})).await?;
+                device_topology::query(&mut session, json!({"command": "channel_count"}))
+                    .await
+                    .with_context(|| format!("{name}: channel counts"))?;
             ensure!(
                 device_topology::same_topology(&counts, &device_topology::counts(&last)?),
                 "managed topology changed during preset capture"
@@ -263,7 +274,8 @@ impl Device {
                 }
                 registry
                     .controller_status(&source, &fresh, &mut session, query)
-                    .await?;
+                    .await
+                    .with_context(|| format!("{name}: {setting}"))?;
                 let record = registry.status_record(&fresh)?;
                 let value = record
                     .get(field)
@@ -273,7 +285,8 @@ impl Device {
             }
             registry
                 .controller_status(&source, &fresh, &mut session, Query::Latency)
-                .await?;
+                .await
+                .with_context(|| format!("{name}: latency"))?;
             let record = registry.status_record(&fresh)?;
             let latency = record["configured_latency_ns"]
                 .as_u64()
@@ -291,7 +304,8 @@ impl Device {
             if record["sample_rate_pullup_configuration_supported"] == true {
                 registry
                     .controller_status(&source, &fresh, &mut session, StatusQuery::Pullup)
-                    .await?;
+                    .await
+                    .with_context(|| format!("{name}: sample-rate pull-up"))?;
                 let record = registry.status_record(&fresh)?;
                 let value = record
                     .get("sample_rate_pullup_raw_value")
@@ -304,7 +318,8 @@ impl Device {
             if record["generic_codec_control_supported"] == true {
                 registry
                     .controller_status(&source, &fresh, &mut session, StatusQuery::Codec)
-                    .await?;
+                    .await
+                    .with_context(|| format!("{name}: codec gain"))?;
                 let record = registry.status_record(&fresh)?;
                 match (record["gain_device_type"].as_str(), record["gain_levels"].as_array()) {
                     (Some(direction @ ("input" | "output")), Some(levels)) => {
@@ -318,7 +333,8 @@ impl Device {
         if request.sections.contains("network") {
             registry
                 .controller_status(&source, &fresh, &mut session, StatusQuery::Interface)
-                .await?;
+                .await
+                .with_context(|| format!("{name}: interfaces"))?;
             let record = registry.status_record(&fresh)?;
             let redundancy = crate::devices::capabilities::operation(&record, "redundancy")?
                 .supported
@@ -331,7 +347,8 @@ impl Device {
                         &mut session,
                         StatusQuery::SwitchConfiguration,
                     )
-                    .await?;
+                    .await
+                    .with_context(|| format!("{name}: switch configuration"))?;
             }
             let record = registry.status_record(&fresh)?;
             capture::network(
