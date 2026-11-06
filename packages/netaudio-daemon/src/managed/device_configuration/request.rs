@@ -102,6 +102,13 @@ impl<'a> Configuration<'a> {
         matches!(self, Self::Channel(_))
     }
 
+    pub fn inventory_settled(&self, record: &Value) -> bool {
+        match self {
+            Self::Channel(change) => change.settled(record),
+            _ => true,
+        }
+    }
+
     pub async fn prepare(&self, session: &mut DeviceSession) -> Result<(), ControlError> {
         if let Self::Channel(change) = self {
             change.probe(session).await?;
