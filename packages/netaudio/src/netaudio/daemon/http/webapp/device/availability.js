@@ -10,7 +10,8 @@ export function operationAvailability(device, operation) {
 }
 
 export function operationWritable(device, operation) {
-  return operationAvailability(device, operation)?.writable === true;
+  const availability = operationAvailability(device, operation);
+  return availability?.writable === true || availability?.write_permitted === true;
 }
 
 export function performanceOperationAvailability(device, operation) {

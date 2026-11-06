@@ -5,10 +5,11 @@ use serde_json::{Map, Value, json};
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
 pub struct OperationAvailability<'a> {
-    supported: Option<bool>,
     readable: bool,
-    writable: bool,
     reasons: &'a [&'static str],
+    supported: Option<bool>,
+    writable: bool,
+    write_permitted: bool,
 }
 
 const OPERATIONS: [(&str, &str, Option<&str>); 9] = [
@@ -99,10 +100,11 @@ pub fn operation(record: &Value, operation: &str) -> Result<Availability> {
 
 pub fn presentation(availability: &Availability) -> Value {
     json!(OperationAvailability {
-        supported: availability.supported,
         readable: availability.readable,
-        writable: availability.writable,
         reasons: &availability.reasons,
+        supported: availability.supported,
+        writable: availability.writable,
+        write_permitted: availability.write_permitted,
     })
 }
 
@@ -120,6 +122,7 @@ pub fn operations(record: &Value) -> Result<Value> {
             "supported": !managed,
             "readable": !managed,
             "writable": !managed,
+            "write_permitted": !managed,
             "reasons": if managed { vec!["managed_metering_not_implemented"] } else { Vec::new() },
         }),
     );
