@@ -774,6 +774,8 @@ impl Worker {
         tasks.spawn(async move {
             if let Err(error) = registry.refresh(None).await {
                 tracing::error!(%error, "managed startup inventory refresh failed");
+            } else if let Err(error) = registry.read_settings().await {
+                tracing::error!(%error, "managed startup settings read failed");
             }
         });
         loop {

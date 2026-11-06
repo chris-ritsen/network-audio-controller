@@ -30,6 +30,26 @@ pub enum StatusQuery {
 }
 
 impl StatusQuery {
+    pub const SETTINGS: [Self; 6] = [
+        Self::Platform,
+        Self::SampleRate,
+        Self::Encoding,
+        Self::Pullup,
+        Self::Aes67,
+        Self::Codec,
+    ];
+
+    pub fn required_capability(self) -> Option<&'static str> {
+        match self {
+            Self::Aes67 => Some("aes67_configuration_supported"),
+            Self::Codec => Some("generic_codec_control_supported"),
+            Self::Encoding => Some("encoding_configuration_supported"),
+            Self::Pullup => Some("sample_rate_pullup_configuration_supported"),
+            Self::SampleRate => Some("sample_rate_configuration_supported"),
+            _ => None,
+        }
+    }
+
     pub fn kind(self) -> StatusKind {
         match self {
             Self::Lock => StatusKind::Lock,
