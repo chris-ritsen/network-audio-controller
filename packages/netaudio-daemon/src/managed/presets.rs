@@ -74,13 +74,16 @@ impl Device {
         let record = self.record()?;
         self.session
             .registry
-            .control_locked(DeviceRequest {
-                caller: super::sessions::Caller::current(),
-                record,
-                operation: operation.clone(),
-                precondition: None,
-                configuration_revision: self.session.revision.clone(),
-            })
+            .control_locked(
+                DeviceRequest {
+                    caller: super::sessions::Caller::current(),
+                    record,
+                    operation: operation.clone(),
+                    precondition: None,
+                    configuration_revision: self.session.revision.clone(),
+                },
+                None,
+            )
             .await
     }
 
