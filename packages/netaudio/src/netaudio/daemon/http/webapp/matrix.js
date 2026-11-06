@@ -5,7 +5,7 @@ import { t, tn } from "./i18n.js";
 import { Icon } from "./icons.js";
 import * as format from "./format.js";
 import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
-import { deviceRequestName, pendingKey, markExternalPending } from "./store.js";
+import { deviceRequestName, markExternalPending, pendingKey, requestSubscriptionChange } from "./store.js";
 import { MatrixTooltip } from "./matrix-tooltip.js";
 import { runAction as performAction } from "./actions.js";
 import { selfConnectionTargetState } from "./self-connection.js";
@@ -541,7 +541,10 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
           }
           return;
         }
-        await runAction(
+        const change = subscribed
+          ? { action: "remove", rx_channel: row.number, rx_device: requestName }
+          : { action: "add", rx_channel: row.number, rx_device: requestName, tx_channel: column.name, tx_device: column.label };
+        await requestSubscriptionChange(change, () => runAction(
           subscribed
             ? t("unsubscribe {device} {channel}", { device: row.label, channel: row.name })
             : t("subscribe {receiverDevice} {receiverChannel} to {transmitterChannel}@{transmitterDevice}", {
@@ -559,7 +562,7 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
                   tx_channel: column.name,
                   tx_device: column.label,
                 }),
-        );
+        ));
         return;
       }
     } finally {

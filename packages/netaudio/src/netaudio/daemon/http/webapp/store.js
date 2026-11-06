@@ -9,7 +9,7 @@ const EVENT_LOG_LIMIT = 400;
 const METER_TABLE_INTERVAL_MILLISECONDS = 250;
 const RECONNECT_DELAY_MILLISECONDS = 2000;
 
-const PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS = 8000;
+const PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS = 10000;
 
 export const connectionState = signal("connecting");
 export const devices = signal(readInventoryCache());
@@ -137,8 +137,29 @@ export function pendingKey(receiverName, receiveChannelNumber) {
   return `${receiverName}\u0000${receiveChannelNumber}`;
 }
 
+function samePendingChange(entry, payload) {
+  return entry.action === payload.action
+    && entry.external_slot === payload.external_slot
+    && entry.external_source_key === payload.external_source_key
+    && (payload.action === "remove"
+      || (entry.tx_channel === payload.tx_channel && entry.tx_device === payload.tx_device));
+}
+
+function releasePending(key, entry) {
+  const current = pendingSubscriptions.value;
+  if (current[key] === entry) {
+    const next = { ...current };
+    delete next[key];
+    pendingSubscriptions.value = next;
+  }
+}
+
 function markPending(payload) {
   const key = pendingKey(payload.rx_device, payload.rx_channel);
+  const existing = pendingSubscriptions.value[key];
+  if (existing && samePendingChange(existing, payload)) {
+    return existing;
+  }
   const entry = {
     action: payload.action,
     since: Date.now(),
@@ -148,14 +169,17 @@ function markPending(payload) {
     external_slot: payload.external_slot,
   };
   pendingSubscriptions.value = { ...pendingSubscriptions.value, [key]: entry };
-  setTimeout(() => {
-    const current = pendingSubscriptions.value;
-    if (current[key] === entry) {
-      const next = { ...current };
-      delete next[key];
-      pendingSubscriptions.value = next;
-    }
-  }, PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS);
+  setTimeout(() => releasePending(key, entry), PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS);
+  return entry;
+}
+
+export async function requestSubscriptionChange(change, perform) {
+  const entry = markPending(change);
+  const outcome = await perform();
+  if (!outcome.ok) {
+    releasePending(pendingKey(change.rx_device, change.rx_channel), entry);
+  }
+  return outcome;
 }
 
 export function markExternalPending(receiver, channel, sourceKey, slot, clear) {
