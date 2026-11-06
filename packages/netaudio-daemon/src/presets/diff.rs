@@ -133,10 +133,13 @@ pub fn compare_presented(
                     .as_array()
                     .context("fresh subscriptions are unavailable")?
                     .iter()
-                    .find(|route| route["rx_channel_number"] == number)
-                    .context("fresh receiver subscription is unavailable")?;
-                let device = route["tx_device"].as_str().filter(|name| !name.is_empty());
-                let channel = route["tx_channel"].as_str().filter(|name| !name.is_empty());
+                    .find(|route| route["rx_channel_number"] == number);
+                let device = route
+                    .and_then(|route| route["tx_device"].as_str())
+                    .filter(|name| !name.is_empty());
+                let channel = route
+                    .and_then(|route| route["tx_channel"].as_str())
+                    .filter(|name| !name.is_empty());
                 ensure!(
                     device.is_some() == channel.is_some(),
                     "fresh receiver subscription is incomplete"
