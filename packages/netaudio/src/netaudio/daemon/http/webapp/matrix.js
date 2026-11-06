@@ -17,7 +17,6 @@ const HEADER_PADDING = 18;
 const INDENT = 22;
 const MINIMUM_GUTTER = 280;
 const MINIMUM_HEADER = 160;
-const MAXIMUM_GUTTER = 340;
 const STORAGE_KEY = "netaudio.matrix.expanded";
 
 function readExpanded() {
@@ -319,6 +318,15 @@ function rowLabelText(row) {
   return row.name;
 }
 
+function rowLabelX(row) {
+  if (row.kind === "device") return CELL + GUTTER_PADDING;
+  return CELL + GUTTER_PADDING + (row.grouped ? INDENT * 2 : INDENT) + (row.kind === "group" ? 18 : 0);
+}
+
+function rowLabelFont(row, theme) {
+  return `${row.kind === "device" ? "600 " : ""}13px ${theme.uiFont}`;
+}
+
 function columnLabelText(column) {
   if (column.kind === "group") return column.name;
   if (column.kind === "device") return column.label;
@@ -326,12 +334,11 @@ function columnLabelText(column) {
 }
 
 export function measureMatrixLayout(context, rows, columns, theme) {
-  context.font = `13px ${theme.uiFont}`;
   let gutter = MINIMUM_GUTTER;
   for (const row of rows) {
-    const indent = row.kind === "device" ? 0 : row.grouped ? INDENT * 2 : INDENT;
+    context.font = rowLabelFont(row, theme);
     const label = context.measureText(rowLabelText(row)).width;
-    gutter = Math.max(gutter, CELL + GUTTER_PADDING + indent + label + GUTTER_PADDING);
+    gutter = Math.max(gutter, rowLabelX(row) + label + GUTTER_PADDING + CELL);
   }
   context.font = `13px ${theme.uiFont}`;
   let header = rows.some((entry) => entry.kind === "group") || columns.some((entry) => entry.kind === "group") ? 192 : MINIMUM_HEADER;
@@ -339,14 +346,7 @@ export function measureMatrixLayout(context, rows, columns, theme) {
     context.font = `${column.kind === "device" ? "600 " : ""}13px ${theme.uiFont}`;
     header = Math.max(header, CELL * 2 + HEADER_PADDING + context.measureText(columnLabelText(column)).width);
   }
-  return { gutter: Math.min(MAXIMUM_GUTTER, Math.ceil(gutter)), header: Math.ceil(header) };
-}
-
-function fitLabel(context, text, width) {
-  if (context.measureText(text).width <= width) return text;
-  let end = text.length;
-  while (end > 0 && context.measureText(text.slice(0, end) + "…").width > width) end -= 1;
-  return text.slice(0, end) + "…";
+  return { gutter: Math.ceil(gutter), header: Math.ceil(header) };
 }
 
 export function stickyDevice(entries, offset) {
@@ -913,18 +913,17 @@ function drawGutterRow(context, row, index, y, { gutter, hover, theme }) {
   }
   if (row.kind === "device") {
     drawExpansionMark(context, CELL / 2, y + CELL / 2, row.expanded, theme);
-    context.font = `600 13px ${theme.uiFont}`;
-    context.fillText(fitLabel(context, rowLabelText(row), gutter - CELL - GUTTER_PADDING * 2 - (row.activity ? CELL : 0)), CELL + GUTTER_PADDING, y + CELL / 2);
+    context.font = rowLabelFont(row, theme);
+    context.fillText(rowLabelText(row), rowLabelX(row), y + CELL / 2);
   } else {
-    context.font = `13px ${theme.uiFont}`;
+    context.font = rowLabelFont(row, theme);
     const x = CELL + GUTTER_PADDING + (row.grouped ? INDENT * 2 : INDENT);
     context.strokeStyle = theme.lineStrong;
     context.beginPath();
     context.moveTo(x - 16, y); context.lineTo(x - 16, y + CELL / 2); context.lineTo(x - 6, y + CELL / 2);
     context.stroke();
     if (row.kind === "group") drawExpansionMark(context, x + 6, y + CELL / 2, row.expanded, theme);
-    const textX = x + (row.kind === "group" ? 18 : 0);
-    context.fillText(fitLabel(context, rowLabelText(row), gutter - textX - GUTTER_PADDING - (row.activity ? CELL : 0)), textX, y + CELL / 2);
+    context.fillText(rowLabelText(row), rowLabelX(row), y + CELL / 2);
   }
 }
 

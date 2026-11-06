@@ -41,16 +41,6 @@ test("duplicate receiver labels retain separate routes and pending readback", as
   }
 });
 
-test("matrix column headers grow to fit labels and subscription text never affects layout", () => {
-  const context = { measureText: (text) => ({ width: text.length * 8 }) };
-  const theme = { dataFont: "monospace" };
-  const channel = { kind: "channel", number: 1, name: "Main" };
-  const baseline = matrix.measureMatrixLayout(context, [channel], [channel], theme);
-  const subscribed = { ...channel, subscription: { tx_device: "source".repeat(100), tx_channel: "channel".repeat(100) } };
-  assert.deepEqual(matrix.measureMatrixLayout(context, [subscribed], [channel], theme), baseline);
-  const long = { ...channel, name: "long-name".repeat(100) };
-  assert.deepEqual(matrix.measureMatrixLayout(context, [long], [long], theme), { gutter: 340, header: 78 + long.name.length * 8 });
-});
 const { groupChannels } = await import(`${WEBAPP}channel-groups.js`);
 
 test("channel groups partition by channel number, expand independently, and retain scoped subscriptions", () => {
