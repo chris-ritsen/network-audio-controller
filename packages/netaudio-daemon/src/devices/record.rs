@@ -96,9 +96,13 @@ impl DeviceRecord {
             }
         }
 
-        self.online = true;
         self.services.insert(service.name.clone(), service);
+        self.online = self.advertised();
         Ok(changed)
+    }
+
+    pub fn advertised(&self) -> bool {
+        self.service(SERVICE_ARC).is_some() || self.service(SERVICE_CMC).is_some()
     }
 
     pub fn control_address(&self) -> Option<DeviceAddress> {
