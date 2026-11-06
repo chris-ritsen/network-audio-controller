@@ -1,6 +1,7 @@
 use super::model::{EvidenceClass, Finding, Issue, Kind, Scope};
 use crate::monitoring::journal::model::{Severity, device_identity};
 use anyhow::Result;
+use netaudio_core::device_identity::canonical_device_mac;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -96,6 +97,14 @@ pub fn subnet_observable(issue: &Issue, record: &Value) -> bool {
                     .gateway
                     .is_some_and(|gateway| gateway.parse::<Ipv4Addr>().is_ok())
         })
+}
+
+pub fn single_hardware_address<'a>(addresses: impl IntoIterator<Item = Option<&'a str>>) -> bool {
+    addresses
+        .into_iter()
+        .map(|address| address.and_then(canonical_device_mac))
+        .collect::<Option<BTreeSet<_>>>()
+        .is_some_and(|addresses| addresses.len() == 1)
 }
 
 pub fn address_observable(record: &Value, identity: &str) -> bool {
@@ -206,6 +215,13 @@ pub fn cross(records: &BTreeMap<String, Arc<Value>>, timestamp: &str) -> Result<
             .map(|(record, _)| device_identity(record))
             .collect::<Result<BTreeSet<_>>>()?;
         if identities.len() < 2 {
+            continue;
+        }
+        if single_hardware_address(members.iter().map(|(record, interface)| {
+            interface.raw["mac_address"]
+                .as_str()
+                .or_else(|| record["mac_address"].as_str())
+        })) {
             continue;
         }
         let peers = members
