@@ -142,7 +142,9 @@ impl Device {
             subscriptions.push(json!({"rx_channel_number": channel.index, "tx_device": if device == "." { record["name"].as_str().unwrap_or_default() } else { device }, "tx_channel": source}));
         }
         record["subscriptions"] = json!(subscriptions);
-        self.control(&request.operation).await?;
+        if record["device_locking_supported"] != false {
+            self.control(&request.operation).await?;
+        }
         let current = self.record()?;
         ensure!(
             routing_condition(&current) == routing_condition(&fresh.record),
