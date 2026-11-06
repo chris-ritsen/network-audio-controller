@@ -106,7 +106,7 @@ impl ExternalSubscription {
         }
 
         result["channels"] = self.receiver_channel_ids.iter().map(|number| {
-            json!({"number": number, "record": record["channels"]["receivers"][number.to_string()]})
+            json!({"number": number, "record": super::operations::stable_channel(&record["channels"]["receivers"][number.to_string()])})
         }).collect();
         result
     }
