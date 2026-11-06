@@ -32,12 +32,13 @@ pub struct Device {
 
 #[derive(Clone, Debug, Default)]
 pub struct XmlIdentity {
-    pub server_name: Option<String>,
+    pub default_name: Option<String>,
     pub mac_address: Option<String>,
     pub manufacturer: Option<String>,
     pub model_identifier: Option<String>,
     pub model_name: Option<String>,
     pub model_version: Option<String>,
+    pub server_name: Option<String>,
 }
 
 impl Document {
