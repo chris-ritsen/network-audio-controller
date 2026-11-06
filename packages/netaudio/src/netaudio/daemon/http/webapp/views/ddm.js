@@ -60,7 +60,7 @@ function EnrollmentControl({ device }) {
   const act = async () => {
     if (busy) return;
     const action = enrolled ? "unenroll" : "enroll";
-    if (!enrolled && !window.confirm(t("Enroll {device} in {domain}? This may interrupt audio. Device configuration will be retained.", { device: format.deviceLabel(device), domain: domains.find((entry) => entry.id === selected)?.name }))) return;
+    if (!enrolled && !window.confirm(t("Enroll {device} in {domain}?", { device: format.deviceLabel(device), domain: domains.find((entry) => entry.id === selected)?.name }))) return;
     setBusy(true); setError("");
     try {
       await api.setDdmEnrollment({ server: device.ddm_server_profile, device_id: device.ddm_device_id, action, domain_id: selected });
