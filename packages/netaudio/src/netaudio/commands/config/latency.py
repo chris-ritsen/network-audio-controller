@@ -30,7 +30,7 @@ async def _read_latency_targets(application, targets):
         *(_read_latency_target(application, server_name, device) for server_name, device in targets)
     )
     failures = [reading for reading in readings if reading[3] is not None]
-    if failures:
+    if failures and (len(failures) == len(readings) or len(readings) == 1):
         for server_name, device, _, exception in failures:
             typer.echo(
                 f"Error: could not read latency from {device.name or server_name}: {exception}",
@@ -72,13 +72,16 @@ def _render_all_latency_readings(readings) -> None:
             _format_latency_range(values),
             _format_latency_choices(values),
         ]
+        if values is not None
+        else [device.name or server_name, *["unavailable"] * (len(headers) - 1)]
         for server_name, device, values, _ in readings
     ]
     output_table(
         headers,
         rows,
         json_data={
-            server_name: {"name": device.name or server_name, **values} for server_name, device, values, _ in readings
+            server_name: {"name": device.name or server_name, **values} if values is not None else None
+            for server_name, device, values, _ in readings
         },
     )
 
