@@ -212,28 +212,9 @@ impl Writes {
         if maintenance::supports(operation) || locking::supports(operation) {
             let reference = required_text(&request, "device")?;
             let record = self.model.device(reference)?;
-            if operation == "clear_configuration"
-                || record
-                    .as_deref()
-                    .is_none_or(|record| !crate::managed::control::required(record))
-            {
-                self.registry
-                    .apply(
-                        reference,
-                        ControlOperation::InspectStatus(crate::devices::registry::Inspection::Lock),
-                    )
-                    .await
-                    .map_err(|error| CallError::invalid(error.to_string()))?;
-            }
-        }
-
-        if operation == "rename_channel" {
-            let reference = required_text(&request, "device")?;
-            if self
-                .model
-                .device(reference)?
+            if record
                 .as_deref()
-                .is_some_and(crate::managed::control::required)
+                .is_none_or(|record| !crate::managed::control::required(record))
             {
                 self.registry
                     .apply(

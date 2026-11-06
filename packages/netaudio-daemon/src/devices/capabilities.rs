@@ -66,7 +66,7 @@ pub fn operation(record: &Value, operation: &str) -> Result<Availability> {
             "redundancy" => &record["switch_redundancy_read_only"],
             _ => &Value::Null,
         },
-        "locked": record["is_locked"],
+        "locked": if record["device_locking_supported"] == false { &Value::Bool(false) } else { &record["is_locked"] },
         "transport_available": true,
         "has_adapter": !record["gain_adapter"].is_null(),
         "managed": record["requires_managed_control"] == true,

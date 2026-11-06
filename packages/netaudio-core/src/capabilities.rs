@@ -208,7 +208,7 @@ pub fn availability(request: AvailabilityRequest) -> Availability {
             None => reasons.push("managed_permission_missing"),
         }
 
-        if request.operation == Locking {
+        if matches!(request.operation, Aes67 | Locking) {
             reasons.push("managed_transport_unavailable");
         }
     }
