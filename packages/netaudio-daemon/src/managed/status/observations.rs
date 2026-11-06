@@ -99,6 +99,23 @@ impl Received {
     fn fresh(&self, now: Instant) -> bool {
         self.valid && self.deadline > now
     }
+
+    fn presented(&self, now: Instant) -> bool {
+        self.fresh(now)
+            || self.valid
+                && matches!(
+                    self.kind,
+                    StatusKind::Aes67
+                        | StatusKind::Codec
+                        | StatusKind::Encoding
+                        | StatusKind::Latency
+                        | StatusKind::Manufacturer
+                        | StatusKind::MulticastPrefix
+                        | StatusKind::Platform
+                        | StatusKind::Pullup
+                        | StatusKind::SampleRate
+                )
+    }
 }
 
 struct DeviceStatus {
@@ -267,7 +284,7 @@ impl Cache {
                     "observed_at": status.observed_at.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
                     "fresh": fresh,
                 });
-                if fresh {
+                if status.presented(now) {
                     if let Some(response_kind) = status.response_kind {
                         let observed = status::decode(
                             response_kind,
