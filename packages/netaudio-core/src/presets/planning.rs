@@ -224,6 +224,7 @@ pub fn requested_actions(
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .filter(|flow| flow["flow_type"] != "unicast")
     {
         result.push(RequestedAction {
             kind: ActionKind::TransmitFlow,
