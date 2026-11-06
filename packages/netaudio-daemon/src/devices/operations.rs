@@ -17,6 +17,26 @@ pub(crate) fn identify_event(reference: &str) -> Value {
         "duration": IDENTIFY_DURATION_SECONDS,
     })
 }
+
+pub(crate) fn stable_channel(channel: &Value) -> Value {
+    let mut channel = channel.clone();
+    if let Some(fields) = channel.as_object_mut() {
+        fields.remove("ddm_signal_presence");
+    }
+    channel
+}
+
+pub(crate) fn stable_channels(channels: &Value) -> Value {
+    match channels.as_object() {
+        Some(channels) => Value::Object(
+            channels
+                .iter()
+                .map(|(number, channel)| (number.clone(), stable_channel(channel)))
+                .collect(),
+        ),
+        None => channels.clone(),
+    }
+}
 const VALIDATION_HOST_ADDRESS: [u8; 6] = [0; 6];
 const VALIDATION_MESSAGE_IDENTIFIER: u16 = 1;
 
@@ -249,7 +269,7 @@ impl ControlOperation {
                 .map(|(number, channel)| {
                     let channel = if crate::managed::control::required(record) {
                         json!({"name": channel["name"], "ddm_channel_id": channel["ddm_channel_id"], "ddm_media_type": channel["ddm_media_type"], "managed_can_subscribe_self": channel["managed_can_subscribe_self"], "managed_can_subscribe_self_fresh": channel["managed_can_subscribe_self_fresh"]})
-                    } else { channel.clone() };
+                    } else { stable_channel(channel) };
                     (number.clone(), channel)
                 })
                 .collect::<serde_json::Map<_, _>>();
@@ -319,7 +339,7 @@ impl ControlOperation {
                 condition["channel"] = if crate::managed::control::required(record) {
                     json!({"name": channel["name"], "identity": channel["ddm_channel_id"], "media_type": channel["ddm_media_type"]})
                 } else {
-                    channel.clone()
+                    stable_channel(channel)
                 };
             }
             Self::SetLatency { .. } => {

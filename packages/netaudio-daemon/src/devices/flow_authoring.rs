@@ -91,7 +91,7 @@ impl Operation {
 
     pub fn precondition(&self, record: &Value) -> Value {
         json!({
-            "channels": record["channels"]["transmitters"],
+            "channels": super::operations::stable_channels(&record["channels"]["transmitters"]),
             "capability": record["transmit_flow_authoring_capability_word"],
             "capacity": record["maximum_transmit_flow_channel_slots"],
             "sample_rate_hz": record["sample_rate_hz"],

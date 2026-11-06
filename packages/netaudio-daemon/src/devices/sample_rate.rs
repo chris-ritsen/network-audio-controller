@@ -58,8 +58,8 @@ impl Operation {
             "capability": record["sample_rate_configuration_supported"],
             "capacities": record["sample_rate_channel_capacities"],
             "managed": record["requires_managed_control"],
-            "receivers": record["channels"]["receivers"],
-            "transmitters": record["channels"]["transmitters"],
+            "receivers": super::operations::stable_channels(&record["channels"]["receivers"]),
+            "transmitters": super::operations::stable_channels(&record["channels"]["transmitters"]),
             "subscriptions": record["subscriptions"].as_array().map(|routes| routes.iter().map(|route| json!({
                 "number": route["rx_channel_number"],
                 "receiver": route["rx_channel"],
