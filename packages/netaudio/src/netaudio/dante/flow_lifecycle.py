@@ -67,6 +67,7 @@ def _flow_device_facts(device, required_capabilities=()) -> _requests.FlowDevice
         "encoding": getattr(device, "encoding", None),
         "channels": [int(number) for number in channels] if isinstance(channels, dict) else None,
         "maximum_flow_channel_slots": getattr(device, "maximum_transmit_flow_channel_slots", None),
+        "maximum_flows": getattr(device, "maximum_transmit_flows", None),
         "capabilities": {
             **{name: getattr(device, name, None) for name in required_capabilities},
             "aes67_configuration_supported": getattr(device, "aes67_configuration_supported", None),

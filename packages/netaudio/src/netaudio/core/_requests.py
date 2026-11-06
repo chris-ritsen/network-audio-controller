@@ -561,6 +561,7 @@ class FlowDeviceFacts(_extensions.TypedDict):
     locked: _extensions.NotRequired[_typing.Union[bool, None]]
     managed: bool
     maximum_flow_channel_slots: _extensions.NotRequired[JsonValue]
+    maximum_flows: _extensions.NotRequired[_typing.Union[int, None]]
     protocol_version: _extensions.NotRequired[_typing.Union[str, None]]
     sample_rate: _extensions.NotRequired[_typing.Union[int, None]]
 

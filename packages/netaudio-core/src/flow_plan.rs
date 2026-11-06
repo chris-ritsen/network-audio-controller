@@ -28,6 +28,7 @@ pub struct FlowDeviceFacts {
     pub channels: Option<Vec<u16>>,
     #[serde(alias = "channel_capacity")]
     pub maximum_flow_channel_slots: Option<Value>,
+    pub maximum_flows: Option<u16>,
     pub capabilities: std::collections::BTreeMap<String, Value>,
 }
 
@@ -302,8 +303,16 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
                 "secondary_destination",
             ];
 
-            if request.identity.global_flow_id.is_none() {
-                plan.reject("legacy creation requires an explicit global flow identifier");
+            match (request.identity.global_flow_id, input.device.maximum_flows) {
+                (None, _) => {
+                    plan.reject("legacy creation requires an explicit global flow identifier")
+                }
+                (Some(identifier), Some(capacity)) if identifier.get() > capacity => {
+                    plan.reasons.push(format!(
+                        "flow {identifier} exceeds the device capacity of {capacity}"
+                    ));
+                }
+                _ => {}
             }
 
             if request_options_word.is_some() {
