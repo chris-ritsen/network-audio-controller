@@ -5,7 +5,7 @@ import { AsyncButton, FieldRow, Panel } from "../components.js";
 import * as format from "../format.js";
 import { t } from "../i18n.js";
 import { html, useRef, useState } from "../lib/preact.js";
-import { deviceRequestName } from "../store.js";
+import { deviceRequestName, recordDeviceRename } from "../store.js";
 import {
   operationWritable,
 } from "./availability.js";
@@ -27,7 +27,10 @@ function RenameControl({ device, requestName }) {
         variant="primary"
         small
         description=${device.name ? t("rename {device}", { device: device.name }) : t("rename device")}
-        onRun=${() => api.renameDevice(requestName, input.current.value)}
+        onRun=${() => {
+          recordDeviceRename(device.name, device);
+          return api.renameDevice(requestName, input.current.value);
+        }}
       >
         ${t("Apply")}
       <//>

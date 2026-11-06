@@ -13,7 +13,7 @@ import * as format from "../format.js";
 import { t, tn } from "../i18n.js";
 import { html, useLayoutEffect } from "../lib/preact.js";
 import { devicePath, navigate, setQueryParameter } from "../router.js";
-import { deviceByName, inventoryReady, scopedDevices as devices } from "../store.js";
+import { deviceByName, inventoryReady, renamedDevice, scopedDevices as devices } from "../store.js";
 import { ConfigurableTable } from "../table.js";
 
 function shown(value) {
@@ -483,6 +483,10 @@ function DeviceView({ location }) {
   const deviceName = location.parameters.device;
   const device = deviceByName(deviceName);
   if (!device) {
+    const renamed = renamedDevice(deviceName);
+    if (renamed) {
+      return html`<${SectionRedirect} path=${devicePath("devices", format.deviceLabel(renamed), location.parameters.section)} />`;
+    }
     return html`<${Notice}>${t("No device named {device}.", { device: deviceName })}<//>`;
   }
   if (!device.online) {
