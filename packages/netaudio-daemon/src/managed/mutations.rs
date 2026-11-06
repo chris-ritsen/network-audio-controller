@@ -242,6 +242,11 @@ impl Registry {
             }
         }
         let acknowledgement_error = audit.acknowledgement(&self.journal, &value).await.err();
+        if value["request_sent"] != false
+            && let Err(error) = self.schedule_settle_readbacks(&request.server)
+        {
+            tracing::warn!(%error, server = request.server, "managed settle readback could not be scheduled");
+        }
         let readback = self.refresh_server(&request.server).await;
         match readback {
             Ok(true) => {

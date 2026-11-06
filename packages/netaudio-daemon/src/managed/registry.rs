@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 use tokio::sync::{Notify, Semaphore, mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
@@ -47,12 +48,19 @@ struct State {
     status: Value,
 }
 
+const SETTLE_READBACKS: [Duration; 3] = [
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(45),
+];
+
 struct Entry {
-    source: Arc<Source>,
-    inventory: InventoryState,
-    discovery: DiscoveryState,
-    signals: BTreeMap<String, Value>,
     controller_status: super::status::observations::Cache,
+    discovery: DiscoveryState,
+    inventory: InventoryState,
+    settle_readbacks: Vec<Instant>,
+    signals: BTreeMap<String, Value>,
+    source: Arc<Source>,
 }
 
 pub(super) struct Source {
@@ -556,6 +564,33 @@ impl Registry {
         Ok(accepted)
     }
 
+    pub(super) fn schedule_settle_readbacks(&self, server: &str) -> Result<(), Error> {
+        let mut state = self.lock()?;
+        let Some(entry) = state.servers.get_mut(server) else {
+            return Ok(());
+        };
+        let now = Instant::now();
+        entry.settle_readbacks = SETTLE_READBACKS.iter().map(|delay| now + *delay).collect();
+        self.publish_locked(&mut state)
+            .map_err(|_| Error::Conflict("Managed inventory could not be published"))?;
+        self.changed.notify_one();
+        Ok(())
+    }
+
+    fn due_settle_readbacks(&self) -> Result<Vec<String>, Error> {
+        let mut state = self.lock()?;
+        let now = Instant::now();
+        let mut due = Vec::new();
+        for (name, entry) in &mut state.servers {
+            let scheduled = entry.settle_readbacks.len();
+            entry.settle_readbacks.retain(|deadline| *deadline > now);
+            if entry.settle_readbacks.len() != scheduled {
+                due.push(name.clone());
+            }
+        }
+        Ok(due)
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, State>, Error> {
         self.state
             .lock()
@@ -643,6 +678,7 @@ impl Registry {
                         .as_ref()
                         .and_then(Weak::upgrade)
                         .map(|session| session.deadline()),
+                    entry.settle_readbacks.first().copied(),
                 ]
             })
             .flatten()
@@ -785,10 +821,19 @@ impl Worker {
                 _ = lifetime.cancelled() => break,
                 _ = wait_deadline(deadline) => {
                     let borrowed = self.registry.reassign_expired()?;
+                    let settled = self.registry.due_settle_readbacks()?;
                     self.registry.publish()?;
                     if !borrowed.is_empty() {
                         let registry = Arc::clone(&self.registry);
                         tasks.spawn(async move { registry.refresh_borrowed(borrowed).await });
+                    }
+                    for server in settled {
+                        let registry = Arc::clone(&self.registry);
+                        tasks.spawn(async move {
+                            if let Err(error) = registry.refresh_queued(&server).await {
+                                tracing::warn!(%error, server, "managed settle readback failed");
+                            }
+                        });
                     }
                 }
                 _ = observer.changed.notified() => {
@@ -912,11 +957,12 @@ fn entries(
             (
                 name.clone(),
                 Entry {
-                    source: Arc::new(source),
-                    inventory,
-                    discovery: DiscoveryState::default(),
-                    signals: BTreeMap::new(),
                     controller_status: super::status::observations::Cache::default(),
+                    discovery: DiscoveryState::default(),
+                    inventory,
+                    settle_readbacks: Vec::new(),
+                    signals: BTreeMap::new(),
+                    source: Arc::new(source),
                 },
             )
         })

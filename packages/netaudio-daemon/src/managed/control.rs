@@ -81,6 +81,21 @@ pub fn evidence(outcome: &Value) -> Value {
     )
 }
 
+fn settles_routes(operation: &ControlOperation) -> bool {
+    match operation {
+        ControlOperation::SampleRate(operation) => !operation.preview,
+        ControlOperation::AudioConfiguration(_)
+        | ControlOperation::FlowAuthoring(_)
+        | ControlOperation::Maintenance(_)
+        | ControlOperation::RenameChannel { .. }
+        | ControlOperation::RenameDevice { .. }
+        | ControlOperation::SetLatency { .. }
+        | ControlOperation::StatusConfiguration(_)
+        | ControlOperation::Subscriptions { .. } => true,
+        _ => false,
+    }
+}
+
 pub fn validate(record: &Value, operation: &ControlOperation) -> Result<(), ControlError> {
     if matches!(
         operation,
@@ -267,7 +282,26 @@ impl Registry {
         request: DeviceRequest,
     ) -> Result<ControlCompletion, ControlError> {
         let configuration = self.configuration_change.lock().await;
-        self.control_locked(request, Some(configuration)).await
+        let server = request.record["ddm_server_profile"].as_str().map(str::to_owned);
+        let settles = settles_routes(&request.operation);
+        let result = self.control_locked(request, Some(configuration)).await;
+        let sent = |outcome: &Value| outcome["request_sent"] == true || outcome["change_sent"] == true;
+        let changed = match &result {
+            Ok(completion) => {
+                completion.acknowledged_commands > 0
+                    || completion.observation.as_ref().is_some_and(sent)
+            }
+            Err(ControlError::Managed { result, .. }) => sent(result),
+            Err(_) => false,
+        };
+        if settles
+            && changed
+            && let Some(server) = server
+            && let Err(error) = self.schedule_settle_readbacks(&server)
+        {
+            tracing::warn!(%error, server, "managed settle readback could not be scheduled");
+        }
+        result
     }
 
     pub(super) async fn control_locked(
