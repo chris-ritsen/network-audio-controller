@@ -42,6 +42,7 @@ const METERING_V3_LEVELS_OFFSET: usize = 30;
 const FLOW_RECORD_FIXED_SIZE: usize = 16;
 const FLOW_RECORD_SAMPLE_RATE: usize = 4;
 const FLOW_RECORD_CHANNEL_COUNT: usize = 14;
+const FLOW_TYPE_RTP_MULTICAST: u16 = 0x0006;
 const FLOW_TYPE_UNICAST: u16 = 0x0011;
 const MODERN_ARC_POINTER_TABLE_OFFSET: usize = 18;
 const TRANSMITTER_FLOW_STATUS_RECORD_FLOW_NUMBER: usize = 2;
@@ -327,6 +328,8 @@ pub struct TransmitterFlowStatus {
     pub flow_name: String,
     pub flow_type_code: u16,
     pub flow_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_mode: Option<&'static str>,
     pub format_pointer: u16,
     pub format_descriptor_hexadecimal: String,
     pub sample_rate: Option<u32>,
