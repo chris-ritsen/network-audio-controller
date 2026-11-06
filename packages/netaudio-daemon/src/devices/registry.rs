@@ -12,7 +12,7 @@ use crate::state::ReadModel;
 use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
 use netaudio_core::parser::ChannelCount;
-use netaudio_core::protocol::{SERVICE_ARC, SERVICE_CMC};
+use netaudio_core::protocol::SERVICE_CMC;
 use netaudio_core::responses::{DeviceSettings, PropertyDirectory};
 use netaudio_core::responses::{NetaudioNotification, parse_notification_envelope};
 use serde::Serialize;
@@ -253,8 +253,7 @@ impl DeviceRegistry {
                     if state.record.services.remove(&name).is_some() {
                         state.generation += 1;
                         state.identity_generation += 1;
-                        state.record.online = state.record.service(SERVICE_ARC).is_some()
-                            || state.record.service(SERVICE_CMC).is_some();
+                        state.record.online = state.record.advertised();
                         if !state.record.online {
                             self.metering.invalidate_direct(&state.record.key)?;
                         }

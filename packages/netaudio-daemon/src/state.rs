@@ -727,7 +727,7 @@ pub(crate) fn resolve_record<'a>(
         return Ok(Some(record));
     }
 
-    let mut matches = records.iter().filter(|(key, record)| {
+    let matches = records.iter().filter(|(key, record)| {
         context.is_none_or(|context| in_context(record, context))
             && (caseless::default_caseless_match_str(key, selector)
                 || [
@@ -741,13 +741,15 @@ pub(crate) fn resolve_record<'a>(
                 .filter_map(|field| record[*field].as_str())
                 .any(|value| caseless::default_caseless_match_str(value, selector)))
     });
-    let first = matches.next().map(|(_, record)| record);
-
-    if matches.next().is_some() {
-        return Err(AmbiguousDevice.into());
+    let matches = matches.map(|(_, record)| record).collect::<Vec<_>>();
+    if matches.len() < 2 {
+        return Ok(matches.first().copied());
     }
-
-    Ok(first)
+    let mut online = matches.iter().filter(|record| record["online"] == true);
+    match (online.next(), online.next()) {
+        (Some(record), None) => Ok(Some(*record)),
+        _ => Err(AmbiguousDevice.into()),
+    }
 }
 
 fn in_context(record: &Value, context: &str) -> bool {
