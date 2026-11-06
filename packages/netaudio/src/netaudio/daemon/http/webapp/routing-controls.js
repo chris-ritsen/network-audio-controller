@@ -79,10 +79,11 @@ export function RoutingControls({ all }) {
         const routed = Boolean(
           subscription?.tx_device && subscription?.tx_channel,
         );
-        const pending =
+        const pendingEntry =
           pendingSubscriptions.value[
             pendingKey(deviceRequestName(receiver), channel.number)
           ];
+        const pending = pendingEntry?.applied ? undefined : pendingEntry;
         const tone = routed
           ? format.subscriptionTone(subscription)
           : "none";
