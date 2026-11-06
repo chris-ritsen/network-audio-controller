@@ -435,6 +435,19 @@ export function deviceByName(deviceName) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+const renamedIdentities = new Map();
+
+export function recordDeviceRename(previousName, device) {
+  if (previousName && device?.inventory_id) renamedIdentities.set(previousName, device.inventory_id);
+}
+
+export function renamedDevice(deviceName) {
+  const identity = renamedIdentities.get(deviceName);
+  if (!identity) return null;
+  const matches = Object.values(scopedDevices.value).filter((device) => device.inventory_id === identity && device.name !== deviceName);
+  return matches.length === 1 ? matches[0] : null;
+}
+
 export function deviceKey(device) {
   return device.server_name || device.name;
 }
