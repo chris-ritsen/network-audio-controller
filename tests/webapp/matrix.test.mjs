@@ -248,7 +248,7 @@ test("receiver-reported connection progress remains pending until connected", ()
   }
 });
 
-test("pending subscriptions update channel, collapsed group, and crosspoint status together", () => {
+test("a pending subscription shows as pending and a pending removal shows as cleared", () => {
   for (const action of ["add", "remove"]) {
     const subscription = { rx_channel: "Input", rx_channel_number: 1, tx_device: "Source", tx_channel: "Output", status: { state: "connected", severity: "ok" } };
     const receiver = { name: "Receiver", server_name: "receiver", channels: { receivers: { 1: { name: "Input" } } }, subscriptions: action === "remove" ? [subscription] : [] };
@@ -258,10 +258,11 @@ test("pending subscriptions update channel, collapsed group, and crosspoint stat
     const pending = matrix.buildMatrixModel(options);
     const row = pending.rows.find((entry) => entry.kind === "channel");
     const column = pending.columns.find((entry) => entry.kind === "channel");
-    assert.equal(row.activity.severity, "pending");
-    assert.equal(matrix.cellState(row, column, pending.subscriptionIndex, options.pending).kind, "pending");
+    const shown = action === "add" ? "pending" : "empty";
+    assert.equal(row.activity?.severity, action === "add" ? "pending" : undefined);
+    assert.equal(matrix.cellState(row, column, pending.subscriptionIndex, options.pending).kind, shown);
     const grouped = matrix.buildMatrixModel({ ...options, groups: { enabled: true, receivers: new Set(), transmitters: new Set() } });
-    assert.equal(grouped.rows.find((entry) => entry.kind === "group").activity.severity, "pending");
+    assert.equal(grouped.rows.find((entry) => entry.kind === "group").activity?.severity, action === "add" ? "pending" : undefined);
     receiver.subscriptions = action === "add" ? [subscription] : [];
     const confirmed = matrix.buildMatrixModel({ ...options, pending: {} });
     const confirmedRow = confirmed.rows.find((entry) => entry.kind === "channel");
@@ -288,4 +289,41 @@ test("pending routes survive unrelated readbacks and clear only for matching cha
   device.subscriptions.pop();
   store.clearPendingForDevice(device);
   assert.deepEqual(store.pendingSubscriptions.value, {});
+});
+
+test("a clicked subscription change is pending from the click until the request settles", async () => {
+  const previous = store.pendingSubscriptions.value;
+  const key = store.pendingKey("receiver", 1);
+  try {
+    store.pendingSubscriptions.value = {};
+    let finish;
+    const request = store.requestSubscriptionChange(
+      { action: "add", rx_device: "receiver", rx_channel: 1, tx_device: "Source", tx_channel: "Output" },
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    assert.equal(store.pendingSubscriptions.value[key].action, "add");
+    finish({ ok: false });
+    await request;
+    assert.equal(store.pendingSubscriptions.value[key], undefined);
+  } finally {
+    store.pendingSubscriptions.value = previous;
+  }
+});
+
+test("the server's pending notice does not replace the change the browser requested", async () => {
+  const previous = store.pendingSubscriptions.value;
+  const key = store.pendingKey("receiver", 1);
+  try {
+    store.pendingSubscriptions.value = {};
+    let finish;
+    const request = store.requestSubscriptionChange({ action: "remove", rx_device: "receiver", rx_channel: 1 },
+      () => new Promise((resolve) => { finish = resolve; }));
+    const requested = store.pendingSubscriptions.value[key];
+    store.receiveEvent({ event: "subscription_pending", action: "remove", rx_device: "receiver", rx_channel: 1 });
+    assert.equal(store.pendingSubscriptions.value[key], requested);
+    finish({ ok: false });
+    await request;
+  } finally {
+    store.pendingSubscriptions.value = previous;
+  }
 });

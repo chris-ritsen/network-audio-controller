@@ -76,13 +76,13 @@ export function RoutingControls({ all }) {
     <div class="routing-channel-rows">
       ${visible.map((channel) => {
         const subscription = channel.subscription;
-        const routed = Boolean(
-          subscription?.tx_device && subscription?.tx_channel,
-        );
         const pending =
           pendingSubscriptions.value[
             pendingKey(deviceRequestName(receiver), channel.number)
           ];
+        const routed = Boolean(
+          subscription?.tx_device && subscription?.tx_channel,
+        ) && pending?.action !== "remove";
         const tone = routed
           ? format.subscriptionTone(subscription)
           : "none";
@@ -100,7 +100,7 @@ export function RoutingControls({ all }) {
           >
           <strong class="routing-channel-name">${channel.name}</strong>
             <span class="routing-channel-source"
-              >${pending ? t("Applying…") : routed ? subscription.tx_channel : t("Choose source")}</span
+              >${pending?.action === "add" ? t("Applying…") : routed ? subscription.tx_channel : t("Choose source")}</span
             >
             <span class="routing-channel-device">${routed ? subscription.tx_device : ""}</span>
           <span

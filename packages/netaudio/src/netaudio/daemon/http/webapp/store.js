@@ -9,7 +9,8 @@ const EVENT_LOG_LIMIT = 400;
 const METER_TABLE_INTERVAL_MILLISECONDS = 250;
 const RECONNECT_DELAY_MILLISECONDS = 2000;
 
-const PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS = 8000;
+const PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS = 12000;
+const PENDING_SUBSCRIPTION_SETTLE_MILLISECONDS = 2000;
 
 export const connectionState = signal("connecting");
 export const devices = signal(readInventoryCache());
@@ -139,6 +140,11 @@ export function pendingKey(receiverName, receiveChannelNumber) {
 
 function markPending(payload) {
   const key = pendingKey(payload.rx_device, payload.rx_channel);
+  const requested = pendingSubscriptions.value[key];
+  if (requested?.requested && requested.action === payload.action
+    && (payload.action === "remove" || (requested.tx_device === payload.tx_device && requested.tx_channel === payload.tx_channel))) {
+    return;
+  }
   const entry = {
     action: payload.action,
     since: Date.now(),
@@ -156,6 +162,24 @@ function markPending(payload) {
       pendingSubscriptions.value = next;
     }
   }, PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS);
+}
+
+export async function requestSubscriptionChange(change, perform) {
+  const key = pendingKey(change.rx_device, change.rx_channel);
+  const entry = { action: change.action, since: Date.now(), tx_channel: change.tx_channel, tx_device: change.tx_device, requested: true };
+  pendingSubscriptions.value = { ...pendingSubscriptions.value, [key]: entry };
+  const release = () => {
+    const current = pendingSubscriptions.value;
+    if (current[key] === entry) {
+      const next = { ...current };
+      delete next[key];
+      pendingSubscriptions.value = next;
+    }
+  };
+  const outcome = await perform();
+  if (outcome.ok) setTimeout(release, PENDING_SUBSCRIPTION_SETTLE_MILLISECONDS);
+  else release();
+  return outcome;
 }
 
 export function markExternalPending(receiver, channel, sourceKey, slot, clear) {

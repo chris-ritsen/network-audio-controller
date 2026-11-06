@@ -12,6 +12,11 @@ use netaudio_core::managed_api::inventory::Observation;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::Instant;
+
+const READBACK_INTERVAL: Duration = Duration::from_millis(500);
+const READBACK_LIMIT: Duration = Duration::from_secs(10);
 
 pub struct DeviceRequest {
     pub caller: super::sessions::Caller,
@@ -443,19 +448,25 @@ impl Registry {
             }
         }
         let acknowledgement_error = audit.acknowledgement(&self.journal, &value).await.err();
-        let readback = async {
-            if !self.refresh_server(server).await? {
-                return Err(Error::Response("Managed command readback is unavailable"));
+        let acknowledged = value["accepted"] == true;
+        if acknowledged {
+            for event in pending_events(&request.record, &request.operation) {
+                if let Err(error) = self.model.publish(event) {
+                    tracing::warn!(%error, "managed subscription progress was not published");
+                }
             }
-            let inventory = self.command_inventory(server, &source)?;
-            let target = inventory.device(identifier)?;
-            if target.domain_id.as_deref() != Some(domain) {
-                return Err(Error::Conflict(
-                    "Managed device changed domains during the command",
-                ));
-            }
-            Ok(target.clone())
         }
+        let readback = settle(
+            || self.command_readback(server, &source, identifier, domain),
+            |observed| {
+                !acknowledged
+                    || observed.as_ref().is_ok_and(|target| {
+                        matches(&command, target) && !establishing(&command, target)
+                    })
+            },
+            READBACK_INTERVAL,
+            READBACK_LIMIT,
+        )
         .await;
         match readback {
             Ok(observed) => {
@@ -512,6 +523,26 @@ impl Registry {
                 .collect(),
             observation: Some(value),
         })
+    }
+
+    async fn command_readback(
+        &self,
+        server: &str,
+        source: &Arc<Source>,
+        identifier: &str,
+        domain: &str,
+    ) -> Result<Observation, Error> {
+        if !self.refresh_queued(server).await? {
+            return Err(Error::Response("Managed command readback is unavailable"));
+        }
+        let inventory = self.command_inventory(server, source)?;
+        let target = inventory.device(identifier)?;
+        if target.domain_id.as_deref() != Some(domain) {
+            return Err(Error::Conflict(
+                "Managed device changed domains during the command",
+            ));
+        }
+        Ok(target.clone())
     }
 
     pub(super) async fn fresh_target(
@@ -579,6 +610,83 @@ impl Registry {
     }
 }
 
+async fn settle<T, R, F>(
+    mut read: R,
+    settled: impl Fn(&T) -> bool,
+    interval: Duration,
+    limit: Duration,
+) -> T
+where
+    R: FnMut() -> F,
+    F: Future<Output = T>,
+{
+    let deadline = Instant::now() + limit;
+    loop {
+        let result = read().await;
+        if settled(&result) || Instant::now() + interval > deadline {
+            return result;
+        }
+        tokio::time::sleep(interval).await;
+    }
+}
+
+fn pending_events(record: &Value, operation: &ControlOperation) -> Vec<Value> {
+    let ControlOperation::Subscriptions { changes } = operation else {
+        return Vec::new();
+    };
+    changes
+        .iter()
+        .map(|change| {
+            let (action, transmitter_device, transmitter_channel) = match change {
+                SubscriptionChange::Set {
+                    transmitter_device,
+                    transmitter_channel,
+                    ..
+                } => (
+                    "add",
+                    transmitter_device.as_str(),
+                    transmitter_channel.as_str(),
+                ),
+                SubscriptionChange::Clear { .. } => ("remove", "", ""),
+            };
+            json!({
+                "event": "subscription_pending",
+                "action": action,
+                "server_name": record["server_name"],
+                "rx_device": record["server_name"],
+                "rx_channel": change.receiver_channel(),
+                "tx_channel": transmitter_channel,
+                "tx_device": transmitter_device,
+            })
+        })
+        .collect()
+}
+
+fn establishing(command: &Control, target: &Observation) -> bool {
+    let Control::Subscriptions { subscriptions } = command else {
+        return false;
+    };
+    subscriptions
+        .iter()
+        .filter(|subscription| !subscription.transmitter_channel.is_empty())
+        .any(|subscription| {
+            target
+                .device
+                .rx_channels
+                .iter()
+                .flatten()
+                .find(|channel| channel.index == subscription.receiver_channel as i64)
+                .and_then(|channel| channel.status.as_deref())
+                .is_some_and(|status| {
+                    netaudio_core::subscription_status::classification_for_identifier(
+                        &status.trim().to_ascii_uppercase(),
+                    )
+                    .severity
+                        == "progress"
+                })
+        })
+}
+
 fn matches(command: &Control, target: &Observation) -> bool {
     match command {
         Control::Name { name } => {
@@ -628,5 +736,167 @@ fn control_error(error: Error) -> ControlError {
             result: json!({"error": message}),
         },
         error => ControlError::Unavailable(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    fn receiver(source: &str, channel: &str) -> Observation {
+        receiver_with_status(source, channel, None)
+    }
+
+    fn receiver_with_status(source: &str, channel: &str, status: Option<&str>) -> Observation {
+        Observation {
+            device: serde_json::from_value(json!({
+                "id": "receiver", "name": "receiver", "domainId": "domain",
+                "rxChannels": [{"id": "rx-1", "index": 1, "subscribedDevice": source, "subscribedChannel": channel, "status": status}],
+            }))
+            .expect("receiver fixture"),
+            domain_id: Some("domain".into()),
+            domain_name: None,
+            observed_at: None,
+            fresh: true,
+            server_profile: "server".into(),
+            context_name: None,
+            operation_permissions: None,
+            discovery: None,
+        }
+    }
+
+    fn subscribe() -> Control {
+        Control::Subscriptions {
+            subscriptions: vec![Subscription {
+                receiver_channel: 1,
+                transmitter_device: "transmitter".into(),
+                transmitter_channel: "01".into(),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn readback_confirms_a_subscription_the_inventory_reports_late() {
+        let command = subscribe();
+        let reads = Cell::new(0);
+        let observed = settle(
+            || {
+                reads.set(reads.get() + 1);
+                let landed = reads.get() >= 3;
+                async move {
+                    if landed {
+                        receiver("transmitter", "01")
+                    } else {
+                        receiver("", "")
+                    }
+                }
+            },
+            |observed| matches(&command, observed),
+            Duration::from_millis(1),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(matches(&command, &observed));
+        assert_eq!(reads.get(), 3);
+    }
+
+    #[tokio::test]
+    async fn readback_reports_the_last_state_once_the_limit_passes() {
+        let command = subscribe();
+        let reads = Cell::new(0);
+        let started = Instant::now();
+        let observed = settle(
+            || {
+                reads.set(reads.get() + 1);
+                async { receiver("", "") }
+            },
+            |observed| matches(&command, observed),
+            Duration::from_millis(10),
+            Duration::from_millis(50),
+        )
+        .await;
+        assert!(!matches(&command, &observed));
+        assert!(reads.get() > 1);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn readback_reads_once_when_nothing_is_awaited() {
+        let reads = Cell::new(0);
+        settle(
+            || {
+                reads.set(reads.get() + 1);
+                async {}
+            },
+            |_| true,
+            Duration::from_millis(1),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert_eq!(reads.get(), 1);
+    }
+
+    #[test]
+    fn a_subscription_is_establishing_only_while_ddm_reports_it_in_progress() {
+        let command = subscribe();
+        for status in ["IN_PROGRESS", "RESOLVED", "in_progress"] {
+            assert!(establishing(
+                &command,
+                &receiver_with_status("transmitter", "01", Some(status))
+            ));
+        }
+        for status in [Some("DYNAMIC"), Some("STATIC"), Some("UNRESOLVED"), None] {
+            assert!(!establishing(
+                &command,
+                &receiver_with_status("transmitter", "01", status)
+            ));
+        }
+    }
+
+    #[test]
+    fn subscription_changes_announce_their_progress_on_the_receiver() {
+        let record = json!({"server_name": "receiver.local", "name": "receiver"});
+        let operation = ControlOperation::Subscriptions {
+            changes: vec![
+                SubscriptionChange::Set {
+                    receiver_channel: 1,
+                    transmitter_device: "transmitter".into(),
+                    transmitter_channel: "01".into(),
+                },
+                SubscriptionChange::Clear {
+                    receiver_channel: 2,
+                },
+            ],
+        };
+        assert_eq!(
+            pending_events(&record, &operation),
+            vec![
+                json!({"event": "subscription_pending", "action": "add", "server_name": "receiver.local", "rx_device": "receiver.local", "rx_channel": 1, "tx_channel": "01", "tx_device": "transmitter"}),
+                json!({"event": "subscription_pending", "action": "remove", "server_name": "receiver.local", "rx_device": "receiver.local", "rx_channel": 2, "tx_channel": "", "tx_device": ""}),
+            ]
+        );
+        assert!(
+            pending_events(
+                &record,
+                &ControlOperation::RenameDevice {
+                    name: "other".into()
+                }
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_cleared_receiver_matches_a_clear() {
+        let clear = Control::Subscriptions {
+            subscriptions: vec![Subscription {
+                receiver_channel: 1,
+                transmitter_device: String::new(),
+                transmitter_channel: String::new(),
+            }],
+        };
+        assert!(matches(&clear, &receiver("", "")));
+        assert!(!matches(&clear, &receiver("transmitter", "01")));
     }
 }

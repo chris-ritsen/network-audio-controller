@@ -5,7 +5,7 @@ import { t, tn } from "./i18n.js";
 import { Icon } from "./icons.js";
 import * as format from "./format.js";
 import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
-import { deviceRequestName, pendingKey, markExternalPending } from "./store.js";
+import { deviceRequestName, pendingKey, markExternalPending, requestSubscriptionChange } from "./store.js";
 import { MatrixTooltip } from "./matrix-tooltip.js";
 import { runAction as performAction } from "./actions.js";
 import { selfConnectionTargetState } from "./self-connection.js";
@@ -184,7 +184,7 @@ export function buildMatrixModel({ devices, externalFlows = {}, expandedReceiver
     const severities = channels.flatMap((channel) => {
       const update = pending[pendingKey(deviceRequestName(entry.device), channel.number)]
         || pending[pendingKey(entry.label, channel.number)];
-      if (update) return ["pending"];
+      if (update) return update.action === "remove" ? [] : ["pending"];
       const subscription = subscriptionIndex.get(entry.label).get(channel.number);
       return subscription ? [subscriptionSeverity(subscription)] : [];
     });
@@ -247,7 +247,7 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
               row.subscription.tx_channel === column.name,
             );
       if (targetsThisColumn) {
-        return { kind: "pending" };
+        return { kind: pendingEntry.action === "remove" ? "empty" : "pending" };
       }
     }
     const subscription = row.subscription;
@@ -541,7 +541,10 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
           }
           return;
         }
-        await runAction(
+        await requestSubscriptionChange(subscribed
+          ? { action: "remove", rx_device: requestName, rx_channel: row.number }
+          : { action: "add", rx_device: requestName, rx_channel: row.number, tx_device: column.label, tx_channel: column.name },
+        () => runAction(
           subscribed
             ? t("unsubscribe {device} {channel}", { device: row.label, channel: row.name })
             : t("subscribe {receiverDevice} {receiverChannel} to {transmitterChannel}@{transmitterDevice}", {
@@ -559,7 +562,7 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
                   tx_channel: column.name,
                   tx_device: column.label,
                 }),
-        );
+        ));
         return;
       }
     } finally {
