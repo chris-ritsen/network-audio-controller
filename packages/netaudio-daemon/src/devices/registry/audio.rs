@@ -11,7 +11,7 @@ impl DeviceRegistry {
         &self,
         device: &Device,
         transport: &mut DeviceTransport,
-        generation: u64,
+        identity: u64,
         kind: AudioKind,
         expected: Option<&AudioConfiguration>,
     ) -> Result<Map<String, Value>> {
@@ -21,7 +21,7 @@ impl DeviceRegistry {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-            if state.generation != generation || !state.record.online {
+            if state.identity_generation != identity || !state.record.online {
                 bail!("device identity changed before audio configuration observation");
             }
 
@@ -43,7 +43,7 @@ impl DeviceRegistry {
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-        if state.generation != generation {
+        if state.identity_generation != identity {
             bail!("device identity changed during audio configuration observation");
         }
 
