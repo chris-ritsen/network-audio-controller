@@ -16,7 +16,9 @@ use tokio_util::sync::CancellationToken;
 
 const CONNECT_DEADLINE: Duration = Duration::from_secs(2);
 const REQUEST_DEADLINE: Duration = Duration::from_secs(3);
-const MAXIMUM_ATTEMPTS: u32 = 3;
+const RECONNECT_WINDOW: Duration = Duration::from_secs(120);
+const MAXIMUM_RECONNECT_DELAY: Duration = Duration::from_secs(15);
+const ESTABLISHED_SESSION: Duration = Duration::from_secs(30);
 const DEVICE_KEYS: &[&str] = &[
     "DEVICE_ID",
     "MODEL",
@@ -79,12 +81,14 @@ pub(super) async fn run(
     cancellation: CancellationToken,
 ) -> Result<()> {
     let active = async {
-        let mut attempt = 0;
-        while attempt < MAXIMUM_ATTEMPTS {
+        let mut attempt: u32 = 0;
+        let mut window = Instant::now() + RECONNECT_WINDOW;
+        loop {
             if attempt > 0 {
+                let delay = Duration::from_secs(1 << (attempt - 1).min(4)).min(MAXIMUM_RECONNECT_DELAY);
                 tokio::select! {
                     _ = cancellation.cancelled() => break,
-                    _ = tokio::time::sleep(Duration::from_secs(u64::from(attempt))) => {}
+                    _ = tokio::time::sleep(delay) => {}
                 }
             }
             if cancellation.is_cancelled() {
@@ -92,10 +96,10 @@ pub(super) async fn run(
             }
             attempt += 1;
             let mut established = None;
-            registry.status(&mac, generation, json!({"state": "connecting", "attempt": attempt, "maximum_attempts": MAXIMUM_ATTEMPTS}))?;
+            registry.status(&mac, generation, json!({"state": "connecting", "attempt": attempt}))?;
             let result = async {
                 let mut connection = Connection::open(Arc::clone(&registry), &mac, address, generation, &cancellation).await?;
-                registry.status(&mac, generation, json!({"state": "ready", "attempt": attempt, "maximum_attempts": MAXIMUM_ATTEMPTS}))?;
+                registry.status(&mac, generation, json!({"state": "ready", "attempt": attempt}))?;
                 established = Some(Instant::now());
                 let result = connection.run(&mut requests, &cancellation).await;
                 connection.close().await;
@@ -109,11 +113,16 @@ pub(super) async fn run(
                 |error: anyhow::Error| error.to_string(),
             );
             tracing::warn!(%mac, %address, attempt, %error, "Wireless control session disconnected");
-            if established.is_some_and(|started| started.elapsed() >= Duration::from_secs(30)) {
+            if established.is_some_and(|started| started.elapsed() >= ESTABLISHED_SESSION) {
                 attempt = 0;
+                window = Instant::now() + RECONNECT_WINDOW;
             }
-            registry.status(&mac, generation, json!({"state": if attempt == MAXIMUM_ATTEMPTS { "exhausted" } else { "reconnecting" }, "error": error,
-                "attempt": attempt, "maximum_attempts": MAXIMUM_ATTEMPTS}))?;
+            let exhausted = Instant::now() >= window;
+            registry.status(&mac, generation, json!({"state": if exhausted { "exhausted" } else { "reconnecting" }, "error": error,
+                "attempt": attempt}))?;
+            if exhausted {
+                break;
+            }
         }
         Ok::<(), anyhow::Error>(())
     };
