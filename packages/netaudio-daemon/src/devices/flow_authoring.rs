@@ -155,6 +155,7 @@ impl Operation {
             "encoding": properties.get("encoding"),
             "channels": record.transmitters.keys().collect::<Vec<_>>(),
             "maximum_flow_channel_slots": properties.get("maximum_transmit_flow_channel_slots"),
+            "maximum_flows": properties.get("maximum_transmit_flows"),
             "capabilities": capabilities,
         });
         let native = match self {

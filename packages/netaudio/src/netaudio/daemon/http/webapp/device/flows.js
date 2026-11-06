@@ -22,6 +22,13 @@ function parseChannels(text) {
   return values;
 }
 
+export function flowIdentifierMaximum(authoring, maximumFlows) {
+  if (authoring?.identity_field === "global_flow_id" && Number.isInteger(maximumFlows) && maximumFlows > 0) {
+    return Math.min(authoring.identifier_max, maximumFlows);
+  }
+  return authoring?.identifier_max;
+}
+
 export function canonicalFlowRequest({
   authoring,
   channels,
@@ -29,6 +36,7 @@ export function canonicalFlowRequest({
   flowId,
   flowName = "",
   framesPerPacket = "",
+  maximumFlows = null,
   mediaMode = "native_dante",
   primaryAddress = "",
   primaryPort = "",
@@ -42,13 +50,14 @@ export function canonicalFlowRequest({
   if (!authoring)
     throw new Error(t("Flow authoring capabilities are unavailable."));
 
+  const identifierMaximum = flowIdentifierMaximum(authoring, maximumFlows);
   if (
     !Number.isInteger(Number(flowId)) ||
     Number(flowId) < 1 ||
-    Number(flowId) > authoring.identifier_max
+    Number(flowId) > identifierMaximum
   ) {
     throw new Error(
-      t("Enter a flow identifier from 1 through {maximum}.", { maximum: authoring.identifier_max }),
+      t("Enter a flow identifier from 1 through {maximum}.", { maximum: identifierMaximum }),
     );
   }
   if (!authoring.media_modes.includes(mediaMode))
@@ -300,8 +309,9 @@ export function TransmitFlows({ device }) {
   const [plan, setPlan] = useState(null);
   const [result, setResult] = useState(null);
   const authoring = device.transmit_flow_authoring;
+  const maximumFlows = device.maximum_transmit_flows;
   const authoringFacts = JSON.stringify([requestName, authoring, device.aes67_current,
-    device.aes67_configuration_supported, device.is_locked, device.sample_rate_hz, device.encoding]);
+    device.aes67_configuration_supported, device.is_locked, device.sample_rate_hz, device.encoding, maximumFlows]);
   useEffect(() => {
     setPlan(null);
     setResult(null);
@@ -329,6 +339,7 @@ export function TransmitFlows({ device }) {
       flowId,
       flowName,
       framesPerPacket,
+      maximumFlows,
       mediaMode,
       primaryAddress,
       primaryPort,
@@ -349,9 +360,14 @@ export function TransmitFlows({ device }) {
     }
   };
   const create = async () => {
-    const response = await api.createTransmitFlow(requestName, specification());
-    setResult(response);
-    setPlan(null);
+    try {
+      setResult(await api.createTransmitFlow(requestName, specification()));
+      setError("");
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setPlan(null);
+    }
     await refresh();
   };
   const remove = async (identifier) => {
@@ -408,7 +424,7 @@ export function TransmitFlows({ device }) {
                 <input
                   type="number"
                   min="1"
-                  max=${authoring.identifier_max}
+                  max=${flowIdentifierMaximum(authoring, maximumFlows)}
                   aria-label=${t("Transmit flow identifier")}
                   value=${flowId}
                   onInput=${edit(setFlowId)}
