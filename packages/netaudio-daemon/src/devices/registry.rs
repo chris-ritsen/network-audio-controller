@@ -910,7 +910,7 @@ impl DeviceRegistry {
             ));
         }
 
-        let (generation, address, protocol_identifier) = {
+        let (generation, identity, address, protocol_identifier) = {
             let state = device
                 .state
                 .lock()
@@ -935,7 +935,12 @@ impl DeviceRegistry {
                 .record
                 .control_address()
                 .context("device has no routing service")?;
-            (state.generation, address, protocol.protocol_id)
+            (
+                state.generation,
+                state.identity_generation,
+                address,
+                protocol.protocol_id,
+            )
         };
         let mut owned_transport = device.transport.lock().await;
 
@@ -1120,7 +1125,7 @@ impl DeviceRegistry {
         };
         let initial_audio = match audio_kind {
             Some(kind) => Some(
-                self.read_audio(device, transport, generation, kind, None)
+                self.read_audio(device, transport, identity, kind, None)
                     .await
                     .map_err(|error| {
                         tracing::warn!(%error, "initial audio configuration observation unavailable");
@@ -1194,7 +1199,7 @@ impl DeviceRegistry {
                         .read_audio(
                             device,
                             transport,
-                            generation,
+                            identity,
                             operation.kind,
                             Some(&operation),
                         )
