@@ -33,7 +33,10 @@ pub(super) fn identity_element(name: &str, identity: XmlIdentity) -> Result<Elem
     let server = identity.server_name.as_deref().unwrap_or_default();
     element.set_text(
         "default_name",
-        server.strip_suffix(".local.").unwrap_or(server),
+        identity
+            .default_name
+            .as_deref()
+            .unwrap_or_else(|| server.strip_suffix(".local.").unwrap_or(server)),
     );
     let mut instance = Element::new("instance_id");
 

@@ -180,7 +180,7 @@ pub fn identity(record: &Value) -> CapturedDevice {
             ("device_identity".into(), json!(identity)),
         ]),
         identity: XmlIdentity {
-            server_name: record["server_name"].as_str().map(str::to_owned),
+            default_name: text(&["default_name"]),
             mac_address: text(&["mac_address"]),
             manufacturer: text(&["manufacturer"]),
             model_identifier: text(&["model_id"]),
@@ -192,6 +192,7 @@ pub fn identity(record: &Value) -> CapturedDevice {
                 "model_id",
             ]),
             model_version: text(&["friendly_product_version", "product_version"]),
+            server_name: record["server_name"].as_str().map(str::to_owned),
         },
         omitted: Vec::new(),
     }
