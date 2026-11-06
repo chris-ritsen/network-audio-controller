@@ -9,12 +9,21 @@ use crate::{
     monitoring::requests::StatusQuery,
 };
 use serde_json::{Value, json};
+use std::{sync::Arc, time::Duration};
 
 mod channel;
 mod latency;
 mod request;
 pub(super) use request::Configuration;
-use std::sync::Arc;
+
+const INVENTORY_READBACK_DELAYS: [Duration; 6] = [
+    Duration::from_millis(500),
+    Duration::from_millis(1000),
+    Duration::from_millis(1500),
+    Duration::from_millis(2000),
+    Duration::from_millis(2000),
+    Duration::from_millis(3000),
+];
 
 struct Prepared {
     fresh: FreshTarget,
@@ -99,6 +108,16 @@ impl Registry {
                 if requested.inventory_readback() {
                     self.refresh_configuration_inventory(source, &prepared.fresh)
                         .await?;
+                    for delay in INVENTORY_READBACK_DELAYS {
+                        if value["accepted"] != true
+                            || requested.inventory_settled(self.status_record(&prepared.fresh)?.as_ref())
+                        {
+                            break;
+                        }
+                        tokio::time::sleep(delay).await;
+                        self.refresh_configuration_inventory(source, &prepared.fresh)
+                            .await?;
+                    }
                 } else if transport_failed {
                     prepared.session = DeviceSession::open(source, &prepared.fresh).await?;
                 }
@@ -212,7 +231,7 @@ impl Registry {
     ) -> Result<(), ControlError> {
         let server = &fresh.target.server_profile;
         if !self
-            .refresh_server(server)
+            .refresh_queued(server)
             .await
             .map_err(|error| ControlError::ObservationUnavailable(error.to_string()))?
         {

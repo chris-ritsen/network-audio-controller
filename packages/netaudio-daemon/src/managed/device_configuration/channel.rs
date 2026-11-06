@@ -109,6 +109,11 @@ impl<'a> Change<'a> {
         Ok(())
     }
 
+    pub fn settled(&self, record: &Value) -> bool {
+        self.channel(record)
+            .is_ok_and(|channel| channel["name"].as_str() == Some(self.name))
+    }
+
     pub fn validate_readback(&self, before: &Value, after: &Value) -> Result<(), ControlError> {
         let before = self.channel(before)?;
         let after = self.channel(after)?;
