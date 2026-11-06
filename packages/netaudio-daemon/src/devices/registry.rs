@@ -372,9 +372,26 @@ impl DeviceRegistry {
             .read()
             .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?
             .get(key)
-            .cloned()
-            .context("device has no native control transport")?;
-        self.refresh_entry(device, None).await
+            .cloned();
+        match device {
+            Some(device) => self.refresh_entry(device, None).await,
+            None if crate::managed::control::required(&record) => {
+                let completion = self
+                    .apply(reference, ControlOperation::InspectStatus(Inspection::Settings))
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let mut errors = BTreeMap::new();
+                if !completion.readback_errors.is_empty() {
+                    errors.insert("settings", completion.readback_errors.join("; "));
+                }
+                Ok(RefreshReport {
+                    observed: Vec::new(),
+                    errors,
+                    superseded: false,
+                })
+            }
+            None => bail!("device has no native control transport"),
+        }
     }
 
     pub fn request_refresh(&self, reference: &str) -> Result<()> {
@@ -553,16 +570,7 @@ impl DeviceRegistry {
                     return Ok(());
                 }
 
-                let required_capability = match query {
-                    StatusQuery::SampleRate => Some("sample_rate_configuration_supported"),
-                    StatusQuery::Encoding => Some("encoding_configuration_supported"),
-                    StatusQuery::Pullup => Some("sample_rate_pullup_configuration_supported"),
-                    StatusQuery::Codec => Some("generic_codec_control_supported"),
-                    StatusQuery::Aes67 => Some("aes67_configuration_supported"),
-                    _ => None,
-                };
-
-                if let Some(capability) = required_capability
+                if let Some(capability) = query.required_capability()
                     && state
                         .record
                         .properties

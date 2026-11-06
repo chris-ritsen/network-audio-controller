@@ -350,7 +350,17 @@ async fn refresh(
 ) -> Result<Response, ApiError> {
     let parameters = parameters(&body, true)?;
     let names = match parameters.get("device") {
-        None | Some(Value::Null) => service.model.records()?.keys().cloned().collect::<Vec<_>>(),
+        None | Some(Value::Null) => service
+            .model
+            .records()?
+            .iter()
+            .filter(|(_, record)| {
+                record["direct_control_available"] == true
+                    || !crate::managed::control::required(record)
+                    || record["ddm_connection_state"] == "READY"
+            })
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>(),
         Some(Value::String(name)) if !name.is_empty() => {
             if service.model.device(name)?.is_none() {
                 return Err(ApiError::not_found("device not found"));

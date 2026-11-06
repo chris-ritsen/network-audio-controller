@@ -7,7 +7,7 @@ use super::{
 use crate::{
     devices::{
         capabilities,
-        operations::{ControlCompletion, ControlError},
+        operations::{ControlCompletion, ControlError, ControlOperation},
         registry::Inspection,
     },
     monitoring::requests::StatusQuery,
@@ -21,6 +21,28 @@ mod query;
 pub(super) use query::Query;
 
 impl Registry {
+    pub(super) async fn read_settings(&self) -> anyhow::Result<()> {
+        for record in self.model.records()?.into_values() {
+            if record["direct_control_available"] == true
+                || !super::control::required(&record)
+                || record["ddm_connection_state"] != "READY"
+            {
+                continue;
+            }
+            let request = DeviceRequest {
+                caller: super::sessions::Caller::Owner,
+                record: record.as_ref().clone(),
+                operation: ControlOperation::InspectStatus(Inspection::Settings),
+                precondition: None,
+                configuration_revision: self.configuration_revision()?,
+            };
+            if let Err(error) = self.control_owned(request).await {
+                tracing::warn!(device = %record["name"], %error, "managed settings read failed");
+            }
+        }
+        Ok(())
+    }
+
     pub(super) async fn controller_inspect(
         &self,
         request: &DeviceRequest,
@@ -37,6 +59,11 @@ impl Registry {
                         vec![StatusQuery::Aes67.into(), Query::MulticastPrefix]
                     }
                     Inspection::Latency => vec![Query::Latency],
+                    Inspection::Settings => StatusQuery::SETTINGS
+                        .into_iter()
+                        .map(Query::from)
+                        .chain([Query::Latency])
+                        .collect(),
                     Inspection::Lock => vec![StatusQuery::Lock.into()],
                     Inspection::Status(query) => Query::preflight(query),
                     Inspection::Network | Inspection::Redundancy => {
@@ -73,6 +100,29 @@ impl Registry {
             Inspection::Latency => {
                 self.controller_status(source, &fresh, &mut session, Query::Latency)
                     .await?;
+            }
+            Inspection::Settings => {
+                let queries = StatusQuery::SETTINGS
+                    .into_iter()
+                    .map(|query| (Query::from(query), query.required_capability()))
+                    .chain([(Query::Latency, None)]);
+                for (query, capability) in queries {
+                    if let Some(capability) = capability
+                        && self.status_record(&fresh)?[capability] == false
+                    {
+                        continue;
+                    }
+                    match self
+                        .controller_status(source, &fresh, &mut session, query)
+                        .await
+                    {
+                        Ok(()) => {}
+                        Err(ControlError::ObservationUnavailable(error)) => {
+                            readback_errors.push(error)
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
             }
             Inspection::Lock => {
                 self.controller_status(source, &fresh, &mut session, StatusQuery::Lock)
@@ -115,7 +165,9 @@ impl Registry {
         }
         let record = self.status_record(&fresh)?;
         let observation = match inspection {
-            Inspection::Status(_) | Inspection::Latency => record.as_ref().clone(),
+            Inspection::Latency | Inspection::Settings | Inspection::Status(_) => {
+                record.as_ref().clone()
+            }
             Inspection::MulticastPrefix => json!({"prefix": record["aes67_multicast_prefix"]}),
             Inspection::Lock => json!({
                 "device": record["server_name"],

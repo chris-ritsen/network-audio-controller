@@ -16,6 +16,7 @@ pub enum Inspection {
     Network,
     NetworkConfiguration,
     Redundancy,
+    Settings,
 }
 
 impl DeviceRegistry {
@@ -26,7 +27,34 @@ impl DeviceRegistry {
         generation: u64,
         inspection: Inspection,
     ) -> Result<ControlCompletion, ControlError> {
+        let mut readback_errors = Vec::new();
         match inspection {
+            Inspection::Settings => {
+                for query in StatusQuery::SETTINGS {
+                    let unsupported = {
+                        let state = device
+                            .state
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+                        query.required_capability().is_some_and(|capability| {
+                            state.record.properties.get(capability) == Some(&Value::Bool(false))
+                        })
+                    };
+                    if unsupported {
+                        continue;
+                    }
+                    match self.read_status(device, transport, generation, query).await {
+                        Ok(()) => {}
+                        Err(ControlError::ObservationUnavailable(error)) => {
+                            readback_errors.push(error)
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                if let Err(error) = self.read_latency(device, transport, generation).await {
+                    readback_errors.push(error.to_string());
+                }
+            }
             Inspection::MulticastPrefix => {
                 return self
                     .configure_multicast_prefix(device, transport, generation, None, None, None)
@@ -133,9 +161,10 @@ impl DeviceRegistry {
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
         let record = state.record.presentation()?;
         let observation = match inspection {
-            Inspection::Status(_) | Inspection::Latency | Inspection::MulticastPrefix => {
-                record.clone()
-            }
+            Inspection::Latency
+            | Inspection::MulticastPrefix
+            | Inspection::Settings
+            | Inspection::Status(_) => record.clone(),
             Inspection::Lock => json!({
                 "device": record["server_name"],
                 "is_locked": record["is_locked"],
@@ -154,8 +183,8 @@ impl DeviceRegistry {
         };
         Ok(ControlCompletion {
             acknowledged_commands: 0,
-            readback_completed: true,
-            readback_errors: Vec::new(),
+            readback_completed: readback_errors.is_empty(),
+            readback_errors,
             observation: Some(observation),
         })
     }
