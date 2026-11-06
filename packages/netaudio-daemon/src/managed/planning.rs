@@ -231,7 +231,7 @@ impl Registry {
 
     pub(super) async fn fresh_inventory(&self, name: &str) -> Result<Inventory, Error> {
         let source = self.source(name)?;
-        if !self.refresh_server(name).await? {
+        if !self.refresh_queued(name).await? {
             return Err(Error::Response("Could not verify current DDM inventory"));
         }
         let inventory = self.command_inventory(name, &source)?;

@@ -266,13 +266,14 @@ impl Registry {
         &self,
         request: DeviceRequest,
     ) -> Result<ControlCompletion, ControlError> {
-        let _configuration = self.configuration_change.lock().await;
-        self.control_locked(request).await
+        let configuration = self.configuration_change.lock().await;
+        self.control_locked(request, Some(configuration)).await
     }
 
     pub(super) async fn control_locked(
         &self,
         request: DeviceRequest,
+        configuration: Option<tokio::sync::MutexGuard<'_, ()>>,
     ) -> Result<ControlCompletion, ControlError> {
         self.load_configuration().await.map_err(control_error)?;
         let revision = self.configuration_revision()?;
@@ -456,6 +457,7 @@ impl Registry {
                 }
             }
         }
+        drop(configuration);
         let readback = settle(
             || self.command_readback(server, &source, identifier, domain),
             |observed| {
@@ -552,7 +554,7 @@ impl Registry {
         revision: &str,
     ) -> Result<FreshTarget, ControlError> {
         let server = text(&request.record, "ddm_server_profile")?;
-        if !self.refresh_server(server).await.map_err(control_error)? {
+        if !self.refresh_queued(server).await.map_err(control_error)? {
             return Err(ControlError::ObservationUnavailable(
                 "Current managed inventory is unavailable".into(),
             ));
