@@ -197,6 +197,17 @@ pub fn identity(record: &Value) -> CapturedDevice {
     }
 }
 
+const MODERN_AUDIO_RECEIVER_FLOW: u64 = 0x1422;
+const NATIVE_RECEIVER_FLOW_TYPE: u64 = 1;
+
+fn native_unicast(flow: &Value, addresses: &BTreeSet<&str>) -> bool {
+    flow["record_type_code"] == MODERN_AUDIO_RECEIVER_FLOW
+        && flow["flow_type_code"] == NATIVE_RECEIVER_FLOW_TYPE
+        && flow["destination_internet_protocol_version_four_address"]
+            .as_str()
+            .is_some_and(|address| addresses.contains(address))
+}
+
 pub fn routing(
     configuration: &mut Map<String, Value>,
     record: &Value,
@@ -249,7 +260,20 @@ pub fn routing(
         .get("receiver_flows")
         .and_then(Value::as_array)
         .context("fresh receiver-flow inventory is unavailable")?;
+    let addresses: BTreeSet<&str> = std::iter::once(&record["ipv4"])
+        .chain(
+            record["interfaces"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|interface| [&interface["address"], &interface["ipv4_address"]]),
+        )
+        .filter_map(Value::as_str)
+        .collect();
     for flow in receiver_flows {
+        if native_unicast(flow, &addresses) {
+            continue;
+        }
         ensure!(
             flow["endpoint_decoding_complete"] == true,
             "receiver-flow endpoints cannot be represented losslessly"
