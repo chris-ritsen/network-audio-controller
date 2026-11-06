@@ -236,6 +236,18 @@ impl Projection {
                         .map(|(key, _)| key)
                         .collect();
                 }
+                let online: BTreeSet<_> = candidates
+                    .iter()
+                    .copied()
+                    .filter(|key| {
+                        direct
+                            .get(*key)
+                            .is_some_and(|record| record["online"] == true)
+                    })
+                    .collect();
+                if candidates.len() > 1 && online.len() == 1 {
+                    candidates = online;
+                }
                 candidates
             })
             .collect();

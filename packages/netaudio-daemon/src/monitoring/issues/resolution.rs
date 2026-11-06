@@ -30,6 +30,17 @@ pub fn recovered(
     thresholds: Thresholds,
     timestamp: &str,
 ) -> Result<bool> {
+    if issue.kind == Kind::AddressConflict
+        && network::single_hardware_address(
+            issue.raw_source_fields["reporting_interfaces"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|member| member["interface"]["raw"]["mac_address"].as_str()),
+        )
+    {
+        return Ok(true);
+    }
     let Some(record) = records
         .get(&issue.scope.device_identity)
         .filter(|record| record["online"] != false)
