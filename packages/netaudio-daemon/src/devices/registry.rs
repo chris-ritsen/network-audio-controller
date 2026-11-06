@@ -695,18 +695,29 @@ impl DeviceRegistry {
             .map_err(|_| anyhow::anyhow!("managed control already configured"))
     }
 
-    pub fn bind_managed_precondition(
+    pub fn bind_precondition(
         &self,
         reference: &str,
+        operation: &ControlOperation,
         condition: &mut Value,
     ) -> Result<(), ControlError> {
-        if let Some(record) = self.model.device(reference)?
-            && crate::managed::control::required(&record)
-        {
+        let Some(record) = self.model.device(reference)? else {
+            return Ok(());
+        };
+        if crate::managed::control::required(&record) {
             let managed = self.managed.get().ok_or_else(|| {
                 ControlError::Unavailable("Managed control is unavailable".into())
             })?;
             condition["managed_configuration"] = json!(managed.configuration_revision()?);
+        } else if *condition == operation.precondition(&record) {
+            let device = self.controlled_device(reference)?;
+            let presented = device
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("device lock poisoned"))?
+                .record
+                .presentation()?;
+            *condition = operation.precondition(&presented);
         }
         Ok(())
     }

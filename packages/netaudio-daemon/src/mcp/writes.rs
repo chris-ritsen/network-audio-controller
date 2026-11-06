@@ -362,7 +362,7 @@ impl Writes {
                 .validate_operation(&device.reference, &device.operation)
                 .map_err(|error| CallError::invalid(error.to_string()))?;
             self.registry
-                .bind_managed_precondition(&device.reference, &mut device.precondition)
+                .bind_precondition(&device.reference, &device.operation, &mut device.precondition)
                 .map_err(|error| CallError::invalid(error.to_string()))?;
         }
 
