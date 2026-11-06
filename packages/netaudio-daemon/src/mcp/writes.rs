@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 mod diagnostics;
 mod external_subscription;
-mod flow_authoring;
+pub(super) mod flow_authoring;
 mod forgetting;
 mod host_audio;
 mod locking;

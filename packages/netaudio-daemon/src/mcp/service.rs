@@ -474,11 +474,17 @@ impl Service {
             let selector = arguments["device"]
                 .as_str()
                 .ok_or_else(|| CallError::invalid("device must be a string"))?;
-            let operation = crate::devices::flow_authoring::Operation::create(
+            let records = self.model.records()?;
+            let device = require_device(&records, &arguments["device"])?;
+            let specification = super::writes::flow_authoring::specification(
                 &arguments["specification"],
-                true,
+                device,
+                &self.registry,
             )
-            .map_err(|error| CallError::invalid(error.to_string()))?;
+            .await?;
+            let operation =
+                crate::devices::flow_authoring::Operation::create(&specification, true)
+                    .map_err(|error| CallError::invalid(error.to_string()))?;
             let completion = self
                 .registry
                 .plan_transmit_flow(selector, &operation)
