@@ -1,5 +1,5 @@
-use reqwest::{Method, Url, header::HeaderMap};
-use rustls::{ClientConfig, RootCertStore, crypto::ring};
+use reqwest::{header::HeaderMap, Method, Url};
+use rustls::{crypto::ring, ClientConfig, RootCertStore};
 use std::fmt;
 use std::io::BufReader;
 use std::path::Path;

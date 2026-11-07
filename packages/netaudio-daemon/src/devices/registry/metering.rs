@@ -1,10 +1,10 @@
 use super::{DeviceRegistry, ReceivedPacket};
 use crate::devices::transport::{CommandIntent, DeviceAddress, DeviceTransport};
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::commands::{OPCODE_CMC_METERING, PROTOCOL_CMC};
-use netaudio_core::protocol::{RESULT_CODE_SUCCESS, response_envelope};
+use netaudio_core::protocol::{response_envelope, RESULT_CODE_SUCCESS};
 use netaudio_core::responses::parse_metering_frame;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::net::Ipv4Addr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

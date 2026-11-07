@@ -1,16 +1,16 @@
 use super::{
-    NEXT_STEP, Prepared, PreparedDevice, PreparedKind, channel_number, require_record,
-    required_text,
+    channel_number, require_record, required_text, Prepared, PreparedDevice, PreparedKind,
+    NEXT_STEP,
 };
-use crate::devices::audio_configuration::{AudioConfiguration, AudioKind, parse_pullup_selection};
-use crate::devices::clock::{ClockOperation, parse_subdomain};
+use crate::devices::audio_configuration::{parse_pullup_selection, AudioConfiguration, AudioKind};
+use crate::devices::clock::{parse_subdomain, ClockOperation};
 use crate::devices::operations::{
     ChannelDirection, ControlCompletion, ControlError, ControlOperation,
 };
 use crate::devices::performance::PerformanceOperation;
 use crate::mcp::service::CallError;
 use crate::mcp::views::{self, Records};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 pub struct PreparedSetting {

@@ -3,7 +3,7 @@ use crate::monitoring::journal::model::{Severity, Thresholds};
 use crate::monitoring::journal::observe::{flow_map, subscription_failure, subscription_map};
 use anyhow::Result;
 use caseless::Caseless;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

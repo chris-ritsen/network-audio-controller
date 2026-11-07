@@ -5,9 +5,9 @@ use crate::devices::panels::{self, Operation};
 use crate::devices::record::DeviceRecord;
 use crate::devices::transport::{CommandIntent, DeviceTransport};
 use crate::monitoring::requests::StatusQuery;
-use anyhow::{Context, Result, ensure};
-use netaudio_core::device_controls::{PanelRequest, PanelStatus, profile};
-use serde_json::{Map, Value, json};
+use anyhow::{ensure, Context, Result};
+use netaudio_core::device_controls::{profile, PanelRequest, PanelStatus};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -371,11 +371,9 @@ impl DeviceRegistry {
                     != initial.properties.get("platform_versions_record")
                 || current_profile.write_unavailable_reason.is_some()
             {
-                result["reason"] = json!(
-                    current_profile
-                        .write_unavailable_reason
-                        .unwrap_or("panel identity changed before command")
-                );
+                result["reason"] = json!(current_profile
+                    .write_unavailable_reason
+                    .unwrap_or("panel identity changed before command"));
                 return Ok(completion(result, errors));
             }
             let receipt = self.panel_requests.subscribe(&current.key)?;

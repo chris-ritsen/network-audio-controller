@@ -1,6 +1,6 @@
 use crate::mcp::views::Records;
 use crate::monitoring::journal::store::Overview;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate};
 use serde_json::Value;
 use std::collections::BTreeMap;

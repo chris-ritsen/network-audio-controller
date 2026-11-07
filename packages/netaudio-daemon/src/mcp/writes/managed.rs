@@ -1,10 +1,10 @@
-use super::{CallError, NEXT_STEP, Prepared, PreparedKind, required_text, views};
+use super::{required_text, views, CallError, Prepared, PreparedKind, NEXT_STEP};
 use crate::managed::{
     operations::{self, Operation},
     planning::Plan,
     registry::Registry,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

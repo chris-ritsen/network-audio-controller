@@ -1,11 +1,11 @@
-use super::ApiError;
 use super::visibility::{EventFilter, Filtered};
+use super::ApiError;
 use crate::events::EventOptions;
 use crate::managed::sessions::Caller;
 use crate::state::{AmbiguousDevice, ReadModel};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, RawQuery, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -42,9 +42,9 @@ async fn devices(
     if caller.is_owner() {
         return Ok(json_bytes(model.devices_in_context(context.as_deref())?));
     }
-    Ok(json_bytes(model.devices_where(context.as_deref(), |record| {
-        caller.sees_device(record)
-    })?))
+    Ok(json_bytes(
+        model.devices_where(context.as_deref(), |record| caller.sees_device(record))?,
+    ))
 }
 
 async fn device(
@@ -81,20 +81,19 @@ async fn events(
     let body = if caller.is_owner() {
         Body::from_stream(receiver.map(|event| Ok::<_, Infallible>(event.encoded)))
     } else {
-        let ended: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
-            match &caller {
-                Caller::Session(session) => {
-                    let mut changes = session.subscribe();
-                    let expires = session.expires();
-                    Box::pin(async move {
-                        tokio::select! {
-                            _ = changes.changed() => {}
-                            _ = tokio::time::sleep_until(expires) => {}
-                        }
-                    })
-                }
-                _ => Box::pin(std::future::pending()),
-            };
+        let ended: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = match &caller {
+            Caller::Session(session) => {
+                let mut changes = session.subscribe();
+                let expires = session.expires();
+                Box::pin(async move {
+                    tokio::select! {
+                        _ = changes.changed() => {}
+                        _ = tokio::time::sleep_until(expires) => {}
+                    }
+                })
+            }
+            _ => Box::pin(std::future::pending()),
+        };
         let mut filter = EventFilter::new(caller);
         Body::from_stream(
             receiver

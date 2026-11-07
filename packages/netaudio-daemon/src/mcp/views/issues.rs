@@ -1,6 +1,6 @@
-use super::{Records, channels, compact, last_seen, local_time, resolve, subscriptions, waiting};
+use super::{channels, compact, last_seen, local_time, resolve, subscriptions, waiting, Records};
 use caseless::Caseless;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const DEFAULT_LIMIT: usize = 50;

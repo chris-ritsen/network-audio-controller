@@ -1,5 +1,5 @@
-use super::{Records, clock_view, compact, first, subscriptions, text, values};
-use serde_json::{Value, json};
+use super::{clock_view, compact, first, subscriptions, text, values, Records};
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 const NANOSECONDS_PER_MILLISECOND: f64 = 1_000_000.0;

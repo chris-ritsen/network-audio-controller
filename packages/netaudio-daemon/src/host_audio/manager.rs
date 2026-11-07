@@ -1,6 +1,6 @@
 use super::{
     card_control, cards,
-    history::{History, provider_name},
+    history::{provider_name, History},
     links, measurement,
     peers::Peers,
     provider::{self, Handle, Outcome},
@@ -9,12 +9,12 @@ use super::{
 use crate::{
     configuration::Configuration, monitoring::journal::service::Journal, state::ReadModel,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use netaudio_core::host_audio::{
     control::{Command, Plan},
     protocol::Provider,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     collections::VecDeque,
     path::PathBuf,

@@ -2,8 +2,8 @@ use super::operations::ControlError;
 use super::record::DeviceRecord;
 use crate::sap::inventory::Identity;
 use crate::state::ReadModel;
-use netaudio_core::spec::{ExternalSubscriptionPlanRequest, plan_external_subscription};
-use serde_json::{Value, json};
+use netaudio_core::spec::{plan_external_subscription, ExternalSubscriptionPlanRequest};
+use serde_json::{json, Value};
 
 pub const SOURCE_CHANGED: &str = "source announcement expired or changed; refresh the source";
 

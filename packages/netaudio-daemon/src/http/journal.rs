@@ -5,7 +5,7 @@ use crate::monitoring::journal::service::Journal;
 use axum::extract::{RawQuery, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -54,14 +54,13 @@ fn query_arguments(query: &str) -> Result<Value, ApiError> {
             continue;
         }
 
-        let value =
-            if matches!(name.as_ref(), "limit" | "before_sequence") {
-                json!(value.parse::<u64>().map_err(|_| ApiError::invalid(format!(
-                    "{name} must be a non-negative integer"
-                )))?)
-            } else {
-                json!(value)
-            };
+        let value = if matches!(name.as_ref(), "limit" | "before_sequence") {
+            json!(value
+                .parse::<u64>()
+                .map_err(|_| ApiError::invalid(format!("{name} must be a non-negative integer")))?)
+        } else {
+            json!(value)
+        };
         arguments.insert(name.into_owned(), value);
     }
 

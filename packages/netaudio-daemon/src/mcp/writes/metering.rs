@@ -1,8 +1,8 @@
-use super::{NEXT_STEP, Prepared, PreparedKind, require_record, required_text};
+use super::{require_record, required_text, Prepared, PreparedKind, NEXT_STEP};
 use crate::mcp::service::CallError;
 use crate::mcp::views::Records;
 use crate::monitoring::metering_streams::MeteringStreams;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub struct PreparedMetering {

@@ -1,16 +1,16 @@
-use super::model::{EventFilter, JournalEvent, OperationRequest, Thresholds, device_identity};
+use super::model::{device_identity, EventFilter, JournalEvent, OperationRequest, Thresholds};
 use super::observe::Observer;
 use super::remembered;
 use super::store::{EventPage, JournalDatabase, Overview};
 use crate::events::{
-    DEVICE_DISCOVERED, DEVICE_REMOVED, DEVICE_UPDATED, Event, SNAPSHOT, TELEMETRY_UPDATED,
+    Event, DEVICE_DISCOVERED, DEVICE_REMOVED, DEVICE_UPDATED, SNAPSHOT, TELEMETRY_UPDATED,
 };
 use crate::monitoring::issues;
 use crate::state::{ReadModel, Subscription};
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use chrono::{SecondsFormat, Utc};
 use futures_util::StreamExt;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;

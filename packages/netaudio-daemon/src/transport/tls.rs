@@ -1,9 +1,9 @@
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
-use rustls::{ServerConfig, crypto};
-use serde_json::{Value, json};
+use rustls::{crypto, ServerConfig};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -256,10 +256,9 @@ impl TlsIdentity {
 
             if let Some(certificate) = &certificates.named {
                 status["names"] = json!(certificate.names);
-                status["valid_until"] = json!(
-                    chrono::DateTime::from_timestamp(certificate.valid_until, 0)
-                        .map(|time| time.to_rfc3339())
-                );
+                status["valid_until"] =
+                    json!(chrono::DateTime::from_timestamp(certificate.valid_until, 0)
+                        .map(|time| time.to_rfc3339()));
             }
 
             if let Some(error) = &certificates.named_error {

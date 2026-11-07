@@ -1,13 +1,13 @@
 mod tls;
 
 use crate::devices::discovery::DiscoveredService;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use reqwest::Method;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::{watch, Semaphore};
 
 const MAXIMUM_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 

@@ -1,5 +1,5 @@
-use super::{Records, channel_names, compact, first, subscriptions, text, values};
-use serde_json::{Value, json};
+use super::{channel_names, compact, first, subscriptions, text, values, Records};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn labels(numbers: &[Value], channels: &Value) -> Vec<String> {

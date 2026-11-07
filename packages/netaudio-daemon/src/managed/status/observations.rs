@@ -3,10 +3,10 @@ use super::super::{
     device_session::{controller_identity, target_identity},
 };
 use crate::monitoring::status::{self, StatusKind};
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use chrono::{DateTime, Utc};
 use netaudio_core::managed_api::inventory::Observation;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::{collections::BTreeMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::time::Instant;
 

@@ -1,13 +1,13 @@
 use super::{
-    NEXT_STEP, Prepared, PreparedDevice, PreparedKind, channel_number, require_record,
-    required_text,
+    channel_number, require_record, required_text, Prepared, PreparedDevice, PreparedKind,
+    NEXT_STEP,
 };
 use crate::devices::flow_authoring::Operation;
 use crate::devices::operations::{ControlCompletion, ControlError, ControlOperation};
 use crate::devices::registry::DeviceRegistry;
 use crate::mcp::service::CallError;
 use crate::mcp::views::{self, Records};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -106,7 +106,11 @@ pub(in crate::mcp) async fn specification(
             })?;
         specification.insert(
             "channel_slots".into(),
-            json!(channels.iter().enumerate().map(|(index, channel)| json!({"slot": index + 1, "transmitter_channel": channel})).collect::<Vec<_>>()),
+            json!(channels
+                .iter()
+                .enumerate()
+                .map(|(index, channel)| json!({"slot": index + 1, "transmitter_channel": channel}))
+                .collect::<Vec<_>>()),
         );
     }
     let slots = specification
@@ -132,9 +136,7 @@ pub(in crate::mcp) async fn specification(
             json!(channel_number(record, &channel, "transmitters")?),
         );
     }
-    let identity = specification
-        .entry("identity")
-        .or_insert_with(|| json!({}));
+    let identity = specification.entry("identity").or_insert_with(|| json!({}));
     let authoring = &record["transmit_flow_authoring"];
     if !identity.is_object()
         || identity.get("global_flow_id").is_some()

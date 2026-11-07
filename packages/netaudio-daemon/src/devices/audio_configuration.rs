@@ -1,9 +1,9 @@
 use super::operations::ControlError;
 use crate::monitoring::requests::StatusQuery;
-use netaudio_core::capabilities::{AvailabilityRequest, availability, sample_rate_pullup_choices};
+use netaudio_core::capabilities::{availability, sample_rate_pullup_choices, AvailabilityRequest};
 use netaudio_core::responses::AudioCapabilityReadback;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]

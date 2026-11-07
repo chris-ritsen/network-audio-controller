@@ -1,15 +1,15 @@
 use super::multicast::ReceivedPacket;
 use crate::state::ReadModel;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::heartbeat::parse_heartbeat_records;
-use netaudio_core::metering::{MeteringScales, metering_scale};
+use netaudio_core::metering::{metering_scale, MeteringScales};
 use netaudio_core::responses::MeteringFrame;
-use netaudio_core::signal_presence::{SignalPresenceRecord, parse_signal_presence_packet};
-use serde_json::{Map, Value, json};
+use netaudio_core::signal_presence::{parse_signal_presence_packet, SignalPresenceRecord};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use tokio::sync::{Notify, watch};
+use tokio::sync::{watch, Notify};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -96,11 +96,9 @@ impl Sample {
         fields.extend([
             (
                 "observed_at".to_owned(),
-                json!(
-                    receipt
-                        .wall
-                        .to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
-                ),
+                json!(receipt
+                    .wall
+                    .to_rfc3339_opts(chrono::SecondsFormat::Micros, true)),
             ),
             (
                 "wall_time".to_owned(),

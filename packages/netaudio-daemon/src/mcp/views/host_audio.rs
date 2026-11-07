@@ -1,7 +1,7 @@
 use super::{local_time, text};
 use crate::mcp::service::CallError;
 use netaudio_core::host_audio::cards::{self, Bridge, Card, Channel};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -443,117 +443,103 @@ pub fn view(snapshot: &Value, arguments: &Value) -> Result<Value, CallError> {
             );
         }
         "connections" => {
-            view["connections"] = json!(
-                selected
+            view["connections"] = json!(selected
+                .iter()
+                .filter(|(_, port)| port["direction"] == "output"
+                    && entries(&port["connections"]).next().is_some())
+                .map(|(name, port)| format!(
+                    "{} → {}",
+                    label(name, port),
+                    entries(&port["connections"])
+                        .filter_map(Value::as_str)
+                        .map(|destination| label(destination, &jack["ports"][destination]))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+                .collect::<Vec<_>>());
+            if client.is_some() {
+                view["heard_by_client"] = json!(selected
                     .iter()
-                    .filter(|(_, port)| port["direction"] == "output"
+                    .filter(|(_, port)| port["direction"] == "input"
                         && entries(&port["connections"]).next().is_some())
                     .map(|(name, port)| format!(
-                        "{} → {}",
+                        "{} ← {}",
                         label(name, port),
-                        entries(&port["connections"])
-                            .filter_map(Value::as_str)
-                            .map(|destination| label(destination, &jack["ports"][destination]))
-                            .collect::<Vec<_>>()
-                            .join(", ")
+                        joined(&port["connections"], ", ")
                     ))
-                    .collect::<Vec<_>>()
-            );
-            if client.is_some() {
-                view["heard_by_client"] = json!(
-                    selected
-                        .iter()
-                        .filter(|(_, port)| port["direction"] == "input"
-                            && entries(&port["connections"]).next().is_some())
-                        .map(|(name, port)| format!(
-                            "{} ← {}",
-                            label(name, port),
-                            joined(&port["connections"], ", ")
-                        ))
-                        .collect::<Vec<_>>()
-                );
+                    .collect::<Vec<_>>());
             }
-            view["unconnected_ports"] = json!(
-                selected
-                    .iter()
-                    .filter(|(_, port)| entries(&port["connections"]).next().is_none())
-                    .count()
-            );
+            view["unconnected_ports"] = json!(selected
+                .iter()
+                .filter(|(_, port)| entries(&port["connections"]).next().is_none())
+                .count());
         }
         "ports" => {
-            view["ports"] = json!(
-                selected
-                    .iter()
-                    .map(|(name, port)| {
-                        let mut line = format!(
-                            "{}: {} {}",
-                            label(name, port),
-                            known(&port["type"]),
-                            known(&port["direction"])
-                        );
-                        if let Some(channel) = hardware(name, port, &cards, &bridges) {
-                            line.push_str(&format!(
-                                ", {} {} {}",
-                                channel.card,
-                                if channel.direction == cards::Direction::Capture {
-                                    "capture"
-                                } else {
-                                    "playback"
-                                },
-                                channel.channel
-                            ));
-                        }
-                        if entries(&port["connections"]).next().is_some() {
-                            line.push_str(&format!(
-                                " {} {}",
-                                if port["direction"] == "output" {
-                                    "→"
-                                } else {
-                                    "←"
-                                },
-                                joined(&port["connections"], ", ")
-                            ));
-                        }
-                        line
-                    })
-                    .collect::<Vec<_>>()
-            );
+            view["ports"] = json!(selected
+                .iter()
+                .map(|(name, port)| {
+                    let mut line = format!(
+                        "{}: {} {}",
+                        label(name, port),
+                        known(&port["type"]),
+                        known(&port["direction"])
+                    );
+                    if let Some(channel) = hardware(name, port, &cards, &bridges) {
+                        line.push_str(&format!(
+                            ", {} {} {}",
+                            channel.card,
+                            if channel.direction == cards::Direction::Capture {
+                                "capture"
+                            } else {
+                                "playback"
+                            },
+                            channel.channel
+                        ));
+                    }
+                    if entries(&port["connections"]).next().is_some() {
+                        line.push_str(&format!(
+                            " {} {}",
+                            if port["direction"] == "output" {
+                                "→"
+                            } else {
+                                "←"
+                            },
+                            joined(&port["connections"], ", ")
+                        ));
+                    }
+                    line
+                })
+                .collect::<Vec<_>>());
         }
         "pulse" => {
             view["pulseaudio"] = json!(pulse_line(pulse));
-            view["outputs"] = json!(
-                entries(&pulse["sinks"])
-                    .map(|entry| device_line("output", entry, &pulse["server"]["default_sink"]))
-                    .collect::<Vec<_>>()
-            );
-            view["inputs"] = json!(
-                entries(&pulse["sources"])
-                    .map(|entry| device_line("input", entry, &pulse["server"]["default_source"]))
-                    .collect::<Vec<_>>()
-            );
+            view["outputs"] = json!(entries(&pulse["sinks"])
+                .map(|entry| device_line("output", entry, &pulse["server"]["default_sink"]))
+                .collect::<Vec<_>>());
+            view["inputs"] = json!(entries(&pulse["sources"])
+                .map(|entry| device_line("input", entry, &pulse["server"]["default_source"]))
+                .collect::<Vec<_>>());
             view["streams"] = json!(streams());
         }
         "cards" => {
             view["cards"] = json!(card_lines(&cards, &mappings));
             view["links"] = json!(mappings);
-            view["bridged_by"] = json!(
-                bridges
-                    .iter()
-                    .map(|(client, bridge)| (
-                        client,
-                        format!(
-                            "{} {} on {}",
-                            bridge.program,
-                            if bridge.direction == cards::Direction::Capture {
-                                "capture"
-                            } else {
-                                "playback"
-                            },
-                            bridge.card
-                        )
-                    ))
-                    .collect::<BTreeMap<_, _>>()
-            );
+            view["bridged_by"] = json!(bridges
+                .iter()
+                .map(|(client, bridge)| (
+                    client,
+                    format!(
+                        "{} {} on {}",
+                        bridge.program,
+                        if bridge.direction == cards::Direction::Capture {
+                            "capture"
+                        } else {
+                            "playback"
+                        },
+                        bridge.card
+                    )
+                ))
+                .collect::<BTreeMap<_, _>>());
         }
         "changes" => view["changes"] = json!(changes(snapshot, None)),
         _ => return Err(CallError::invalid("Unknown host audio section")),

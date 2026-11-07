@@ -1,6 +1,6 @@
 use anyhow::Result;
 use netaudio_core::responses::DeviceSettings;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub fn apply_settings(
     properties: &mut Map<String, Value>,

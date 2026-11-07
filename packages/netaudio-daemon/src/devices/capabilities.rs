@@ -1,7 +1,7 @@
 use anyhow::Result;
-use netaudio_core::capabilities::{Availability, AvailabilityRequest, availability};
-use netaudio_core::network::{NetworkControlState, network_control_state, redundancy_control};
-use serde_json::{Map, Value, json};
+use netaudio_core::capabilities::{availability, Availability, AvailabilityRequest};
+use netaudio_core::network::{network_control_state, redundancy_control, NetworkControlState};
+use serde_json::{json, Map, Value};
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
 pub struct OperationAvailability<'a> {

@@ -1,4 +1,4 @@
-use super::{Credential, Error, Transport, client::Client};
+use super::{client::Client, Credential, Error, Transport};
 use base64::Engine;
 use rand::RngCore;
 use serde_json::Value;

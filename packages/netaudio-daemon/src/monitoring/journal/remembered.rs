@@ -1,5 +1,5 @@
 use super::store::JournalDatabase;
-use anyhow::{Result, ensure};
+use anyhow::{ensure, Result};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

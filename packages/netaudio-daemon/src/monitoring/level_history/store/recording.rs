@@ -1,8 +1,8 @@
 use super::{HistoryStore, LevelHistory, RETENTION_SECONDS};
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::host_audio::recording::Record;
-use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub(super) fn initialize(connection: &mut Connection) -> Result<()> {

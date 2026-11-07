@@ -1,9 +1,9 @@
 use super::capabilities;
 use super::operations::ControlError;
 use netaudio_core::network::{
-    InterfaceConfigurationRequest, NetworkInterface, verify_interface_configuration,
+    verify_interface_configuration, InterfaceConfigurationRequest, NetworkInterface,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Clone, Debug)]
 pub struct Configuration {

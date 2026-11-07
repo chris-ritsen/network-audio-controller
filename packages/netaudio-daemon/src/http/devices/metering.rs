@@ -1,10 +1,10 @@
-use super::{ApiError, DeviceService, RequestBody, json_value, parameters, text};
-use axum::Router;
+use super::{json_value, parameters, text, ApiError, DeviceService, RequestBody};
 use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::{get, post};
-use serde_json::{Map, Value, json};
+use axum::Router;
+use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
 pub(super) fn routes(router: Router<DeviceService>) -> Router<DeviceService> {

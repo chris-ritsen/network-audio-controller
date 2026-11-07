@@ -1,9 +1,9 @@
 use crate::monitoring::journal::model::{
-    Derivation, EventKind, JournalEvent, Severity, device_identity,
+    device_identity, Derivation, EventKind, JournalEvent, Severity,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 pub(super) const SCHEMA_VERSION: u32 = 1;

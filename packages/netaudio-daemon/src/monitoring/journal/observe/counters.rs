@@ -1,7 +1,7 @@
 use super::Observation;
 use crate::monitoring::journal::model::{EventKind, Severity};
 use anyhow::Result;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 pub fn observe(observation: &mut Observation<'_>) -> Result<()> {

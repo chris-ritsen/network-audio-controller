@@ -13,7 +13,7 @@ use crate::{
     },
     monitoring::status::StatusKind,
 };
-use serde_json::{Map, json};
+use serde_json::{json, Map};
 use std::sync::Arc;
 
 impl Registry {

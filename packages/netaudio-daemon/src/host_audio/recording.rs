@@ -2,17 +2,17 @@ use super::{
     process::Process,
     provider::{Handle as ProviderHandle, Observation, Status},
 };
-use crate::monitoring::level_history::{LevelHistory, store::HistoryStore};
-use anyhow::{Context, Result, bail, ensure};
+use crate::monitoring::level_history::{store::HistoryStore, LevelHistory};
+use anyhow::{bail, ensure, Context, Result};
 use netaudio_core::host_audio::{
     protocol::{Event, Provider, Purpose, RequestAction},
     recording::{Configuration, Record},
     snapshot::{Direction, Snapshot},
 };
 use rand::RngCore;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc, time::Duration};
-use tokio::sync::{Notify, watch};
+use tokio::sync::{watch, Notify};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]

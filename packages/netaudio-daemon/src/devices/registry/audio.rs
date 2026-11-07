@@ -1,6 +1,6 @@
 use super::{Device, DeviceRegistry, DeviceTransport};
 use crate::devices::audio_configuration::{AudioConfiguration, AudioKind};
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use serde_json::{Map, Value};
 use std::time::Duration;
 

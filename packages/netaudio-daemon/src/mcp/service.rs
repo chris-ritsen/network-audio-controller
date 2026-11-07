@@ -7,8 +7,8 @@ use crate::authorization::{Grant, WRITE_SCOPE};
 use crate::devices::operations::ControlOperation;
 use crate::devices::registry::{DeviceRegistry, DiagnosticOptions};
 use crate::state::ReadModel;
-use futures_util::{StreamExt, stream};
-use serde_json::{Map, Value, json};
+use futures_util::{stream, StreamExt};
+use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -482,9 +482,8 @@ impl Service {
                 &self.registry,
             )
             .await?;
-            let operation =
-                crate::devices::flow_authoring::Operation::create(&specification, true)
-                    .map_err(|error| CallError::invalid(error.to_string()))?;
+            let operation = crate::devices::flow_authoring::Operation::create(&specification, true)
+                .map_err(|error| CallError::invalid(error.to_string()))?;
             let completion = self
                 .registry
                 .plan_transmit_flow(selector, &operation)

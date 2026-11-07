@@ -2,23 +2,23 @@ use super::operations::Operation;
 use super::resources::{ResourceWatch, Resources};
 use super::sessions::{Caller, Session};
 use super::{
-    Credential, Error, Limits, Transport,
     client::Client,
     configuration::{Server, Settings},
     discovery::DiscoveryState,
     inventory::InventoryState,
     store::{Snapshot, Store},
+    Credential, Error, Limits, Transport,
 };
 use crate::state::ReadModel;
 use anyhow::{Context, Result};
-use futures_util::{StreamExt, stream};
-use serde_json::{Value, json};
+use futures_util::{stream, StreamExt};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
-use tokio::sync::{Notify, Semaphore, mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch, Notify, Semaphore};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -662,7 +662,9 @@ impl Registry {
         let mut controller_status = Vec::new();
         for (name, entry) in &mut state.servers {
             let source_observations =
-                entry.inventory.observations(name, contexts, &entry.discovery);
+                entry
+                    .inventory
+                    .observations(name, contexts, &entry.discovery);
             controller_status.extend(entry.controller_status.project(&source_observations, now)?);
             observations.extend(source_observations);
         }

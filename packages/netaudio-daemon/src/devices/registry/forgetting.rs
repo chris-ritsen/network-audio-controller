@@ -5,11 +5,11 @@ use crate::devices::operations::ControlError;
 use crate::devices::record::DeviceRecord;
 use crate::devices::transport::DeviceTransport;
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{Mutex as AsyncMutex, oneshot};
+use tokio::sync::{oneshot, Mutex as AsyncMutex};
 
 const REDISCOVERY_DEADLINE: Duration = Duration::from_secs(5);
 

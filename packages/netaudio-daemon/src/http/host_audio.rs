@@ -1,14 +1,14 @@
-use super::{ApiError, MAXIMUM_REQUEST_BYTES, RequestBody, inventory::json_value};
+use super::{inventory::json_value, ApiError, RequestBody, MAXIMUM_REQUEST_BYTES};
 use crate::host_audio::{manager::Manager, provider::Outcome};
 use axum::{
-    Router,
     extract::{DefaultBodyLimit, OriginalUri, RawQuery, State},
     http::StatusCode,
     response::Response,
     routing::{get, post},
+    Router,
 };
 use netaudio_core::host_audio::control::Command;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub fn signal_router(service: Option<Arc<crate::host_audio::signal::Service>>) -> Router {
@@ -83,13 +83,11 @@ async fn trace_query(
                 "1" | "true" | "yes" => json!(true),
                 _ => return Err(ApiError::invalid("levels must be true or false")),
             },
-            "seconds" => json!(
-                value
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|value| value.is_finite())
-                    .ok_or_else(|| ApiError::invalid("seconds must be a finite number"))?
-            ),
+            "seconds" => json!(value
+                .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| ApiError::invalid("seconds must be a finite number"))?),
             _ => json!(value),
         };
         arguments.insert(name.into_owned(), value);

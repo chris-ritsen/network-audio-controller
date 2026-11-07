@@ -1,9 +1,9 @@
 use super::{
-    Error,
     audit::Audit,
     control::DeviceRequest,
-    device_session::{DeviceSession, identities},
+    device_session::{identities, DeviceSession},
     registry::{Registry, Source},
+    Error,
 };
 use crate::devices::{
     maintenance,
@@ -13,7 +13,7 @@ use netaudio_core::{
     capabilities::{self, AvailabilityRequest},
     managed_session::ManagedOperation,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 #[derive(Clone, Copy)]

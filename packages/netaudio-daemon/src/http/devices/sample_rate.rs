@@ -1,12 +1,12 @@
-use super::{ApiError, DeviceService, RequestBody, control_error, parameters, text};
+use super::{control_error, parameters, text, ApiError, DeviceService, RequestBody};
 use crate::devices::operations::ControlOperation;
-use crate::devices::sample_rate::{Operation, response_status};
+use crate::devices::sample_rate::{response_status, Operation};
 use crate::http::inventory::json_value;
-use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::post;
+use axum::Router;
 use serde_json::json;
 use std::sync::Arc;
 

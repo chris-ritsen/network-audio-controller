@@ -1,5 +1,5 @@
-use crate::resources::{FileWatch, resource_paths};
-use anyhow::{Context, Result, ensure};
+use crate::resources::{resource_paths, FileWatch};
+use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeMap;

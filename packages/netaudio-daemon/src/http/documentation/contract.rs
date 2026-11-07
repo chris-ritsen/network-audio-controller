@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use schemars::generate::{Contract, SchemaSettings};
 use schemars::{JsonSchema, SchemaGenerator};
 use serde_json::{Map, Value};

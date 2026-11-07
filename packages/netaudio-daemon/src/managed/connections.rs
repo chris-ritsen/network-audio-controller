@@ -1,13 +1,13 @@
 use super::{
-    Credential, Error, Limits, Transport,
     client::Client,
     configuration::validate_name,
     registry::{Output, Registry},
     sessions::{Caller, Login as SessionLogin, Session},
     store::{Change, Snapshot},
+    Credential, Error, Limits, Transport,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -88,9 +88,7 @@ impl Registry {
         let client = Client::new(&url, credential.clone(), transport, Limits::default())?;
         let (response, inventory) = client.inventory().await?;
         let mut verified = super::inventory::InventoryState::default();
-        if !verified.apply(response, inventory)?
-            || !verified.fresh()
-        {
+        if !verified.apply(response, inventory)? || !verified.fresh() {
             return Err(Error::Invalid(
                 "DDM did not grant access to its device inventory",
             ));
@@ -167,12 +165,7 @@ impl Registry {
                 ));
             }
             let domain = domains[0];
-            let name = context_name(
-                &snapshot,
-                &server,
-                &domain_id,
-                domain["name"].as_str(),
-            );
+            let name = context_name(&snapshot, &server, &domain_id, domain["name"].as_str());
             Change::Context {
                 server,
                 name,
@@ -276,12 +269,15 @@ impl Registry {
             ),
             Authentication::ApiKey { api_key } => (Credential::new(api_key)?, None),
             Authentication::Saved => {
-                return Err(Error::Invalid(
-                    "Enter your DDM email address and password",
-                ));
+                return Err(Error::Invalid("Enter your DDM email address and password"));
             }
         };
-        let client = Client::new(&url, credential.clone(), transport.clone(), Limits::default())?;
+        let client = Client::new(
+            &url,
+            credential.clone(),
+            transport.clone(),
+            Limits::default(),
+        )?;
         let domains = visible_domains(&request.server, &client).await?;
         if !saved {
             self.add_server(&request.server, &url).await?;
@@ -420,9 +416,7 @@ impl Registry {
 async fn visible_domains(server: &str, client: &Client) -> Result<BTreeSet<String>, Error> {
     let (response, inventory) = client.inventory().await?;
     let mut verified = super::inventory::InventoryState::default();
-    if !verified.apply(response, inventory)?
-        || !verified.fresh()
-    {
+    if !verified.apply(response, inventory)? || !verified.fresh() {
         return Err(Error::Invalid(
             "DDM did not grant access to its device inventory",
         ));
@@ -449,7 +443,9 @@ fn context_name(
         .unwrap_or_else(|| {
             let base: String = format!(
                 "{server}-{}",
-                domain_name.filter(|name| !name.is_empty()).unwrap_or("domain")
+                domain_name
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("domain")
             )
             .chars()
             .map(|character| {

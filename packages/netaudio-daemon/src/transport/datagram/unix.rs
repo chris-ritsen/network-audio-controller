@@ -1,5 +1,5 @@
-use super::{PacketMetadata, invalid_packet};
-use nix::sys::socket::{ControlMessageOwned, MsgFlags, SockaddrIn, recvmsg, setsockopt, sockopt};
+use super::{invalid_packet, PacketMetadata};
+use nix::sys::socket::{recvmsg, setsockopt, sockopt, ControlMessageOwned, MsgFlags, SockaddrIn};
 use socket2::Socket;
 use std::io::{self, IoSliceMut};
 use std::net::{Ipv4Addr, SocketAddrV4};

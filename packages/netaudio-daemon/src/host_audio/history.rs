@@ -5,7 +5,7 @@ use crate::monitoring::journal::{
 };
 use anyhow::{Context, Result};
 use netaudio_core::host_audio::{changes, protocol::Provider, snapshot::Snapshot};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::VecDeque;
 
 #[derive(Default)]
@@ -136,12 +136,10 @@ pub fn projection(observation: &Observation, changes: &VecDeque<Value>) -> Resul
             .unwrap_or(Value::Null);
     }
     value["available"] = json!(ready);
-    value["reason"] = json!(
-        observation
-            .error
-            .as_deref()
-            .or_else(|| (!ready).then_some("Host audio provider is connecting"))
-    );
+    value["reason"] = json!(observation
+        .error
+        .as_deref()
+        .or_else(|| (!ready).then_some("Host audio provider is connecting")));
     value["changes"] = json!(changes);
     value["observation"] = json!({"status":observation.status,"generation":observation.generation,"revision":observation.revision,"observed_at":observation.observed_at,"executable_sha256":observation.executable_sha256,"process_id":observation.process_id});
     Ok(value)

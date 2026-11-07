@@ -1,7 +1,7 @@
 use super::{
-    Error,
     audit::Audit,
     registry::{Registry, Request, Source},
+    Error,
 };
 use crate::devices::operations::{
     ControlCompletion, ControlError, ControlOperation, SubscriptionChange,
@@ -9,7 +9,7 @@ use crate::devices::operations::{
 use crate::devices::panels::Operation;
 use netaudio_core::managed_api::control::{Control, Subscription};
 use netaudio_core::managed_api::inventory::Observation;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -282,10 +282,13 @@ impl Registry {
         request: DeviceRequest,
     ) -> Result<ControlCompletion, ControlError> {
         let configuration = self.configuration_change.lock().await;
-        let server = request.record["ddm_server_profile"].as_str().map(str::to_owned);
+        let server = request.record["ddm_server_profile"]
+            .as_str()
+            .map(str::to_owned);
         let settles = settles_routes(&request.operation);
         let result = self.control_locked(request, Some(configuration)).await;
-        let sent = |outcome: &Value| outcome["request_sent"] == true || outcome["change_sent"] == true;
+        let sent =
+            |outcome: &Value| outcome["request_sent"] == true || outcome["change_sent"] == true;
         let changed = match &result {
             Ok(completion) => {
                 completion.acknowledged_commands > 0

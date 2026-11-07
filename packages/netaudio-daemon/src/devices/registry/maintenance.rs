@@ -6,7 +6,7 @@ use crate::devices::transport::DeviceTransport;
 use crate::monitoring::requests;
 use crate::monitoring::status::StatusKind;
 use anyhow::Context;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::time::Duration;
 
 const CLEAR_OBSERVATION_WINDOW: Duration = Duration::from_secs(3);

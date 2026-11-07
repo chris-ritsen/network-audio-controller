@@ -1,5 +1,5 @@
-use super::{Provider, projection, wait};
-use anyhow::{Context, Result, bail, ensure};
+use super::{projection, wait, Provider};
+use anyhow::{bail, ensure, Context, Result};
 use libpulse_binding::callbacks::ListResult;
 use netaudio_core::host_audio::{
     protocol::MAXIMUM_FRAME_BYTES,
@@ -8,7 +8,7 @@ use netaudio_core::host_audio::{
 use netaudio_host_worker::input::{Input, Wake};
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex, atomic::Ordering},
+    sync::{atomic::Ordering, Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -157,20 +157,18 @@ fn gather(provider: &mut Provider, input: &mut Input) -> Result<Collection> {
     drop(introspector);
     provider.mainloop.unlock();
     let deadline = Instant::now() + Duration::from_secs(3);
-    let completion = (|| {
-        loop {
-            {
-                let collected = collection.lock().unwrap_or_else(|error| error.into_inner());
-                if let Some(error) = &collected.error {
-                    bail!("{error}");
-                }
-                if collected.server.is_some() && collected.complete.iter().all(|done| *done) {
-                    return Ok(());
-                }
+    let completion = (|| loop {
+        {
+            let collected = collection.lock().unwrap_or_else(|error| error.into_inner());
+            if let Some(error) = &collected.error {
+                bail!("{error}");
             }
-            provider.check()?;
-            wait(input, deadline)?;
+            if collected.server.is_some() && collected.complete.iter().all(|done| *done) {
+                return Ok(());
+            }
         }
+        provider.check()?;
+        wait(input, deadline)?;
     })();
     provider.mainloop.lock();
     if completion.is_err() {

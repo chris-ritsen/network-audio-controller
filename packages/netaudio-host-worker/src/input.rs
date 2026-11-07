@@ -1,12 +1,12 @@
-use anyhow::{Context, Result, bail, ensure};
-use netaudio_core::host_audio::protocol::{MAXIMUM_FRAME_BYTES, Request};
+use anyhow::{bail, ensure, Context, Result};
+use netaudio_core::host_audio::protocol::{Request, MAXIMUM_FRAME_BYTES};
 use std::{
     collections::VecDeque,
     io::{ErrorKind, Read},
     os::{fd::AsRawFd, unix::net::UnixStream},
     sync::{
-        Arc,
         atomic::{AtomicU64, Ordering},
+        Arc,
     },
     time::Instant,
 };

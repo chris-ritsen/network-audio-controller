@@ -1,4 +1,4 @@
-use super::{Device, DeviceRegistry, read_inventory};
+use super::{read_inventory, Device, DeviceRegistry};
 use crate::devices::audit::Audit;
 use crate::devices::flow_authoring::{self, Operation};
 use crate::devices::flows::{self, TransmitInventory};
@@ -8,10 +8,10 @@ use crate::devices::record::DeviceRecord;
 use crate::devices::transport::{CommandIntent, DeviceTransport, TransportError};
 use crate::monitoring::requests::StatusQuery;
 use anyhow::Context;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::{Instant, timeout_at};
+use tokio::time::{timeout_at, Instant};
 
 const READBACK_WINDOW: Duration = Duration::from_secs(5);
 
@@ -82,7 +82,6 @@ impl DeviceRegistry {
                 "fresh transmitter channels unavailable; no request was sent".to_owned(),
             ));
         }
-
 
         if !operation.is_delete() {
             for query in [StatusQuery::SampleRate, StatusQuery::Encoding] {

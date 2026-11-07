@@ -6,9 +6,9 @@ use crate::devices::operations::{ControlCompletion, ControlError, ControlOperati
 use crate::devices::transport::{CommandIntent, DeviceTransport, TransportError};
 use crate::monitoring::requests::StatusQuery;
 use anyhow::Context;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::time::Duration;
-use tokio::time::{Instant, timeout_at};
+use tokio::time::{timeout_at, Instant};
 
 const READBACK_WINDOW: Duration = Duration::from_secs(3);
 

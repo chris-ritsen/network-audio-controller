@@ -1,5 +1,5 @@
-use super::{Records, compact, events_view, local_time, text};
-use serde_json::{Value, json};
+use super::{compact, events_view, local_time, text, Records};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn domains(records: &Records) -> Vec<Value> {

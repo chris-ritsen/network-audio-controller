@@ -1,17 +1,17 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netlink_packet_core::{
-    NLM_F_DUMP, NLM_F_DUMP_INTR, NLM_F_REQUEST, NetlinkMessage, NetlinkPayload,
+    NetlinkMessage, NetlinkPayload, NLM_F_DUMP, NLM_F_DUMP_INTR, NLM_F_REQUEST,
 };
 use netlink_packet_route::{
-    AddressFamily, RouteNetlinkMessage,
     neighbour::{NeighbourAddress, NeighbourAttribute, NeighbourMessage, NeighbourState},
+    AddressFamily, RouteNetlinkMessage,
 };
-use netlink_sys::{Socket, SocketAddr, protocols::NETLINK_ROUTE};
+use netlink_sys::{protocols::NETLINK_ROUTE, Socket, SocketAddr};
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::time::Duration;
 use tokio::io::unix::AsyncFd;
-use tokio::time::{Instant, timeout_at};
+use tokio::time::{timeout_at, Instant};
 
 const NEIGHBOUR_GROUP: u32 = 4;
 const MAXIMUM_DATAGRAM: usize = 1_048_576;

@@ -1,6 +1,6 @@
 use crate::configuration::file;
-use crate::resources::{FileWatch, resource_paths};
-use anyhow::{Context, Result, ensure};
+use crate::resources::{resource_paths, FileWatch};
+use anyhow::{ensure, Context, Result};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;

@@ -1,10 +1,10 @@
 use crate::events::{
-    DEVICE_DISCOVERED, DEVICE_PATCH, DEVICE_REMOVED, DEVICE_UPDATED, Event, MANAGED_STATUS,
+    Event, DEVICE_DISCOVERED, DEVICE_PATCH, DEVICE_REMOVED, DEVICE_UPDATED, MANAGED_STATUS,
     SNAPSHOT,
 };
 use crate::managed::sessions::Caller;
 use bytes::Bytes;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 const MEMBERSHIP_FIELDS: [&str; 2] = ["ddm_domain_id", "ddm_server_profile"];
@@ -63,7 +63,9 @@ impl EventFilter {
                     }
                     Filtered::Keep
                 } else if self.hidden.insert(name.to_owned()) {
-                    encode(&json!({"event": DEVICE_REMOVED, "revision": value["revision"], "server_name": name}))
+                    encode(
+                        &json!({"event": DEVICE_REMOVED, "revision": value["revision"], "server_name": name}),
+                    )
                 } else {
                     Filtered::Skip
                 }
@@ -107,7 +109,10 @@ impl EventFilter {
         {
             domains.retain(|domain| self.caller.sees_domain_record(domain));
         }
-        if let Some(managed) = value.get_mut("managed").filter(|managed| managed.is_object()) {
+        if let Some(managed) = value
+            .get_mut("managed")
+            .filter(|managed| managed.is_object())
+        {
             managed["default_context"] = json!(match &self.caller {
                 Caller::Session(session) => session.context(),
                 _ => None,

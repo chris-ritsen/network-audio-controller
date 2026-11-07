@@ -1,8 +1,8 @@
 use super::operations::ControlError;
 use super::record::DeviceRecord;
 use anyhow::{Context, Result};
-use netaudio_core::device_controls::{PanelFamily, PanelProfileRequest, PanelStatus, profile};
-use serde_json::{Map, Value, json};
+use netaudio_core::device_controls::{profile, PanelFamily, PanelProfileRequest, PanelStatus};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 const FRESHNESS_SECONDS: f64 = 10.0;

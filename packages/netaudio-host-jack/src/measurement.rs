@@ -1,10 +1,10 @@
 mod capture;
 
-use crate::capture::{Channel, Connection, Connections, Notifications, State, identity, verify};
-use anyhow::{Context, Result, bail, ensure};
+use crate::capture::{identity, verify, Channel, Connection, Connections, Notifications, State};
+use anyhow::{bail, ensure, Context, Result};
 use capture::Processing;
 use netaudio_core::host_audio::{
-    measurement::{Reading, Readings, Request, decibels},
+    measurement::{decibels, Reading, Readings, Request},
     protocol::{Event, RequestAction},
 };
 use netaudio_host_worker::{
@@ -13,8 +13,8 @@ use netaudio_host_worker::{
 };
 use std::{
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicU8, Ordering},
+        Arc,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };

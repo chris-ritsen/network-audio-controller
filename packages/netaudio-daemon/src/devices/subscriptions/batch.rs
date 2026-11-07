@@ -1,8 +1,8 @@
-use super::{ControlError, ControlOperation, DeviceRegistry, SubscriptionChange, invalid};
+use super::{invalid, ControlError, ControlOperation, DeviceRegistry, SubscriptionChange};
 use crate::state::ReadModel;
-use futures_util::{StreamExt, stream};
+use futures_util::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
 use std::sync::Arc;

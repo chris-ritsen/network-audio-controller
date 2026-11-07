@@ -1,19 +1,19 @@
 use super::{
-    Credential, Error, Limits,
     control::FreshTarget,
     controller::{Controller, Exchange, ExchangeError, Session},
     registry::Source,
+    Credential, Error, Limits,
 };
 use crate::devices::operations::ControlError;
 use netaudio_core::{
-    device_identity::{DeviceIdentityRequest, managed_device_id, normalize},
+    device_identity::{managed_device_id, normalize, DeviceIdentityRequest},
     managed_api::{
-        inventory::{Observation, primary_mac},
+        inventory::{primary_mac, Observation},
         models::Device,
     },
     managed_session::ManagedOperation,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{net::IpAddr, num::NonZeroU16};
 
 pub(super) struct DeviceSession {

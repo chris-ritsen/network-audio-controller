@@ -1,10 +1,10 @@
 use super::{
-    Error,
     audit::Audit,
     registry::{Output, Registry},
+    Error,
 };
 use netaudio_core::managed_api::{inventory::Observation, mutation::Mutation};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub struct Request {
     pub server: String,

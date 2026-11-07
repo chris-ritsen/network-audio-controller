@@ -2,7 +2,7 @@ use crate::{
     devices::operations::ControlError,
     monitoring::{requests::StatusQuery, status::StatusKind},
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Clone, Copy)]
 pub(in crate::managed) enum Query {

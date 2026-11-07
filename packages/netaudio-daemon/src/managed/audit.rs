@@ -1,10 +1,10 @@
-use super::{Error, mutations::Request};
+use super::{mutations::Request, Error};
 use crate::monitoring::journal::{
     model::{Derivation, EventKind, LifecyclePhase, OperationRequest, Severity},
     service::Journal,
 };
 use rand::RngCore;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(super) struct Audit {
     request: OperationRequest,

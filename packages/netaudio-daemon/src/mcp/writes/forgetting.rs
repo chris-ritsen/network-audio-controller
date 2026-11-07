@@ -1,6 +1,6 @@
-use super::{CallError, NEXT_STEP, Prepared, PreparedKind, Records, required_text, views};
-use crate::devices::registry::{DeviceRegistry, cache_precondition};
-use serde_json::{Value, json};
+use super::{required_text, views, CallError, Prepared, PreparedKind, Records, NEXT_STEP};
+use crate::devices::registry::{cache_precondition, DeviceRegistry};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

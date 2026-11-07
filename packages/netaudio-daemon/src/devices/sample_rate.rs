@@ -1,12 +1,12 @@
 use super::operations::ControlError;
 use super::record::DeviceRecord;
-use netaudio_core::capabilities::{AvailabilityRequest, availability};
-use netaudio_core::flow_readback::{FlowReadbackRequest, transmit_flow_topology};
+use netaudio_core::capabilities::{availability, AvailabilityRequest};
+use netaudio_core::flow_readback::{transmit_flow_topology, FlowReadbackRequest};
 use netaudio_core::sample_rate_topology::{
-    EvidenceRequest, TopologyImpactRequest, TopologyReadbackRequest, topology_impact,
-    verify_topology,
+    topology_impact, verify_topology, EvidenceRequest, TopologyImpactRequest,
+    TopologyReadbackRequest,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Clone, Debug)]
 pub struct Operation {
@@ -135,7 +135,9 @@ impl Operation {
             .map_err(|error| error.to_string())
             .and_then(topology_impact)
             .and_then(|impact| serde_json::to_value(impact).map_err(|error| error.to_string()))
-            .inspect_err(|error| tracing::warn!(%error, "sample-rate topology impact is unavailable"))
+            .inspect_err(
+                |error| tracing::warn!(%error, "sample-rate topology impact is unavailable"),
+            )
             .ok()
         });
         let snapshot = snapshot.filter(|_| impact.is_some());

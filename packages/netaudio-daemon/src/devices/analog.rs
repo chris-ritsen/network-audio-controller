@@ -1,8 +1,8 @@
 use super::operations::ControlError;
 use netaudio_core::responses::{
-    AnalogAccess, AnalogLevelPlan, AnalogLevelRequest, analog_level_control,
+    analog_level_control, AnalogAccess, AnalogLevelPlan, AnalogLevelRequest,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
 
 pub fn present(record: &mut Map<String, Value>) {
@@ -38,12 +38,10 @@ pub fn present(record: &mut Map<String, Value>) {
     {
         record.insert(
             "gain_level_choices".to_owned(),
-            json!(
-                supported
-                    .iter()
-                    .map(|level| json!({"value": level, "label": label(level)}))
-                    .collect::<Vec<_>>()
-            ),
+            json!(supported
+                .iter()
+                .map(|level| json!({"value": level, "label": label(level)}))
+                .collect::<Vec<_>>()),
         );
     }
 

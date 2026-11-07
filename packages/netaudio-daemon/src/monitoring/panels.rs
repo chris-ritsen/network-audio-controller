@@ -1,11 +1,11 @@
-use anyhow::{Context, Result, ensure};
-use netaudio_core::device_controls::{PanelStatus, allocate_panel_sequence};
+use anyhow::{ensure, Context, Result};
+use netaudio_core::device_controls::{allocate_panel_sequence, PanelStatus};
 use rand::RngCore;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::watch;
-use tokio::time::{Instant, timeout_at};
+use tokio::time::{timeout_at, Instant};
 
 const MAXIMUM_PENDING_REQUESTS: usize = 256;
 

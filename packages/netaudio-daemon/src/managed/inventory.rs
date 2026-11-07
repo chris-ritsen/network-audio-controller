@@ -1,15 +1,15 @@
 use super::{
-    Error,
     configuration::{Context, Server},
     discovery::DiscoveryState,
+    Error,
 };
 use chrono::{DateTime, Utc};
 use netaudio_core::managed_api::{
-    Issue, Response,
-    inventory::{Observation, primary_mac},
+    inventory::{primary_mac, Observation},
     models::{Device, Domain, Inventory},
+    Issue, Response,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -93,18 +93,34 @@ impl InventoryState {
             self.last_success = Some(now);
         }
         if self.authoritative && complete_membership {
-            self.signal_membership = SignalMembership {
-                observed_at: Some(now),
-                revision: self.signal_membership.revision.checked_add(1)
-                    .ok_or(Error::Conflict("Managed signal membership revision exhausted"))?,
-                domains: self.domains.iter().map(|(identifier, domain)| {
-                    let targets = domain.devices.iter().flatten().flatten()
-                        .filter(|device| device.connection.as_ref().and_then(|connection| connection.state.as_deref())
-                            .is_some_and(|state| state.eq_ignore_ascii_case("READY")))
-                        .map(|device| (device.id.clone(), native_identity(device))).collect();
-                    (identifier.clone(), targets)
-                }).collect(),
-            };
+            self.signal_membership =
+                SignalMembership {
+                    observed_at: Some(now),
+                    revision: self.signal_membership.revision.checked_add(1).ok_or(
+                        Error::Conflict("Managed signal membership revision exhausted"),
+                    )?,
+                    domains: self
+                        .domains
+                        .iter()
+                        .map(|(identifier, domain)| {
+                            let targets = domain
+                                .devices
+                                .iter()
+                                .flatten()
+                                .flatten()
+                                .filter(|device| {
+                                    device
+                                        .connection
+                                        .as_ref()
+                                        .and_then(|connection| connection.state.as_deref())
+                                        .is_some_and(|state| state.eq_ignore_ascii_case("READY"))
+                                })
+                                .map(|device| (device.id.clone(), native_identity(device)))
+                                .collect();
+                            (identifier.clone(), targets)
+                        })
+                        .collect(),
+                };
         }
         self.last_error = (!response.errors.is_empty()).then(|| {
             response
@@ -218,16 +234,12 @@ impl InventoryState {
             .map(|domain| {
                 let mut record = json!(domain);
                 record["ddm_server_profile"] = json!(server);
-                record["ddm_context"] = json!(
-                    contexts
-                        .iter()
-                        .find(|(_, context)| context.server == server
-                            && context.domain_id == domain.id)
-                        .map(|(name, _)| name)
-                );
+                record["ddm_context"] = json!(contexts
+                    .iter()
+                    .find(|(_, context)| context.server == server && context.domain_id == domain.id)
+                    .map(|(name, _)| name));
                 record["ddm_fresh"] = json!(self.domains_fresh());
-                record["ddm_last_sync"] =
-                    json!(self.domains_observed.map(seconds));
+                record["ddm_last_sync"] = json!(self.domains_observed.map(seconds));
                 record
             })
             .collect()

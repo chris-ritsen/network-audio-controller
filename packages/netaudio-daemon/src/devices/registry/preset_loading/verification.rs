@@ -2,7 +2,7 @@ use super::{DeviceRegistry, PreparedDevice, Selected};
 use crate::presets::report::Report;
 use anyhow::Result;
 use netaudio_core::presets::planning::{ActionKind, ActionState, RequestedAction};
-use serde_json::{Map, json};
+use serde_json::{json, Map};
 use tokio::time::Instant;
 
 impl DeviceRegistry {

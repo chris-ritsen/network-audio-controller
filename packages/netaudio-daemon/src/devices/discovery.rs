@@ -1,8 +1,8 @@
 use crate::network::NetworkSnapshot;
 use crate::relay::Advertisement;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use futures_util::stream::{BoxStream, SelectAll};
-use futures_util::{StreamExt, stream};
+use futures_util::{stream, StreamExt};
 use mdns_sd::{DaemonEvent, DaemonStatus, IfKind, ResolvedService, ServiceDaemon, ServiceEvent};
 use netaudio_core::protocol::{SERVICE_ARC, SERVICE_CHAN, SERVICE_CMC, SERVICE_DBC, SERVICE_VIDEO};
 use serde::Serialize;

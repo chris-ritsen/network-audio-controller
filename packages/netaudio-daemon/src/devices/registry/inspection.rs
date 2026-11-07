@@ -4,7 +4,7 @@ use crate::devices::operations::{ControlCompletion, ControlError};
 use crate::devices::transport::DeviceTransport;
 use crate::monitoring::requests::StatusQuery;
 use anyhow::Result;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::time::Instant;
 
 #[derive(Clone, Copy, Debug)]

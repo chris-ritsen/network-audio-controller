@@ -2,7 +2,7 @@ use crate::devices::operations::{
     ChannelDirection, ControlCompletion, ControlError, ControlOperation, SubscriptionChange,
 };
 use crate::devices::transport::TransportError;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub struct Observation {
     pub confirmed: Option<bool>,

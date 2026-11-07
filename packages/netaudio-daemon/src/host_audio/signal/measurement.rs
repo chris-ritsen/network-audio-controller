@@ -1,5 +1,5 @@
 use super::*;
-use netaudio_core::host_audio::measurement::{MAXIMUM_SOURCES, MAXIMUM_TARGETS, Request};
+use netaudio_core::host_audio::measurement::{Request, MAXIMUM_SOURCES, MAXIMUM_TARGETS};
 use netaudio_core::host_audio::signal::observation::{Reading, Readings};
 
 impl Service {
@@ -206,18 +206,16 @@ impl Service {
             .await?;
         let mut body = json!({"measured_at":presentation::now()});
         for (point, identities) in resolved {
-            body[point] = json!(
-                identities
-                    .iter()
-                    .map(|identity| format!(
-                        "{}: {}",
-                        context.graph.nodes[identity].label,
-                        levels
-                            .get(identity)
-                            .map_or("not measured", |level| &level.text)
-                    ))
-                    .collect::<Vec<_>>()
-            );
+            body[point] = json!(identities
+                .iter()
+                .map(|identity| format!(
+                    "{}: {}",
+                    context.graph.nodes[identity].label,
+                    levels
+                        .get(identity)
+                        .map_or("not measured", |level| &level.text)
+                ))
+                .collect::<Vec<_>>());
         }
         for (point, error) in errors {
             body[point] = json!(error);

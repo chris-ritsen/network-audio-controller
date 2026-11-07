@@ -1,13 +1,13 @@
-use super::{ApiError, DeviceService, RequestBody, control_error, json_value, parameters, text};
+use super::{control_error, json_value, parameters, text, ApiError, DeviceService, RequestBody};
 use crate::devices::analog::Configuration;
 use crate::devices::operations::{ControlError, ControlOperation};
 use crate::devices::status_configuration;
-use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::post;
-use serde_json::{Value, json};
+use axum::Router;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub(super) fn routes(router: Router<DeviceService>) -> Router<DeviceService> {

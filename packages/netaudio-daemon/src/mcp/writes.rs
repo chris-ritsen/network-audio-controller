@@ -1,12 +1,12 @@
-use super::confirmation::{PreviewTokens, Redemption, preview_digest};
+use super::confirmation::{preview_digest, PreviewTokens, Redemption};
 use super::service::CallError;
 use super::views::{self, Records};
 use crate::authorization::Grant;
 use crate::devices::operations::{ControlError, ControlOperation, SubscriptionChange};
 use crate::devices::registry::DeviceRegistry;
 use crate::state::ReadModel;
-use futures_util::{StreamExt, stream};
-use serde_json::{Map, Value, json};
+use futures_util::{stream, StreamExt};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -362,7 +362,11 @@ impl Writes {
                 .validate_operation(&device.reference, &device.operation)
                 .map_err(|error| CallError::invalid(error.to_string()))?;
             self.registry
-                .bind_precondition(&device.reference, &device.operation, &mut device.precondition)
+                .bind_precondition(
+                    &device.reference,
+                    &device.operation,
+                    &mut device.precondition,
+                )
                 .map_err(|error| CallError::invalid(error.to_string()))?;
         }
 
@@ -428,7 +432,8 @@ impl Writes {
         let digest = preview_digest(operation, &bound_request, &prepared.preview);
 
         if arguments["confirmed"] != true {
-            prepared.preview["preview_token"] = json!(self.tokens.issue(&grant.client_id, digest)?);
+            prepared.preview["preview_token"] =
+                json!(self.tokens.issue(&grant.client_id, digest)?);
             return Ok((prepared.preview, false));
         }
 

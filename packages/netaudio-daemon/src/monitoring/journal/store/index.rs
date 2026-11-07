@@ -1,9 +1,9 @@
 use super::super::model::{EventFilter, JournalEvent};
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use caseless::Caseless;
 use chrono::DateTime;
 use rusqlite::types::Value;
-use rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_iter};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 
 const INDEX_LAYOUT: &str = "1";
 const INDEX_LAYOUT_KEY: &str = "event_index_layout";

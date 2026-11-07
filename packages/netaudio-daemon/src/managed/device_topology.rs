@@ -11,7 +11,7 @@ use crate::{
     monitoring::{requests::StatusQuery, status::StatusKind},
 };
 use netaudio_core::{inventory::InventoryState, parser::ChannelCount};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
 impl Registry {

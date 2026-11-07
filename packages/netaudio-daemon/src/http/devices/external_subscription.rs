@@ -1,5 +1,5 @@
-use super::{ApiError, DeviceService, RequestBody, control_error, parameters, text};
-use crate::devices::external_subscription::{ExternalSubscription, Outcome, response};
+use super::{control_error, parameters, text, ApiError, DeviceService, RequestBody};
+use crate::devices::external_subscription::{response, ExternalSubscription, Outcome};
 use crate::devices::operations::ControlOperation;
 use crate::http::inventory::json_value;
 use axum::extract::State;

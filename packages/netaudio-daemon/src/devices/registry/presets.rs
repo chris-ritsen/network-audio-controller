@@ -3,10 +3,10 @@ use crate::devices::record::DeviceRecord;
 use crate::devices::transport::DeviceTransport;
 use crate::devices::{capabilities, flows, inventory};
 use crate::monitoring::requests::StatusQuery;
-use crate::presets::Error;
 use crate::presets::capture::{self, CaptureRequest, CapturedDevice};
-use anyhow::{Context, Result, bail, ensure};
-use serde_json::{Map, Value, json};
+use crate::presets::Error;
+use anyhow::{bail, ensure, Context, Result};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -144,7 +144,11 @@ impl DeviceRegistry {
                     "{}",
                     omitted
                         .iter()
-                        .map(|entry| format!("{}: {}", entry["device"].as_str().unwrap_or_default(), entry["reason"].as_str().unwrap_or_default()))
+                        .map(|entry| format!(
+                            "{}: {}",
+                            entry["device"].as_str().unwrap_or_default(),
+                            entry["reason"].as_str().unwrap_or_default()
+                        ))
                         .collect::<Vec<_>>()
                         .join("; ")
                 );
@@ -398,7 +402,9 @@ impl DeviceRegistry {
                     .get("sample_rate_pullup_raw_value")
                     .filter(|value| value.is_u64())
                     .cloned()
-                    .ok_or_else(|| "The fresh sample-rate pull-up value is unavailable.".to_owned()),
+                    .ok_or_else(|| {
+                        "The fresh sample-rate pull-up value is unavailable.".to_owned()
+                    }),
                 Err(error) => Err(format!("{error:#}")),
             };
             match value {

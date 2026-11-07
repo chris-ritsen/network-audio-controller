@@ -1,14 +1,14 @@
 use super::capabilities;
 use super::operations::ControlError;
 use crate::configuration::Configuration;
-use anyhow::{Context, Result, ensure};
-use netaudio_core::lock::{self, KEY_LENGTH, LockOperation, LockResult};
+use anyhow::{ensure, Context, Result};
+use netaudio_core::lock::{self, LockOperation, LockResult, KEY_LENGTH};
 use rand::RngCore;
 use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tokio::time::{Instant, timeout_at};
+use tokio::time::{timeout_at, Instant};
 
 const EXCHANGE_WINDOW: Duration = Duration::from_secs(5);
 

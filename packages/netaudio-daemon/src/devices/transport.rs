@@ -1,12 +1,12 @@
-use netaudio_core::protocol::{NetaudioError, NetaudioPort, next_message_id, response_envelope};
-use netaudio_core::spec::{IoMode, Target, build_routed_command};
+use netaudio_core::protocol::{next_message_id, response_envelope, NetaudioError, NetaudioPort};
+use netaudio_core::spec::{build_routed_command, IoMode, Target};
 use serde::Serialize;
 use serde_json::Value;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tokio::time::{Instant, timeout_at};
+use tokio::time::{timeout_at, Instant};
 
 const MAXIMUM_DATAGRAM_BYTES: usize = u16::MAX as usize;
 const RESPONSE_MESSAGE_IDENTIFIER_OFFSET: usize = 4;

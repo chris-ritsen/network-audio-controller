@@ -6,7 +6,7 @@ use netaudio_core::heartbeat_connection_health::{
 };
 use netaudio_core::heartbeat_interface_traffic::parse_heartbeat_interface_traffic_packet;
 use netaudio_core::observation::Series;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::time::Duration;
 use tokio::time::Instant;
 

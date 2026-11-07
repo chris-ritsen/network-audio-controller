@@ -1,5 +1,5 @@
 use super::compact;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub fn domains(payload: Vec<Value>, arguments: &Value) -> Value {
     if arguments["detail"] == "debug" {

@@ -1,6 +1,6 @@
-use super::model::{EventKind, JournalEvent, Severity, device_identity};
+use super::model::{device_identity, EventKind, JournalEvent, Severity};
 use anyhow::Result;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

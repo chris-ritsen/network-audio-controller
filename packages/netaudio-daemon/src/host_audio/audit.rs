@@ -6,7 +6,7 @@ use crate::monitoring::journal::{
 use anyhow::{Context, Result};
 use netaudio_core::host_audio::{control::Command, protocol::Provider};
 use rand::RngCore;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub(super) struct Audit {
     request: OperationRequest,

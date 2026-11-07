@@ -1,10 +1,10 @@
-use super::{ApiError, DeviceService, control_error, json_value};
+use super::{control_error, json_value, ApiError, DeviceService};
 use crate::devices::operations::ControlOperation;
 use crate::devices::registry::Inspection;
-use axum::Router;
 use axum::extract::{Extension, Path, State};
 use axum::response::Response;
 use axum::routing::get;
+use axum::Router;
 use std::sync::Arc;
 
 pub(super) fn routes(router: Router<DeviceService>) -> Router<DeviceService> {

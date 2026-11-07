@@ -1,9 +1,9 @@
 use super::protocol::META_SUBSCRIPTION_ID;
-use axum::response::Sse;
 use axum::response::sse::{Event, KeepAlive};
+use axum::response::Sse;
 use futures_core::Stream;
 use futures_util::stream;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::time::Duration;

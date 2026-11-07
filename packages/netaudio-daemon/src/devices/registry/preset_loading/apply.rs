@@ -1,14 +1,14 @@
 use super::{DeviceRegistry, PreparedAction, PreparedDevice, Selected};
-use crate::devices::audit::{Audit, outcome};
+use crate::devices::audit::{outcome, Audit};
 use crate::devices::operations::{ControlError, ControlOperation, SubscriptionChange};
 use crate::presets::{
-    Error,
     audit::PresetAudit,
     report::{OperationResult, Report},
+    Error,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::presets::planning::{ActionKind, ActionState};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::time::Duration;
 use tokio::time::Instant;

@@ -1,6 +1,6 @@
 use super::Records;
-use netaudio_core::shure::{Protocol, described};
-use serde_json::{Map, Value, json};
+use netaudio_core::shure::{described, Protocol};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 pub fn view(

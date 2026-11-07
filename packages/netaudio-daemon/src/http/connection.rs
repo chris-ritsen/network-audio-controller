@@ -34,11 +34,7 @@ impl ConnectionContext {
         self.base_url_for(headers, None)
     }
 
-    pub fn request_base_url(
-        &self,
-        headers: &HeaderMap,
-        uri: &Uri,
-    ) -> Result<Url, super::ApiError> {
+    pub fn request_base_url(&self, headers: &HeaderMap, uri: &Uri) -> Result<Url, super::ApiError> {
         self.base_url_for(headers, uri.authority().map(|authority| authority.as_str()))
     }
 

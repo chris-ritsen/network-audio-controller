@@ -1,7 +1,7 @@
 use super::Provider;
 use anyhow::Result;
 use netaudio_core::host_audio::{
-    control::{Command, Operation, observed, prepare},
+    control::{observed, prepare, Command, Operation},
     protocol::{Event, RequestAction},
     snapshot::Snapshot,
 };
@@ -9,7 +9,7 @@ use netaudio_host_worker::{
     input::{Event as InputEvent, Input},
     output::Output,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
 pub(super) fn execute(
@@ -130,12 +130,10 @@ pub(super) fn execute(
     });
     if let Snapshot::Jack(snapshot) = latest {
         body["source_feeds"] = json!(snapshot.ports.get(source).map(|port| &port.connections));
-        body["destination_hears"] = json!(
-            snapshot
-                .ports
-                .get(destination)
-                .map(|port| &port.connections)
-        );
+        body["destination_hears"] = json!(snapshot
+            .ports
+            .get(destination)
+            .map(|port| &port.connections));
     }
     output.send(Event::Completed {
         request_sequence: sequence,

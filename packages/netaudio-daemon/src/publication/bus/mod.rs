@@ -2,11 +2,11 @@ mod interfaces;
 mod views;
 
 use crate::state::ReadModel;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use blake2::digest::{Update, VariableOutput};
 use futures_util::StreamExt;
 use interfaces::{DanteChannel, DanteDevice, Manager, ShureChannel, ShureDevice};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;

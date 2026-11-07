@@ -11,7 +11,7 @@ use crate::{
     },
     monitoring::{requests::StatusQuery, status::StatusKind},
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 
 struct Prepared {

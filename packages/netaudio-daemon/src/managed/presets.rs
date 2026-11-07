@@ -3,8 +3,8 @@ use crate::devices::{
     operations::{ControlCompletion, ControlError, ControlOperation},
     registry::Inspection,
 };
-use anyhow::{Context, Result, ensure};
-use serde_json::{Value, json};
+use anyhow::{ensure, Context, Result};
+use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::OwnedMutexGuard;
 
@@ -208,10 +208,9 @@ impl Device {
                 .map_err(|error| anyhow::anyhow!("{error}"))?
                 .context("managed routing protocol unavailable")?
                 .protocol_id;
-            let first =
-                device_topology::query(&mut session, json!({"command": "channel_count"}))
-                    .await
-                    .with_context(|| format!("{name}: channel counts"))?;
+            let first = device_topology::query(&mut session, json!({"command": "channel_count"}))
+                .await
+                .with_context(|| format!("{name}: channel counts"))?;
             let counts = device_topology::counts(&first)?;
             ensure!(
                 observed["channels"]["receivers"]
@@ -251,10 +250,9 @@ impl Device {
                     .with_context(|| format!("{name}: transmit flows"))?;
                 crate::devices::flows::canonical_inventory(&inventory, protocol)?
             };
-            let last =
-                device_topology::query(&mut session, json!({"command": "channel_count"}))
-                    .await
-                    .with_context(|| format!("{name}: channel counts"))?;
+            let last = device_topology::query(&mut session, json!({"command": "channel_count"}))
+                .await
+                .with_context(|| format!("{name}: channel counts"))?;
             ensure!(
                 device_topology::same_topology(&counts, &device_topology::counts(&last)?),
                 "managed topology changed during preset capture"

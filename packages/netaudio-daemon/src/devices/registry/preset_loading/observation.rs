@@ -2,8 +2,8 @@ use super::{DeviceRegistry, Selected};
 use crate::devices::record::DeviceRecord;
 use crate::devices::transport::DeviceTransport;
 use crate::monitoring::requests::StatusQuery;
-use anyhow::{Context, Result, ensure};
-use serde_json::{Map, Value, json};
+use anyhow::{ensure, Context, Result};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use tokio::time::Instant;
 
@@ -102,13 +102,11 @@ impl DeviceRegistry {
             );
             settings.insert(
                 "performance_settings".into(),
-                json!(
-                    values
-                        .performance_values
-                        .iter()
-                        .map(|entry| (entry.property_id.to_string(), entry.value))
-                        .collect::<BTreeMap<_, _>>()
-                ),
+                json!(values
+                    .performance_values
+                    .iter()
+                    .map(|entry| (entry.property_id.to_string(), entry.value))
+                    .collect::<BTreeMap<_, _>>()),
             );
         }
         let report = self.accept_inventory(target.direct()?, generation, started, data)?;

@@ -1,8 +1,8 @@
-use super::{ClockObservations, ConnectionHealthUpdate, Diagnostics, HISTORY_LIMIT, Series};
+use super::{ClockObservations, ConnectionHealthUpdate, Diagnostics, Series, HISTORY_LIMIT};
 use crate::devices::registry::DiagnosticOptions;
 use anyhow::{Context, Result};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Serialize)]
 #[serde(untagged)]

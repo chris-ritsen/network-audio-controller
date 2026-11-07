@@ -1,6 +1,6 @@
 use super::{aes67, analog, operations::ControlError};
 use crate::monitoring::requests::StatusQuery;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::time::Duration;
 
 #[derive(Clone, Debug)]

@@ -1,14 +1,14 @@
 mod form;
 mod page;
 
-use super::{ConnectionContext, MAXIMUM_REQUEST_BYTES, RequestBody};
-use crate::authorization::{AuthorizationError, AuthorizationStore, SCOPES, normalize_scope};
+use super::{ConnectionContext, RequestBody, MAXIMUM_REQUEST_BYTES};
+use crate::authorization::{normalize_scope, AuthorizationError, AuthorizationStore, SCOPES};
 use axum::extract::{DefaultBodyLimit, Extension, RawQuery, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use form::{Form, basic_credentials, parse_body, parse_json, parse_query};
+use form::{basic_credentials, parse_body, parse_json, parse_query, Form};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -122,7 +122,7 @@ impl AuthorizationService {
     }
 
     fn consent(&self, fields: &Form) -> Result<ConsentRequest, AuthorizationError> {
-        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
         let (client_id, record) = self.store.client(value(fields, "client_id"))?;
         let redirect = value(fields, "redirect_uri").ok_or_else(|| {

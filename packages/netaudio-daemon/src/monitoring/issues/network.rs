@@ -1,9 +1,9 @@
 use super::model::{EvidenceClass, Finding, Issue, Kind, Scope};
-use crate::monitoring::journal::model::{Severity, device_identity};
+use crate::monitoring::journal::model::{device_identity, Severity};
 use anyhow::Result;
 use netaudio_core::device_identity::canonical_device_mac;
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::sync::Arc;

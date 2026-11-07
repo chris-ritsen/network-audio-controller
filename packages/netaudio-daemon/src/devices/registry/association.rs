@@ -3,11 +3,11 @@ use crate::devices::record::DeviceRecord;
 use anyhow::Result;
 use netaudio_core::conmon_identity::Identity;
 use netaudio_core::protocol::SERVICE_CMC;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tokio::time::Instant;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

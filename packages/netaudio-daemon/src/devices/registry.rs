@@ -9,19 +9,19 @@ use crate::monitoring::metering::Metering;
 use crate::monitoring::requests::{self, StatusQuery, StatusRequests};
 use crate::monitoring::{multicast::ReceivedPacket, status};
 use crate::state::ReadModel;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use futures_util::StreamExt;
 use netaudio_core::parser::ChannelCount;
 use netaudio_core::protocol::SERVICE_CMC;
+use netaudio_core::responses::{parse_notification_envelope, NetaudioNotification};
 use netaudio_core::responses::{DeviceSettings, PropertyDirectory};
-use netaudio_core::responses::{NetaudioNotification, parse_notification_envelope};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
-use tokio::sync::{Mutex as AsyncMutex, Notify, Semaphore, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex, Notify, Semaphore};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -52,7 +52,7 @@ mod sample_rate;
 mod status_configuration;
 
 pub use forgetting::cache_precondition;
-pub use heartbeat::{DiagnosticOptions, diagnostic_precondition};
+pub use heartbeat::{diagnostic_precondition, DiagnosticOptions};
 pub use inspection::Inspection;
 pub use metering::{MeteringLease, MeteringTarget};
 use refresh_queue::{RefreshQueue, ScheduledRefresh};
@@ -376,7 +376,10 @@ impl DeviceRegistry {
             Some(device) => self.refresh_entry(device, None).await,
             None if crate::managed::control::required(&record) => {
                 let completion = self
-                    .apply(reference, ControlOperation::InspectStatus(Inspection::Settings))
+                    .apply(
+                        reference,
+                        ControlOperation::InspectStatus(Inspection::Settings),
+                    )
                     .await
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 let mut errors = BTreeMap::new();

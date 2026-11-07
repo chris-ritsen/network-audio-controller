@@ -5,7 +5,7 @@ use crate::devices::operations::{ControlCompletion, ControlError, ControlOperati
 use crate::devices::transport::DeviceTransport;
 use crate::monitoring::requests::StatusQuery;
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 impl DeviceRegistry {
     pub fn configure_locking(&self, settings: Settings) -> Result<()> {

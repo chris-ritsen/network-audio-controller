@@ -1,9 +1,9 @@
 mod queue;
 mod view;
 
-pub use queue::{EventReceiver, EventSender, event_queue};
+pub use queue::{event_queue, EventReceiver, EventSender};
 pub(crate) use view::TELEMETRY_FIELDS;
-pub use view::{DeviceView, EventOptions, substantive_record};
+pub use view::{substantive_record, DeviceView, EventOptions};
 
 use bytes::Bytes;
 use serde_json::Value;

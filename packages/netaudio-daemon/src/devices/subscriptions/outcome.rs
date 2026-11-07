@@ -1,6 +1,6 @@
 use super::ControlError;
 use crate::devices::transport::TransportError;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 #[derive(Debug)]

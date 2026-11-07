@@ -1,4 +1,4 @@
-use super::{AUTHORIZE_PATH, ConsentRequest};
+use super::{ConsentRequest, AUTHORIZE_PATH};
 use crate::authorization::{READ_SCOPE, WRITE_SCOPE};
 
 pub fn render(request: &ConsentRequest, host: &str, error: Option<&str>) -> String {

@@ -1,5 +1,5 @@
 use super::Provider;
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use netaudio_core::host_audio::snapshot::{Direction, JackPort, JackProperty, JackSnapshot};
 use std::{collections::BTreeMap, sync::atomic::Ordering};
 

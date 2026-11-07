@@ -7,13 +7,13 @@ use crate::{
     monitoring::{journal::service::Journal, metering_streams::MeteringStreams},
     state::ReadModel,
 };
-use anyhow::{Context as _, Result, ensure};
-use futures_util::{StreamExt, stream};
+use anyhow::{ensure, Context as _, Result};
+use futures_util::{stream, StreamExt};
 use netaudio_core::host_audio::signal::{
     self, Details, Direction, Graph, HostSnapshot, Levels, NetworkDirection,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -417,15 +417,13 @@ impl Service {
             }
         }
         if !related.is_empty() {
-            value["paths"] = json!(
-                related
-                    .iter()
-                    .map(|path| (
-                        path.name.clone(),
-                        context.graph.trace(path, levels.as_ref())
-                    ))
-                    .collect::<BTreeMap<_, _>>()
-            );
+            value["paths"] = json!(related
+                .iter()
+                .map(|path| (
+                    path.name.clone(),
+                    context.graph.trace(path, levels.as_ref())
+                ))
+                .collect::<BTreeMap<_, _>>());
             value["also_named"] =
                 json!("Connected points with related names are shown under paths");
         }

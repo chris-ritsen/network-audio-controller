@@ -6,7 +6,7 @@ mod receivers;
 mod resolution;
 pub mod store;
 
-use crate::monitoring::journal::model::{JournalEvent, Thresholds, device_identity};
+use crate::monitoring::journal::model::{device_identity, JournalEvent, Thresholds};
 use anyhow::{Context, Result};
 use model::{Issue, Kind, Lifecycle, ObservationState};
 use serde_json::Value;

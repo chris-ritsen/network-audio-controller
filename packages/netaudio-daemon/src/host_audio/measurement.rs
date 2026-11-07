@@ -1,5 +1,5 @@
 use super::{process::Process, provider::Outcome};
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use netaudio_core::host_audio::{
     measurement::Request,
     protocol::{Event, Provider, Purpose, RequestAction},

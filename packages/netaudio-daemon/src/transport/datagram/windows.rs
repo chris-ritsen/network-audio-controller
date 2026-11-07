@@ -1,4 +1,4 @@
-use super::{PacketMetadata, invalid_packet};
+use super::{invalid_packet, PacketMetadata};
 use socket2::Socket;
 use std::io;
 use std::mem::{size_of, size_of_val};
@@ -7,7 +7,7 @@ use std::os::windows::io::AsRawSocket;
 use std::ptr;
 use tokio::net::UdpSocket;
 use windows_sys::Win32::Networking::WinSock::{
-    self, AF_INET, CMSGHDR, IN_PKTINFO, IP_PKTINFO, IPPROTO_IP, LPFN_WSARECVMSG, MSG_CTRUNC,
+    self, AF_INET, CMSGHDR, IN_PKTINFO, IPPROTO_IP, IP_PKTINFO, LPFN_WSARECVMSG, MSG_CTRUNC,
     MSG_TRUNC, SIO_GET_EXTENSION_FUNCTION_POINTER, SOCKADDR_IN, WSABUF, WSAID_WSARECVMSG, WSAMSG,
 };
 

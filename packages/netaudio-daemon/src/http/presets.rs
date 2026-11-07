@@ -1,13 +1,13 @@
 use super::inventory::json_value;
-use super::{ApiError, MAXIMUM_REQUEST_BYTES, RequestBody};
+use super::{ApiError, RequestBody, MAXIMUM_REQUEST_BYTES};
 use crate::devices::registry::DeviceRegistry;
 use crate::presets::{Error, Service};
 use crate::state::ReadModel;
-use axum::Router;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::post;
+use axum::Router;
 use serde_json::Value;
 use std::sync::Arc;
 

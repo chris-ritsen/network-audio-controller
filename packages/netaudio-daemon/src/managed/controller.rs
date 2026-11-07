@@ -3,7 +3,7 @@ use netaudio_core::controller_api::{self, ControllerEndpoints, ControllerLogin};
 use netaudio_core::managed_session::{
     self, ManagedOperation, ManagedSessionRequest, ManagedSessionState,
 };
-use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE};
 use reqwest::{Method, Url};
 use rustls::pki_types::ServerName;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::OwnedSemaphorePermit;
-use tokio_rustls::{TlsConnector, client::TlsStream};
+use tokio_rustls::{client::TlsStream, TlsConnector};
 
 mod stream;
 pub use stream::{Lookup, Signal, StreamEvent};

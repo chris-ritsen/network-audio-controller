@@ -11,7 +11,7 @@ pub mod storage;
 pub use error::Error;
 
 use netaudio_core::presets::{Document, MAXIMUM_BYTES, MAXIMUM_DEVICES};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

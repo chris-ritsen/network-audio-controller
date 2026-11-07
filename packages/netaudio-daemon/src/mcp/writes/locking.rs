@@ -1,9 +1,9 @@
-use super::{NEXT_STEP, Prepared, PreparedDevice, PreparedKind, require_record, required_text};
+use super::{require_record, required_text, Prepared, PreparedDevice, PreparedKind, NEXT_STEP};
 use crate::devices::locking::Operation;
 use crate::devices::operations::{ControlCompletion, ControlError, ControlOperation};
 use crate::mcp::service::CallError;
 use crate::mcp::views::Records;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 pub(super) fn supports(operation: &str) -> bool {

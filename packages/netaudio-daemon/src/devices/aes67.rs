@@ -1,6 +1,6 @@
 use super::capabilities;
 use super::operations::ControlError;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 #[derive(Clone, Debug)]
 pub struct Configuration {

@@ -1,7 +1,7 @@
 use super::super::device_session::DeviceSession;
 use crate::devices::operations::{ChannelDirection, ControlError, ControlOperation};
 use netaudio_core::protocol::PROTOCOL_ARC_2809;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(in crate::managed) struct Change<'a> {
     direction: ChannelDirection,

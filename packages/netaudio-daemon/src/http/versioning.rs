@@ -1,9 +1,9 @@
 use super::ApiError;
 use axum::extract::Request;
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub const MAJOR: u32 = 1;
 pub const CONTRACT_VERSION: &str = "1.0.0";

@@ -1,7 +1,7 @@
 use super::model::{EvidenceClass, Finding, Issue, Kind, Scope};
 use crate::monitoring::journal::model::Severity;
 use anyhow::Result;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 const CONFIGURATION_PAIRS: &[(&str, &str)] = &[
     ("requested_sample_rate", "sample_rate_hz"),
@@ -256,7 +256,8 @@ fn divergence(record: &Value, timestamp: &str, issues: &mut Vec<Issue>) -> Resul
             raw: json!({"differences": differences}),
             source: "configuration_readback",
             evidence_class: EvidenceClass::DerivedState,
-            remediation: "Review pending reboot state and fresh readback before retrying any mutation.",
+            remediation:
+                "Review pending reboot state and fresh readback before retrying any mutation.",
         };
         issues.push(Issue::candidate(
             Scope::device(record)?,

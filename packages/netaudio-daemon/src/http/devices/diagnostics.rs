@@ -1,10 +1,10 @@
-use super::{ApiError, DeviceService, RequestBody, control_error, parameters, text};
+use super::{control_error, parameters, text, ApiError, DeviceService, RequestBody};
 use crate::devices::registry::DiagnosticOptions;
 use crate::http::inventory::json_bytes;
-use axum::Router;
 use axum::extract::{Extension, Path, RawQuery, State};
 use axum::response::Response;
 use axum::routing::{get, post};
+use axum::Router;
 use serde_json::Value;
 use std::collections::BTreeMap;
 

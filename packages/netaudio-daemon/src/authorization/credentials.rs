@@ -1,6 +1,6 @@
 use super::{AuthorizationError, READ_SCOPE, SCOPES, WRITE_SCOPE};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use rand::{RngCore, rngs::OsRng};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use url::Url;

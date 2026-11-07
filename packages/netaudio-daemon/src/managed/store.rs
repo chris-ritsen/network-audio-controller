@@ -1,12 +1,12 @@
+use super::configuration::{validate_name, Settings};
 use super::Error;
-use super::configuration::{Settings, validate_name};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use toml_edit::{DocumentMut, Item, Table, TableLike, value};
+use toml_edit::{value, DocumentMut, Item, Table, TableLike};
 
 #[derive(Clone)]
 pub struct Store {

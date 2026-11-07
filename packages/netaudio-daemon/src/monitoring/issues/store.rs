@@ -1,14 +1,14 @@
-use super::Change;
 use super::model::{Issue, Kind, Lifecycle, ObservationState, SCHEMA_VERSION};
+use super::Change;
 use crate::monitoring::journal::model::{EventKind, JournalEvent, Severity};
-use anyhow::{Context, Result, ensure};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use anyhow::{ensure, Context, Result};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use caseless::Caseless;
 use chrono::DateTime;
 use rusqlite::types::Value as Parameter;
-use rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_iter};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const LAYOUT_KEY: &str = "issue_index_layout";
 const LAYOUT: &str = "2";

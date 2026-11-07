@@ -1,5 +1,5 @@
-use super::{Records, compact, first, local_time, text, truthy};
-use serde_json::{Map, Value, json};
+use super::{compact, first, local_time, text, truthy, Records};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 pub fn clock_view(device: &Value) -> Value {

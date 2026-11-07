@@ -2,7 +2,7 @@ use super::{operations::ControlError, record::DeviceRecord};
 use netaudio_core::flow_plan::{FlowCommandPlan, FlowCreateRequest, FlowDeleteRequest};
 use netaudio_core::flow_readback::{self, FlowReadbackRequest};
 use netaudio_core::flow_specification::TransmitFlowSpecification;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Clone, Debug)]
 pub enum Operation {

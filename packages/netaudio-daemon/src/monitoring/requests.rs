@@ -1,13 +1,13 @@
 use super::status::StatusKind;
 use crate::devices::transport::{CommandIntent, DeviceTransport};
-use anyhow::{Context, Result, bail, ensure};
-use netaudio_core::responses::{CmcRegistrationResponse, parse_cmc_registration_response};
-use serde_json::{Map, Value, json};
+use anyhow::{bail, ensure, Context, Result};
+use netaudio_core::responses::{parse_cmc_registration_response, CmcRegistrationResponse};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::watch;
-use tokio::time::{Instant, timeout_at};
+use tokio::time::{timeout_at, Instant};
 
 const OBSERVATION_DEADLINE: Duration = Duration::from_secs(3);
 const MAXIMUM_PENDING_OBSERVATIONS: usize = 256;

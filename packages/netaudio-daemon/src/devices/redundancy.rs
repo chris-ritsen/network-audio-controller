@@ -1,9 +1,9 @@
 use super::capabilities;
 use super::operations::ControlError;
 use netaudio_core::network::{
-    DanteRedundancyMode, RedundancyConfirmation, RedundancyControlRequest, redundancy_control,
+    redundancy_control, DanteRedundancyMode, RedundancyConfirmation, RedundancyControlRequest,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Clone, Debug)]
 pub struct Configuration {

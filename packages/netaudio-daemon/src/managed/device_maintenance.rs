@@ -2,7 +2,7 @@ use super::{
     audit::Audit,
     control::{DeviceRequest, FreshTarget},
     device_control::Action,
-    device_session::{DeviceSession, identities},
+    device_session::{identities, DeviceSession},
     registry::{Registry, Source},
 };
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
     monitoring::requests::StatusQuery,
 };
 use netaudio_core::managed_session::ManagedOperation;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub(super) fn operation(operation: &ControlOperation) -> Option<&Operation> {

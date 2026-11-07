@@ -1,5 +1,5 @@
 use super::{Registry, Source, State};
-use crate::managed::{Error, inventory::InventoryState, sessions::Session};
+use crate::managed::{inventory::InventoryState, sessions::Session, Error};
 use std::sync::{Arc, Weak};
 use tokio::sync::Semaphore;
 

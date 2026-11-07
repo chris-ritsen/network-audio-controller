@@ -1,6 +1,6 @@
-use super::{CallError, NEXT_STEP, Prepared, PreparedKind};
+use super::{CallError, Prepared, PreparedKind, NEXT_STEP};
 use crate::shure::Registry;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(super) struct PreparedWireless {
     arguments: Value,

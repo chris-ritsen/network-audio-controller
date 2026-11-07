@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
-use if_watch::{IpNet, tokio::IfWatcher};
+use if_watch::{tokio::IfWatcher, IpNet};
 use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 use tokio::sync::watch;

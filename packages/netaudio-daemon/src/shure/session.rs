@@ -1,17 +1,17 @@
 use super::{Outcome, Registry, Request};
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::shure::{
-    Change, Decoder, Device, Message, Protocol, Report, command, described, indexed, meter_value,
-    sampled,
+    command, described, indexed, meter_value, sampled, Change, Decoder, Device, Message, Protocol,
+    Report,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio::time::{Instant, timeout, timeout_at};
+use tokio::time::{timeout, timeout_at, Instant};
 use tokio_util::sync::CancellationToken;
 
 const CONNECT_DEADLINE: Duration = Duration::from_secs(2);
@@ -85,7 +85,8 @@ pub(super) async fn run(
         let mut window = Instant::now() + RECONNECT_WINDOW;
         loop {
             if attempt > 0 {
-                let delay = Duration::from_secs(1 << (attempt - 1).min(4)).min(MAXIMUM_RECONNECT_DELAY);
+                let delay =
+                    Duration::from_secs(1 << (attempt - 1).min(4)).min(MAXIMUM_RECONNECT_DELAY);
                 tokio::select! {
                     _ = cancellation.cancelled() => break,
                     _ = tokio::time::sleep(delay) => {}
@@ -96,15 +97,31 @@ pub(super) async fn run(
             }
             attempt += 1;
             let mut established = None;
-            registry.status(&mac, generation, json!({"state": "connecting", "attempt": attempt}))?;
+            registry.status(
+                &mac,
+                generation,
+                json!({"state": "connecting", "attempt": attempt}),
+            )?;
             let result = async {
-                let mut connection = Connection::open(Arc::clone(&registry), &mac, address, generation, &cancellation).await?;
-                registry.status(&mac, generation, json!({"state": "ready", "attempt": attempt}))?;
+                let mut connection = Connection::open(
+                    Arc::clone(&registry),
+                    &mac,
+                    address,
+                    generation,
+                    &cancellation,
+                )
+                .await?;
+                registry.status(
+                    &mac,
+                    generation,
+                    json!({"state": "ready", "attempt": attempt}),
+                )?;
                 established = Some(Instant::now());
                 let result = connection.run(&mut requests, &cancellation).await;
                 connection.close().await;
                 result
-            }.await;
+            }
+            .await;
             if cancellation.is_cancelled() {
                 break;
             }

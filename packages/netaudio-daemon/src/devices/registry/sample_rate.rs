@@ -8,9 +8,9 @@ use crate::devices::sample_rate::{self, Operation};
 use crate::devices::transport::DeviceTransport;
 use crate::monitoring::requests::StatusQuery;
 use anyhow::Context;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::time::Duration;
-use tokio::time::{Instant, timeout, timeout_at};
+use tokio::time::{timeout, timeout_at, Instant};
 
 const PREFLIGHT_WINDOW: Duration = Duration::from_secs(30);
 const READBACK_WINDOW: Duration = Duration::from_secs(20);

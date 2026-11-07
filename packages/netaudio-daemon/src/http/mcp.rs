@@ -1,14 +1,14 @@
 use super::{
-    ApiError, AuthorizationService, ConnectionContext, MAXIMUM_REQUEST_BYTES, RequestBody,
+    ApiError, AuthorizationService, ConnectionContext, RequestBody, MAXIMUM_REQUEST_BYTES,
 };
 use crate::authorization::AuthorizationStore;
 use crate::mcp::{protocol, service::Service};
 use axum::extract::{DefaultBodyLimit, Extension, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 

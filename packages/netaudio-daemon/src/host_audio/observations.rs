@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::host_audio::signal::{self, Details, Graph, VolumeStage};
 use serde::Deserialize;
 use serde_json::Value;

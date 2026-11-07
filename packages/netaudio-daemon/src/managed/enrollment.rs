@@ -1,12 +1,12 @@
 use super::{
-    Error,
     audit::Audit,
     mutations::{Inventory, Request as MutationRequest},
     planning::device_change,
     registry::{Output, Registry},
+    Error,
 };
 use netaudio_core::managed_api::{inventory::primary_mac, mutation::Mutation};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub struct Request {
     pub server: String,
@@ -129,13 +129,11 @@ impl Registry {
             result["state_verified"] = json!(true);
             result["changed"] = json!(false);
             result["readback_fresh"] = json!(true);
-            result["now_in"] = json!(
-                original
-                    .domain_name
-                    .as_deref()
-                    .or(original.domain_id.as_deref())
-                    .unwrap_or("no domain (unmanaged)")
-            );
+            result["now_in"] = json!(original
+                .domain_name
+                .as_deref()
+                .or(original.domain_id.as_deref())
+                .unwrap_or("no domain (unmanaged)"));
             return Ok(200);
         }
         let moving = original.domain_id.is_some() && request.domain_id.is_some();
@@ -261,13 +259,11 @@ impl Registry {
             let verified = device.domain_id == request.domain_id;
             result["state_verified"] = json!(verified);
             result["changed"] = json!(verified);
-            result["now_in"] = json!(
-                device
-                    .domain_name
-                    .as_deref()
-                    .or(device.domain_id.as_deref())
-                    .unwrap_or("no domain (unmanaged)")
-            );
+            result["now_in"] = json!(device
+                .domain_name
+                .as_deref()
+                .or(device.domain_id.as_deref())
+                .unwrap_or("no domain (unmanaged)"));
             result["device_id"] = json!(device.device.id);
             if verified {
                 result["state"] = json!(if result["accepted"] == false {

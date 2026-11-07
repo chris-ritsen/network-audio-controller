@@ -1,5 +1,5 @@
-use anyhow::{Context, Result, ensure};
-use flate2::{Compression, write::GzEncoder};
+use anyhow::{ensure, Context, Result};
+use flate2::{write::GzEncoder, Compression};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;

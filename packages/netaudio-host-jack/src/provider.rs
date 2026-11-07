@@ -2,7 +2,7 @@ mod callbacks;
 mod control;
 mod snapshot;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use callbacks::{Notifications, Processing, State};
 use netaudio_core::host_audio::{
     protocol::{Event, RequestAction},

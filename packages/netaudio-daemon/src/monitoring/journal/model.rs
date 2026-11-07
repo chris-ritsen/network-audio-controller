@@ -1,7 +1,7 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub const SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_VIEW_LIMIT: usize = 1000;

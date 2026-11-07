@@ -1,5 +1,5 @@
 use crate::capture::{Channel, State};
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::{atomic::Ordering, Arc};
 
 pub struct Processing {
     pub state: Arc<State>,

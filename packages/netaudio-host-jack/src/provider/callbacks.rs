@@ -1,7 +1,7 @@
 use netaudio_host_worker::input::Wake;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
 };
 
 pub struct State {

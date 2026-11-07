@@ -2,9 +2,9 @@ use super::controller::Controller;
 use super::{Credential, Error, Limits, Transport};
 use netaudio_core::controller_api;
 use netaudio_core::managed_api::{self, Response};
-use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Method, Url};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::num::NonZeroU16;
 
 #[derive(Clone)]

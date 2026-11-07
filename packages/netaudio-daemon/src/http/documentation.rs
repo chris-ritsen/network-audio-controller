@@ -3,13 +3,13 @@ mod render;
 
 use super::ApiError;
 use anyhow::{Context, Result};
-use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{OriginalUri, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use flate2::{Compression, write::GzEncoder};
+use axum::Router;
+use flate2::{write::GzEncoder, Compression};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::Write;

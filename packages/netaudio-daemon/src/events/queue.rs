@@ -1,4 +1,4 @@
-use super::{CLIENT_QUEUE_CAPACITY, Event};
+use super::{Event, CLIENT_QUEUE_CAPACITY};
 use futures_core::Stream;
 use futures_util::task::AtomicWaker;
 use std::collections::VecDeque;

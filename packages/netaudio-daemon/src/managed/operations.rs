@@ -1,4 +1,4 @@
-use super::{Error, connections};
+use super::{connections, Error};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 

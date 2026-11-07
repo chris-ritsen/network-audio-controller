@@ -2,9 +2,9 @@ mod control;
 mod projection;
 mod snapshot;
 
-use anyhow::{Context as ErrorContext, Result, bail};
+use anyhow::{bail, Context as ErrorContext, Result};
 use libpulse_binding::{
-    context::{Context, FlagSet, State, subscribe::InterestMaskSet},
+    context::{subscribe::InterestMaskSet, Context, FlagSet, State},
     mainloop::threaded::Mainloop,
     operation::Operation,
 };
@@ -19,8 +19,8 @@ use netaudio_host_worker::{
 };
 use std::{
     sync::{
-        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -126,14 +126,12 @@ impl Provider {
         input: &mut Input,
     ) -> Result<bool> {
         let deadline = Instant::now() + Duration::from_secs(3);
-        let completion = (|| {
-            loop {
-                if let Some(success) = *result.lock().unwrap_or_else(|error| error.into_inner()) {
-                    return Ok(success);
-                }
-                self.check()?;
-                wait(input, deadline)?;
+        let completion = (|| loop {
+            if let Some(success) = *result.lock().unwrap_or_else(|error| error.into_inner()) {
+                return Ok(success);
             }
+            self.check()?;
+            wait(input, deadline)?;
         })();
         self.mainloop.lock();
         if operation.get_state() == libpulse_binding::operation::State::Running {

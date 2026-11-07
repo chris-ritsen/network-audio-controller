@@ -1,23 +1,23 @@
 use super::{
-    ApiError, ConnectionContext, MAXIMUM_REQUEST_BYTES, RequestBody,
     inventory::{json_value, query_context},
+    ApiError, ConnectionContext, RequestBody, MAXIMUM_REQUEST_BYTES,
 };
 use crate::managed::{
-    Error,
     connections::{Authentication, Login},
     operations::{self, Operation},
     registry::Registry,
     sessions::{Caller, Sessions},
+    Error,
 };
 use crate::state::ReadModel;
 use axum::{
-    Router,
     extract::{DefaultBodyLimit, Extension, OriginalUri, RawQuery, State},
-    http::{HeaderMap, StatusCode, Uri, header},
+    http::{header, HeaderMap, StatusCode, Uri},
     response::Response,
     routing::{get, post},
+    Router,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
 struct ManagedState {
@@ -192,9 +192,7 @@ async fn session_logout(
         )));
     }
     state.sessions.end(&session);
-    let mut response = json_value(Arc::new(
-        state.managed.connections_for(&Caller::Anonymous)?,
-    ));
+    let mut response = json_value(Arc::new(state.managed.connections_for(&Caller::Anonymous)?));
     response
         .headers_mut()
         .append(header::SET_COOKIE, super::caller::cleared_cookie());

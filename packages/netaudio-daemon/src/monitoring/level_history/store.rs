@@ -1,8 +1,8 @@
 mod recording;
 
-use super::{LevelHistory, MINUTE_SLOTS, Minute, RETENTION_SECONDS, SECOND_SLOTS, Second, Track};
-use anyhow::{Context, Result, ensure};
-use rusqlite::{Connection, OptionalExtension, params};
+use super::{LevelHistory, Minute, Second, Track, MINUTE_SLOTS, RETENTION_SECONDS, SECOND_SLOTS};
+use anyhow::{ensure, Context, Result};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

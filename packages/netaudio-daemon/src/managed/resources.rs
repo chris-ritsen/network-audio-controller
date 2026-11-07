@@ -1,5 +1,5 @@
-use super::{Credential, Error, configuration::Server};
-pub(super) use crate::resources::{FileWatch as ResourceWatch, resource_paths};
+use super::{configuration::Server, Credential, Error};
+pub(super) use crate::resources::{resource_paths, FileWatch as ResourceWatch};
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::{

@@ -90,7 +90,7 @@ fn initialize_logging() -> Result<()> {
 async fn shutdown_signal() -> Result<()> {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{SignalKind, signal};
+        use tokio::signal::unix::{signal, SignalKind};
         let mut terminate = signal(SignalKind::terminate())?;
         tokio::select! {
             result = tokio::signal::ctrl_c() => result.context("receive interrupt signal"),

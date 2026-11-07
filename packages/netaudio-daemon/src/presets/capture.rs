@@ -1,8 +1,8 @@
-use super::{Error, Service, device_identifiers};
+use super::{device_identifiers, Error, Service};
 use crate::devices::registry::DeviceRegistry;
 use anyhow::{Context, Result};
 use netaudio_core::presets::{Document, XmlIdentity};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -325,12 +325,10 @@ pub fn routing(
         .context("canonical transmit flows are unavailable")?;
     configuration.insert(
         "transmit_flows".into(),
-        json!(
-            flows
-                .iter()
-                .filter(|flow| flow["flow_type"] != "unicast")
-                .collect::<Vec<_>>()
-        ),
+        json!(flows
+            .iter()
+            .filter(|flow| flow["flow_type"] != "unicast")
+            .collect::<Vec<_>>()),
     );
     Ok(())
 }

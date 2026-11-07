@@ -1,8 +1,8 @@
 use crate::devices::operations::{ControlError, ControlOperation, SubscriptionChange};
 use crate::devices::record::DeviceRecord;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::presets::planning::{Action, ActionKind, ActionState, RequestedAction};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub fn compare(
     request: &RequestedAction,
@@ -42,7 +42,11 @@ pub fn compare_presented(
         ControlOperation::NetworkConfiguration(configuration) => {
             let (current, matches) = match configuration {
                 crate::devices::network::Change::Interface(configuration) => {
-                    let current = configuration.selected(&presented["interfaces"]).context("fresh interface identity is unavailable or ambiguous")?["configured"].clone();
+                    let current = configuration
+                        .selected(&presented["interfaces"])
+                        .context("fresh interface identity is unavailable or ambiguous")?
+                        ["configured"]
+                        .clone();
                     let expected = configuration.requested()["configuration"].clone();
                     ensure!(
                         matches!(current["mode"].as_str(), Some("dynamic" | "static")),

@@ -1,6 +1,6 @@
 use super::operations::{ControlCompletion, ControlError, ControlOperation, SubscriptionChange};
 use super::registry::DeviceRegistry;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub mod batch;

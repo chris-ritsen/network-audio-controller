@@ -4,9 +4,9 @@ use crate::{
     monitoring::requests::StatusQuery,
     presets::diff,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::presets::planning::{Action, ActionKind, ActionState, RequestedAction};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 impl DeviceRegistry {
     pub(super) async fn plan_managed_preset_action(

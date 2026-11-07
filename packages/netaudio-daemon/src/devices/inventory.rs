@@ -1,14 +1,14 @@
 use super::transport::{CommandIntent, DeviceTransport, TransportError};
 use netaudio_core::commands;
 use netaudio_core::parser::{
-    ChannelAudioMetadata, ChannelCount, RX_CHANNELS_PER_PAGE, RxChannel, TX_CHANNELS_PER_PAGE,
-    TxChannel, parse_channel_audio_metadata, parse_channel_count, parse_rx_page,
-    parse_tx_friendly_page, parse_tx_info_page,
+    parse_channel_audio_metadata, parse_channel_count, parse_rx_page, parse_tx_friendly_page,
+    parse_tx_info_page, ChannelAudioMetadata, ChannelCount, RxChannel, TxChannel,
+    RX_CHANNELS_PER_PAGE, TX_CHANNELS_PER_PAGE,
 };
-use netaudio_core::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_MORE_PAGES, response_envelope};
+use netaudio_core::protocol::{response_envelope, RESPONSE_HEADER_SIZE, RESULT_CODE_MORE_PAGES};
 use netaudio_core::responses::{
-    DeviceSettings, PropertyDirectory, parse_device_name, parse_device_settings,
-    parse_property_directory,
+    parse_device_name, parse_device_settings, parse_property_directory, DeviceSettings,
+    PropertyDirectory,
 };
 use netaudio_core::spec::Target;
 use serde::Serialize;

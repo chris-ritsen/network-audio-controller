@@ -1,7 +1,7 @@
-use super::{Observation, counters::flow_map};
+use super::{counters::flow_map, Observation};
 use crate::monitoring::journal::model::{Derivation, EventKind, Severity, Thresholds};
 use anyhow::Result;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const BITS_PER_MEGABIT: f64 = 1_000_000.0;

@@ -1,6 +1,6 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::host_audio::protocol::{
-    Event, MAXIMUM_FRAME_BYTES, Message, Provider, Purpose, VERSION,
+    Event, Message, Provider, Purpose, MAXIMUM_FRAME_BYTES, VERSION,
 };
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};

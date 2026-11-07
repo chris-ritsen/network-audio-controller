@@ -3,11 +3,11 @@ use crate::monitoring::diagnostics::{self, PRESENCE_LIFETIME};
 use anyhow::Result;
 use netaudio_core::heartbeat::parse_heartbeat_device_extended_unique_identifier;
 use netaudio_core::heartbeat_connection_health::Topology;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::Instant;
-use tokio_util::time::{DelayQueue, delay_queue::Key};
+use tokio_util::time::{delay_queue::Key, DelayQueue};
 
 pub struct DiagnosticOptions {
     pub include_clock: bool,

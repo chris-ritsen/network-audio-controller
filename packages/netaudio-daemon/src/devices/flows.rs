@@ -2,14 +2,14 @@ use super::operations::ControlError;
 use super::record::DeviceRecord;
 use super::transport::{CommandIntent, DeviceTransport, TransportError};
 use netaudio_core::flow_readback::{
-    FlowReadbackRequest, inventory_complete, transmit_flow_specification,
+    inventory_complete, transmit_flow_specification, FlowReadbackRequest,
 };
 use netaudio_core::inventory::{Inventory, InventoryState};
 use netaudio_core::protocol::{
-    RESULT_CODE_FRONTEND_UNAVAILABLE, RESULT_CODE_MORE_PAGES, RESULT_CODE_SUCCESS,
-    response_envelope,
+    response_envelope, RESULT_CODE_FRONTEND_UNAVAILABLE, RESULT_CODE_MORE_PAGES,
+    RESULT_CODE_SUCCESS,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const MAXIMUM_INVENTORY_PAGES: usize = 256;
 const RESULT_UNSUPPORTED_REVISION: u16 = 0x0010;

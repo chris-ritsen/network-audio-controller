@@ -1,4 +1,4 @@
-use super::{Registry, Source, current_entry};
+use super::{current_entry, Registry, Source};
 use crate::{
     devices::operations::ControlError,
     managed::{

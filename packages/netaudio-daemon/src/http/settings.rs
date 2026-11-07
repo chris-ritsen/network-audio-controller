@@ -1,11 +1,11 @@
 use super::inventory::json_value;
 use super::{ApiError, RequestBody};
 use crate::monitoring::settings::Settings;
-use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::{get, post};
+use axum::Router;
 use serde_json::Value;
 use std::sync::Arc;
 

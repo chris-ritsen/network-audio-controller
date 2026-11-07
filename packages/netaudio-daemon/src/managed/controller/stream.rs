@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::{Instant, timeout_at};
+use tokio::time::{timeout_at, Instant};
 
 pub struct Signal {
     pub publication: SignalPresencePublication,

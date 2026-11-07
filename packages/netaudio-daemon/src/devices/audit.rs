@@ -6,7 +6,7 @@ use crate::monitoring::journal::model::{
 use crate::monitoring::journal::service::Journal;
 use anyhow::{Context, Result};
 use rand::RngCore;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(crate) mod outcome;
 
@@ -193,12 +193,10 @@ impl Audit {
             ("command_count".to_owned(), json!(command_count)),
             (
                 "acknowledged_commands".to_owned(),
-                json!(
-                    receipts
-                        .iter()
-                        .filter(|receipt| receipt["accepted"] == true)
-                        .count()
-                ),
+                json!(receipts
+                    .iter()
+                    .filter(|receipt| receipt["accepted"] == true)
+                    .count()),
             ),
             ("acknowledgements".to_owned(), json!(receipts)),
         ]));

@@ -1,8 +1,8 @@
 use super::provider::{Observation, Status};
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use netaudio_core::host_audio::{
     protocol::{
-        Event, MAXIMUM_FRAME_BYTES, Message, Provider, Purpose, Request, RequestAction, VERSION,
+        Event, Message, Provider, Purpose, Request, RequestAction, MAXIMUM_FRAME_BYTES, VERSION,
     },
     snapshot::Snapshot,
 };

@@ -1,5 +1,5 @@
 use super::compact;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 fn meaning(category: &str, value: &Value) -> Value {
     match category {

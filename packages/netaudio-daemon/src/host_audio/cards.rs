@@ -3,7 +3,7 @@ mod hotplug;
 
 use anyhow::Result;
 #[cfg(target_os = "linux")]
-use anyhow::{Context, ensure};
+use anyhow::{ensure, Context};
 #[cfg(target_os = "linux")]
 use netaudio_core::host_audio::cards;
 use netaudio_core::host_audio::cards::{Bridge, Card};
@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{Notify, watch};
+use tokio::sync::{watch, Notify};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]

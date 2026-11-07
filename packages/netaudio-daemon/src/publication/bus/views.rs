@@ -1,4 +1,4 @@
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub(super) fn dante_device(record: &Value) -> Value {
     let mut result = fields(
@@ -184,40 +184,36 @@ fn subscriptions(record: &Value) -> Value {
     let Some(subscriptions) = record["subscriptions"].as_array() else {
         return Value::Null;
     };
-    json!(
-        subscriptions
-            .iter()
-            .map(|value| json!([
-                record["server_name"],
-                value["rx_channel"],
-                value["tx_device"],
-                value["tx_channel"],
-                value["status"]["code"],
-            ]))
-            .collect::<Vec<_>>()
-    )
+    json!(subscriptions
+        .iter()
+        .map(|value| json!([
+            record["server_name"],
+            value["rx_channel"],
+            value["tx_device"],
+            value["tx_channel"],
+            value["status"]["code"],
+        ]))
+        .collect::<Vec<_>>())
 }
 
 fn flows(record: &Value) -> Value {
     let Some(flows) = record["transmitter_flows"].as_array() else {
         return Value::Null;
     };
-    json!(
-        flows
-            .iter()
-            .map(|flow| json!([
-                flow["flow_number"],
-                flow.get("channel_count")
-                    .cloned()
-                    .unwrap_or_else(|| json!(flow["channels"].as_array().map(Vec::len))),
-                flow["flow_type"],
-                flow["sample_rate"],
-                flow["encoding"],
-                flow["destination_internet_protocol_version_four_address"],
-                flow["destination_user_datagram_port"],
-                flow["subscriber_device_name"].as_str().unwrap_or(""),
-                flow["subscriber_flow_name"].as_str().unwrap_or(""),
-            ]))
-            .collect::<Vec<_>>()
-    )
+    json!(flows
+        .iter()
+        .map(|flow| json!([
+            flow["flow_number"],
+            flow.get("channel_count")
+                .cloned()
+                .unwrap_or_else(|| json!(flow["channels"].as_array().map(Vec::len))),
+            flow["flow_type"],
+            flow["sample_rate"],
+            flow["encoding"],
+            flow["destination_internet_protocol_version_four_address"],
+            flow["destination_user_datagram_port"],
+            flow["subscriber_device_name"].as_str().unwrap_or(""),
+            flow["subscriber_flow_name"].as_str().unwrap_or(""),
+        ]))
+        .collect::<Vec<_>>())
 }

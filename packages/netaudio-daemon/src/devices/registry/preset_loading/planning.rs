@@ -5,9 +5,9 @@ use crate::devices::operations::ControlOperation;
 use crate::devices::panels;
 use crate::monitoring::requests::StatusQuery;
 use crate::presets::{diff, operations};
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::presets::planning::{Action, ActionKind, ActionState, RequestedAction};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 fn reject_conflicting_performance(

@@ -2,7 +2,7 @@ use super::service::CallError;
 use crate::devices::operations::ControlOperation;
 use crate::devices::panels::{Change, Operation};
 use crate::devices::registry::DeviceRegistry;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub async fn change(

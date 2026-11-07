@@ -1,10 +1,10 @@
-use super::{NEXT_STEP, Prepared, PreparedDevice, PreparedKind, require_record, required_text};
+use super::{require_record, required_text, Prepared, PreparedDevice, PreparedKind, NEXT_STEP};
 use crate::devices::operations::{ControlCompletion, ControlError, ControlOperation};
 use crate::devices::panels::Operation;
 use crate::devices::registry::DeviceRegistry;
 use crate::mcp::service::CallError;
 use crate::mcp::views;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

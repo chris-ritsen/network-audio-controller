@@ -1,13 +1,13 @@
 use super::{Registry, Source};
 use crate::managed::{
-    Error, Limits,
     controller::{Controller, Lookup, StreamEvent},
+    Error, Limits,
 };
 use crate::monitoring::metering::Metering;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
-use netaudio_core::device_identity::{DeviceIdentityRequest, normalize};
-use serde_json::{Value, json};
+use netaudio_core::device_identity::{normalize, DeviceIdentityRequest};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::{NonZeroU16, NonZeroUsize};
 use std::ops::ControlFlow;
@@ -219,7 +219,9 @@ impl Registry {
                 let mut targets = BTreeMap::new();
                 let mut unavailable = BTreeSet::new();
                 let mut repeated = BTreeSet::new();
-                for (inventory_id, identifier) in membership.domains.get(&domain).into_iter().flatten() {
+                for (inventory_id, identifier) in
+                    membership.domains.get(&domain).into_iter().flatten()
+                {
                     let Some(identifier) = identifier else {
                         unavailable.insert(inventory_id.clone());
                         continue;
@@ -360,10 +362,13 @@ impl Registry {
     ) -> Result<bool, Error> {
         let applied = self.discovery(key, source, |entry| {
             let known = entry.inventory.native_identities(&key.1);
-            let applied =
-                entry
-                    .discovery
-                    .apply(&key.1, generation, &lookup.event, lookup.received_at, &known);
+            let applied = entry.discovery.apply(
+                &key.1,
+                generation,
+                &lookup.event,
+                lookup.received_at,
+                &known,
+            );
             let changed = applied.changed;
             (applied, changed)
         })?;
@@ -389,12 +394,14 @@ impl Registry {
             let mut failures = 0u32;
             loop {
                 if failures > 0 {
-                    let delay = Duration::from_secs(1 << (failures - 1).min(5)).min(MAXIMUM_BACKOFF);
+                    let delay =
+                        Duration::from_secs(1 << (failures - 1).min(5)).min(MAXIMUM_BACKOFF);
                     tokio::time::sleep(delay).await;
                 }
                 let attempt = failures + 1;
-                let Some(generation) =
-                    self.discovery(key, source, |entry| (entry.discovery.connecting(&key.1), true))?
+                let Some(generation) = self.discovery(key, source, |entry| {
+                    (entry.discovery.connecting(&key.1), true)
+                })?
                 else {
                     return Ok(());
                 };
@@ -402,9 +409,13 @@ impl Registry {
                     "maximum_attempts": MAXIMUM_ATTEMPTS, "unavailable_devices": route.borrow().unavailable}))?;
                 let mut ready = None;
                 let result = self
-                    .receive_signals(key, source, &route, metering, owner, attempt, generation, &mut ready)
+                    .receive_signals(
+                        key, source, &route, metering, owner, attempt, generation, &mut ready,
+                    )
                     .await;
-                self.discovery(key, source, |entry| ((), entry.discovery.lost(&key.1, generation)))?;
+                self.discovery(key, source, |entry| {
+                    ((), entry.discovery.lost(&key.1, generation))
+                })?;
                 invalidate(metering, &route.borrow(), owner)?;
                 failures = match ready {
                     Some(ready) if ready.elapsed() >= HEALTHY_SESSION => 1,
@@ -412,7 +423,11 @@ impl Registry {
                 };
                 let permanent = matches!(
                     result,
-                    Err(Error::Authentication | Error::Credential(_) | Error::Forbidden(_) | Error::Session(_) | Error::Tls(_))
+                    Err(Error::Authentication
+                        | Error::Credential(_)
+                        | Error::Forbidden(_)
+                        | Error::Session(_)
+                        | Error::Tls(_))
                 );
                 let error = match result {
                     Ok(()) => "Managed signal session ended".to_owned(),
@@ -420,12 +435,16 @@ impl Registry {
                 };
                 let exhausted = permanent || failures >= MAXIMUM_ATTEMPTS;
                 tracing::warn!(server = %key.0, domain = %key.1, attempt, %error, "managed signal stream disconnected");
-                self.signal_status(key, source, json!({
-                    "state": if exhausted { "exhausted" } else { "reconnecting" },
-                    "attempt": attempt, "maximum_attempts": MAXIMUM_ATTEMPTS, "error": error,
-                    "recovery": "Refresh managed inventory to retry an exhausted session",
-                    "unavailable_devices": route.borrow().unavailable,
-                }))?;
+                self.signal_status(
+                    key,
+                    source,
+                    json!({
+                        "state": if exhausted { "exhausted" } else { "reconnecting" },
+                        "attempt": attempt, "maximum_attempts": MAXIMUM_ATTEMPTS, "error": error,
+                        "recovery": "Refresh managed inventory to retry an exhausted session",
+                        "unavailable_devices": route.borrow().unavailable,
+                    }),
+                )?;
                 if exhausted {
                     return Ok(());
                 }

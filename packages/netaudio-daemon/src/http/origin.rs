@@ -1,6 +1,6 @@
 use super::{ApiError, ConnectionContext};
 use axum::extract::Request;
-use axum::http::{Method, StatusCode, header};
+use axum::http::{header, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use url::Url;

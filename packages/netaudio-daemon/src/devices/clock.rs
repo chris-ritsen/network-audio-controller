@@ -1,9 +1,9 @@
 use super::operations::ControlError;
 use netaudio_core::clock_configuration::{
-    ClockPlan, ClockPlanRequest, ClockProfile, ClockReadbackRequest, configuration_matches,
-    control_profile, normalize_subdomain, plan_configuration,
+    configuration_matches, control_profile, normalize_subdomain, plan_configuration, ClockPlan,
+    ClockPlanRequest, ClockProfile, ClockReadbackRequest,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub const PROFILE_PARAMETER_ERROR: &str =
     "Use control_profile to select the local clock serializer.";

@@ -1,21 +1,21 @@
 use crate::authorization::AuthorizationStore;
-use crate::configuration::{Configuration, DEFAULT_HTTP_PORT, http_address};
+use crate::configuration::{http_address, Configuration, DEFAULT_HTTP_PORT};
 use crate::devices::{discovery, registry::DeviceRegistry};
-use crate::http::{ApiError, AuthorizationService, ConnectionContext, inventory};
+use crate::http::{inventory, ApiError, AuthorizationService, ConnectionContext};
 use crate::monitoring::multicast::MulticastReceiver;
 use crate::network::{NetworkMonitor, NetworkSnapshot};
 use crate::preferences::Preferences;
 use crate::state::ReadModel;
-use crate::transport::{Listener, ListenerOptions, TlsIdentity, generated};
-use anyhow::{Context, Result, bail, ensure};
+use crate::transport::{generated, Listener, ListenerOptions, TlsIdentity};
+use anyhow::{bail, ensure, Context, Result};
 use axum::extract::{Extension, State};
 use axum::middleware;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use netaudio_core::protocol::{
-    MULTICAST_GROUP_CONTROL_MONITORING, MULTICAST_GROUP_HEARTBEAT, NetaudioPort,
+    NetaudioPort, MULTICAST_GROUP_CONTROL_MONITORING, MULTICAST_GROUP_HEARTBEAT,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;

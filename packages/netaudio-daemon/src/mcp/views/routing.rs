@@ -1,5 +1,5 @@
-use super::{Records, channel_names, compact, last_seen, problem, subscriptions, text, waiting};
-use serde_json::{Map, Value, json};
+use super::{channel_names, compact, last_seen, problem, subscriptions, text, waiting, Records};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 pub fn routing_view(records: &Records, arguments: &Value) -> Value {

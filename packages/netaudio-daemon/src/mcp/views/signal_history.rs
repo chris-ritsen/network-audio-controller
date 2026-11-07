@@ -1,10 +1,10 @@
-use super::{Records, channel_label, channels, local_time, text};
+use super::{channel_label, channels, local_time, text, Records};
 use crate::monitoring::level_history::{
-    LevelHistory, Period, RETENTION_SECONDS, Summary, iso_second,
+    iso_second, LevelHistory, Period, Summary, RETENTION_SECONDS,
 };
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::time::Duration;
 
 const DEFAULT_HISTORY_SECONDS: i64 = 60;

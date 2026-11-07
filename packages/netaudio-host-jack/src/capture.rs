@@ -1,8 +1,8 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_host_worker::input::Wake;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, AtomicU8, Ordering},
+    Arc,
 };
 
 pub struct State {

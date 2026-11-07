@@ -1,6 +1,6 @@
 use super::{network_configuration, operations::ControlError, redundancy};
 use crate::monitoring::requests::StatusQuery;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 #[derive(Clone, Debug)]
 pub enum Change {

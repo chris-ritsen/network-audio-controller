@@ -1,15 +1,15 @@
 use super::{
-    Error,
     configuration::validate_name,
     connections::{Authentication, Profile},
     mutations::Inventory,
     operations::Operation,
     registry::{Registry, Request},
     store::Snapshot,
+    Error,
 };
 use netaudio_core::managed_api::{inventory::Observation, mutation::Mutation};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Clone, Serialize, PartialEq)]
 pub struct Conditions {

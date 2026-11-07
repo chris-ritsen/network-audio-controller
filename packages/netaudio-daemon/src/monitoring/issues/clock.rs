@@ -1,8 +1,8 @@
 use super::model::{EvidenceClass, Finding, Issue, Kind, Scope};
-use crate::monitoring::journal::model::{Severity, device_identity};
+use crate::monitoring::journal::model::{device_identity, Severity};
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeDelta, Utc};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const CLOCK_FRESHNESS_SECONDS: i64 = 5;

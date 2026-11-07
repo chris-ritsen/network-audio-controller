@@ -3,7 +3,7 @@ use super::{
     SHURE_METER_VALUES, SNAPSHOT, TELEMETRY_UPDATED,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const TELEMETRY_FIELDS: [&str; 5] = [

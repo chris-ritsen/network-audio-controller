@@ -1,13 +1,13 @@
 use crate::devices::registry::{DeviceRegistry, MeteringLease, MeteringTarget};
 use crate::events::EventOptions;
 use crate::state::ReadModel;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use futures_util::StreamExt;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
-use tokio::sync::{Notify, Semaphore, watch};
+use tokio::sync::{watch, Notify, Semaphore};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;

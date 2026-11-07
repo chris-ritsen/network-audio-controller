@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use netaudio_core::responses;
 use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusKind {
@@ -223,11 +223,9 @@ pub fn decode(
                 "fresh": true,
             });
             let mut support = source.clone();
-            support["field_reported"] = json!(
-                parsed
-                    .get("switch_redundancy_supported")
-                    .is_some_and(|value| !value.is_null())
-            );
+            support["field_reported"] = json!(parsed
+                .get("switch_redundancy_supported")
+                .is_some_and(|value| !value.is_null()));
             fields.insert("redundancy_advertised_support_source".to_owned(), support);
             let mut read_only = source;
             let reported = parsed

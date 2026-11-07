@@ -1,9 +1,9 @@
 use super::Error;
-use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::client::WebPkiServerVerifier;
 use rustls::crypto::{
-    CryptoProvider, verify_tls12_signature, verify_tls13_signature,
-    verify_tls13_signature_with_raw_key,
+    verify_tls12_signature, verify_tls13_signature, verify_tls13_signature_with_raw_key,
+    CryptoProvider,
 };
 use rustls::pki_types::{CertificateDer, ServerName, SubjectPublicKeyInfoDer, UnixTime};
 use rustls::{CertificateError, DigitallySignedStruct, RootCertStore, SignatureScheme};

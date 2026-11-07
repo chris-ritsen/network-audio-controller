@@ -1,11 +1,11 @@
 use super::{
-    CallError, ControlError, NEXT_STEP, Prepared, PreparedDevice, PreparedKind, Records,
-    require_record, required_text,
+    require_record, required_text, CallError, ControlError, Prepared, PreparedDevice, PreparedKind,
+    Records, NEXT_STEP,
 };
 use crate::devices::external_subscription::ExternalSubscription;
 use crate::devices::operations::{ControlCompletion, ControlOperation};
 use crate::state::ReadModel;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 pub(super) fn prepare(

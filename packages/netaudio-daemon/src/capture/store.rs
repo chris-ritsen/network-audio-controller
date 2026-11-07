@@ -1,7 +1,7 @@
 use super::Packet;
 use anyhow::{Context, Result};
-use flate2::{Compression, write::ZlibEncoder};
-use rusqlite::{Connection, OptionalExtension, params};
+use flate2::{write::ZlibEncoder, Compression};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 use std::io::Write;
 use std::path::Path;

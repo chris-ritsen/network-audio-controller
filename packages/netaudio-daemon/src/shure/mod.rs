@@ -4,9 +4,9 @@ pub mod correlations;
 mod neighbours;
 mod session;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use netaudio_core::shure::{Change, Device};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};

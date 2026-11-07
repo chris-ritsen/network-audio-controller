@@ -1,6 +1,6 @@
 use super::{capabilities, operations::ControlError};
-use netaudio_core::capabilities::{SettingsCapabilityFacts, settings_capabilities};
-use serde_json::{Value, json};
+use netaudio_core::capabilities::{settings_capabilities, SettingsCapabilityFacts};
+use serde_json::{json, Value};
 use std::net::Ipv4Addr;
 
 #[derive(Clone, Debug)]

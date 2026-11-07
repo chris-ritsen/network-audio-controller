@@ -1,6 +1,6 @@
 use crate::authorization::AuthorizationError;
-use axum::http::{HeaderMap, header};
-use base64::{Engine, engine::general_purpose::STANDARD};
+use axum::http::{header, HeaderMap};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use url::form_urlencoded;

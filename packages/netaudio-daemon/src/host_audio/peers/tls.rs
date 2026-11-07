@@ -1,7 +1,7 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{
-    WebPkiSupportedAlgorithms, ring, verify_tls12_signature, verify_tls13_signature,
+    ring, verify_tls12_signature, verify_tls13_signature, WebPkiSupportedAlgorithms,
 };
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, Error, SignatureScheme};

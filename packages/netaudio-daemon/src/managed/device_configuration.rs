@@ -8,7 +8,7 @@ use crate::{
     devices::operations::{ControlCompletion, ControlError},
     monitoring::requests::StatusQuery,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 
 mod channel;
@@ -110,7 +110,8 @@ impl Registry {
                         .await?;
                     for delay in INVENTORY_READBACK_DELAYS {
                         if value["accepted"] != true
-                            || requested.inventory_settled(self.status_record(&prepared.fresh)?.as_ref())
+                            || requested
+                                .inventory_settled(self.status_record(&prepared.fresh)?.as_ref())
                         {
                             break;
                         }

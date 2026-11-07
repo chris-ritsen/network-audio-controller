@@ -1,6 +1,6 @@
 use axum::http::{HeaderMap, StatusCode};
-use base64::{Engine, engine::general_purpose::STANDARD};
-use serde_json::{Value, json};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use serde_json::{json, Value};
 
 pub const LEGACY_VERSION: &str = "2025-06-18";
 pub const MODERN_VERSION: &str = "2026-07-28";

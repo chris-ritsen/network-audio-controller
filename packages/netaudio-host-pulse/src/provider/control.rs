@@ -1,16 +1,16 @@
 use super::Provider;
-use anyhow::{Result, ensure};
+use anyhow::{ensure, Result};
 use libpulse_binding::{
     operation::Operation as PulseOperation,
     volume::{ChannelVolumes, Volume},
 };
 use netaudio_core::host_audio::{
-    control::{Command, Operation, observed, prepare},
+    control::{observed, prepare, Command, Operation},
     protocol::Event,
     snapshot::PulseKind,
 };
 use netaudio_host_worker::{input::Input, output::Output};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
 pub(super) fn execute(

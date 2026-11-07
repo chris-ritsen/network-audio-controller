@@ -9,7 +9,7 @@ use crate::{
     },
     monitoring::requests::StatusQuery,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(in crate::managed) enum Configuration<'a> {
     Status(&'a status_configuration::Configuration),
@@ -179,11 +179,9 @@ impl<'a> Configuration<'a> {
                     configuration.completion(after.and_then(Value::as_object), sent)?;
                 result["current"] = result["current_value"].clone();
                 result["configured"] = result["status"]["requested_value"].clone();
-                result["configuration_confirmed"] = json!(
-                    result["configured"]
-                        .as_u64()
-                        .map(|value| value == u64::from(configuration.requested))
-                );
+                result["configuration_confirmed"] = json!(result["configured"]
+                    .as_u64()
+                    .map(|value| value == u64::from(configuration.requested)));
                 if after.is_none() {
                     result["effective_state_confirmed"] = Value::Null;
                 }
@@ -264,15 +262,14 @@ impl<'a> Configuration<'a> {
             Self::Audio(configuration) => {
                 record["managed_status"][configuration.kind.query().kind().as_str()].clone()
             }
-            Self::Network(_) => json!(
-                self.readback_queries(before)
-                    .into_iter()
-                    .map(|query| {
-                        let name = query.kind().as_str();
-                        (name.to_owned(), record["managed_status"][name].clone())
-                    })
-                    .collect::<serde_json::Map<_, _>>()
-            ),
+            Self::Network(_) => json!(self
+                .readback_queries(before)
+                .into_iter()
+                .map(|query| {
+                    let name = query.kind().as_str();
+                    (name.to_owned(), record["managed_status"][name].clone())
+                })
+                .collect::<serde_json::Map<_, _>>()),
         })
     }
 }

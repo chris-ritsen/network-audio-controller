@@ -1,5 +1,5 @@
-use super::{Records, first, problem, subscriptions, text, waiting};
-use serde_json::{Map, Value, json};
+use super::{first, problem, subscriptions, text, waiting, Records};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const COLLAPSE_MINIMUM: usize = 4;

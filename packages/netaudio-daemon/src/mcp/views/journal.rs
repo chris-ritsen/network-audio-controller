@@ -1,5 +1,5 @@
 use super::{compact, local_time};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 const DEFAULT_EVENT_LIMIT: usize = 20;

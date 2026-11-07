@@ -1,10 +1,10 @@
 use super::model::{EventFilter, JournalEvent, SCHEMA_VERSION};
 use crate::monitoring::issues;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use chrono::{DateTime, SecondsFormat, Utc};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::Arc;

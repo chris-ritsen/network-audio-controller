@@ -1,8 +1,8 @@
 use super::inventory::{Announcement, Inventory, Observation};
 use crate::network::NetworkSnapshot;
 use crate::state::ReadModel;
-use crate::transport::datagram::{DatagramSocket, MAXIMUM_DATAGRAM_BYTES, PacketMetadata};
-use anyhow::{Context, Result, ensure};
+use crate::transport::datagram::{DatagramSocket, PacketMetadata, MAXIMUM_DATAGRAM_BYTES};
+use anyhow::{ensure, Context, Result};
 use chrono::Utc;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};

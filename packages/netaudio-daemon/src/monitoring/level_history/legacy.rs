@@ -1,5 +1,5 @@
-use super::{MINUTE_SLOTS, RETENTION_SECONDS, SECOND_SLOTS, SECONDS_PER_MINUTE};
-use anyhow::{Context, Result, ensure};
+use super::{MINUTE_SLOTS, RETENTION_SECONDS, SECONDS_PER_MINUTE, SECOND_SLOTS};
+use anyhow::{ensure, Context, Result};
 use flate2::read::ZlibDecoder;
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};

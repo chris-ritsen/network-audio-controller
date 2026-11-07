@@ -1,5 +1,5 @@
 use crate::devices::operations::ControlError;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(super) fn command(milliseconds: f64, record: &Value) -> Result<Option<Value>, ControlError> {
     netaudio_core::latency_configuration::requested_nanoseconds(milliseconds)
@@ -37,11 +37,9 @@ pub(super) fn completion(
     )
     .map_err(anyhow::Error::from)?;
     result["latency_state"] = result["state"].take();
-    result["configuration_confirmed"] = json!(
-        result["configured_latency_ns"]
-            .as_u64()
-            .map(|configured| Some(configured) == result["requested_latency_ns"].as_u64())
-    );
+    result["configuration_confirmed"] = json!(result["configured_latency_ns"]
+        .as_u64()
+        .map(|configured| Some(configured) == result["requested_latency_ns"].as_u64()));
     if acknowledged.is_none() || result["configured_latency_ns"].is_null() {
         result["effective_state_confirmed"] = Value::Null;
     }

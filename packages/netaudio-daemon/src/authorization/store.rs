@@ -1,16 +1,16 @@
 use super::credentials::{
-    CLIENT_IDENTIFIER_BYTES, TOKEN_BYTES, constant_time_equal, decode_hexadecimal, digest,
-    secret_digest, secret_record, token, valid_redirect_uri, verify_challenge,
+    constant_time_equal, decode_hexadecimal, digest, secret_digest, secret_record, token,
+    valid_redirect_uri, verify_challenge, CLIENT_IDENTIFIER_BYTES, TOKEN_BYTES,
 };
 use super::{
-    ACCESS_TOKEN_LIFETIME_SECONDS, AUTHORIZATION_CODE_LIFETIME_SECONDS, AuthorizationError,
-    CLIENTS_PREFERENCE, Grant, LOGIN_ATTEMPT_LIMIT, LOGIN_ATTEMPT_WINDOW_SECONDS,
-    LOGIN_SECRET_PREFERENCE, PUBLIC_URL_PREFERENCE, REFRESH_TOKEN_LIFETIME_SECONDS,
-    STATIC_TOKEN_PREFERENCE, TOKENS_PREFERENCE, WRITE_SCOPE,
+    AuthorizationError, Grant, ACCESS_TOKEN_LIFETIME_SECONDS, AUTHORIZATION_CODE_LIFETIME_SECONDS,
+    CLIENTS_PREFERENCE, LOGIN_ATTEMPT_LIMIT, LOGIN_ATTEMPT_WINDOW_SECONDS, LOGIN_SECRET_PREFERENCE,
+    PUBLIC_URL_PREFERENCE, REFRESH_TOKEN_LIFETIME_SECONDS, STATIC_TOKEN_PREFERENCE,
+    TOKENS_PREFERENCE, WRITE_SCOPE,
 };
 use crate::preferences::Preferences;
 use anyhow::{Context, Result};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

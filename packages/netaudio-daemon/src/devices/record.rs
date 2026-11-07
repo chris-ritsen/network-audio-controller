@@ -1,11 +1,11 @@
 use super::discovery::DiscoveredService;
 use super::inventory::ChannelInventory;
 use super::transport::DeviceAddress;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use netaudio_core::parser::ChannelCount;
-use netaudio_core::protocol::{SERVICE_ARC, SERVICE_CMC, arc_protocol};
+use netaudio_core::protocol::{arc_protocol, SERVICE_ARC, SERVICE_CMC};
 use netaudio_core::responses::{DeviceSettings, PropertyDirectory};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 

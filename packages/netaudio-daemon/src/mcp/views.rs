@@ -23,7 +23,7 @@ pub mod signal_history;
 pub use routing::routing_view;
 
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -337,13 +337,11 @@ pub fn record_fields(record: &Value, fields: &[String], known: &BTreeSet<String>
             });
             unknown.insert(
                 field.clone(),
-                json!(
-                    matches
-                        .into_iter()
-                        .take(3)
-                        .map(|(_, name)| name)
-                        .collect::<Vec<_>>()
-                ),
+                json!(matches
+                    .into_iter()
+                    .take(3)
+                    .map(|(_, name)| name)
+                    .collect::<Vec<_>>()),
             );
         }
     }

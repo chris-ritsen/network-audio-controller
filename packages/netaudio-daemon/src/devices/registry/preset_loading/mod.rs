@@ -1,15 +1,15 @@
 use super::{Device, DeviceRegistry};
 use crate::devices::operations::ControlOperation;
 use crate::devices::record::DeviceRecord;
-use crate::presets::Error;
 use crate::presets::loading::{LoadRequest, Target};
-use anyhow::{Context, Result, ensure};
+use crate::presets::Error;
+use anyhow::{ensure, Context, Result};
 use netaudio_core::presets::planning::Action;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{OwnedMutexGuard, oneshot};
+use tokio::sync::{oneshot, OwnedMutexGuard};
 
 mod apply;
 mod managed;
@@ -62,20 +62,19 @@ impl Selected {
     fn checkpoint(&self) -> Result<Value> {
         if let Some(device) = self.managed() {
             let record = device.record()?;
-            return Ok(json!(
-                self.target
-                    .actions
-                    .iter()
-                    .map(|request| {
-                        crate::presets::operations::operations(request, true).map(|operations| {
-                            operations
-                                .iter()
-                                .map(|operation| operation.precondition(&record))
-                                .collect::<Vec<_>>()
-                        })
+            return Ok(json!(self
+                .target
+                .actions
+                .iter()
+                .map(|request| {
+                    crate::presets::operations::operations(request, true).map(|operations| {
+                        operations
+                            .iter()
+                            .map(|operation| operation.precondition(&record))
+                            .collect::<Vec<_>>()
                     })
-                    .collect::<Result<Vec<_>, _>>()?
-            ));
+                })
+                .collect::<Result<Vec<_>, _>>()?));
         }
         Ok(json!(self.record()?.1))
     }

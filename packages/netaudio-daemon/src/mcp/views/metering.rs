@@ -1,5 +1,5 @@
-use super::{Records, channel_label, channels, compact, last_seen, text};
-use serde_json::{Map, Value, json};
+use super::{channel_label, channels, compact, last_seen, text, Records};
+use serde_json::{json, Map, Value};
 
 pub fn signal_text(reading: &Value) -> String {
     let state = match reading["state"].as_str() {

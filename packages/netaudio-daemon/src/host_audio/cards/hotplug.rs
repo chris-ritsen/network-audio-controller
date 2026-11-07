@@ -1,5 +1,5 @@
-use anyhow::{Result, ensure};
-use netlink_sys::{Socket, SocketAddr, protocols::NETLINK_KOBJECT_UEVENT};
+use anyhow::{ensure, Result};
+use netlink_sys::{protocols::NETLINK_KOBJECT_UEVENT, Socket, SocketAddr};
 use tokio::io::unix::AsyncFd;
 
 pub struct Observer {

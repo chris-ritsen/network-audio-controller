@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use chrono::{DateTime, SecondsFormat, Utc};
 use futures_util::StreamExt;
 use netaudio_core::sap::{
@@ -6,14 +6,14 @@ use netaudio_core::sap::{
 };
 use netaudio_core::sdp::{self, SdpDocument};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::NonZeroU16;
 use std::time::Duration;
 use tokio::time::Instant;
-use tokio_util::time::{DelayQueue, delay_queue::Key};
+use tokio_util::time::{delay_queue::Key, DelayQueue};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Identity {

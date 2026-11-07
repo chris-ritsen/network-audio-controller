@@ -1,11 +1,11 @@
-use super::{ApiError, inventory};
+use super::{inventory, ApiError};
 use crate::sap::Diagnostics;
 use crate::state::ReadModel;
 use anyhow::Context;
-use axum::Router;
 use axum::extract::State;
 use axum::response::Response;
 use axum::routing::get;
+use axum::Router;
 use std::sync::{Arc, Mutex};
 
 struct ExternalFlows {

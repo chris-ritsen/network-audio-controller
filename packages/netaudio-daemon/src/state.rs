@@ -1,13 +1,13 @@
 use crate::events::{
-    DEVICE_DISCOVERED, DEVICE_REMOVED, DEVICE_UPDATED, DeviceView, Event, EventOptions,
-    EventReceiver, EventSender, MANAGED_STATUS, SNAPSHOT, TELEMETRY_UPDATED, event_queue,
+    event_queue, DeviceView, Event, EventOptions, EventReceiver, EventSender, DEVICE_DISCOVERED,
+    DEVICE_REMOVED, DEVICE_UPDATED, MANAGED_STATUS, SNAPSHOT, TELEMETRY_UPDATED,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use bytes::Bytes;
 use futures_core::Stream;
 use netaudio_core::managed_api::inventory::{self as managed_inventory, Observation};
 use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, Weak};

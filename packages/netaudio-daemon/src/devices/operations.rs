@@ -6,7 +6,7 @@ use super::subscriptions::outcome::SubscriptionFailure;
 use super::transport::{CommandIntent, DeviceTransport, TransportError};
 use netaudio_core::responses::parse_command_acknowledgement;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const IDENTIFY_DURATION_SECONDS: u8 = 6;
 
@@ -450,13 +450,11 @@ impl ControlOperation {
                 (commands, Vec::new())
             }
             Self::Performance(_) => (
-                vec![
-                    performance
-                        .as_ref()
-                        .expect("performance plan prepared")
-                        .command
-                        .clone(),
-                ],
+                vec![performance
+                    .as_ref()
+                    .expect("performance plan prepared")
+                    .command
+                    .clone()],
                 Vec::new(),
             ),
             Self::RenameDevice { name } => {

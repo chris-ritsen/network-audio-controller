@@ -1,6 +1,6 @@
 use crate::network::NetworkSnapshot;
 use crate::transport::datagram::DatagramSocket;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr};

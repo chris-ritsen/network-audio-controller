@@ -1,7 +1,7 @@
 pub(crate) mod file;
 
 use crate::transport::CertificatePaths;
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use std::env;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
