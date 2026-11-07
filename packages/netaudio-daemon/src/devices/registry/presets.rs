@@ -335,22 +335,104 @@ impl DeviceRegistry {
                 captured.omitted.push(json!({"device": record.name, "setting": setting, "reason": "The device's advertised capabilities do not include this setting."}));
                 continue;
             }
-            let fields = self.capture_preset_status(target, transport, query).await?;
-            let current = fields
-                .get(field)
-                .filter(|value| value.as_u64().is_some_and(|value| value > 0))
-                .with_context(|| format!("fresh {setting} value is unavailable"))?;
-            captured
-                .configuration
-                .insert(setting.into(), current.clone());
+            let current = match self.capture_preset_status(target, transport, query).await {
+                Ok(fields) => fields
+                    .get(field)
+                    .filter(|value| value.as_u64().is_some_and(|value| value > 0))
+                    .cloned()
+                    .ok_or_else(|| format!("The fresh {setting} value is unavailable.")),
+                Err(error) => Err(format!("{error:#}")),
+            };
+            match current {
+                Ok(current) => {
+                    captured.configuration.insert(setting.into(), current);
+                }
+                Err(reason) => captured
+                    .omitted
+                    .push(json!({"device": record.name, "setting": setting, "reason": reason})),
+            }
         }
-        let settings = inventory::settings(transport).await?;
-        let latency = settings
-            .configured_latency_ns
-            .context("configured latency is unavailable")?;
-        captured
-            .configuration
-            .insert("latency".into(), json!(f64::from(latency) / 1_000_000.0));
+        match inventory::settings(transport).await {
+            Ok(settings) => {
+                match settings.configured_latency_ns {
+                    Some(latency) => {
+                        captured
+                            .configuration
+                            .insert("latency".into(), json!(f64::from(latency) / 1_000_000.0));
+                    }
+                    None => captured.omitted.push(json!({"device": record.name, "setting": "latency", "reason": "The configured latency is unavailable."})),
+                }
+                match Self::capture_preset_performance(transport, record, &settings).await {
+                    Ok(performance) => captured.configuration.extend(performance),
+                    Err(error) => captured.omitted.push(json!({"device": record.name, "setting": "performance", "reason": format!("{error:#}")})),
+                }
+            }
+            Err(error) => {
+                for setting in ["latency", "performance"] {
+                    captured.omitted.push(json!({"device": record.name, "setting": setting, "reason": format!("{error:#}")}));
+                }
+            }
+        }
+        match self
+            .capture_preset_status(target, transport, StatusQuery::Clock)
+            .await
+        {
+            Ok(clock) => capture::clock(
+                &mut captured.configuration,
+                &mut captured.omitted,
+                &record.name,
+                &clock,
+            )?,
+            Err(error) => captured.omitted.push(json!({"device": record.name, "setting": "clock_configuration", "reason": format!("{error:#}")})),
+        }
+        if record
+            .properties
+            .get("sample_rate_pullup_configuration_supported")
+            == Some(&json!(true))
+        {
+            let value = match self
+                .capture_preset_status(target, transport, StatusQuery::Pullup)
+                .await
+            {
+                Ok(fields) => fields
+                    .get("sample_rate_pullup_raw_value")
+                    .filter(|value| value.is_u64())
+                    .cloned()
+                    .ok_or_else(|| "The fresh sample-rate pull-up value is unavailable.".to_owned()),
+                Err(error) => Err(format!("{error:#}")),
+            };
+            match value {
+                Ok(value) => {
+                    captured
+                        .configuration
+                        .insert("sample_rate_pullup".into(), value);
+                }
+                Err(reason) => captured.omitted.push(json!({"device": record.name, "setting": "sample_rate_pullup", "reason": reason})),
+            }
+        }
+        if record.properties.get("generic_codec_control_supported") == Some(&json!(true)) {
+            match self
+                .capture_preset_status(target, transport, StatusQuery::Codec)
+                .await
+            {
+                Ok(fields) => match (fields.get("gain_device_type").and_then(Value::as_str), fields.get("gain_levels").and_then(Value::as_array)) {
+                    (Some(direction @ ("input" | "output")), Some(levels)) => {
+                        let values: Vec<_> = levels.iter().enumerate().map(|(index, level)| json!({"channel": index + 1, "device_type": direction, "level": level})).collect();
+                        captured.configuration.insert("codec_gain".into(), json!(values));
+                    }
+                    _ => captured.omitted.push(json!({"device": record.name, "setting": "codec_gain", "reason": "The fresh codec status does not expose a supported gain adapter."})),
+                },
+                Err(error) => captured.omitted.push(json!({"device": record.name, "setting": "codec_gain", "reason": format!("{error:#}")})),
+            }
+        }
+        Ok(())
+    }
+
+    async fn capture_preset_performance(
+        transport: &mut DeviceTransport,
+        record: &DeviceRecord,
+        settings: &netaudio_core::responses::DeviceSettings,
+    ) -> Result<Map<String, Value>> {
         let properties = inventory::properties(transport).await?;
         let values: BTreeMap<_, _> = settings
             .performance_values
@@ -381,49 +463,9 @@ impl DeviceRegistry {
                 "fresh {field} values are incomplete or inconsistent"
             );
         }
-        captured.configuration.extend(
-            performance
-                .as_object()
-                .context("performance snapshot is not an object")?
-                .clone(),
-        );
-        let clock = self
-            .capture_preset_status(target, transport, StatusQuery::Clock)
-            .await?;
-        capture::clock(
-            &mut captured.configuration,
-            &mut captured.omitted,
-            &record.name,
-            &clock,
-        )?;
-        if record
-            .properties
-            .get("sample_rate_pullup_configuration_supported")
-            == Some(&json!(true))
-        {
-            let fields = self
-                .capture_preset_status(target, transport, StatusQuery::Pullup)
-                .await?;
-            let value = fields
-                .get("sample_rate_pullup_raw_value")
-                .filter(|value| value.is_u64())
-                .context("fresh sample-rate pull-up value is unavailable")?;
-            captured
-                .configuration
-                .insert("sample_rate_pullup".into(), value.clone());
-        }
-        if record.properties.get("generic_codec_control_supported") == Some(&json!(true)) {
-            let fields = self
-                .capture_preset_status(target, transport, StatusQuery::Codec)
-                .await?;
-            match (fields.get("gain_device_type").and_then(Value::as_str), fields.get("gain_levels").and_then(Value::as_array)) {
-                (Some(direction @ ("input" | "output")), Some(levels)) => {
-                    let values: Vec<_> = levels.iter().enumerate().map(|(index, level)| json!({"channel": index + 1, "device_type": direction, "level": level})).collect();
-                    captured.configuration.insert("codec_gain".into(), json!(values));
-                }
-                _ => captured.omitted.push(json!({"device": record.name, "setting": "codec_gain", "reason": "The fresh codec status does not expose a supported gain adapter."})),
-            }
-        }
-        Ok(())
+        performance
+            .as_object()
+            .cloned()
+            .context("performance snapshot is not an object")
     }
 }
