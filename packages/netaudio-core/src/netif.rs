@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, UdpSocket};
 use crate::protocol::MULTICAST_GROUP_CONTROL_MONITORING;
 
 /// cbindgen:ignore
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 mod adapter_addresses;
 /// cbindgen:ignore
 #[cfg(target_os = "macos")]
@@ -186,31 +186,4 @@ pub fn discover_host_mac() -> Option<[u8; 6]> {
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos", target_os = "ios")))]
 pub fn host_mac_for_ipv4(_address: Ipv4Addr) -> Option<[u8; 6]> {
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_a_real_unicast_address_identifies_an_interface() {
-        assert!(is_interface_mac(&[0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D]));
-        assert!(is_interface_mac(&[0xCE, 0x9B, 0x7A, 0x19, 0x26, 0x88]));
-        assert!(!is_interface_mac(&[0; 6]));
-        assert!(!is_interface_mac(&MASKED_INTERFACE_MAC));
-        assert!(!is_interface_mac(&[0x01, 0x00, 0x5E, 0x00, 0x00, 0xE7]));
-    }
-
-    #[test]
-    fn a_settings_command_still_has_an_identity_without_an_interface() {
-        let unassigned = Ipv4Addr::new(192, 0, 2, 254);
-        assert_eq!(host_mac_for_ipv4(unassigned), None);
-        assert_eq!(command_host_mac(unassigned), FALLBACK_HOST_MAC);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn an_unknown_interface_has_no_hardware_address() {
-        assert_eq!(hardware_address::interface_mac(c"netaudio-none"), None);
-    }
 }

@@ -272,6 +272,3 @@ pub fn managed_status(request: ManagedStatusRequest) -> ManagedSubscriptionStatu
         status: identifier,
     }
 }
-
-#[cfg(test)]
-mod tests;

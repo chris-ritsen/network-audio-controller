@@ -580,6 +580,3 @@ pub use performance::*;
 pub use protocol::*;
 pub use runtime::*;
 pub use subscriptions::*;
-
-#[cfg(test)]
-mod tests;

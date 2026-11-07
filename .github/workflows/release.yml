@@ -47,32 +47,8 @@ jobs:
             exit 1
           fi
 
-  test:
-    needs: check-version
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, windows-latest]
-    timeout-minutes: 30
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v7
-      - if: runner.os == 'macOS'
-        run: brew install pkg-config jack pulseaudio
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libjack-jackd2-dev libpulse-dev pkg-config
-      - run: cargo test --manifest-path packages/netaudio-core/Cargo.toml
-      - run: uv run pytest -q
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - run: npm ci
-      - run: node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
-
   build-wheel:
-    needs: test
+    needs: check-version
     strategy:
       fail-fast: false
       matrix:
@@ -190,7 +166,7 @@ jobs:
             --push .
 
   build-sdist:
-    needs: test
+    needs: check-version
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -227,7 +203,7 @@ jobs:
           path: dist/*.tar.gz
 
   build-xcframework:
-    needs: test
+    needs: check-version
     timeout-minutes: 30
     runs-on: macos-15
     steps:

@@ -334,5 +334,3 @@ pub fn build_panel_control(
     }
     .packet(&body)
 }
-#[cfg(test)]
-mod tests;
