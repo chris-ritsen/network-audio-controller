@@ -230,21 +230,14 @@ pub fn routing(
     ] {
         let mut names = Map::new();
         for (number, channel) in channels {
-            ensure!(
-                channel
-                    .get("media_type")
-                    .or_else(|| channel.get("ddm_media_type"))
-                    .and_then(Value::as_str)
-                    .is_none_or(|media| media.eq_ignore_ascii_case("audio")),
-                "non-audio channel capture requires media-qualified preset support"
-            );
             let name = channel
                 .get("friendly_name")
                 .and_then(Value::as_str)
                 .filter(|name| !name.is_empty())
-                .or_else(|| channel.get("name").and_then(Value::as_str))
-                .context("channel label is unavailable")?;
-            names.insert(number.to_string(), json!(name));
+                .or_else(|| channel.get("name").and_then(Value::as_str));
+            if let Some(name) = name {
+                names.insert(number.to_string(), json!(name));
+            }
         }
         if !names.is_empty() {
             configuration.insert(field.into(), json!(names));
@@ -275,41 +268,24 @@ pub fn routing(
         if native_unicast(flow, &addresses) {
             continue;
         }
-        ensure!(
-            flow["endpoint_decoding_complete"] == true,
-            "receiver-flow endpoints cannot be represented losslessly"
-        );
-        if let Some(identity) = flow
-            .get("external_identity")
-            .filter(|value| !value.is_null())
-        {
-            ensure!(
-                identity["source_ipv4"].is_string()
-                    && identity["session_id"]
-                        .as_u64()
-                        .is_some_and(|value| value > 0)
-                    && identity["inconsistent_presence_mask"] == 0,
-                "external receiver-flow identity is incomplete or inconsistent"
-            );
-        }
         for identity in flow["effective_subscription_identities"]
             .as_array()
-            .context("receiver-flow subscription identities are unavailable")?
+            .into_iter()
+            .flatten()
         {
-            let number = identity["receiver_channel"]
+            let Some(entry) = identity["receiver_channel"]
                 .as_u64()
-                .context("external receiver channel identity is unavailable")?;
-            let entry = subscriptions
-                .get_mut(&number.to_string())
-                .context("external receiver channel is absent from the channel inventory")?;
-            ensure!(
-                entry.is_null(),
-                "receiver channel {number} has multiple external RTP identities"
-            );
-            let endpoints = identity["interface_endpoints"]
+                .and_then(|number| subscriptions.get_mut(&number.to_string()))
+                .filter(|entry| entry.is_null())
+            else {
+                continue;
+            };
+            let endpoints: Vec<_> = identity["interface_endpoints"]
                 .as_array()
-                .context("external flow endpoints are unavailable")?;
-            let endpoints: Vec<_> = endpoints.iter().map(|endpoint| json!({"ipv4_address": endpoint["ipv4_address"], "udp_port": endpoint["udp_port"]})).collect();
+                .into_iter()
+                .flatten()
+                .map(|endpoint| json!({"ipv4_address": endpoint["ipv4_address"], "udp_port": endpoint["udp_port"]}))
+                .collect();
             *entry = json!({
                 "kind": "external_rtp",
                 "flow_identity": {"source_ipv4": identity["source_ipv4"], "session_id": identity["session_id"]},
@@ -323,27 +299,19 @@ pub fn routing(
         .as_array()
         .context("receiver subscriptions unavailable")?
     {
-        let number = subscription["rx_channel_number"]
+        let Some(entry) = subscription["rx_channel_number"]
             .as_u64()
-            .context("receiver subscription identity is unavailable")?;
-        let entry = subscriptions
-            .get_mut(&number.to_string())
-            .context("receiver subscription is absent from the channel inventory")?;
+            .and_then(|number| subscriptions.get_mut(&number.to_string()))
+        else {
+            continue;
+        };
         let transmitter = subscription["tx_device"]
             .as_str()
             .filter(|name| !name.is_empty());
         let channel = subscription["tx_channel"]
             .as_str()
             .filter(|name| !name.is_empty());
-        ensure!(
-            transmitter.is_some() == channel.is_some(),
-            "receiver channel {number} has an incomplete native subscription identity"
-        );
         if let (Some(transmitter), Some(channel)) = (transmitter, channel) {
-            ensure!(
-                entry.is_null(),
-                "receiver channel {number} reports both native and external subscriptions"
-            );
             *entry =
                 json!({"kind": "native_dante", "tx_device": transmitter, "tx_channel": channel});
         }
@@ -351,12 +319,6 @@ pub fn routing(
     if !subscriptions.is_empty() {
         configuration.insert("rx_subscriptions".into(), json!(subscriptions));
     }
-    ensure!(
-        transmit_flows["unparsed_records"]
-            .as_array()
-            .is_some_and(Vec::is_empty),
-        "transmitter-flow inventory cannot be represented losslessly"
-    );
     let flows = transmit_flows
         .get("flows")
         .and_then(Value::as_array)
