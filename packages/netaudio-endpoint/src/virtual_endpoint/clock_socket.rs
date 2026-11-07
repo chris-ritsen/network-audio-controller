@@ -12,7 +12,7 @@ use socket2::{Domain, InterfaceIndexOrAddress, Protocol, Socket, Type};
 use tokio::io::Interest;
 use tokio::io::unix::AsyncFd;
 
-use super::sockets::Monotonic;
+use super::sockets::{Monotonic, control_length, control_length_usize};
 
 const DATAGRAM_BUFFER_BYTES: usize = 65_536;
 const CONTROL_BUFFER_WORDS: usize = 64;
@@ -123,7 +123,9 @@ impl ClockSocket {
         message.msg_iovlen = 1;
         message.msg_control = control.as_mut_ptr().cast();
         message.msg_controllen =
-            unsafe { libc::CMSG_SPACE(size_of::<libc::in_pktinfo>() as u32) } as usize;
+            control_length(
+                unsafe { libc::CMSG_SPACE(size_of::<libc::in_pktinfo>() as u32) } as usize
+            );
         let information = libc::in_pktinfo {
             ipi_ifindex: interface_index.try_into()?,
             ipi_spec_dst: libc::in_addr {
@@ -137,7 +139,8 @@ impl ClockSocket {
             let header = libc::CMSG_FIRSTHDR(&message);
             (*header).cmsg_level = libc::SOL_IP;
             (*header).cmsg_type = libc::IP_PKTINFO;
-            (*header).cmsg_len = libc::CMSG_LEN(size_of::<libc::in_pktinfo>() as u32) as usize;
+            (*header).cmsg_len =
+                control_length(libc::CMSG_LEN(size_of::<libc::in_pktinfo>() as u32) as usize);
             std::ptr::write_unaligned(
                 libc::CMSG_DATA(header).cast::<libc::in_pktinfo>(),
                 information,
@@ -265,7 +268,7 @@ fn receive_message(socket: &Socket, error_queue: bool) -> io::Result<Event> {
     message.msg_iov = &mut vector;
     message.msg_iovlen = 1;
     message.msg_control = control.as_mut_ptr().cast();
-    message.msg_controllen = size_of::<[usize; CONTROL_BUFFER_WORDS]>();
+    message.msg_controllen = control_length(size_of::<[usize; CONTROL_BUFFER_WORDS]>());
 
     let flags = libc::MSG_DONTWAIT
         | if error_queue {
@@ -333,15 +336,16 @@ fn ancillary(message: &libc::msghdr) -> io::Result<Ancillary> {
             .checked_sub(message.msg_control as usize)
             .ok_or_else(|| invalid("kernel metadata pointer precedes its buffer"))?;
 
-        if value.cmsg_len < minimum
-            || offset.checked_add(value.cmsg_len).is_none_or(|end| end > message.msg_controllen)
+        let length = control_length_usize(value.cmsg_len);
+        if length < minimum
+            || offset
+                .checked_add(length)
+                .is_none_or(|end| end > control_length_usize(message.msg_controllen))
         {
             return Err(invalid("kernel metadata extent is invalid"));
         }
 
-        let data = unsafe {
-            std::slice::from_raw_parts(libc::CMSG_DATA(header), value.cmsg_len - minimum)
-        };
+        let data = unsafe { std::slice::from_raw_parts(libc::CMSG_DATA(header), length - minimum) };
 
         match (value.cmsg_level, value.cmsg_type) {
             (libc::SOL_SOCKET, libc::SCM_TIMESTAMPING) => {
