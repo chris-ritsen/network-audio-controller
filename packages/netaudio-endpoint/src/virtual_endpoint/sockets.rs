@@ -23,6 +23,25 @@ pub enum Channel {
     ReceiveMedia(usize),
 }
 
+/// The length fields of `msghdr` and `cmsghdr`: `size_t` on glibc, `socklen_t` on musl.
+#[cfg(target_env = "musl")]
+pub(crate) type ControlLength = libc::socklen_t;
+/// The length fields of `msghdr` and `cmsghdr`: `size_t` on glibc, `socklen_t` on musl.
+#[cfg(not(target_env = "musl"))]
+pub(crate) type ControlLength = usize;
+
+/// `length` as a `msghdr`/`cmsghdr` length field.
+#[allow(clippy::unnecessary_cast)] // the same type on glibc
+pub(crate) fn control_length(length: usize) -> ControlLength {
+    length as ControlLength
+}
+
+/// A `msghdr`/`cmsghdr` length field as a `usize`.
+#[allow(clippy::unnecessary_cast)] // the same type on glibc
+pub(crate) fn control_length_usize(length: ControlLength) -> usize {
+    length as usize
+}
+
 pub struct Datagram {
     pub channel: Channel,
     pub peer: SocketAddrV4,

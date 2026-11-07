@@ -20,9 +20,8 @@ pub fn spawn_background<T: Send + 'static>(
     work: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> JoinHandle<Result<T>> {
     tokio::task::spawn_blocking(move || {
-        let parameters = libc::sched_param {
-            sched_priority: 0,
-        };
+        // musl's sched_param has more fields than glibc's: all zero, as is priority 0
+        let parameters: libc::sched_param = unsafe { std::mem::zeroed() };
         if unsafe { libc::sched_setscheduler(0, libc::SCHED_OTHER, &parameters) } != 0 {
             return Err(std::io::Error::last_os_error())
                 .context("set ordinary scheduling for endpoint background work");
