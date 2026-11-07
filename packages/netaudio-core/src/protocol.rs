@@ -191,37 +191,53 @@ pub fn arc_protocol(
             return Ok(None);
         };
 
-        let mut parts = version.split('.');
-        let mut component = || {
-            let part = parts.next()?;
-            if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
-                return None;
-            }
-
-            part.parse::<u16>().ok()
-        };
-        let components = (component(), component(), component());
-        let (Some(major), Some(minor), Some(patch)) = components else {
-            return Err("unsupported ARC protocol version");
-        };
-
-        if parts.next().is_some() || major > 15 || minor > 15 || patch > 255 {
-            return Err("unsupported ARC protocol version");
-        }
-
-        ((major << 12) | (minor << 8) | patch).min(PROTOCOL_ARC_280F)
+        advertised_arc_protocol(version)
     };
 
     arc_protocol_for_identifier(protocol_id, managed).map(Some)
+}
+
+const KNOWN_ARC_PROTOCOL_IDS: [u16; 6] = [
+    NetaudioProtocol::Arc2729 as u16,
+    PROTOCOL_ID,
+    NetaudioProtocol::Arc2801 as u16,
+    PROTOCOL_ARC_2809,
+    PROTOCOL_ARC_280C,
+    PROTOCOL_ARC_280F,
+];
+
+pub fn known_arc_protocol(protocol_id: u16) -> u16 {
+    KNOWN_ARC_PROTOCOL_IDS
+        .into_iter()
+        .rev()
+        .find(|known| *known <= protocol_id)
+        .unwrap_or(PROTOCOL_ID)
+}
+
+fn advertised_arc_protocol(version: &str) -> u16 {
+    let mut parts = version.trim().split('.');
+    let mut component = || {
+        let part = parts.next()?;
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+
+        Some(part.parse::<u32>().unwrap_or(u32::MAX))
+    };
+    let (Some(major), Some(minor)) = (component(), component()) else {
+        return PROTOCOL_ID;
+    };
+    let patch = component().unwrap_or(0);
+    let identifier = (major.min(15) << 12) | (minor.min(15) << 8) | patch.min(255);
+
+    known_arc_protocol(identifier as u16)
 }
 
 pub fn arc_protocol_for_identifier(
     protocol_id: u16,
     managed: bool,
 ) -> Result<ArcProtocol, &'static str> {
-    if !is_supported_arc_protocol(protocol_id) {
-        return Err("unsupported ARC protocol version");
-    }
+    let protocol_id = known_arc_protocol(protocol_id);
 
     Ok(ArcProtocol {
         protocol_id,
@@ -253,12 +269,12 @@ pub fn transmit_flow_inventory_protocols(
 ) -> Result<Vec<u16>, &'static str> {
     use crate::commands::{PROTOCOL_DANTE_FLOW, PROTOCOL_DANTE_FLOW_2801};
 
-    if !is_supported_arc_protocol(advertised)
-        || (!matches!(observed, PROTOCOL_DANTE_FLOW | PROTOCOL_DANTE_FLOW_2801)
-            && !is_modern_arc_protocol(observed))
-    {
-        return Err("unsupported transmitter inventory protocol");
-    }
+    let advertised = known_arc_protocol(advertised);
+    let observed = match known_arc_protocol(observed) {
+        known if is_modern_arc_protocol(known) => known,
+        known if known >= PROTOCOL_DANTE_FLOW_2801 => PROTOCOL_DANTE_FLOW_2801,
+        _ => PROTOCOL_DANTE_FLOW,
+    };
 
     if is_modern_arc_protocol(advertised) {
         return Ok(vec![advertised]);

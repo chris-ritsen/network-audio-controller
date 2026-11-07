@@ -55,24 +55,6 @@ async def test_channel_name_probe_rejects_invalid_direction_before_io(channel_ty
     device.execute.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("channel_type", ["rx", "tx"])
-@pytest.mark.parametrize("version", [None, "2.8.256", "invalid"])
-@pytest.mark.parametrize("cached", [None, 0x2809])
-async def test_channel_rename_does_not_guess_revision_even_with_a_cached_frontend(channel_type, version, cached):
-    device = SimpleNamespace(
-        services={"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": version}}},
-        execute=AsyncMock(return_value=_frontend_boundary_packet(0x3400, 4)),
-        receiver_channel_name_protocol_identifier=cached,
-        transmitter_channel_name_protocol_identifier=cached,
-    )
-
-    with pytest.raises(RuntimeError, match="ARC"):
-        await DanteApplication().send_set_channel_name(device, channel_type, 1, "Input-1")
-
-    device.execute.assert_not_awaited()
-
-
 def test_query_and_rename_builders_are_byte_identical_to_controller_requests():
     query = core.build_command(
         {

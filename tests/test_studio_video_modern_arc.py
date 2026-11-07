@@ -191,21 +191,6 @@ async def test_direct_channel_refresh_uses_the_explicitly_advertised_modern_prot
 
 
 @pytest.mark.asyncio
-async def test_direct_channel_refresh_fails_closed_on_an_unknown_advertised_protocol():
-    application = DanteApplication()
-    device = DanteDevice("future-device.local.", app=application)
-    device.services = {
-        "arc": {
-            **_studio_service(SERVICE_ARC, "future.local.", "192.168.1.39", 4540),
-            "properties": {"arcp_vers": "2.8.14"},
-        }
-    }
-
-    with pytest.raises(RuntimeError, match="unsupported ARC protocol version"):
-        await device.get_rx_channels()
-
-
-@pytest.mark.asyncio
 async def test_normal_subscription_path_selects_the_captured_280f_video_shape():
     application = DanteApplication()
     device = DanteDevice("studio-media-b.local.", app=application)

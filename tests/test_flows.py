@@ -4,21 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from netaudio import core
 from netaudio.dante import flows
-from netaudio.dante.const import RESULT_CODE_SUCCESS, SERVICE_ARC
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("version", [None, "2.8.256", "garbage"])
-async def test_preferred_transmitter_inventory_does_not_query_unknown_revisions(version):
-    device = SimpleNamespace(
-        services={"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": version}}},
-        execute=AsyncMock(),
-    )
-
-    assert await flows.query_preferred_tx_flow_inventory("192.0.2.10", 4440, 0x2729, device=device) is None
-    device.execute.assert_not_awaited()
+from netaudio.dante.const import SERVICE_ARC
 
 
 @pytest.mark.asyncio
@@ -82,20 +69,6 @@ async def test_rejected_modern_receiver_query_never_falls_back_to_legacy(monkeyp
     assert await flows.query_preferred_receiver_flow_inventory(device) is None
     modern_query.assert_awaited_once_with(device)
     legacy_query.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("version", [None, "2.8.256", "garbage"])
-async def test_flow_detection_does_not_probe_guessed_revisions(monkeypatch, version):
-    device = SimpleNamespace(
-        services={"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": version}}},
-    )
-    request = AsyncMock(return_value=b"unexpected reply")
-    monkeypatch.setattr(flows, "_request", request)
-    monkeypatch.setattr(core, "parse_response", lambda *_: RESULT_CODE_SUCCESS)
-
-    assert await flows.detect_flow_protocol("192.0.2.10", 4440, device=device) is None
-    request.assert_not_awaited()
 
 
 @pytest.mark.asyncio

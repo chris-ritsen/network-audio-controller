@@ -127,7 +127,7 @@ impl DeviceRecord {
     pub fn routing_protocol(&self) -> Result<Option<netaudio_core::protocol::ArcProtocol>> {
         let version = self
             .service(SERVICE_ARC)
-            .and_then(|service| service.property("arcp_vers"));
+            .map(|service| service.property("arcp_vers").unwrap_or_default());
         arc_protocol(version, false).map_err(anyhow::Error::msg)
     }
 

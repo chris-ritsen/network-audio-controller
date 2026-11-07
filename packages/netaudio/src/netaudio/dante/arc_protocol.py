@@ -20,10 +20,7 @@ def _advertised_facts(device):
                 continue
 
             properties = service.get("properties")
-
-            if isinstance(properties, dict):
-                version = properties.get("arcp_vers")
-
+            version = (properties.get("arcp_vers") or "") if isinstance(properties, dict) else ""
             break
 
     return version, managed
