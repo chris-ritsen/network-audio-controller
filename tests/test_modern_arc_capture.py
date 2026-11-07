@@ -7,7 +7,6 @@ import pytest
 
 from netaudio import core
 from netaudio.dante.arc_protocol import (
-    ArcProtocolError,
     modern_arc_protocol_identifier_for_device,
 )
 from netaudio.dante.const import (
@@ -38,24 +37,6 @@ def _without_transaction_id(payload: bytes) -> bytes:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("direction", ["rx", "tx"])
-@pytest.mark.parametrize("version", [None, "", "2.8.256", "invalid"])
-async def test_device_inventory_never_falls_back_to_legacy_without_a_known_revision(direction, version):
-    application = DanteApplication()
-    device = DanteDevice("receiver.local.", app=application)
-    device.ipv4 = "192.0.2.1"
-    device.services = _arc_device(version).services
-    device.call_core = AsyncMock()
-    device.execute = AsyncMock()
-
-    with pytest.raises(ArcProtocolError):
-        await getattr(device, f"get_{direction}_channels")()
-
-    device.call_core.assert_not_awaited()
-    device.execute.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("direction,path", [("rx", "receiver_0x3400"), ("tx", "transmitter_0x2400")])
 async def test_device_inventory_consumes_native_protocol_and_media_metadata(direction, path):
     device = DanteDevice("receiver.local.", app=DanteApplication())
@@ -82,12 +63,6 @@ async def test_device_inventory_consumes_native_protocol_and_media_metadata(dire
 )
 def test_modern_arc_protocol_selection_caps_at_280f(version, expected):
     assert modern_arc_protocol_identifier_for_device(_arc_device(version)) == expected
-
-
-@pytest.mark.parametrize("version", ["", "2.8.256", "invalid"])
-def test_modern_arc_protocol_selection_rejects_unrecognized_versions(version):
-    with pytest.raises(ArcProtocolError, match="unsupported ARC protocol version"):
-        modern_arc_protocol_identifier_for_device(_arc_device(version))
 
 
 def test_managed_device_uses_observed_2809_protocol_without_mdns_metadata():

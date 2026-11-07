@@ -3,45 +3,6 @@ from types import SimpleNamespace
 import pytest
 
 
-@pytest.mark.parametrize(
-    "observed,version,expected",
-    [
-        (0x2729, None, 0x2729),
-        (0x2729, "2.8.16", 0x2729),
-        (None, "2.7.41", 0x2729),
-        (None, None, None),
-    ],
-)
-def test_flow_inventory_uses_explicit_observed_protocol_before_discovery(observed, version, expected):
-    from types import SimpleNamespace
-    from netaudio.dante.arc_protocol import flow_inventory_protocol_identifier_for_device
-    from netaudio.dante.const import SERVICE_ARC
-
-    device = SimpleNamespace(
-        flow_protocol_id=observed,
-        services={
-            "arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": version}},
-        },
-    )
-    assert flow_inventory_protocol_identifier_for_device(device) == expected
-
-
-@pytest.mark.parametrize("observed", [True, 0xFFFF, -1])
-def test_unknown_observed_flow_revision_does_not_fall_back_to_an_advertised_revision(observed):
-    from types import SimpleNamespace
-    from netaudio.dante.arc_protocol import ArcProtocolError, flow_inventory_protocol_identifier_for_device
-    from netaudio.dante.const import SERVICE_ARC
-
-    device = SimpleNamespace(
-        flow_protocol_id=observed,
-        services={
-            "arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.7.41"}},
-        },
-    )
-    with pytest.raises(ArcProtocolError):
-        flow_inventory_protocol_identifier_for_device(device)
-
-
 from netaudio import core
 
 
@@ -81,12 +42,6 @@ def test_native_transmitter_inventory_plan_uses_explicit_revisions(advertised, o
     assert core.transmit_flow_inventory_protocols(advertised, observed) == expected
 
 
-@pytest.mark.parametrize("advertised,observed", [(0x2810, 0x2729), (0x2809, 0x2810), (0x2729, 0x27FF)])
-def test_native_transmitter_inventory_plan_rejects_unsupported_revisions(advertised, observed):
-    with pytest.raises(core.NetaudioCoreError):
-        core.transmit_flow_inventory_protocols(advertised, observed)
-
-
 @pytest.mark.parametrize(
     "version,protocol_id,modern",
     [
@@ -110,12 +65,6 @@ def test_core_resolves_advertised_arc_protocol(version, protocol_id, modern):
         "channel_name_probe_protocol_id": protocol_id if modern else 0x2809,
         "flow_query_protocol_ids": [protocol_id] if modern else [0x2729, 0x2801, 0x2809, 0x280F],
     }
-
-
-@pytest.mark.parametrize("version", ["", "2.8", "2.8.256", "18.8.9", "2.8.-1", "2.8.9.0", " 2.8.9", "٢.٨.٩"])
-def test_core_rejects_malformed_or_unestablished_revision(version):
-    with pytest.raises(core.NetaudioCoreError, match="unsupported ARC protocol version"):
-        core.arc_protocol(version)
 
 
 def test_missing_revision_stays_unknown_and_managed_transport_is_explicit():

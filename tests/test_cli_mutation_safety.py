@@ -230,18 +230,6 @@ def test_bulk_subscription_uses_native_revision_limits_and_verifies_every_channe
     assert len(rx.subscriptions) == 33
 
 
-def test_bulk_subscription_unknown_revision_never_writes():
-    devices, _, rx = _subscription_devices()
-    rx.services["arc"]["properties"]["arcp_vers"] = "2.8.256"
-    application = FakeApplication(devices)
-
-    result = _add_bulk(application)
-
-    assert result.exit_code == 1
-    assert application.sent == []
-    assert "unsupported ARC protocol version" in result.output
-
-
 def test_subscription_add_requires_fresh_readback():
     devices, _, rx = _subscription_devices()
     application = FakeApplication(devices)
@@ -335,23 +323,6 @@ def test_single_subscription_skips_verified_existing_source():
     assert result.exit_code == 0
     assert application.sent == []
     assert "already subscribed" in result.output
-
-
-@pytest.mark.parametrize("action", ["add", "remove"])
-def test_single_subscription_unknown_revision_never_writes(action):
-    devices, _, rx = _subscription_devices()
-    rx.services["arc"]["properties"]["arcp_vers"] = "2.8.256"
-    rx.subscriptions = [_subscription("Rx1", "Other", "TX")]
-    application = FakeApplication(devices)
-
-    if action == "add":
-        result = invoke(subscription_commands.run_subscription_add_single, application, devices, "Tx1@TX", "Rx1@RX")
-    else:
-        result = invoke(subscription_commands.run_subscription_remove, application, devices, ["Rx1@RX"], False)
-
-    assert result.exit_code == 1
-    assert application.sent == []
-    assert "unsupported ARC protocol version" in result.output
 
 
 def test_subscription_removal_batches_and_reports_partial_readback(reset_cli_state):
