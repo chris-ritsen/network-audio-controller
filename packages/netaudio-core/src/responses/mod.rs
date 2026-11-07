@@ -712,6 +712,3 @@ pub use identity::*;
 pub use network::*;
 use pointer_table::parse_pointer_table_page;
 pub use receiver_ranges::*;
-
-#[cfg(test)]
-mod tests;

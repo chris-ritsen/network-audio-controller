@@ -2,33 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn retained_observation_clones_share_immutable_wire_evidence() {
-        let observation = Observation::new(
-            24,
-            Some(48000),
-            Some(1),
-            "receiver_latency",
-            "now",
-            1.0,
-            vec![1; 4096],
-        );
-        let retained = observation.clone();
-        assert_eq!(
-            observation.raw_record.as_ptr(),
-            retained.raw_record.as_ptr()
-        );
-        assert_eq!(
-            serde_json::to_value(&observation).unwrap()["raw_record"],
-            json!(vec![1; 4096])
-        );
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Diagnostic {

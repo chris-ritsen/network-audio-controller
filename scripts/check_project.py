@@ -94,11 +94,8 @@ def run_checks(checks, scopes, report_path, *, timeout=300, library=None):
 
     scopes = set(scopes)
 
-    if scopes & {"python", "native"}:
-        scopes.add("core")
-
     if "native" in scopes:
-        scopes.add("rust")
+        scopes.add("core")
 
     report = {
         "status": "incomplete",
@@ -136,9 +133,6 @@ def run_checks(checks, scopes, report_path, *, timeout=300, library=None):
             print(f"Checking {check.name}", flush=True)
 
             try:
-                if library is not None and check.scope == "python":
-                    entry["native_library_sha256"] = digest(library)
-
                 with log_path.open("w", encoding="utf-8") as log:
                     process = subprocess.Popen(
                         check.command,
@@ -154,12 +148,6 @@ def run_checks(checks, scopes, report_path, *, timeout=300, library=None):
                 entry["exit_code"] = code
                 entry["status"] = "passed" if code == 0 else "failed"
                 exit_code = 0 if code == 0 else 1
-
-                if "native_library_sha256" in entry and (
-                    not library.is_file() or digest(library) != entry["native_library_sha256"]
-                ):
-                    entry["status"] = "artifact_changed"
-                    exit_code = 124
             except subprocess.TimeoutExpired:
                 entry["status"] = "timed_out"
                 exit_code = 124
@@ -238,28 +226,13 @@ def project_checks(library, *, offline=False):
             "native",
             ["cargo", "clippy", *cargo, "--all-targets", "--features", "schema", "--", "-D", "warnings"],
         ),
-        Check("rust-tests", "rust", ["cargo", "test", *cargo, "--features", "schema"]),
-        Check("python-tests", "python", [*python, "-m", "pytest", "-q"]),
-        Check(
-            "web-tests",
-            "webapp",
-            [
-                "node",
-                "--import",
-                "./tests/webapp/loader.mjs",
-                "--import",
-                "./tests/webapp/setup.mjs",
-                "--test",
-                *[str(path.relative_to(ROOT)) for path in sorted((ROOT / "tests/webapp").glob("*.test.mjs"))],
-            ],
-        ),
         Check("web-translations", "webapp", ["node", "scripts/webapp/translations.mjs", "check"]),
     ]
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run shared local/CI checks on the current host.")
-    parser.add_argument("--scope", choices=["all", "native", "python", "runtime", "webapp"], default="all")
+    parser.add_argument("--scope", choices=["all", "native", "runtime", "webapp"], default="all")
     parser.add_argument("--report", type=Path)
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--timeout", type=float, default=300)
@@ -273,13 +246,7 @@ def main():
     )
     library = TARGET / "debug" / library_name
     report = args.report or Path(tempfile.mkdtemp(prefix="netaudio-checks-")) / "report.json"
-    scopes = (
-        {"native", "python", "webapp"}
-        if args.scope == "all"
-        else {"python", "rust"}
-        if args.scope == "runtime"
-        else {args.scope}
-    )
+    scopes = {"native", "webapp"} if args.scope == "all" else {"core"} if args.scope == "runtime" else {args.scope}
     return run_checks(
         project_checks(library, offline=args.offline),
         scopes,

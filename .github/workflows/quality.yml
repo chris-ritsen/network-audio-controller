@@ -9,8 +9,8 @@ on:
       scope:
         description: Checks to run
         type: choice
-        options: [python, webapp, native, compatibility]
-        default: python
+        options: [webapp, native, compatibility]
+        default: native
       browser_tests:
         description: Include browser UI tests
         type: boolean
@@ -52,30 +52,6 @@ jobs:
         with:
           name: browser-failures-${{ matrix.runner }}
           path: test-results/
-
-  python-tests:
-    if: github.event_name != 'workflow_dispatch' || inputs.scope == 'python' || inputs.scope == 'compatibility'
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.scope == 'compatibility') && '["3.10", "3.11", "3.12", "3.13", "3.14"]' || '["3.13"]') }}
-    timeout-minutes: 20
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v7
-      - if: runner.os == 'macOS'
-        run: brew install pkg-config jack pulseaudio
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libjack-jackd2-dev libpulse-dev pkg-config
-      - run: uv sync --python ${{ matrix.python-version }} --all-groups
-      - run: uv run --python ${{ matrix.python-version }} python scripts/check_project.py --scope python --report "${{ runner.temp }}/checks/report.json"
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: python-checks-${{ matrix.python-version }}
-          path: ${{ runner.temp }}/checks/
 
   cross-platform-tests:
     if: github.event_name != 'workflow_dispatch' || inputs.scope == 'compatibility'

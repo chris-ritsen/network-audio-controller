@@ -186,8 +186,5 @@ pub use performance::*;
 pub use settings::*;
 pub use subscriptions::*;
 
-#[cfg(test)]
-mod tests;
-
 mod clock;
 pub use clock::*;

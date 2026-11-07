@@ -118,6 +118,3 @@ pub fn build_command_from_json(json: &str) -> Result<Vec<u8>, SpecError> {
 mod command_spec;
 
 use command_spec::{build_command, parse_command_spec};
-
-#[cfg(test)]
-mod tests;

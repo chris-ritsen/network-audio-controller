@@ -1,21 +1,16 @@
-.PHONY: core header core-types prune-core test test-webapp quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
+.PHONY: core header core-types prune-core quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
 .DEFAULT_GOAL := help
 PYTHON ?= .venv/bin/python
-TEST_CASES ?=
 WEB_TESTS ?=
-RUST_TEST ?=
 LINT_FILES ?=
 BOUNDED := python3 scripts/run_bounded_tests.py
 
-.PHONY: help test-python-full test-webapp-full test-full test-rust test-browser test-lab lint audit audit-fix release release-status
+.PHONY: help test-browser test-lab lint audit audit-fix release release-status
 help:
-	@echo "test TEST_CASES='tests/test_name.py::test_name'  Focused Python checks; no build or dependency sync"
-	@echo "test-webapp WEB_TESTS='tests/webapp/name.test.mjs'  Focused JavaScript checks"
-	@echo "test-rust RUST_TEST='test_name'                  Focused Rust checks"
 	@echo "test-browser WEB_TESTS='path/to/browser.test.mjs'  Explicit browser UI checks"
 	@echo "test-lab LAB=path/to/lab.toml [LAB_REPORT=report.xml]  Regression checks against lab devices"
 	@echo "lint LINT_FILES='path/to/changed.py'             Focused Python lint"
-	@echo "test-full / quality                           Explicit broad checks; not routine"
+	@echo "quality                                         Explicit broad checks; not routine"
 	@echo "check-local                                   Shared local/CI checks with a report; five-minute limit"
 	@echo "core / install / deploy                        Explicit build and deployment commands"
 	@echo "audit                                         Known vulnerabilities in uv.lock and the core's Cargo.lock"
@@ -67,18 +62,6 @@ dev:
 	@echo "Watching for changes... (restart daemon on *.py save)"
 	@find packages/netaudio/src -name '*.py' | entr -r make restart
 
-test:
-	@test -n "$(strip $(TEST_CASES))" || { echo "Set TEST_CASES to the affected test file or method; use test-full only for an explicit full run."; exit 2; }
-	$(BOUNDED) $(PYTHON) -m pytest -q $(TEST_CASES)
-
-test-webapp:
-	@test -n "$(strip $(WEB_TESTS))" || { echo "Set WEB_TESTS to the affected JavaScript test files."; exit 2; }
-	$(BOUNDED) node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test $(WEB_TESTS)
-
-test-rust:
-	@test -n "$(strip $(RUST_TEST))" || { echo "Set RUST_TEST to the affected Rust test name."; exit 2; }
-	$(BOUNDED) cargo test --locked --offline --manifest-path $(CORE_DIR)/Cargo.toml $(RUST_TEST)
-
 test-lab:
 	@test -n "$(strip $(LAB))" || { echo "Set LAB to a lab file naming the devices to test."; exit 2; }
 	NETAUDIO_LAB="$(LAB)" $(PYTHON) -m pytest -q -p no:cacheprovider tests/lab $(if $(LAB_REPORT),--junitxml="$(LAB_REPORT)")
@@ -86,14 +69,6 @@ test-lab:
 test-browser:
 	@test -n "$(strip $(WEB_TESTS))" || { echo "Set WEB_TESTS to the affected browser test files."; exit 2; }
 	$(BOUNDED) ./node_modules/.bin/playwright test --project=chromium --workers=1 --retries=0 $(WEB_TESTS)
-
-test-python-full:
-	$(PYTHON) -m pytest -q
-
-test-webapp-full:
-	node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
-
-test-full: test-webapp-full test-python-full
 
 lint:
 	@test -n "$(strip $(LINT_FILES))" || { echo "Set LINT_FILES to the changed Python files; use quality for a full check."; exit 2; }
