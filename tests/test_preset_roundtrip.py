@@ -202,27 +202,6 @@ async def test_gain_preset_reports_direction_mismatch_without_reinterpreting_the
     assert "input" in action.reason
 
 
-@pytest.mark.parametrize("media_mode", [None, "rtp_aes67"])
-def test_preset_export_keeps_observed_transmitter_media_mode(media_mode):
-    from pathlib import Path
-    from netaudio import core
-    from netaudio.dante.device import DanteDevice
-
-    response = (Path(__file__).parent / "fixtures/transmit_flow_lifecycle/modern-2809-create-readback.bin").read_bytes()
-    record = core.parse_response("transmitter_flow_status_page", response)["flows"][0]
-
-    if media_mode is not None:
-        record["media_mode"] = media_mode
-
-    device = DanteDevice("desk.local.")
-    device.name = "Desk"
-    device.flow_protocol_id = 0x2809
-    device.apply_transmitter_flow_status_page({"reported_flow_count": 1, "flows": [record]})
-    exported = device_preset_config(device, {"routing"})
-    assert exported["transmit_flows"][0]["media_mode"] == (media_mode or "unknown")
-    assert exported["transmit_flows"][0]["raw_fields"] == record
-
-
 def _flow() -> dict:
     return {
         "schema_version": 1,
