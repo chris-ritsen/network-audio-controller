@@ -12,6 +12,7 @@ from pathlib import Path
 NATIVE_LIBRARY_NAMES = {
     "linux": "libnetaudio_core.so",
     "macos": "libnetaudio_core.dylib",
+    "musllinux": "libnetaudio_core.so",
     "windows": "netaudio_core.dll",
 }
 
@@ -20,6 +21,8 @@ MACHINE_CODES = {
     ("linux", "aarch64"): 183,
     ("macos", "x86_64"): 0x01000007,
     ("macos", "arm64"): 0x0100000C,
+    ("musllinux", "x86_64"): 62,
+    ("musllinux", "aarch64"): 183,
     ("windows", "x86_64"): 0x8664,
 }
 
@@ -42,6 +45,8 @@ def _expected_tag(platform_name: str, architecture: str) -> str:
         return f"manylinux_2_28_{architecture}"
     if platform_name == "macos":
         return f"macosx_11_0_{architecture}"
+    if platform_name == "musllinux" and architecture in ("x86_64", "aarch64"):
+        return f"musllinux_1_2_{architecture}"
     if platform_name == "windows" and architecture == "x86_64":
         return "win_amd64"
     raise ValueError(f"unsupported artifact policy: {platform_name}/{architecture}")
@@ -113,6 +118,12 @@ def _verify_native_binary(data: bytes, platform_name: str, architecture: str) ->
         if required_versions and max(required_versions) > (2, 28):
             version = ".".join(str(part) for part in max(required_versions))
             raise RuntimeError(f"Linux library requires GLIBC_{version}, above the manylinux 2.28 policy")
+    elif platform_name == "musllinux":
+        actual_machine = _elf_machine(data)
+        if b"libc.so.6" in data:
+            raise RuntimeError("musllinux binary links against glibc")
+        if b"libc.musl-" not in data:
+            raise RuntimeError("musllinux binary is not dynamically linked against musl")
     elif platform_name == "macos":
         actual_machine, minimum_version = _macho_details(data)
         if minimum_version > (11, 0, 0):

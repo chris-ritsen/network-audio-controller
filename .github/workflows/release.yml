@@ -63,6 +63,16 @@ jobs:
             architecture: aarch64
             manylinux-image: quay.io/pypa/manylinux_2_28_aarch64:latest
             artifact: linux-aarch64
+          - runner: ubuntu-24.04
+            platform: musllinux
+            architecture: x86_64
+            musllinux-image: quay.io/pypa/musllinux_1_2_x86_64:latest
+            artifact: musllinux-x86_64
+          - runner: ubuntu-24.04-arm
+            platform: musllinux
+            architecture: aarch64
+            musllinux-image: quay.io/pypa/musllinux_1_2_aarch64:latest
+            artifact: musllinux-aarch64
           - runner: macos-15
             platform: macos
             architecture: arm64
@@ -111,7 +121,32 @@ jobs:
               test "${#repaired_wheel[@]}" -eq 1
               auditwheel show "${repaired_wheel[0]}"
             '
-      - if: matrix.platform != 'linux'
+      - if: matrix.platform == 'musllinux'
+        name: Build at the musllinux 1.2 compatibility floor
+        shell: bash
+        run: |
+          docker run --pull always --rm \
+            --volume "$PWD:/project" --workdir /project \
+            "${{ matrix.musllinux-image }}" /bin/bash -euxo pipefail -c '
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+              export PATH="$HOME/.cargo/bin:/opt/python/cp39-cp39/bin:$PATH"
+              export RUSTFLAGS="-C target-feature=-crt-static"
+              python -m pip install --disable-pip-version-check uv auditwheel
+              apk add alsa-lib-dev jack-dev pulseaudio-dev pkgconf
+              uv build --wheel
+              wheel=(dist/*.whl)
+              test "${#wheel[@]}" -eq 1
+              original_wheel="${wheel[0]}"
+              mkdir -p dist/unrepaired
+              mv "$original_wheel" dist/unrepaired/
+              auditwheel repair --plat "musllinux_1_2_$(uname -m)" \
+                --exclude libasound.so.2 --exclude libpulse.so.0 \
+                --wheel-dir dist "dist/unrepaired/${original_wheel##*/}"
+              repaired_wheel=(dist/*.whl)
+              test "${#repaired_wheel[@]}" -eq 1
+              auditwheel show "${repaired_wheel[0]}"
+            '
+      - if: matrix.platform != 'linux' && matrix.platform != 'musllinux'
         run: uv build --wheel
       - shell: bash
         run: |
@@ -122,11 +157,29 @@ jobs:
           fi
           python scripts/verify_wheel_artifact.py "${wheel[0]}" \
             --platform "${{ matrix.platform }}" --architecture "${{ matrix.architecture }}"
+      - if: matrix.platform != 'musllinux'
+        shell: bash
+        run: |
+          wheel=(dist/*.whl)
           for python_version in 3.10 3.11 3.12 3.13 3.14; do
             uv run --isolated --no-project --python "$python_version" \
               python scripts/smoke_wheel_install.py "${wheel[0]}"
           done
-      - shell: bash
+      - if: matrix.platform == 'musllinux'
+        name: Install on Alpine
+        shell: bash
+        run: |
+          wheel=(dist/*.whl)
+          for python_version in 3.10 3.11 3.12 3.13 3.14; do
+            docker run --pull always --rm \
+              --volume "$PWD:/project:ro" --workdir /project \
+              "python:${python_version}-alpine" /bin/sh -eux -c '
+                python -m pip install --disable-pip-version-check --root-user-action=ignore uv
+                python scripts/smoke_wheel_install.py "$0"
+              ' "${wheel[0]}"
+          done
+      - if: matrix.platform != 'musllinux'
+        shell: bash
         run: |
           wheel=(dist/*.whl)
           uv run --isolated --no-project --python 3.10 --with "${wheel[0]}" \
