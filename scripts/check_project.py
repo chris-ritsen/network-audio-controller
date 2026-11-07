@@ -225,6 +225,19 @@ def project_checks(library, *, offline=False):
             "native",
             ["cargo", "clippy", *cargo, "--all-targets", "--features", "schema", "--", "-D", "warnings"],
         ),
+        Check(
+            "web-format",
+            "webapp",
+            [
+                "node_modules/.bin/prettier",
+                "--check",
+                "packages/netaudio/src/netaudio/daemon/http/webapp",
+                "packages/netaudio-daemon/assets/api-documentation.css",
+                "playwright.config.mjs",
+                "scripts/webapp",
+                "tests/webapp",
+            ],
+        ),
         Check("web-translations", "webapp", ["node", "scripts/webapp/translations.mjs", "check"]),
     ]
 
