@@ -23,6 +23,21 @@ pub enum Channel {
     ReceiveMedia(usize),
 }
 
+#[cfg(target_env = "musl")]
+pub(crate) type ControlLength = libc::socklen_t;
+#[cfg(not(target_env = "musl"))]
+pub(crate) type ControlLength = usize;
+
+#[allow(clippy::unnecessary_cast)]
+pub(crate) fn control_length(length: usize) -> ControlLength {
+    length as ControlLength
+}
+
+#[allow(clippy::unnecessary_cast)]
+pub(crate) fn control_length_usize(length: ControlLength) -> usize {
+    length as usize
+}
+
 pub struct Datagram {
     pub channel: Channel,
     pub peer: SocketAddrV4,
