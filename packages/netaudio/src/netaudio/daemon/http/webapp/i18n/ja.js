@@ -575,7 +575,7 @@ export default {
   "Connectivity": "接続性",
   "Devices": "デバイス",
   "Reading domains…": "ドメインを読み取り中…",
-  "Enroll {device} in {domain}? This may interrupt audio. Device configuration will be retained.": "{device}を{domain}に登録しますか？音声が途切れる可能性があります。デバイスの設定は保持されます。",
+  "Enroll {device} in {domain}?": "{device}を{domain}に登録しますか？",
   "Domain for {device}": "{device}のドメイン",
   "No domains available": "利用可能なドメインがありません",
   "Unenroll": "登録解除",

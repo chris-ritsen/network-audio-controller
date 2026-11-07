@@ -563,7 +563,7 @@ export default {
   "Connectivity": "Kesambungan",
   "Devices": "Peranti",
   "Reading domains…": "Membaca domain…",
-  "Enroll {device} in {domain}? This may interrupt audio. Device configuration will be retained.": "Daftarkan {device} dalam {domain}? Ini mungkin mengganggu audio. Konfigurasi peranti akan dikekalkan.",
+  "Enroll {device} in {domain}?": "Daftarkan {device} dalam {domain}?",
   "Domain for {device}": "Domain untuk {device}",
   "No domains available": "Tiada domain tersedia",
   "Unenroll": "Nyahdaftar",

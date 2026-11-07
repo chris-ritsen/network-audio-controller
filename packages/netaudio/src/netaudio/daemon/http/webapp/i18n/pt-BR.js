@@ -587,7 +587,7 @@ export default {
   "Connectivity": "Conectividade",
   "Devices": "Dispositivos",
   "Reading domains…": "Lendo domínios…",
-  "Enroll {device} in {domain}? This may interrupt audio. Device configuration will be retained.": "Registrar {device} em {domain}? Isso pode interromper o áudio. A configuração do dispositivo será mantida.",
+  "Enroll {device} in {domain}?": "Registrar {device} em {domain}?",
   "Domain for {device}": "Domínio de {device}",
   "No domains available": "Nenhum domínio disponível",
   "Unenroll": "Cancelar registro",

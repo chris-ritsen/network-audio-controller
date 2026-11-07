@@ -575,7 +575,7 @@ export default {
   "Connectivity": "連通性",
   "Devices": "裝置",
   "Reading domains…": "正在讀取域…",
-  "Enroll {device} in {domain}? This may interrupt audio. Device configuration will be retained.": "要將 {device} 註冊到 {domain} 嗎？這可能會中斷音訊。裝置設定將會保留。",
+  "Enroll {device} in {domain}?": "要將 {device} 註冊到 {domain} 嗎？",
   "Domain for {device}": "{device} 的域",
   "No domains available": "沒有可用的域",
   "Unenroll": "取消註冊",
