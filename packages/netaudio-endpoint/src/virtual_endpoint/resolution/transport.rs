@@ -7,6 +7,8 @@ use anyhow::{Result, bail};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::io::unix::AsyncFd;
 
+use crate::virtual_endpoint::sockets::{control_length, control_length_usize};
+
 const MULTICAST_ADDRESS: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const MULTICAST_PORT: u16 = 5353;
 const LINK_LOCAL_HOP_LIMIT: u32 = 255;
@@ -115,7 +117,7 @@ fn receive(socket: &Socket) -> io::Result<Datagram> {
     message.msg_iov = &mut vector;
     message.msg_iovlen = 1;
     message.msg_control = metadata.as_mut_ptr().cast();
-    message.msg_controllen = size_of::<[usize; METADATA_WORDS]>();
+    message.msg_controllen = control_length(size_of::<[usize; METADATA_WORDS]>());
     let length = unsafe { libc::recvmsg(socket.as_raw_fd(), &mut message, libc::MSG_DONTWAIT) };
 
     if length < 0 {
@@ -142,14 +144,17 @@ fn receive(socket: &Socket) -> io::Result<Datagram> {
             .checked_sub(message.msg_control as usize)
             .ok_or_else(|| invalid("discovery metadata pointer precedes its buffer"))?;
 
-        if value.cmsg_len < minimum
-            || offset.checked_add(value.cmsg_len).is_none_or(|end| end > message.msg_controllen)
+        let length = control_length_usize(value.cmsg_len);
+        if length < minimum
+            || offset
+                .checked_add(length)
+                .is_none_or(|end| end > control_length_usize(message.msg_controllen))
         {
             return Err(invalid("discovery metadata extent is invalid"));
         }
 
         if value.cmsg_level == libc::IPPROTO_IP && value.cmsg_type == libc::IP_PKTINFO {
-            if value.cmsg_len - minimum != size_of::<libc::in_pktinfo>() {
+            if length - minimum != size_of::<libc::in_pktinfo>() {
                 return Err(invalid("discovery interface metadata is incomplete"));
             }
 
