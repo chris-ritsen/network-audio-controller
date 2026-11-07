@@ -36,7 +36,7 @@ impl DeviceRegistry {
     pub async fn capture_preset(
         &self,
         request: &CaptureRequest,
-    ) -> Result<Vec<CapturedDevice>, Error> {
+    ) -> Result<(Vec<CapturedDevice>, Vec<Value>), Error> {
         let records = self.model.records()?;
         let managed = if request.identifiers.iter().any(|identifier| {
             records
@@ -115,24 +115,52 @@ impl DeviceRegistry {
                 target.verify()?;
             }
             let mut result = Vec::new();
-            for target in selected.values() {
-                result.push(
-                    self.capture_preset_device(target, request)
-                        .await
-                        .with_context(|| format!("{}: fresh preset capture", target.record.name))?,
+            let mut omitted = Vec::new();
+            let mut failed = BTreeSet::new();
+            for (identifier, target) in &selected {
+                match self.capture_preset_device(target, request).await {
+                    Ok(device) => result.push(device),
+                    Err(error) => {
+                        failed.insert(identifier.clone());
+                        omitted.push(json!({"device": target.record.name, "setting": "device", "reason": format!("{error:#}")}));
+                    }
+                }
+            }
+            for (identifier, target) in &managed_targets {
+                match target.capture(request).await {
+                    Ok(device) => result.push(device),
+                    Err(error) => {
+                        failed.insert(identifier.clone());
+                        let name = records
+                            .get(identifier)
+                            .and_then(|record| record["name"].as_str())
+                            .unwrap_or(identifier);
+                        omitted.push(json!({"device": name, "setting": "device", "reason": format!("{error:#}")}));
+                    }
+                }
+            }
+            if result.is_empty() {
+                bail!(
+                    "{}",
+                    omitted
+                        .iter()
+                        .map(|entry| format!("{}: {}", entry["device"].as_str().unwrap_or_default(), entry["reason"].as_str().unwrap_or_default()))
+                        .collect::<Vec<_>>()
+                        .join("; ")
                 );
             }
-            for target in managed_targets.values() {
-                result.push(target.capture(request).await?);
+            for (identifier, target) in &selected {
+                if !failed.contains(identifier) {
+                    target.verify()?;
+                }
             }
-            for target in selected.values() {
-                target.verify()?;
-            }
-            for target in managed_targets.values() {
-                target.record()?;
+            for (identifier, target) in &managed_targets {
+                if !failed.contains(identifier) {
+                    target.record()?;
+                }
             }
             drop(guards);
-            Ok::<_, anyhow::Error>(result)
+            Ok::<_, anyhow::Error>((result, omitted))
         };
         tokio::select! {
             _ = self.cancellation.cancelled() => Err(Error::Conflict("Preset was not saved: device registry is stopping".into())),

@@ -66,7 +66,7 @@ impl Service {
             .operation
             .try_lock()
             .map_err(|_| Error::Conflict("Another preset operation is in progress.".into()))?;
-        let captured =
+        let (captured, unavailable) =
             tokio::time::timeout(Duration::from_secs(60), devices.capture_preset(&request))
                 .await
                 .map_err(|_| {
@@ -77,7 +77,7 @@ impl Service {
                 })??;
         self.blocking(move || {
             let mut document = Document::new(&request.name);
-            let mut omitted = Vec::new();
+            let mut omitted = unavailable;
 
             for device in captured {
                 document.insert(Value::Object(device.configuration), device.identity)?;
