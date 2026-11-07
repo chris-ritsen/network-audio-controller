@@ -1,6 +1,6 @@
 use super::{Error, Service, device_identifiers};
 use crate::devices::registry::DeviceRegistry;
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use netaudio_core::presets::{Document, XmlIdentity};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
@@ -335,15 +335,25 @@ pub fn routing(
     Ok(())
 }
 
-pub fn clock(configuration: &mut Map<String, Value>, observed: &Map<String, Value>) -> Result<()> {
-    let preferred = observed
+pub fn clock(
+    configuration: &mut Map<String, Value>,
+    omitted: &mut Vec<Value>,
+    device: &str,
+    observed: &Map<String, Value>,
+) -> Result<()> {
+    match observed
         .get("preferred_leader")
         .filter(|value| value.is_boolean())
-        .context("preferred-leader state could not be read")?;
-    configuration.insert("preferred_leader".into(), preferred.clone());
-    let status = observed
-        .get("clock_status")
-        .context("clock status is unavailable")?;
+    {
+        Some(preferred) => {
+            configuration.insert("preferred_leader".into(), preferred.clone());
+        }
+        None => omitted.push(json!({"device": device, "setting": "preferred_leader", "reason": "The preferred-leader state could not be read."})),
+    }
+    let Some(status) = observed.get("clock_status") else {
+        omitted.push(json!({"device": device, "setting": "clock_configuration", "reason": "The clock status could not be read."}));
+        return Ok(());
+    };
     for field in [
         "clock_source_code",
         "clock_subdomain",
@@ -408,14 +418,19 @@ pub fn clock(configuration: &mut Map<String, Value>, observed: &Map<String, Valu
 
 pub fn network(
     configuration: &mut Map<String, Value>,
+    omitted: &mut Vec<Value>,
+    device: &str,
     observed: &Map<String, Value>,
     redundancy_supported: bool,
-) -> Result<()> {
+) {
     let interfaces = observed
         .get("interfaces")
         .and_then(Value::as_array)
-        .filter(|values| !values.is_empty())
-        .context("network interfaces could not be read")?;
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if interfaces.is_empty() {
+        omitted.push(json!({"device": device, "setting": "interfaces", "reason": "The network interfaces could not be read."}));
+    }
     let mut result = Vec::new();
     for (index, interface) in interfaces.iter().enumerate() {
         let configured = interface
@@ -438,16 +453,6 @@ pub fn network(
                 .map(|value| (field.to_owned(), value.clone()))
         })
         .collect();
-        let mode = configured["mode"]
-            .as_str()
-            .context("network mode is unknown")?;
-        ensure!(
-            matches!(mode, "static" | "dynamic" | "dhcp"),
-            "network mode is unknown"
-        );
-        if mode == "dhcp" {
-            fields.insert("mode".into(), json!("dynamic"));
-        }
         let identity = interface
             .get("interface")
             .or_else(|| interface.get("identity"))
@@ -464,25 +469,32 @@ pub fn network(
                 1 => "secondary".into(),
                 _ => index.to_string(),
             });
+        match configured["mode"].as_str() {
+            Some("static" | "dynamic") => {}
+            Some("dhcp") => {
+                fields.insert("mode".into(), json!("dynamic"));
+            }
+            _ => {
+                omitted.push(json!({"device": device, "setting": format!("interface {identity}"), "reason": "The interface's addressing mode is unknown."}));
+                continue;
+            }
+        }
         fields.insert("identity".into(), json!(identity));
         result.push(fields);
     }
-    configuration.insert("interfaces".into(), json!(result));
-    if redundancy_supported {
-        let state = observed
-            .get("dante_redundancy")
-            .context("fresh redundancy state is unavailable")?;
-        let configured = &state["configured_mode"];
-        ensure!(
-            state["state_fresh"] == true
-                && state["available_modes_fresh"] == true
-                && !configured.is_null()
-                && state["available_modes"]
-                    .as_array()
-                    .is_some_and(|modes| modes.iter().any(|mode| mode["mode"] == *configured)),
-            "configured redundancy mode or available modes are incomplete"
-        );
-        configuration.insert("redundancy_mode".into(), configured.clone());
+    if !result.is_empty() {
+        configuration.insert("interfaces".into(), json!(result));
     }
-    Ok(())
+    if redundancy_supported {
+        let configured = observed
+            .get("dante_redundancy")
+            .map(|state| &state["configured_mode"])
+            .filter(|configured| !configured.is_null());
+        match configured {
+            Some(configured) => {
+                configuration.insert("redundancy_mode".into(), configured.clone());
+            }
+            None => omitted.push(json!({"device": device, "setting": "redundancy_mode", "reason": "The configured redundancy mode could not be read."})),
+        }
+    }
 }

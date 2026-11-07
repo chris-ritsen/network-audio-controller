@@ -269,7 +269,13 @@ impl DeviceRegistry {
                         .await?,
                 );
             }
-            capture::network(&mut captured.configuration, &fields, redundancy)?;
+            capture::network(
+                &mut captured.configuration,
+                &mut captured.omitted,
+                &record.name,
+                &fields,
+                redundancy,
+            );
         }
         if request.sections.contains("device_controls") {
             let observed = self
@@ -384,7 +390,12 @@ impl DeviceRegistry {
         let clock = self
             .capture_preset_status(target, transport, StatusQuery::Clock)
             .await?;
-        capture::clock(&mut captured.configuration, &clock)?;
+        capture::clock(
+            &mut captured.configuration,
+            &mut captured.omitted,
+            &record.name,
+            &clock,
+        )?;
         if record
             .properties
             .get("sample_rate_pullup_configuration_supported")
