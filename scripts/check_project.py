@@ -214,8 +214,7 @@ def project_checks(library, *, offline=False):
                 "packages/netaudio-core",
             ],
         ),
-        Check("rust-format", "native", ["cargo", "fmt", "--manifest-path", CRATE, "--", "--check"]),
-        Check("endpoint-format", "native", ["cargo", "fmt", "--manifest-path", ENDPOINT_CRATE, "--", "--check"]),
+        Check("rust-format", "native", ["cargo", "fmt", "--all", "--", "--check"]),
         Check(
             "endpoint-clippy",
             "native",
