@@ -353,11 +353,13 @@ impl Device {
             let record = registry.status_record(&fresh)?;
             capture::network(
                 &mut captured.configuration,
+                &mut captured.omitted,
+                &name,
                 record
                     .as_object()
                     .context("managed record is not an object")?,
                 redundancy,
-            )?;
+            );
         }
         if request.sections.contains("device_controls") {
             captured.omitted.push(json!({"device": observed["name"], "setting": "device_controls", "reason": "Managed device-control panels have no established transport."}));
