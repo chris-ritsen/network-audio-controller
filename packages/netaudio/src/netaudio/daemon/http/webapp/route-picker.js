@@ -3,7 +3,13 @@ import { Button } from "./components.js";
 import { t } from "./i18n.js";
 import { Icon } from "./icons.js";
 import * as format from "./format.js";
-import { html, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
+import {
+  html,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "./lib/preact.js";
 import { deviceRequestName, scopedDevices as devices } from "./store.js";
 import { runAction } from "./actions.js";
 import { selfConnectionTargetState } from "./self-connection.js";
@@ -29,7 +35,14 @@ function transmitterEntries(sourceDevices) {
   return entries;
 }
 
-export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveChannelName, subscription, sourceDevices }) {
+export function RoutePicker({
+  onClose,
+  receiver,
+  receiveChannelNumber,
+  receiveChannelName,
+  subscription,
+  sourceDevices,
+}) {
   const dialog = useRef(null);
   const input = useRef(null);
   const [query, setQuery] = useState("");
@@ -40,14 +53,24 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
   const requestName = deviceRequestName(receiver);
   const receiveChannel = receiver.channels?.receivers?.[receiveChannelNumber];
   const entries = useMemo(
-    () => transmitterEntries(sourceDevices || format.sortedDevices(devices.value)).filter(
-      (entry) => entry.online && selfConnectionTargetState(receiver, receiveChannel, entry.device).allowed,
-    ),
+    () =>
+      transmitterEntries(
+        sourceDevices || format.sortedDevices(devices.value),
+      ).filter(
+        (entry) =>
+          entry.online &&
+          selfConnectionTargetState(receiver, receiveChannel, entry.device)
+            .allowed,
+      ),
     [sourceDevices, devices.value, receiver, receiveChannel],
   );
   const needle = query.trim().toLowerCase();
   const results = entries.filter(
-    (entry) => !needle || `${entry.channelName} ${entry.deviceLabel}`.toLowerCase().includes(needle),
+    (entry) =>
+      !needle ||
+      `${entry.channelName} ${entry.deviceLabel}`
+        .toLowerCase()
+        .includes(needle),
   );
   const activeIndex = Math.min(highlighted, Math.max(results.length - 1, 0));
 
@@ -61,17 +84,24 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
   }, []);
 
   const apply = async (entry) => {
-    const target = selfConnectionTargetState(receiver, receiveChannel, entry.device);
+    const target = selfConnectionTargetState(
+      receiver,
+      receiveChannel,
+      entry.device,
+    );
     if (busy || !entry.online || !receiver.online || !target.allowed) return;
     setError("");
     setBusy(true);
     const result = await runAction(
-      t("route {transmitterChannel}@{transmitterDevice} to {receiverDevice} channel {receiverChannel}", {
-        transmitterChannel: entry.channelName,
-        transmitterDevice: entry.deviceLabel,
-        receiverDevice: format.deviceLabel(receiver),
-        receiverChannel: receiveChannelNumber,
-      }),
+      t(
+        "route {transmitterChannel}@{transmitterDevice} to {receiverDevice} channel {receiverChannel}",
+        {
+          transmitterChannel: entry.channelName,
+          transmitterDevice: entry.deviceLabel,
+          receiverDevice: format.deviceLabel(receiver),
+          receiverChannel: receiveChannelNumber,
+        },
+      ),
       () =>
         api.subscribe({
           rx_channel: receiveChannelNumber,
@@ -89,8 +119,16 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
     if (busy || !receiver.online) return;
     setError("");
     setBusy(true);
-    const result = await runAction(t("unsubscribe {device} channel {channel}", { device: format.deviceLabel(receiver), channel: receiveChannelNumber }), () =>
-      api.unsubscribe({ rx_channel: receiveChannelNumber, rx_device: requestName }),
+    const result = await runAction(
+      t("unsubscribe {device} channel {channel}", {
+        device: format.deviceLabel(receiver),
+        channel: receiveChannelNumber,
+      }),
+      () =>
+        api.unsubscribe({
+          rx_channel: receiveChannelNumber,
+          rx_device: requestName,
+        }),
     );
     setBusy(false);
     if (result.ok) onClose();
@@ -122,8 +160,13 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
 
   return html`
     <dialog class="modal modal-middle source-picker" aria-labelledby="source-picker-title" ref=${dialog} onClose=${onClose}
-      onClick=${(event) => { if (!busy && event.target === event.currentTarget) onClose(); }}
-      onCancel=${(event) => { if (busy) event.preventDefault(); else onClose(); }}>
+      onClick=${(event) => {
+        if (!busy && event.target === event.currentTarget) onClose();
+      }}
+      onCancel=${(event) => {
+        if (busy) event.preventDefault();
+        else onClose();
+      }}>
       <div class="modal-box source-picker-box">
       <header class="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -133,9 +176,11 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
           </div>
         </div>
         <div class="toolbar">
-          ${subscription?.tx_device && subscription?.tx_channel
-            ? html`<${Button} variant="danger" disabled=${busy || !receiver.online} onClick=${clear}>${t("Disconnect")}<//>`
-            : null}
+          ${
+            subscription?.tx_device && subscription?.tx_channel
+              ? html`<${Button} variant="danger" disabled=${busy || !receiver.online} onClick=${clear}>${t("Disconnect")}<//>`
+              : null
+          }
           <${Button} disabled=${busy} onClick=${onClose}>${t("Done")}<//>
         </div>
       </header>
@@ -154,14 +199,15 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
         onKeyDown=${onKeyDown}
       />
       <div class="source-picker-results">
-        ${results.length === 0
-          ? html`<div class="palette-empty">${t("No matching transmit channels.")}</div>`
-          : results.map((entry, index) => {
-              const active =
-                subscription &&
-                subscription.tx_channel === entry.channelName &&
-                subscription.tx_device === entry.deviceLabel;
-              return html`
+        ${
+          results.length === 0
+            ? html`<div class="palette-empty">${t("No matching transmit channels.")}</div>`
+            : results.map((entry, index) => {
+                const active =
+                  subscription &&
+                  subscription.tx_channel === entry.channelName &&
+                  subscription.tx_device === entry.deviceLabel;
+                return html`
                 <button type="button" disabled=${busy || !receiver.online}
                   key=${`${entry.deviceLabel}/${entry.channelName}`}
                   class=${`source-picker-entry${active ? " current" : ""}`}
@@ -173,7 +219,8 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
                   ${active ? html`<span class="source-picker-current">${t("Current")}</span>` : null}
                 </button>
               `;
-            })}
+              })
+        }
       </div>
       </div>
     </dialog>

@@ -7,7 +7,11 @@ export function subscriptionIndicator(subscription) {
   const status = subscription?.status;
   const tone = format.subscriptionTone(subscription);
   if (tone === "bad")
-    return { icon: "subscription-error", tone, label: t("Subscription failed") };
+    return {
+      icon: "subscription-error",
+      tone,
+      label: t("Subscription failed"),
+    };
   if (tone === "warn")
     return { icon: "warning", tone, label: t("Subscription warning") };
   if (status?.state === "connected" && tone === "good")

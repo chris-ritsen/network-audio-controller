@@ -1,14 +1,28 @@
-import { html, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
+import {
+  html,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "./lib/preact.js";
 
 export function tooltipPosition(point, bounds, tooltip) {
   const margin = 12;
   const gap = 16;
   return {
-    left: Math.max(margin, Math.min(point.x + gap, bounds.width - tooltip.width - margin)),
-    top: Math.max(margin, Math.min(
-      point.y + gap + tooltip.height + margin > bounds.height ? point.y - tooltip.height - gap : point.y + gap,
-      bounds.height - tooltip.height - margin,
-    )),
+    left: Math.max(
+      margin,
+      Math.min(point.x + gap, bounds.width - tooltip.width - margin),
+    ),
+    top: Math.max(
+      margin,
+      Math.min(
+        point.y + gap + tooltip.height + margin > bounds.height
+          ? point.y - tooltip.height - gap
+          : point.y + gap,
+        bounds.height - tooltip.height - margin,
+      ),
+    ),
   };
 }
 
@@ -22,12 +36,17 @@ export function MatrixTooltip({ id, text, point, bounds, onDismiss }) {
     return () => clearTimeout(timer);
   }, [text]);
   useEffect(() => {
-    const escape = (event) => { if (event.key === "Escape") onDismiss(); };
+    const escape = (event) => {
+      if (event.key === "Escape") onDismiss();
+    };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
   }, [onDismiss]);
   useLayoutEffect(() => {
-    if (visible && node.current) setPosition(tooltipPosition(point, bounds, node.current.getBoundingClientRect()));
+    if (visible && node.current)
+      setPosition(
+        tooltipPosition(point, bounds, node.current.getBoundingClientRect()),
+      );
   }, [visible, point.x, point.y, bounds.width, bounds.height, text]);
   if (!visible) return null;
   const [route, ...details] = text.split("\n");

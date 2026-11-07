@@ -15,7 +15,9 @@ export const usesCommandKey = APPLE_PLATFORM.test(platformName());
 export const commandKeyLabel = usesCommandKey ? "⌘" : t("Ctrl");
 
 export function shortcutLabel(key) {
-  return usesCommandKey ? `${commandKeyLabel}${key}` : `${commandKeyLabel}+${key}`;
+  return usesCommandKey
+    ? `${commandKeyLabel}${key}`
+    : `${commandKeyLabel}+${key}`;
 }
 
 export function matchesCommandKey(event) {

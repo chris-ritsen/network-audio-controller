@@ -1,7 +1,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { build } from "esbuild";
 
-const webapp = new URL("../../packages/netaudio/src/netaudio/daemon/http/webapp/", import.meta.url);
+const webapp = new URL(
+  "../../packages/netaudio/src/netaudio/daemon/http/webapp/",
+  import.meta.url,
+);
 const views = ["routing"];
 const vendor = {
   "@preact/signals": "signals.module.js",
@@ -14,20 +17,30 @@ const vendor = {
 const vendorModules = {
   name: "vendor-modules",
   setup(builder) {
-    builder.onResolve({ filter: /^(preact|preact\/hooks|htm|@preact\/signals|@preact\/signals-core)$/ }, (request) => ({
-      path: new URL(`vendor/${vendor[request.path]}`, webapp).pathname,
-    }));
+    builder.onResolve(
+      {
+        filter:
+          /^(preact|preact\/hooks|htm|@preact\/signals|@preact\/signals-core)$/,
+      },
+      (request) => ({
+        path: new URL(`vendor/${vendor[request.path]}`, webapp).pathname,
+      }),
+    );
   },
 };
 
 function inline(text, tag) {
   if (text.toLowerCase().includes(`</${tag}`)) {
-    throw new Error(`the bundled ${tag} contains </${tag}, which would end the inline element early`);
+    throw new Error(
+      `the bundled ${tag} contains </${tag}, which would end the inline element early`,
+    );
   }
   return text;
 }
 
-const stylesheet = readFileSync(new URL("app.css", webapp), "utf8") + readFileSync(new URL("mcp-app/shell.css", webapp), "utf8");
+const stylesheet =
+  readFileSync(new URL("app.css", webapp), "utf8") +
+  readFileSync(new URL("mcp-app/shell.css", webapp), "utf8");
 
 for (const view of views) {
   const result = await build({

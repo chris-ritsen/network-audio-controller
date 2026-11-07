@@ -3,48 +3,87 @@ import { readInventoryCache, writeInventoryCache } from "./inventory-cache.js";
 import { visibleInventory } from "./inventory-visibility.js";
 import { inventoryFilters, matchesDeviceFilters } from "./device-filters.js";
 import { setMeteringScale } from "./format.js";
-import { createShureLevels, observeShureMeters, shureLevels } from "./shure-levels.js";
+import {
+  createShureLevels,
+  observeShureMeters,
+  shureLevels,
+} from "./shure-levels.js";
 
 const EVENT_LOG_LIMIT = 400;
 const METER_TABLE_INTERVAL_MILLISECONDS = 250;
 const RECONNECT_DELAY_MILLISECONDS = 2000;
 
 const PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS = 10000;
-const SETTLING_SUBSCRIPTION_STATES = new Set(["in_progress", "pending", "resolved", "resolving", "unresolved"]);
+const SETTLING_SUBSCRIPTION_STATES = new Set([
+  "in_progress",
+  "pending",
+  "resolved",
+  "resolving",
+  "unresolved",
+]);
 
 export const connectionState = signal("connecting");
 export const devices = signal(readInventoryCache());
 export const externalFlows = signal({});
-export const contextExternalFlows = computed(() => ["all", "local"].includes(selectedContext.value) ? externalFlows.value : {});
+export const contextExternalFlows = computed(() =>
+  ["all", "local"].includes(selectedContext.value) ? externalFlows.value : {},
+);
 export const managedState = signal(null);
 export const managedDomains = signal([]);
 export const connectionProfiles = signal(null);
 export const backendSettings = signal(null);
 function readContext() {
-  try { return window.localStorage.getItem("netaudio.context") || "all"; } catch { return "all"; }
+  try {
+    return window.localStorage.getItem("netaudio.context") || "all";
+  } catch {
+    return "all";
+  }
 }
 export const selectedContext = signal(readContext());
 export const visibleDevices = computed(() => visibleInventory(devices.value));
-export const contextDevices = computed(() => selectedContext.value === "all" ? visibleDevices.value :
-  Object.fromEntries(Object.entries(visibleDevices.value).filter(([, device]) => selectedContext.value === "local"
-    ? device.management_state !== "managed" : selectedContext.value.startsWith("server:")
-      ? device.ddm_server_profile === selectedContext.value.slice(7)
-      : selectedContext.value.startsWith("domain:")
-        ? JSON.stringify([device.ddm_server_profile, device.ddm_domain_id]) === selectedContext.value.slice(7)
-        : device.ddm_context === selectedContext.value)));
-export const scopedDevices = computed(() => Object.fromEntries(Object.entries(contextDevices.value)
-  .filter(([, device]) => matchesDeviceFilters(device, inventoryFilters.value))));
+export const contextDevices = computed(() =>
+  selectedContext.value === "all"
+    ? visibleDevices.value
+    : Object.fromEntries(
+        Object.entries(visibleDevices.value).filter(([, device]) =>
+          selectedContext.value === "local"
+            ? device.management_state !== "managed"
+            : selectedContext.value.startsWith("server:")
+              ? device.ddm_server_profile === selectedContext.value.slice(7)
+              : selectedContext.value.startsWith("domain:")
+                ? JSON.stringify([
+                    device.ddm_server_profile,
+                    device.ddm_domain_id,
+                  ]) === selectedContext.value.slice(7)
+                : device.ddm_context === selectedContext.value,
+        ),
+      ),
+);
+export const scopedDevices = computed(() =>
+  Object.fromEntries(
+    Object.entries(contextDevices.value).filter(([, device]) =>
+      matchesDeviceFilters(device, inventoryFilters.value),
+    ),
+  ),
+);
 export function selectContext(context) {
   selectedContext.value = context;
-  try { window.localStorage.setItem("netaudio.context", context); } catch {}
+  try {
+    window.localStorage.setItem("netaudio.context", context);
+  } catch {}
 }
 export const inventoryReady = signal(false);
 export const events = signal([]);
 export const meterRevision = signal(0);
 export const pendingSubscriptions = signal({});
 export const shureDevices = signal({});
-export const visibleShureDevices = computed(() => Object.fromEntries(Object.entries(visibleInventory(shureDevices.value))
-  .filter(([, device]) => matchesDeviceFilters(device, inventoryFilters.value))));
+export const visibleShureDevices = computed(() =>
+  Object.fromEntries(
+    Object.entries(visibleInventory(shureDevices.value)).filter(([, device]) =>
+      matchesDeviceFilters(device, inventoryFilters.value),
+    ),
+  ),
+);
 export const shureMeters = signal({});
 
 export const meterCache = new Map();
@@ -101,12 +140,28 @@ function recordEvent(payload) {
 
 function applyMeterValues(payload) {
   const previous = meterCache.get(payload.server_name);
-  const continues = previous && previous.metering_source === payload.metering_source;
+  const continues =
+    previous && previous.metering_source === payload.metering_source;
   const channelTimes = (direction) => {
-    const numbers = (sample) => [...new Set([...Object.keys(sample[direction] || {}), ...Object.keys(sample[`${direction}_signal_presence`] || {})])];
+    const numbers = (sample) => [
+      ...new Set([
+        ...Object.keys(sample[direction] || {}),
+        ...Object.keys(sample[`${direction}_signal_presence`] || {}),
+      ]),
+    ];
     return {
-      ...(continues ? Object.fromEntries(numbers(previous).map((number) => [number, previous[`${direction}_updated_at`]?.[number] ?? previous.wall_time])) : {}),
-      ...Object.fromEntries(numbers(payload).map((number) => [number, payload.wall_time])),
+      ...(continues
+        ? Object.fromEntries(
+            numbers(previous).map((number) => [
+              number,
+              previous[`${direction}_updated_at`]?.[number] ??
+                previous.wall_time,
+            ]),
+          )
+        : {}),
+      ...Object.fromEntries(
+        numbers(payload).map((number) => [number, payload.wall_time]),
+      ),
     };
   };
   const values = {
@@ -139,11 +194,14 @@ export function pendingKey(receiverName, receiveChannelNumber) {
 }
 
 function samePendingChange(entry, payload) {
-  return entry.action === payload.action
-    && entry.external_slot === payload.external_slot
-    && entry.external_source_key === payload.external_source_key
-    && (payload.action === "remove"
-      || (entry.tx_channel === payload.tx_channel && entry.tx_device === payload.tx_device));
+  return (
+    entry.action === payload.action &&
+    entry.external_slot === payload.external_slot &&
+    entry.external_source_key === payload.external_source_key &&
+    (payload.action === "remove" ||
+      (entry.tx_channel === payload.tx_channel &&
+        entry.tx_device === payload.tx_device))
+  );
 }
 
 let pendingSequence = 0;
@@ -173,7 +231,10 @@ function markPending(payload) {
     external_slot: payload.external_slot,
   };
   pendingSubscriptions.value = { ...pendingSubscriptions.value, [key]: entry };
-  setTimeout(() => releasePending(key, entry), PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS);
+  setTimeout(
+    () => releasePending(key, entry),
+    PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS,
+  );
   return entry;
 }
 
@@ -187,13 +248,22 @@ export async function requestSubscriptionChange(change, perform) {
 }
 
 export function markExternalPending(receiver, channel, sourceKey, slot, clear) {
-  markPending({rx_device: receiver, rx_channel: channel, action: clear ? "remove" : "add",
-    external_source_key: sourceKey, external_slot: slot});
+  markPending({
+    rx_device: receiver,
+    rx_channel: channel,
+    action: clear ? "remove" : "add",
+    external_source_key: sourceKey,
+    external_slot: slot,
+  });
 }
 
 function subscriptionSettled(subscription) {
   const status = subscription?.status;
-  return !status || (status.severity !== "progress" && !SETTLING_SUBSCRIPTION_STATES.has(status.state));
+  return (
+    !status ||
+    (status.severity !== "progress" &&
+      !SETTLING_SUBSCRIPTION_STATES.has(status.state))
+  );
 }
 
 export function clearPendingForDevice(device) {
@@ -204,17 +274,35 @@ export function clearPendingForDevice(device) {
   for (const [key, entry] of Object.entries(current)) {
     const [receiverName, number] = key.split("\u0000");
     const channel = device.channels?.receivers?.[number];
-    const subscription = channel && (device.subscriptions || []).find((entry) => entry.rx_channel_number === Number(number));
-    const externalIdentities = (device.receiver_flows || []).flatMap(flow => flow.effective_subscription_identities || []);
-    const externalMatch = externalIdentities.some(identity => identity.receiver_channel === Number(number)
-      && `${identity.source_ipv4}/${identity.session_id}` === entry.external_source_key && identity.flow_slot === entry.external_slot);
+    const subscription =
+      channel &&
+      (device.subscriptions || []).find(
+        (entry) => entry.rx_channel_number === Number(number),
+      );
+    const externalIdentities = (device.receiver_flows || []).flatMap(
+      (flow) => flow.effective_subscription_identities || [],
+    );
+    const externalMatch = externalIdentities.some(
+      (identity) =>
+        identity.receiver_channel === Number(number) &&
+        `${identity.source_ipv4}/${identity.session_id}` ===
+          entry.external_source_key &&
+        identity.flow_slot === entry.external_slot,
+    );
     const confirmed = entry.external_source_key
-      ? device.receiver_flow_completeness === "complete" && (entry.action === "remove" ? !externalMatch : externalMatch)
-      : channel && (entry.action === "remove"
-      ? !subscription?.tx_device
-      : subscription?.tx_device === entry.tx_device && subscription?.tx_channel === entry.tx_channel);
+      ? device.receiver_flow_completeness === "complete" &&
+        (entry.action === "remove" ? !externalMatch : externalMatch)
+      : channel &&
+        (entry.action === "remove"
+          ? !subscription?.tx_device
+          : subscription?.tx_device === entry.tx_device &&
+            subscription?.tx_channel === entry.tx_channel);
     if (names.has(receiverName) && confirmed) {
-      if (!entry.external_source_key && entry.action === "add" && !subscriptionSettled(subscription)) {
+      if (
+        !entry.external_source_key &&
+        entry.action === "add" &&
+        !subscriptionSettled(subscription)
+      ) {
         next[key] = entry.applied ? entry : { ...entry, applied: true };
         changed ||= !entry.applied;
       } else {
@@ -233,7 +321,7 @@ function applyEvent(payload) {
   const kind = payload.event;
   if (kind === "external_flow_changed") {
     const key = `${payload.identity.source_ipv4}/${payload.identity.session_id}`;
-    const next = {...externalFlows.value};
+    const next = { ...externalFlows.value };
     if (["deleted", "expired"].includes(payload.change)) delete next[key];
     else if (payload.flow) next[key] = payload.flow;
     externalFlows.value = next;
@@ -256,7 +344,10 @@ function applyEvent(payload) {
   }
   if (kind === "snapshot") {
     if (payload.api_version != null) {
-      if (loadedApiVersion != null && loadedApiVersion !== payload.api_version) {
+      if (
+        loadedApiVersion != null &&
+        loadedApiVersion !== payload.api_version
+      ) {
         window.location.reload();
         return;
       }
@@ -286,7 +377,10 @@ function applyEvent(payload) {
   }
   if (kind === "device_discovered" || kind === "device_updated") {
     batch(() => {
-      devices.value = { ...devices.value, [payload.server_name]: payload.device };
+      devices.value = {
+        ...devices.value,
+        [payload.server_name]: payload.device,
+      };
       if (payload.device) {
         clearPendingForDevice(payload.device);
       }
@@ -310,7 +404,10 @@ function applyEvent(payload) {
   if (kind === "telemetry_updated") {
     const current = devices.value[payload.server_name];
     if (current && payload.telemetry) {
-      devices.value = { ...devices.value, [payload.server_name]: { ...current, ...payload.telemetry } };
+      devices.value = {
+        ...devices.value,
+        [payload.server_name]: { ...current, ...payload.telemetry },
+      };
       saveInventorySoon();
     }
     return;
@@ -328,7 +425,10 @@ function applyEvent(payload) {
     return;
   }
   if (kind === "shure_device_discovered" || kind === "shure_device_updated") {
-    shureDevices.value = { ...shureDevices.value, [payload.mac]: payload.device };
+    shureDevices.value = {
+      ...shureDevices.value,
+      [payload.mac]: payload.device,
+    };
     return;
   }
   if (kind === "shure_device_removed") {
@@ -340,11 +440,25 @@ function applyEvent(payload) {
   if (kind === "shure_meter_values") {
     const device = shureMeterLatest.get(payload.mac) || {};
     const channel = device[payload.channel] || {};
-    const values = payload.values && typeof payload.values === "object" ? payload.values : payload.key ? { [payload.key]: payload.value } : {};
+    const values =
+      payload.values && typeof payload.values === "object"
+        ? payload.values
+        : payload.key
+          ? { [payload.key]: payload.value }
+          : {};
     for (const [key, value] of Object.entries(values)) {
-      channel[key] = value && typeof value === "object" ? { ...(channel[key] || {}), ...value } : value;
+      channel[key] =
+        value && typeof value === "object"
+          ? { ...(channel[key] || {}), ...value }
+          : value;
     }
-    observeShureMeters(shureLevelState, payload.mac, payload.channel, values, performance.now() / 1000);
+    observeShureMeters(
+      shureLevelState,
+      payload.mac,
+      payload.channel,
+      values,
+      performance.now() / 1000,
+    );
     device[payload.channel] = channel;
     shureMeterLatest.set(payload.mac, device);
     scheduleShureMeterCommit();
@@ -363,7 +477,12 @@ function scheduleShureMeterCommit() {
     shureMeterCommitPending = false;
     const next = {};
     for (const [mac, device] of shureMeterLatest) {
-      next[mac] = Object.fromEntries(Object.entries(device).map(([channel, values]) => [channel, { ...values }]));
+      next[mac] = Object.fromEntries(
+        Object.entries(device).map(([channel, values]) => [
+          channel,
+          { ...values },
+        ]),
+      );
     }
     shureMeters.value = next;
   }, SHURE_METER_COMMIT_MILLISECONDS);
@@ -380,7 +499,10 @@ const EVENT_STREAM_PATH =
 
 export function receiveEvent(payload) {
   applyEvent(payload);
-  if (payload.event !== "meter_values" && payload.event !== "shure_meter_values") {
+  if (
+    payload.event !== "meter_values" &&
+    payload.event !== "shure_meter_values"
+  ) {
     recordEvent(payload);
   }
 }
@@ -405,7 +527,11 @@ export function connect() {
     try {
       payload = JSON.parse(event.data);
     } catch (error) {
-      recordEvent({ data: event.data, event: "parse_error", message: String(error) });
+      recordEvent({
+        data: event.data,
+        event: "parse_error",
+        message: String(error),
+      });
       return;
     }
     receiveEvent(payload);
@@ -431,20 +557,25 @@ export function deviceByName(deviceName) {
   if (!deviceName) {
     return null;
   }
-  const matches = Object.values(scopedDevices.value).filter((device) => device.name === deviceName || device.server_name === deviceName);
+  const matches = Object.values(scopedDevices.value).filter(
+    (device) => device.name === deviceName || device.server_name === deviceName,
+  );
   return matches.length === 1 ? matches[0] : null;
 }
 
 const renamedIdentities = new Map();
 
 export function recordDeviceRename(previousName, device) {
-  if (previousName && device?.inventory_id) renamedIdentities.set(previousName, device.inventory_id);
+  if (previousName && device?.inventory_id)
+    renamedIdentities.set(previousName, device.inventory_id);
 }
 
 export function renamedDevice(deviceName) {
   const identity = renamedIdentities.get(deviceName);
   if (!identity) return null;
-  const matches = Object.values(scopedDevices.value).filter((device) => device.inventory_id === identity && device.name !== deviceName);
+  const matches = Object.values(scopedDevices.value).filter(
+    (device) => device.inventory_id === identity && device.name !== deviceName,
+  );
   return matches.length === 1 ? matches[0] : null;
 }
 

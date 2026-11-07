@@ -26,11 +26,17 @@ export function RoutingControls({ all }) {
   const query = location.value.query;
   const selected = query.receiver || "";
   const filter = query.find || "";
-  const editing = /^\d+$/.test(query.channel || "") ? Number(query.channel) : null;
-  const setEditing = (number) => setQueryParameters({ channel: number }, { replace: number === null });
+  const editing = /^\d+$/.test(query.channel || "")
+    ? Number(query.channel)
+    : null;
+  const setEditing = (number) =>
+    setQueryParameters({ channel: number }, { replace: number === null });
   const receiver =
-    receivers.find((device) => deviceRequestName(device) === selected || format.deviceLabel(device) === selected) ||
-    receivers[0];
+    receivers.find(
+      (device) =>
+        deviceRequestName(device) === selected ||
+        format.deviceLabel(device) === selected,
+    ) || receivers[0];
   if (!receiver) return html`<p>${t("No receiving devices.")}</p>`;
   const channels = receiverChannels(receiver);
   const visible = channels.filter((channel) =>
@@ -49,9 +55,20 @@ export function RoutingControls({ all }) {
       <select
         value=${deviceRequestName(receiver)}
         onChange=${(event) => {
-        const device = receivers.find((entry) => deviceRequestName(entry) === event.target.value);
-        setQueryParameters({ channel: null, find: null, receiver: device ? format.deviceLabel(device) : event.target.value }, { replace: false });
-      }}
+          const device = receivers.find(
+            (entry) => deviceRequestName(entry) === event.target.value,
+          );
+          setQueryParameters(
+            {
+              channel: null,
+              find: null,
+              receiver: device
+                ? format.deviceLabel(device)
+                : event.target.value,
+            },
+            { replace: false },
+          );
+        }}
       >
         ${receivers.map(
           (device) =>
@@ -84,9 +101,7 @@ export function RoutingControls({ all }) {
             pendingKey(deviceRequestName(receiver), channel.number)
           ];
         const pending = pendingEntry?.applied ? undefined : pendingEntry;
-        const tone = routed
-          ? format.subscriptionTone(subscription)
-          : "none";
+        const tone = routed ? format.subscriptionTone(subscription) : "none";
         const good = subscription?.status?.state === "connected";
         return html`<button
           type="button"

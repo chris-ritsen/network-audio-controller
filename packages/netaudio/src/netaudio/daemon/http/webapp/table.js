@@ -1,4 +1,14 @@
-import { html, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
+import {
+  html,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "./lib/preact.js";
 import { PanelHeaderControls } from "./components.js";
 import { t } from "./i18n.js";
 import { Icon } from "./icons.js";
@@ -14,7 +24,11 @@ function readLayout(tableId) {
       return null;
     }
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.order) || !Array.isArray(parsed.hidden)) {
+    if (
+      !parsed ||
+      !Array.isArray(parsed.order) ||
+      !Array.isArray(parsed.hidden)
+    ) {
       return null;
     }
     return parsed;
@@ -25,7 +39,10 @@ function readLayout(tableId) {
 
 function writeLayout(tableId, layout) {
   try {
-    window.localStorage.setItem(`${STORAGE_PREFIX}${tableId}`, JSON.stringify(layout));
+    window.localStorage.setItem(
+      `${STORAGE_PREFIX}${tableId}`,
+      JSON.stringify(layout),
+    );
   } catch (error) {
     return;
   }
@@ -43,13 +60,23 @@ function resolveOrder(columns, storedOrder) {
 }
 
 function defaultLayout(columns) {
-  return { hidden: columns.filter((column) => column.defaultHidden).map((column) => column.id), order: [] };
+  return {
+    hidden: columns
+      .filter((column) => column.defaultHidden)
+      .map((column) => column.id),
+    order: [],
+  };
 }
 
 export function useColumnLayout(tableId, columns) {
-  const [layout, setLayout] = useState(() => readLayout(tableId) || defaultLayout(columns));
+  const [layout, setLayout] = useState(
+    () => readLayout(tableId) || defaultLayout(columns),
+  );
 
-  const order = useMemo(() => resolveOrder(columns, layout.order), [columns, layout.order]);
+  const order = useMemo(
+    () => resolveOrder(columns, layout.order),
+    [columns, layout.order],
+  );
   const hidden = useMemo(() => new Set(layout.hidden), [layout.hidden]);
 
   const persist = useCallback(
@@ -94,7 +121,12 @@ export function useColumnLayout(tableId, columns) {
 
   const visible = useMemo(() => {
     const byId = new Map(columns.map((column) => [column.id, column]));
-    return order.map((id) => byId.get(id)).filter((column) => column && (column.configurable === false || !hidden.has(column.id)));
+    return order
+      .map((id) => byId.get(id))
+      .filter(
+        (column) =>
+          column && (column.configurable === false || !hidden.has(column.id)),
+      );
   }, [columns, hidden, order]);
 
   return { hidden, move, order, reset, toggle, visible };
@@ -104,7 +136,12 @@ function ColumnMenu({ columns, layout }) {
   const menuId = useId();
   const selectable = columns
     .filter((column) => column.configurable !== false && column.label)
-    .sort((first, second) => first.label.localeCompare(second.label, undefined, { sensitivity: "base", numeric: true }));
+    .sort((first, second) =>
+      first.label.localeCompare(second.label, undefined, {
+        sensitivity: "base",
+        numeric: true,
+      }),
+    );
   const [open, setOpen] = useState(false);
   const trigger = useRef(null);
   const panel = useRef(null);
@@ -122,7 +159,9 @@ function ColumnMenu({ columns, layout }) {
     menu.style.maxHeight = `${Math.max(40, Math.min(480, upwards ? above : below))}px`;
     menu.style.left = `${Math.max(margin, Math.min(anchor.right - width, window.innerWidth - width - margin))}px`;
     const height = menu.getBoundingClientRect().height;
-    const desiredTop = upwards ? anchor.top - gap - height : anchor.bottom + gap;
+    const desiredTop = upwards
+      ? anchor.top - gap - height
+      : anchor.bottom + gap;
     menu.style.top = `${Math.max(margin, Math.min(desiredTop, window.innerHeight - height - margin))}px`;
   }, []);
 
@@ -142,7 +181,9 @@ function ColumnMenu({ columns, layout }) {
   return html`
     <div class="menu">
       <button ref=${trigger} type="button" class="btn btn-sm" aria-expanded=${open}
-        popovertarget=${menuId} popovertargetaction="toggle" onClick=${(event) => {
+        popovertarget=${menuId} popovertargetaction="toggle" onClick=${(
+          event,
+        ) => {
           event.preventDefault();
           panel.current?.togglePopover();
           position();
@@ -170,19 +211,34 @@ function ColumnMenu({ columns, layout }) {
   `;
 }
 
-export function ConfigurableTable({ columns, mobileSummary, rowHref, rowKey, rows, tableId, toolbar, toolbarActions }) {
+export function ConfigurableTable({
+  columns,
+  mobileSummary,
+  rowHref,
+  rowKey,
+  rows,
+  tableId,
+  toolbar,
+  toolbarActions,
+}) {
   const layout = useColumnLayout(tableId, columns);
   const headerControls = useContext(PanelHeaderControls);
   useLayoutEffect(() => {
     if (!headerControls) return;
     headerControls.value = html`<${ColumnMenu} columns=${columns} layout=${layout} />`;
-    return () => { headerControls.value = null; };
+    return () => {
+      headerControls.value = null;
+    };
   }, [headerControls, columns, layout]);
   const dragged = useRef(null);
   const [dragTarget, setDragTarget] = useState(null);
   const [sort, setSort] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
-  const sortedRows = sortRows(rows, columns.find((column) => column.id === sort?.id), sort?.direction);
+  const sortedRows = sortRows(
+    rows,
+    columns.find((column) => column.id === sort?.id),
+    sort?.direction,
+  );
 
   return html`
     <div class="flex flex-col gap-4">
@@ -192,13 +248,26 @@ export function ConfigurableTable({ columns, mobileSummary, rowHref, rowKey, row
         <label class="mobile-table-sort"><span class="sr-only">${t("Sort by")}</span>
           <select aria-label=${t("Sort by")} value=${sort?.id || ""} onChange=${(event) => setSort(event.target.value ? { id: event.target.value, direction: sort?.direction || "ascending" } : null)}>
             <option value="">${t("Sort: default")}</option>
-            ${layout.visible.filter((column) => column.label && column.sortable !== false)
-              .sort((first, second) => first.label.localeCompare(second.label, undefined, { numeric: true, sensitivity: "base" }))
-              .map((column) => html`<option value=${column.id}>${column.label}</option>`)}
+            ${layout.visible
+              .filter((column) => column.label && column.sortable !== false)
+              .sort((first, second) =>
+                first.label.localeCompare(second.label, undefined, {
+                  numeric: true,
+                  sensitivity: "base",
+                }),
+              )
+              .map(
+                (column) =>
+                  html`<option value=${column.id}>${column.label}</option>`,
+              )}
           </select>
         </label>
-        ${sort ? html`<button type="button" class="btn btn-sm mobile-table-order" aria-label=${sort.direction === "ascending" ? t("Sort descending") : t("Sort ascending")}
-          onClick=${() => setSort({ ...sort, direction: sort.direction === "ascending" ? "descending" : "ascending" })}><${Icon} name=${sort.direction === "ascending" ? "sort-up" : "sort-down"} /></button>` : null}
+        ${
+          sort
+            ? html`<button type="button" class="btn btn-sm mobile-table-order" aria-label=${sort.direction === "ascending" ? t("Sort descending") : t("Sort ascending")}
+          onClick=${() => setSort({ ...sort, direction: sort.direction === "ascending" ? "descending" : "ascending" })}><${Icon} name=${sort.direction === "ascending" ? "sort-up" : "sort-down"} /></button>`
+            : null
+        }
         ${toolbarActions}
         ${headerControls ? null : html`<${ColumnMenu} columns=${columns} layout=${layout} />`}
         </div>
@@ -239,11 +308,15 @@ export function ConfigurableTable({ columns, mobileSummary, rowHref, rowKey, row
                       setDragTarget(null);
                     }}
                   >
-                    ${column.label && column.sortable !== false ? html`
+                    ${
+                      column.label && column.sortable !== false
+                        ? html`
                       <button type="button" class="inline-flex items-center gap-2 bg-transparent border-0 p-0 text-inherit font-inherit cursor-pointer"
                         onClick=${() => setSort({ id: column.id, direction: sort?.id === column.id && sort.direction === "ascending" ? "descending" : "ascending" })}>
                         ${column.label}<${Icon} name=${sort?.id === column.id ? (sort.direction === "ascending" ? "sort-up" : "sort-down") : "sort"} />
-                      </button>` : column.label}
+                      </button>`
+                        : column.label
+                    }
                   </th>
                 `,
               )}
@@ -258,33 +331,66 @@ export function ConfigurableTable({ columns, mobileSummary, rowHref, rowKey, row
                 <tr
                   key=${key}
                   class=${`${rowHref ? "cursor-pointer" : ""}${summary ? " expandable-row" : ""}${isExpanded ? " expanded" : ""}`}
-                  onClick=${rowHref ? (event) => {
-                    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                    if (event.target.closest("a, button, input, select, textarea, summary, [role=button]")) return;
-                    if (window.getSelection()?.toString()) return;
-                    navigate(rowHref(row));
-                  } : undefined}
+                  onClick=${
+                    rowHref
+                      ? (event) => {
+                          if (
+                            event.defaultPrevented ||
+                            event.button !== 0 ||
+                            event.metaKey ||
+                            event.ctrlKey ||
+                            event.shiftKey ||
+                            event.altKey
+                          )
+                            return;
+                          if (
+                            event.target.closest(
+                              "a, button, input, select, textarea, summary, [role=button]",
+                            )
+                          )
+                            return;
+                          if (window.getSelection()?.toString()) return;
+                          navigate(rowHref(row));
+                        }
+                      : undefined
+                  }
                 >
-                  ${summary ? html`<td class="mobile-card-heading" data-label="" colspan=${layout.visible.length || 1}>
+                  ${
+                    summary
+                      ? html`<td class="mobile-card-heading" data-label="" colspan=${layout.visible.length || 1}>
                     <button type="button" class="mobile-card-toggle" aria-expanded=${isExpanded}
-                      onClick=${() => setExpanded((current) => {
-                        const next = new Set(current);
-                        if (next.has(key)) next.delete(key);
-                        else next.add(key);
-                        return next;
-                      })}>
+                      onClick=${() =>
+                        setExpanded((current) => {
+                          const next = new Set(current);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
+                          return next;
+                        })}>
                       <span class="mobile-card-summary">
                         <span class="mobile-card-title">${summary.title}</span>
                         ${summary.detail ? html`<span class="mobile-card-detail">${summary.detail}</span>` : null}
                       </span>
                       <span class="mobile-card-chevron" aria-hidden="true">${isExpanded ? "−" : "+"}</span>
                     </button>
-                  </td>` : null}
+                  </td>`
+                      : null
+                  }
                   ${layout.visible.map(
-                    (column) => html`<td key=${column.id} data-label=${column.label || ""} class=${`${column.align === "right" ? "numeric" : ""}${column.id === "number" ? " channel-number" : ""}${column.id === "status" || column.id.endsWith("-status") ? " status-cell" : ""}`}>
-                      ${rowHref && column.id === (layout.visible.find((entry) => entry.id === "name" || entry.id === "device") || layout.visible[0]).id
-                        ? html`<a class="device-table-link" href=${rowHref(row)} draggable="false"><${Icon} name="devices" />${column.cell(row)}</a>`
-                        : column.cell(row)}
+                    (
+                      column,
+                    ) => html`<td key=${column.id} data-label=${column.label || ""} class=${`${column.align === "right" ? "numeric" : ""}${column.id === "number" ? " channel-number" : ""}${column.id === "status" || column.id.endsWith("-status") ? " status-cell" : ""}`}>
+                      ${
+                        rowHref &&
+                        column.id ===
+                          (
+                            layout.visible.find(
+                              (entry) =>
+                                entry.id === "name" || entry.id === "device",
+                            ) || layout.visible[0]
+                          ).id
+                          ? html`<a class="device-table-link" href=${rowHref(row)} draggable="false"><${Icon} name="devices" />${column.cell(row)}</a>`
+                          : column.cell(row)
+                      }
                     </td>`,
                   )}
                 </tr>

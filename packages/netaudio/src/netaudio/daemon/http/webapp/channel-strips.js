@@ -1,6 +1,13 @@
 import { METER_FLOOR_DBFS } from "./format.js";
 import { t } from "./i18n.js";
-import { html, useCallback, useEffect, useMemo, useRef, useState } from "./lib/preact.js";
+import {
+  html,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "./lib/preact.js";
 import { observeVisibility, useAnimationFrames } from "./meter-animation.js";
 import {
   ALIGNMENT_LEVEL_DBFS,
@@ -49,11 +56,18 @@ function trackCount(strip) {
 }
 
 function sameTicks(first, second) {
-  return first.length === second.length && first.every((tick, index) => tick === second[index]);
+  return (
+    first.length === second.length &&
+    first.every((tick, index) => tick === second[index])
+  );
 }
 
 function createStripState(tracks) {
-  return { meters: Array.from({ length: tracks }, createPeakMeter), over: createOverIndicator(), readout: createReadout() };
+  return {
+    meters: Array.from({ length: tracks }, createPeakMeter),
+    over: createOverIndicator(),
+    readout: createReadout(),
+  };
 }
 
 function findParts(element) {
@@ -62,12 +76,14 @@ function findParts(element) {
     over: element.querySelector(".channel-strip-over"),
     count: element.querySelector(".channel-strip-over-count"),
     readout: element.querySelector(".channel-strip-readout"),
-    tracks: [...element.querySelectorAll(".channel-strip-track")].map((track) => ({
-      fill: track.querySelector(".channel-strip-fill"),
-      peak: track.querySelector(".channel-strip-peak"),
-      lit: null,
-      peakSegment: null,
-    })),
+    tracks: [...element.querySelectorAll(".channel-strip-track")].map(
+      (track) => ({
+        fill: track.querySelector(".channel-strip-fill"),
+        peak: track.querySelector(".channel-strip-peak"),
+        lit: null,
+        peakSegment: null,
+      }),
+    ),
     lit: null,
     countText: null,
     readoutText: null,
@@ -106,7 +122,9 @@ function paintStrip(parts, state, readoutText) {
       track.peak.hidden = peakSegment <= 0;
       if (peakSegment > 0) {
         track.peak.style.bottom = percent((peakSegment - 1) / SEGMENTS);
-        track.peak.dataset.region = levelRegion(segmentDecibels(peakSegment - 0.5)).name;
+        track.peak.dataset.region = levelRegion(
+          segmentDecibels(peakSegment - 0.5),
+        ).name;
       }
     }
   });
@@ -117,7 +135,13 @@ function paintStrip(parts, state, readoutText) {
   }
 }
 
-export function ChannelStripToggle({ pressed, pending, label, title, onToggle }) {
+export function ChannelStripToggle({
+  pressed,
+  pending,
+  label,
+  title,
+  onToggle,
+}) {
   return html`<button
     type="button"
     class="channel-strip-toggle"
@@ -133,8 +157,12 @@ export function ChannelStripToggle({ pressed, pending, label, title, onToggle })
 
 function ChannelStrip({ strip, ticks, controls, onClearOver }) {
   const tracks = trackCount(strip);
-  const labels = Array.isArray(strip.trackLabels) ? strip.trackLabels.slice(0, tracks) : [];
-  const title = strip.name ? t("Channel {number} {name}", { number: strip.number, name: strip.name }) : t("Channel {number}", { number: strip.number });
+  const labels = Array.isArray(strip.trackLabels)
+    ? strip.trackLabels.slice(0, tracks)
+    : [];
+  const title = strip.name
+    ? t("Channel {number} {name}", { number: strip.number, name: strip.name })
+    : t("Channel {number}", { number: strip.number });
   return html`<div class="channel-strip" data-strip-key=${strip.key} role="group" aria-label=${title}>
     <button
       type="button"
@@ -149,18 +177,23 @@ function ChannelStrip({ strip, ticks, controls, onClearOver }) {
     <div class="channel-strip-meter" data-tracks=${tracks} aria-hidden="true">
       <div class="channel-strip-scale">
         ${ticks.map(
-          (tick) => html`<span key=${tick} class="channel-strip-scale-label" style=${`bottom:${percent(levelFraction(tick))}`}>${scaleLabel(tick)}</span>`,
+          (tick) =>
+            html`<span key=${tick} class="channel-strip-scale-label" style=${`bottom:${percent(levelFraction(tick))}`}>${scaleLabel(tick)}</span>`,
         )}
       </div>
       ${Array.from(
         { length: tracks },
-        (_, index) => html`<div key=${index} class="channel-strip-track" style=${`grid-column:${index + 2}`}>
+        (
+          _,
+          index,
+        ) => html`<div key=${index} class="channel-strip-track" style=${`grid-column:${index + 2}`}>
           <div class="channel-strip-fill"></div>
           <div class="channel-strip-peak" hidden></div>
         </div>`,
       )}
       ${labels.map(
-        (trackLabel, index) => html`<span key=${`label-${index}`} class="channel-strip-track-label" style=${`grid-column:${index + 2}`}>${trackLabel}</span>`,
+        (trackLabel, index) =>
+          html`<span key=${`label-${index}`} class="channel-strip-track-label" style=${`grid-column:${index + 2}`}>${trackLabel}</span>`,
       )}
     </div>
     <div class="channel-strip-readout"></div>
@@ -178,13 +211,21 @@ export function ChannelStrips({ strips, read, label, controls }) {
   const parts = useRef(new Map());
   const visible = useRef(new Set());
   const [running, setRunning] = useState(false);
-  const [ticks, setTicks] = useState(() => chooseScaleTicks(INITIAL_METER_LENGTH, INITIAL_SCALE_LABEL_HEIGHT));
-  const stripsByKey = useMemo(() => new Map(strips.map((strip) => [strip.key, strip])), [strips]);
+  const [ticks, setTicks] = useState(() =>
+    chooseScaleTicks(INITIAL_METER_LENGTH, INITIAL_SCALE_LABEL_HEIGHT),
+  );
+  const stripsByKey = useMemo(
+    () => new Map(strips.map((strip) => [strip.key, strip])),
+    [strips],
+  );
 
   const stateFor = (strip) => {
     let state = states.current.get(strip.key);
     if (!state || state.meters.length !== trackCount(strip)) {
-      state = { ...createStripState(trackCount(strip)), ...(state ? { over: state.over } : {}) };
+      state = {
+        ...createStripState(trackCount(strip)),
+        ...(state ? { over: state.over } : {}),
+      };
       states.current.set(strip.key, state);
     }
     return state;
@@ -218,8 +259,12 @@ export function ChannelStrips({ strips, read, label, controls }) {
     const track = node && node.querySelector(".channel-strip-track");
     if (!track || typeof ResizeObserver !== "function") return undefined;
     const measure = () => {
-      const scaleLabelElement = node.querySelector(".channel-strip-scale-label");
-      const extent = scaleLabelElement ? scaleLabelElement.getBoundingClientRect().height : INITIAL_SCALE_LABEL_HEIGHT;
+      const scaleLabelElement = node.querySelector(
+        ".channel-strip-scale-label",
+      );
+      const extent = scaleLabelElement
+        ? scaleLabelElement.getBoundingClientRect().height
+        : INITIAL_SCALE_LABEL_HEIGHT;
       const next = chooseScaleTicks(track.clientHeight, extent);
       setTicks((current) => (sameTicks(current, next) ? current : next));
     };
@@ -237,15 +282,24 @@ export function ChannelStrips({ strips, read, label, controls }) {
       const state = stateFor(strip);
       const sample = reader.current(strip) || {};
       const levels = Array.isArray(sample.levels) ? sample.levels : [];
-      const readings = state.meters.map((_, index) => (index < levels.length ? levels[index] : null));
+      const readings = state.meters.map((_, index) =>
+        index < levels.length ? levels[index] : null,
+      );
       let over = sample.clipping === true;
       state.meters.forEach((meter, index) => {
         advancePeakMeter(meter, readings[index], elapsed);
         if (isOverReading(readings[index])) over = true;
       });
       advanceOverIndicator(state.over, over, elapsed);
-      const text = typeof sample.readout === "string" ? sample.readout : stripReadout(state.meters, readings);
-      paintStrip(stripParts, state, advanceReadout(state.readout, text, elapsed));
+      const text =
+        typeof sample.readout === "string"
+          ? sample.readout
+          : stripReadout(state.meters, readings);
+      paintStrip(
+        stripParts,
+        state,
+        advanceReadout(state.readout, text, elapsed),
+      );
     }
   });
 
@@ -259,7 +313,8 @@ export function ChannelStrips({ strips, read, label, controls }) {
 
   return html`<div class="channel-strips" ref=${container} role="group" aria-label=${label} style=${BANK_STYLE}>
     ${strips.map(
-      (strip) => html`<${ChannelStrip} key=${strip.key} strip=${strip} ticks=${ticks} controls=${controls} onClearOver=${clearOver} />`,
+      (strip) =>
+        html`<${ChannelStrip} key=${strip.key} strip=${strip} ticks=${ticks} controls=${controls} onClearOver=${clearOver} />`,
     )}
   </div>`;
 }

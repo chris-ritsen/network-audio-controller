@@ -23,7 +23,11 @@ function parseChannels(text) {
 }
 
 export function flowIdentifierMaximum(authoring, maximumFlows) {
-  if (authoring?.identity_field === "global_flow_id" && Number.isInteger(maximumFlows) && maximumFlows > 0) {
+  if (
+    authoring?.identity_field === "global_flow_id" &&
+    Number.isInteger(maximumFlows) &&
+    maximumFlows > 0
+  ) {
     return Math.min(authoring.identifier_max, maximumFlows);
   }
   return authoring?.identifier_max;
@@ -57,7 +61,9 @@ export function canonicalFlowRequest({
     Number(flowId) > identifierMaximum
   ) {
     throw new Error(
-      t("Enter a flow identifier from 1 through {maximum}.", { maximum: identifierMaximum }),
+      t("Enter a flow identifier from 1 through {maximum}.", {
+        maximum: identifierMaximum,
+      }),
     );
   }
   if (!authoring.media_modes.includes(mediaMode))
@@ -76,12 +82,16 @@ export function canonicalFlowRequest({
   const primaryDestination = socket(
     primaryAddress.trim(),
     primaryPort,
-    t("Primary destination needs an IPv4 address and UDP port from 1 through 65535."),
+    t(
+      "Primary destination needs an IPv4 address and UDP port from 1 through 65535.",
+    ),
   );
   const secondaryDestination = socket(
     secondaryAddress.trim(),
     secondaryPort,
-    t("Secondary destination needs an IPv4 address and UDP port from 1 through 65535."),
+    t(
+      "Secondary destination needs an IPv4 address and UDP port from 1 through 65535.",
+    ),
   );
   const fpp = framesPerPacket === "" ? null : Number(framesPerPacket);
   if (fpp !== null && (!Number.isInteger(fpp) || fpp < 1 || fpp > 65535))
@@ -162,7 +172,9 @@ export function flowEvidenceRows(result) {
 function socketLabel(socket) {
   if (!socket) return "";
   const endpoint = `${socket.address}:${socket.port}`;
-  return socket.interface ? t("{endpoint} via {interface}", { endpoint, interface: socket.interface }) : endpoint;
+  return socket.interface
+    ? t("{endpoint} via {interface}", { endpoint, interface: socket.interface })
+    : endpoint;
 }
 
 function channelLabel(specification) {
@@ -197,7 +209,9 @@ function receiverFlowChannels(flow) {
   const slots = flow.receiver_channel_numbers_by_flow_channel;
   if (Array.isArray(slots)) {
     return slots
-      .map((channels, index) => `${index + 1}:${channels.join(",") || t("none")}`)
+      .map(
+        (channels, index) => `${index + 1}:${channels.join(",") || t("none")}`,
+      )
       .join("; ");
   }
   return "";
@@ -206,7 +220,9 @@ function receiverFlowChannels(flow) {
 function externalIdentityLabel(flow) {
   const identity = flow.external_identity;
   if (!identity) return "";
-  return [identity.source_ipv4, identity.session_id].filter((value) => value != null).join("/");
+  return [identity.source_ipv4, identity.session_id]
+    .filter((value) => value != null)
+    .join("/");
 }
 
 export function ReceiverFlows({ device }) {
@@ -239,16 +255,20 @@ export function ReceiverFlows({ device }) {
                 ${typed ? html`<td data-label=${t("Type")}>${t(capitalized(flow.flow_type))}</td>` : null}
                 ${mapped ? html`<td data-label=${t("Slot:receiver channels")}>${receiverFlowChannels(flow)}</td>` : null}
                 ${addressed ? html`<td data-label=${t("Destination")}>${receiverFlowEndpoints(flow)}</td>` : null}
-                ${external
-                  ? html`<td data-label=${t("Source")}>${externalIdentityLabel(flow)}</td>
+                ${
+                  external
+                    ? html`<td data-label=${t("Source")}>${externalIdentityLabel(flow)}</td>
                       <td data-label="SDP">
-                        ${flow.sdp_correlation?.matched === true
-                          ? t("Matched")
-                          : flow.external_identity
-                            ? t("Not matched")
-                            : ""}
+                        ${
+                          flow.sdp_correlation?.matched === true
+                            ? t("Matched")
+                            : flow.external_identity
+                              ? t("Not matched")
+                              : ""
+                        }
                       </td>`
-                  : null}
+                    : null
+                }
               </tr>`,
           )}
         </tbody>
@@ -258,7 +278,10 @@ export function ReceiverFlows({ device }) {
 }
 
 function flowTypeLabel(entry) {
-  return [entry.media_mode === "rtp_aes67" ? "AES67" : null, t(capitalized(entry.flow_type))]
+  return [
+    entry.media_mode === "rtp_aes67" ? "AES67" : null,
+    t(capitalized(entry.flow_type)),
+  ]
     .filter(Boolean)
     .join(" ");
 }
@@ -310,8 +333,16 @@ export function TransmitFlows({ device }) {
   const [result, setResult] = useState(null);
   const authoring = device.transmit_flow_authoring;
   const maximumFlows = device.maximum_transmit_flows;
-  const authoringFacts = JSON.stringify([requestName, authoring, device.aes67_current,
-    device.aes67_configuration_supported, device.is_locked, device.sample_rate_hz, device.encoding, maximumFlows]);
+  const authoringFacts = JSON.stringify([
+    requestName,
+    authoring,
+    device.aes67_current,
+    device.aes67_configuration_supported,
+    device.is_locked,
+    device.sample_rate_hz,
+    device.encoding,
+    maximumFlows,
+  ]);
   useEffect(() => {
     setPlan(null);
     setResult(null);
@@ -434,9 +465,11 @@ export function TransmitFlows({ device }) {
                 authoring.media_modes.length > 1
                   ? html`<${FlowField} label=${t("Mode")}>
                       <select aria-label=${t("Transmit flow media mode")} value=${mediaMode} onChange=${edit(setMediaMode)}>
-                        ${authoring.media_modes.map((mode) => html`<option value=${mode}
+                        ${authoring.media_modes.map(
+                          (mode) => html`<option value=${mode}
                           disabled=${mode === "rtp_aes67" && (device.aes67_configuration_supported !== true || device.aes67_current !== true)}
-                          >${mode === "native_dante" ? t("Native Dante") : "RTP/AES67"}</option>`)}
+                          >${mode === "native_dante" ? t("Native Dante") : "RTP/AES67"}</option>`,
+                        )}
                       </select>
                     <//>`
                   : null

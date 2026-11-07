@@ -8,7 +8,8 @@ import { inventoryReady, scopedDevices, selectedContext } from "../store.js";
 
 function readable(message) {
   const text = String(
-    message || t("Preset operation failed. Review the selection and try again."),
+    message ||
+      t("Preset operation failed. Review the selection and try again."),
   );
   return /\b0x[\da-f]+\b|\b[\da-f]{16,}\b/i.test(text)
     ? t("The device returned an unsupported response.")
@@ -262,16 +263,16 @@ function LoadPreset() {
                         ></label
                       >
                       ${
-                  device.settings.length
-                    ? html`<ul class="text-sm">
+                        device.settings.length
+                          ? html`<ul class="text-sm">
                         ${device.settings.map((setting) => html`<li>${t("{setting}: {value}", { setting: t(setting.label), value: readable(setting.value) })}</li>`)}
                       </ul>`
-                    : null
-                }
+                          : null
+                      }
                       ${device.preserved.length ? html`<p class="text-sm">${t("Not applied: {settings}", { settings: device.preserved.map((label) => t(label)).join(", ") })}</p>` : null}
                       ${
-                  choices[index].include
-                    ? html`<label class="flex flex-col gap-2 text-sm"
+                        choices[index].include
+                          ? html`<label class="flex flex-col gap-2 text-sm"
                         >${t("Target for {device}", { device: device.name })}
                         <select
                           value=${choices[index].target}
@@ -283,8 +284,8 @@ function LoadPreset() {
                           ${device.targets.map((target) => html`<option value=${target.id} disabled=${!target.online}>${target.name}${target.address ? ` · ${target.address}` : ""}${target.context ? ` · ${target.context}` : ""}${target.online ? "" : ` · ${t("Offline")}`}</option>`)}
                         </select></label
                       >`
-                    : html`<p class="text-sm">${t("Skipped")}</p>`
-                }
+                          : html`<p class="text-sm">${t("Skipped")}</p>`
+                      }
                     </div>`,
                 )}
                 <details>

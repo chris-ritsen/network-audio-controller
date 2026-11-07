@@ -2,7 +2,13 @@ import { api } from "../api.js";
 import { AsyncButton, Button, Panel, Value } from "../components.js";
 import * as format from "../format.js";
 import { t } from "../i18n.js";
-import { html, useEffect, useLayoutEffect, useRef, useState } from "../lib/preact.js";
+import {
+  html,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "../lib/preact.js";
 import { RoutePicker } from "../route-picker.js";
 import { deviceRequestName } from "../store.js";
 import { ConfigurableTable } from "../table.js";
@@ -20,7 +26,13 @@ function gainChannelType(device) {
   return null;
 }
 
-function NameCell({ channel, channelNumber, channelType, requestName, managed }) {
+function NameCell({
+  channel,
+  channelNumber,
+  channelType,
+  requestName,
+  managed,
+}) {
   const input = useRef(null);
   const editor = useRef(null);
   const [editing, setEditing] = useState(false);
@@ -29,13 +41,16 @@ function NameCell({ channel, channelNumber, channelType, requestName, managed })
   const [name, setName] = useState(channel.name || "");
   // Leave the editable text node under browser control so rerenders do not move the caret.
   const draft = useRef("");
-  const label = channelType === "rx"
-    ? t("Receive channel {number} name", { number: channelNumber })
-    : t("Transmit channel {number} name", { number: channelNumber });
-  const editLabel = channelType === "rx"
-    ? t("Edit receive channel {number} name", { number: channelNumber })
-    : t("Edit transmit channel {number} name", { number: channelNumber });
-  const renameAllowed = channelType !== "rx" || managed || channel.can_rename === true;
+  const label =
+    channelType === "rx"
+      ? t("Receive channel {number} name", { number: channelNumber })
+      : t("Transmit channel {number} name", { number: channelNumber });
+  const editLabel =
+    channelType === "rx"
+      ? t("Edit receive channel {number} name", { number: channelNumber })
+      : t("Edit transmit channel {number} name", { number: channelNumber });
+  const renameAllowed =
+    channelType !== "rx" || managed || channel.can_rename === true;
   useEffect(() => setName(channel.name || ""), [channel.name]);
   useLayoutEffect(() => {
     if (editing) {
@@ -52,13 +67,20 @@ function NameCell({ channel, channelNumber, channelType, requestName, managed })
         editor.current.style.top = `${above ? box.top : box.bottom}px`;
         editor.current.style.width = `${box.width}px`;
         editor.current.classList.toggle("actions-above", above);
-        editor.current.classList.toggle("actions-right", window.innerWidth - box.left < 248);
+        editor.current.classList.toggle(
+          "actions-right",
+          window.innerWidth - box.left < 248,
+        );
       };
       reposition();
       window.addEventListener("resize", reposition);
       window.addEventListener("scroll", reposition, true);
       const outside = (event) => {
-        if (!input.current.contains(event.target) && !editor.current.contains(event.target)) close();
+        if (
+          !input.current.contains(event.target) &&
+          !editor.current.contains(event.target)
+        )
+          close();
       };
       document.addEventListener("pointerdown", outside);
       return () => {
@@ -117,19 +139,35 @@ function NameCell({ channel, channelNumber, channelType, requestName, managed })
         onClick=${open}
         onKeyDown=${(event) => {
           if (event.isComposing || pending) return;
-          if (!editing && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open(); }
-          else if (editing && event.key === "Enter") { event.preventDefault(); void save(draft.current); }
-          else if (editing && event.key === "Escape") { event.preventDefault(); close(); }
+          if (!editing && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            open();
+          } else if (editing && event.key === "Enter") {
+            event.preventDefault();
+            void save(draft.current);
+          } else if (editing && event.key === "Escape") {
+            event.preventDefault();
+            close();
+          }
         }}
         onInput=${(event) => {
-          const value = event.currentTarget.innerText.replace(/[\r\n]+$/g, "").replace(/[\r\n]+/g, " ");
-          if (event.currentTarget.textContent !== value) event.currentTarget.textContent = value;
+          const value = event.currentTarget.innerText
+            .replace(/[\r\n]+$/g, "")
+            .replace(/[\r\n]+/g, " ");
+          if (event.currentTarget.textContent !== value)
+            event.currentTarget.textContent = value;
           draft.current = value;
         }}
       >${name || t("Unnamed channel")}</span>
     <form ref=${editor} popover="manual" class="channel-name-editor"
-      onSubmit=${(event) => { event.preventDefault(); void save(draft.current); }} onKeyDown=${(event) => {
-        if (event.key === "Escape" && !pending) { event.preventDefault(); close(); }
+      onSubmit=${(event) => {
+        event.preventDefault();
+        void save(draft.current);
+      }} onKeyDown=${(event) => {
+        if (event.key === "Escape" && !pending) {
+          event.preventDefault();
+          close();
+        }
       }}>
       <div class="channel-name-actions">
       <button type="submit" class="btn btn-xs" disabled=${pending} aria-busy=${pending}>${t("Save")}</button>
@@ -141,7 +179,13 @@ function NameCell({ channel, channelNumber, channelType, requestName, managed })
   `;
 }
 
-function GainCell({ channel, channelNumber, channelType, device, requestName }) {
+function GainCell({
+  channel,
+  channelNumber,
+  channelType,
+  device,
+  requestName,
+}) {
   const select = useRef(null);
   const choices = device.gain_level_choices;
   if (!choices || gainChannelType(device) !== channelType) {
@@ -154,8 +198,14 @@ function GainCell({ channel, channelNumber, channelType, device, requestName }) 
     <span class="cell-actions">
       <select key=${`gain-${requestName}-${channelType}-${channelNumber}`} ref=${select}>
         ${choices.map((choice) => {
-          const value = choice !== null && typeof choice === "object" ? choice.value : choice;
-          const label = choice !== null && typeof choice === "object" ? choice.label : String(choice);
+          const value =
+            choice !== null && typeof choice === "object"
+              ? choice.value
+              : choice;
+          const label =
+            choice !== null && typeof choice === "object"
+              ? choice.label
+              : String(choice);
           return html`<option key=${value} value=${value} selected=${Number(value) === Number(channel.gain_level)}>
             ${label}
           </option>`;
@@ -173,7 +223,11 @@ function GainCell({ channel, channelNumber, channelType, device, requestName }) 
 }
 
 function subscriptionForChannel(device, number) {
-  return (device.subscriptions || []).find((entry) => entry.rx_channel_number === number) || null;
+  return (
+    (device.subscriptions || []).find(
+      (entry) => entry.rx_channel_number === number,
+    ) || null
+  );
 }
 
 function receiveColumns(device, requestName, onRoute) {
@@ -185,9 +239,14 @@ function receiveColumns(device, requestName, onRoute) {
       id: "name",
       label: t("Name"),
     },
-    { cell: (row) => format.subscriptionSource(row.subscription), id: "subscription", label: t("Subscription") },
     {
-      cell: (row) => html`<${SubscriptionStatus} subscription=${row.subscription} />`,
+      cell: (row) => format.subscriptionSource(row.subscription),
+      id: "subscription",
+      label: t("Subscription"),
+    },
+    {
+      cell: (row) =>
+        html`<${SubscriptionStatus} subscription=${row.subscription} />`,
       id: "status",
       label: t("Status"),
     },
@@ -195,15 +254,17 @@ function receiveColumns(device, requestName, onRoute) {
       cell: (row) => html`
         <span class="cell-actions">
           <${Button} small onClick=${() => onRoute(row)}>${t("Subscribe")}<//>
-          ${row.subscription && row.subscription.tx_device
-            ? html`<${AsyncButton}
+          ${
+            row.subscription && row.subscription.tx_device
+              ? html`<${AsyncButton}
                 small
                 description=${t("unsubscribe {device} channel {number}", { device: requestName, number: row.number })}
                 onRun=${() => api.unsubscribe({ rx_channel: row.number, rx_device: requestName })}
               >
                 ${t("Unsubscribe")}
               <//>`
-            : null}
+              : null
+          }
         </span>
       `,
       id: "subscribe",
@@ -222,11 +283,36 @@ function receiveColumns(device, requestName, onRoute) {
       id: "gain",
       label: t("Gain"),
     },
-    { cell: (row) => html`<${Value} value=${row.channel.volume} />`, id: "volume", label: t("Volume"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${row.channel.muted} />`, id: "muted", label: t("Muted"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${t(row.channel.media_type)} />`, id: "media-type", label: t("Media type"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${row.channel.status_text} />`, id: "channel-status", label: t("Channel status"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${t(row.channel.ddm_summary)} />`, id: "managed", label: t("Managed"), defaultHidden: true },
+    {
+      cell: (row) => html`<${Value} value=${row.channel.volume} />`,
+      id: "volume",
+      label: t("Volume"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${row.channel.muted} />`,
+      id: "muted",
+      label: t("Muted"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${t(row.channel.media_type)} />`,
+      id: "media-type",
+      label: t("Media type"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${row.channel.status_text} />`,
+      id: "channel-status",
+      label: t("Channel status"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${t(row.channel.ddm_summary)} />`,
+      id: "managed",
+      label: t("Managed"),
+      defaultHidden: true,
+    },
   ];
 }
 
@@ -239,8 +325,18 @@ function transmitColumns(device, requestName) {
       id: "name",
       label: t("Name"),
     },
-    { cell: (row) => html`<${Value} value=${row.channel.friendly_name} />`, id: "friendly-name", label: t("Friendly name"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${row.channel.factory_name} />`, id: "factory-name", label: t("Factory name"), defaultHidden: true },
+    {
+      cell: (row) => html`<${Value} value=${row.channel.friendly_name} />`,
+      id: "friendly-name",
+      label: t("Friendly name"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${row.channel.factory_name} />`,
+      id: "factory-name",
+      label: t("Factory name"),
+      defaultHidden: true,
+    },
     {
       cell: (row) =>
         html`<${GainCell}
@@ -253,17 +349,49 @@ function transmitColumns(device, requestName) {
       id: "gain",
       label: t("Gain"),
     },
-    { cell: (row) => format.sampleRate(row.channel.sample_rate), id: "sample-rate", label: t("Sample rate"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${row.channel.encoding} />`, id: "encoding", label: t("Encoding"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${row.channel.bit_depth} />`, id: "bit-depth", label: t("Bit depth"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${t(row.channel.media_type)} />`, id: "media-type", label: t("Media type"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${row.channel.status_text} />`, id: "channel-status", label: t("Channel status"), defaultHidden: true },
-    { cell: (row) => html`<${Value} value=${t(row.channel.ddm_summary)} />`, id: "managed", label: t("Managed"), defaultHidden: true },
+    {
+      cell: (row) => format.sampleRate(row.channel.sample_rate),
+      id: "sample-rate",
+      label: t("Sample rate"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${row.channel.encoding} />`,
+      id: "encoding",
+      label: t("Encoding"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${row.channel.bit_depth} />`,
+      id: "bit-depth",
+      label: t("Bit depth"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${t(row.channel.media_type)} />`,
+      id: "media-type",
+      label: t("Media type"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${row.channel.status_text} />`,
+      id: "channel-status",
+      label: t("Channel status"),
+      defaultHidden: true,
+    },
+    {
+      cell: (row) => html`<${Value} value=${t(row.channel.ddm_summary)} />`,
+      id: "managed",
+      label: t("Managed"),
+      defaultHidden: true,
+    },
   ];
 }
 
 function receiveRows(device) {
-  const receiveChannels = device.channels ? device.channels.receivers || {} : {};
+  const receiveChannels = device.channels
+    ? device.channels.receivers || {}
+    : {};
   return format.sortedChannelNumbers(receiveChannels).map((number) => ({
     channel: receiveChannels[number],
     number,
@@ -272,8 +400,12 @@ function receiveRows(device) {
 }
 
 function transmitRows(device) {
-  const transmitChannels = device.channels ? device.channels.transmitters || {} : {};
-  return format.sortedChannelNumbers(transmitChannels).map((number) => ({ channel: transmitChannels[number], number }));
+  const transmitChannels = device.channels
+    ? device.channels.transmitters || {}
+    : {};
+  return format
+    .sortedChannelNumbers(transmitChannels)
+    .map((number) => ({ channel: transmitChannels[number], number }));
 }
 
 export function ReceiveSection({ device }) {
@@ -282,19 +414,24 @@ export function ReceiveSection({ device }) {
   const rows = receiveRows(device);
   return html`
     <div class="flex flex-col gap-4">
-      ${routing
-        ? html`<${RoutePicker}
+      ${
+        routing
+          ? html`<${RoutePicker}
             receiver=${device}
             receiveChannelNumber=${routing.number}
             receiveChannelName=${routing.channel.name}
             subscription=${routing.subscription}
             onClose=${() => setRouting(null)}
           />`
-        : null}
-      ${rows.length ? html`<${Panel}
+          : null
+      }
+      ${
+        rows.length
+          ? html`<${Panel}
         title=${t("Receivers ({count})", { count: rows.length })}
-        headerActions=${rows.length
-          ? html`<${AsyncButton}
+        headerActions=${
+          rows.length
+            ? html`<${AsyncButton}
               small
               variant="danger"
               description=${t("unsubscribe all receivers on {device}", { device: requestName })}
@@ -302,7 +439,8 @@ export function ReceiveSection({ device }) {
             >
               ${t("Unsubscribe all")}
             <//>`
-          : null}
+            : null
+        }
       >
         <${ConfigurableTable}
               tableId="device-receive-channels"
@@ -311,13 +449,17 @@ export function ReceiveSection({ device }) {
                   <${SubscriptionStatus} subscription=${row.subscription} />
                   <span>${row.number}. ${row.channel.name || t("Unnamed channel")}</span>
                 </span>`,
-                detail: row.subscription?.tx_device ? format.subscriptionSource(row.subscription) : t("Not subscribed"),
+                detail: row.subscription?.tx_device
+                  ? format.subscriptionSource(row.subscription)
+                  : t("Not subscribed"),
               })}
               columns=${receiveColumns(device, requestName, setRouting).filter((column) => column.id !== "gain" || (gainChannelType(device) === "rx" && device.gain_level_choices?.length))}
               rows=${rows}
               rowKey=${(row) => row.number}
             />
-      <//>` : null}
+      <//>`
+          : null
+      }
       <${ReceiverFlows} device=${device} />
     </div>
   `;
@@ -328,7 +470,9 @@ export function TransmitSection({ device }) {
   const rows = transmitRows(device);
   return html`
     <div class="flex flex-col gap-4">
-    ${rows.length ? html`<${Panel} title=${t("Transmitters ({count})", { count: rows.length })}>
+    ${
+      rows.length
+        ? html`<${Panel} title=${t("Transmitters ({count})", { count: rows.length })}>
       <${ConfigurableTable}
             tableId="device-transmit-channels"
             mobileSummary=${(row) => ({ title: html`<span class="receiver-summary-line"><span>${row.number}. ${row.channel.name || t("Unnamed channel")}</span></span>` })}
@@ -336,7 +480,9 @@ export function TransmitSection({ device }) {
             rows=${rows}
             rowKey=${(row) => row.number}
           />
-    <//>` : null}
+    <//>`
+        : null
+    }
     <${TransmitFlows} device=${device} />
     </div>
   `;

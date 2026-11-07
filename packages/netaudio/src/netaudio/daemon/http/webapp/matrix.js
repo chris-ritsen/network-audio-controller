@@ -1,15 +1,36 @@
 import { api } from "./api.js";
-import { channelGroups, groupChannels, setGroupsExpanded } from "./channel-groups.js";
+import {
+  channelGroups,
+  groupChannels,
+  setGroupsExpanded,
+} from "./channel-groups.js";
 import { useColorScheme } from "./color-scheme.js";
 import { t, tn } from "./i18n.js";
 import { Icon } from "./icons.js";
 import * as format from "./format.js";
-import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
-import { deviceRequestName, markExternalPending, pendingKey, requestSubscriptionChange } from "./store.js";
+import {
+  html,
+  signal,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "./lib/preact.js";
+import {
+  deviceRequestName,
+  markExternalPending,
+  pendingKey,
+  requestSubscriptionChange,
+} from "./store.js";
 import { MatrixTooltip } from "./matrix-tooltip.js";
 import { runAction as performAction } from "./actions.js";
 import { selfConnectionTargetState } from "./self-connection.js";
-import { externalColumns, externalCellState, externalSubscriptionRequest, externalSourcesWithAssignments } from "./external-sources.js";
+import {
+  externalColumns,
+  externalCellState,
+  externalSubscriptionRequest,
+  externalSourcesWithAssignments,
+} from "./external-sources.js";
 
 const CELL = 30;
 const GUTTER_PADDING = 12;
@@ -23,8 +44,16 @@ function readExpanded() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && Array.isArray(parsed.receivers) && Array.isArray(parsed.transmitters)) {
-      return { receivers: new Set(parsed.receivers), transmitters: new Set(parsed.transmitters), initialized: true };
+    if (
+      parsed &&
+      Array.isArray(parsed.receivers) &&
+      Array.isArray(parsed.transmitters)
+    ) {
+      return {
+        receivers: new Set(parsed.receivers),
+        transmitters: new Set(parsed.transmitters),
+        initialized: true,
+      };
     }
   } catch (error) {
     return { receivers: new Set(), transmitters: new Set() };
@@ -36,16 +65,29 @@ export const expanded = signal(readExpanded());
 
 export function initializeExpansion(devices) {
   if (expanded.value.initialized || !devices.length) return;
-  const forSide = (side) => new Set(devices.filter((device) => {
-    const count = Object.keys(device.channels?.[side] || {}).length;
-    return count > 0 && count <= 16;
-  }).map(format.deviceLabel));
-  expanded.value = { receivers: forSide("receivers"), transmitters: forSide("transmitters"), initialized: true };
+  const forSide = (side) =>
+    new Set(
+      devices
+        .filter((device) => {
+          const count = Object.keys(device.channels?.[side] || {}).length;
+          return count > 0 && count <= 16;
+        })
+        .map(format.deviceLabel),
+    );
+  expanded.value = {
+    receivers: forSide("receivers"),
+    transmitters: forSide("transmitters"),
+    initialized: true,
+  };
 }
 
 export function toggleExpanded(side, deviceLabel) {
   const current = expanded.value;
-  const next = { receivers: new Set(current.receivers), transmitters: new Set(current.transmitters), initialized: true };
+  const next = {
+    receivers: new Set(current.receivers),
+    transmitters: new Set(current.transmitters),
+    initialized: true,
+  };
   if (next[side].has(deviceLabel)) {
     next[side].delete(deviceLabel);
   } else {
@@ -55,7 +97,10 @@ export function toggleExpanded(side, deviceLabel) {
   try {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ receivers: [...next.receivers], transmitters: [...next.transmitters] }),
+      JSON.stringify({
+        receivers: [...next.receivers],
+        transmitters: [...next.transmitters],
+      }),
     );
   } catch (error) {
     return;
@@ -64,7 +109,11 @@ export function toggleExpanded(side, deviceLabel) {
 
 export function setAllExpanded(side, deviceLabels, value) {
   const current = expanded.value;
-  const next = { receivers: new Set(current.receivers), transmitters: new Set(current.transmitters), initialized: true };
+  const next = {
+    receivers: new Set(current.receivers),
+    transmitters: new Set(current.transmitters),
+    initialized: true,
+  };
   for (const label of deviceLabels) {
     if (value) {
       next[side].add(label);
@@ -76,7 +125,10 @@ export function setAllExpanded(side, deviceLabels, value) {
   try {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ receivers: [...next.receivers], transmitters: [...next.transmitters] }),
+      JSON.stringify({
+        receivers: [...next.receivers],
+        transmitters: [...next.transmitters],
+      }),
     );
   } catch (error) {
     return;
@@ -99,14 +151,26 @@ function matchesFilter(deviceLabel, channels, needle) {
   if (deviceLabel.toLowerCase().includes(needle)) {
     return { device: true, channels: null };
   }
-  const matching = channels.filter((channel) => channel.name.toLowerCase().includes(needle));
+  const matching = channels.filter((channel) =>
+    channel.name.toLowerCase().includes(needle),
+  );
   if (!matching.length) {
     return null;
   }
-  return { device: false, channels: new Set(matching.map((channel) => channel.number)) };
+  return {
+    device: false,
+    channels: new Set(matching.map((channel) => channel.number)),
+  };
 }
 
-function buildAxis(devices, direction, expandedSet, filter, subscriptionsFor, groups) {
+function buildAxis(
+  devices,
+  direction,
+  expandedSet,
+  filter,
+  subscriptionsFor,
+  groups,
+) {
   const needle = filter.trim().toLowerCase();
   const entries = [];
   for (const device of devices) {
@@ -120,7 +184,9 @@ function buildAxis(devices, direction, expandedSet, filter, subscriptionsFor, gr
       continue;
     }
     const isExpanded = expandedSet.has(label) || match.channels !== null;
-    const visibleChannels = match.channels ? channels.filter((channel) => match.channels.has(channel.number)) : channels;
+    const visibleChannels = match.channels
+      ? channels.filter((channel) => match.channels.has(channel.number))
+      : channels;
     entries.push({
       channelCount: channels.length,
       channels,
@@ -141,15 +207,29 @@ function buildAxis(devices, direction, expandedSet, filter, subscriptionsFor, gr
           label,
           name: channel.name,
           number: channel.number,
-          subscription: subscriptionsFor ? subscriptionsFor(device, channel.number) : null,
+          subscription: subscriptionsFor
+            ? subscriptionsFor(device, channel.number)
+            : null,
         });
       };
       if (groups.enabled) {
-        for (const group of groupChannels(deviceRequestName(device), visibleChannels)) {
-          const groupExpanded = groups[direction].has(group.key) || match.channels !== null;
-          entries.push({ ...group, device, label, kind: "group", expanded: groupExpanded,
-            channelCount: group.channels.length, subscription: null });
-          if (groupExpanded) for (const channel of group.channels) appendChannel(channel, true);
+        for (const group of groupChannels(
+          deviceRequestName(device),
+          visibleChannels,
+        )) {
+          const groupExpanded =
+            groups[direction].has(group.key) || match.channels !== null;
+          entries.push({
+            ...group,
+            device,
+            label,
+            kind: "group",
+            expanded: groupExpanded,
+            channelCount: group.channels.length,
+            subscription: null,
+          });
+          if (groupExpanded)
+            for (const channel of group.channels) appendChannel(channel, true);
         }
       } else {
         for (const channel of visibleChannels) appendChannel(channel);
@@ -159,8 +239,16 @@ function buildAxis(devices, direction, expandedSet, filter, subscriptionsFor, gr
   return entries;
 }
 
-export function buildMatrixModel({ devices, externalFlows = {}, expandedReceivers, expandedTransmitters, receiverFilter, transmitterFilter,
-  groups = { enabled: false, receivers: new Set(), transmitters: new Set() }, pending = {} }) {
+export function buildMatrixModel({
+  devices,
+  externalFlows = {},
+  expandedReceivers,
+  expandedTransmitters,
+  receiverFilter,
+  transmitterFilter,
+  groups = { enabled: false, receivers: new Set(), transmitters: new Set() },
+  pending = {},
+}) {
   const sorted = format.sortedDevices(devices);
   const subscriptionIndex = new Map();
   for (const device of sorted) {
@@ -173,23 +261,50 @@ export function buildMatrixModel({ devices, externalFlows = {}, expandedReceiver
     subscriptionIndex.set(format.deviceLabel(device), byChannel);
   }
   const subscriptionsFor = (device, channelNumber) =>
-    subscriptionIndex.get(format.deviceLabel(device)).get(channelNumber) || null;
-  const columns = buildAxis(sorted, "transmitters", expandedTransmitters, transmitterFilter, null, groups);
-  columns.push(...externalColumns(externalSourcesWithAssignments(externalFlows, devices), transmitterFilter));
-  const rows = buildAxis(sorted, "receivers", expandedReceivers, receiverFilter, subscriptionsFor, groups);
+    subscriptionIndex.get(format.deviceLabel(device)).get(channelNumber) ||
+    null;
+  const columns = buildAxis(
+    sorted,
+    "transmitters",
+    expandedTransmitters,
+    transmitterFilter,
+    null,
+    groups,
+  );
+  columns.push(
+    ...externalColumns(
+      externalSourcesWithAssignments(externalFlows, devices),
+      transmitterFilter,
+    ),
+  );
+  const rows = buildAxis(
+    sorted,
+    "receivers",
+    expandedReceivers,
+    receiverFilter,
+    subscriptionsFor,
+    groups,
+  );
   for (const entry of rows) {
     if (entry.kind !== "channel" && entry.expanded) continue;
     const channels = entry.kind === "channel" ? [entry] : entry.channels;
     const severities = channels.flatMap((channel) => {
-      const update = pending[pendingKey(deviceRequestName(entry.device), channel.number)]
-        || pending[pendingKey(entry.label, channel.number)];
+      const update =
+        pending[pendingKey(deviceRequestName(entry.device), channel.number)] ||
+        pending[pendingKey(entry.label, channel.number)];
       if (update) return ["pending"];
-      const subscription = subscriptionIndex.get(entry.label).get(channel.number);
+      const subscription = subscriptionIndex
+        .get(entry.label)
+        .get(channel.number);
       return subscription ? [subscriptionSeverity(subscription)] : [];
     });
     if (!severities.length) continue;
     const worst = severityName(Math.max(...severities.map(severityRank)));
-    entry.activity = { count: severities.length, severity: worst === "ok" && severities.includes("pending") ? "pending" : worst };
+    entry.activity = {
+      count: severities.length,
+      severity:
+        worst === "ok" && severities.includes("pending") ? "pending" : worst,
+    };
   }
   return {
     columns,
@@ -200,7 +315,10 @@ export function buildMatrixModel({ devices, externalFlows = {}, expandedReceiver
 
 function subscriptionSeverity(subscription) {
   const status = subscription?.status;
-  if (status?.severity === "progress" || ["in_progress", "resolved"].includes(status?.state)) {
+  if (
+    status?.severity === "progress" ||
+    ["in_progress", "resolved"].includes(status?.state)
+  ) {
     return "pending";
   }
   return severityName(severityRank(format.subscriptionTone(subscription)));
@@ -229,17 +347,32 @@ function severityName(rank) {
   return "ok";
 }
 
-export function cellState(row, column, subscriptionIndex, pending, flipped = false) {
+export function cellState(
+  row,
+  column,
+  subscriptionIndex,
+  pending,
+  flipped = false,
+) {
   if (flipped) [row, column] = [column, row];
-  if (column.sourceKind === "external") return externalCellState(row, column,
-    row.kind === "channel" ? pending[pendingKey(deviceRequestName(row.device), row.number)] : null);
+  if (column.sourceKind === "external")
+    return externalCellState(
+      row,
+      column,
+      row.kind === "channel"
+        ? pending[pendingKey(deviceRequestName(row.device), row.number)]
+        : null,
+    );
   const receiverSubscriptions = subscriptionIndex.get(row.label) || new Map();
   if (row.kind === "channel" && column.kind === "channel") {
-    const pendingEntry = pending[pendingKey(deviceRequestName(row.device), row.number)] || pending[pendingKey(row.label, row.number)];
+    const pendingEntry =
+      pending[pendingKey(deviceRequestName(row.device), row.number)] ||
+      pending[pendingKey(row.label, row.number)];
     if (pendingEntry) {
       const targetsThisColumn =
         pendingEntry.action === "add"
-          ? pendingEntry.tx_device === column.label && pendingEntry.tx_channel === column.name
+          ? pendingEntry.tx_device === column.label &&
+            pendingEntry.tx_channel === column.name
           : Boolean(
               row.subscription &&
               row.subscription.tx_device === column.label &&
@@ -250,9 +383,18 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
       }
     }
     const subscription = row.subscription;
-    if (!subscription || subscription.tx_device !== column.label || subscription.tx_channel !== column.name) {
-      const target = selfConnectionTargetState(row.device, row.channel, column.device);
-      if (!target.allowed) return { kind: `self-${target.state}`, reason: target.reason };
+    if (
+      !subscription ||
+      subscription.tx_device !== column.label ||
+      subscription.tx_channel !== column.name
+    ) {
+      const target = selfConnectionTargetState(
+        row.device,
+        row.channel,
+        column.device,
+      );
+      if (!target.allowed)
+        return { kind: `self-${target.state}`, reason: target.reason };
       return { kind: "empty" };
     }
     return { kind: subscriptionSeverity(subscription), subscription };
@@ -262,7 +404,12 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
     if (!subscription || subscription.tx_device !== column.label) {
       return { kind: "empty" };
     }
-    if (column.kind === "group" && !column.channels.some((channel) => channel.name === subscription.tx_channel)) {
+    if (
+      column.kind === "group" &&
+      !column.channels.some(
+        (channel) => channel.name === subscription.tx_channel,
+      )
+    ) {
       return { kind: "empty" };
     }
     return { kind: "partial", subscription };
@@ -270,8 +417,20 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
   let count = 0;
   let worst = 0;
   for (const subscription of receiverSubscriptions.values()) {
-    if (row.kind === "group" && !row.channels.some((channel) => channel.number === subscription.rx_channel_number)) continue;
-    if (column.kind === "group" && !column.channels.some((channel) => channel.name === subscription.tx_channel)) continue;
+    if (
+      row.kind === "group" &&
+      !row.channels.some(
+        (channel) => channel.number === subscription.rx_channel_number,
+      )
+    )
+      continue;
+    if (
+      column.kind === "group" &&
+      !column.channels.some(
+        (channel) => channel.name === subscription.tx_channel,
+      )
+    )
+      continue;
     if (subscription.tx_device !== column.label) {
       continue;
     }
@@ -279,7 +438,10 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
       continue;
     }
     count += 1;
-    worst = Math.max(worst, severityRank(format.subscriptionTone(subscription)));
+    worst = Math.max(
+      worst,
+      severityRank(format.subscriptionTone(subscription)),
+    );
   }
   if (count === 0) {
     return { kind: "empty" };
@@ -292,7 +454,8 @@ function readTheme() {
     typeof getComputedStyle === "function" && document.documentElement
       ? getComputedStyle(document.documentElement)
       : null;
-  const read = (name, fallback) => (style ? style.getPropertyValue(name).trim() || fallback : fallback);
+  const read = (name, fallback) =>
+    style ? style.getPropertyValue(name).trim() || fallback : fallback;
   return {
     accent: read("--accent", "#ff2323"),
     bad: read("--bad", "#ff4d4d"),
@@ -320,7 +483,12 @@ function rowLabelText(row) {
 
 function rowLabelX(row) {
   if (row.kind === "device") return CELL + GUTTER_PADDING;
-  return CELL + GUTTER_PADDING + (row.grouped ? INDENT * 2 : INDENT) + (row.kind === "group" ? 18 : 0);
+  return (
+    CELL +
+    GUTTER_PADDING +
+    (row.grouped ? INDENT * 2 : INDENT) +
+    (row.kind === "group" ? 18 : 0)
+  );
 }
 
 function rowLabelFont(row, theme) {
@@ -341,10 +509,19 @@ export function measureMatrixLayout(context, rows, columns, theme) {
     gutter = Math.max(gutter, rowLabelX(row) + label + GUTTER_PADDING + CELL);
   }
   context.font = `13px ${theme.uiFont}`;
-  let header = rows.some((entry) => entry.kind === "group") || columns.some((entry) => entry.kind === "group") ? 192 : MINIMUM_HEADER;
+  let header =
+    rows.some((entry) => entry.kind === "group") ||
+    columns.some((entry) => entry.kind === "group")
+      ? 192
+      : MINIMUM_HEADER;
   for (const column of columns) {
     context.font = `${column.kind === "device" ? "600 " : ""}13px ${theme.uiFont}`;
-    header = Math.max(header, CELL * 2 + HEADER_PADDING + context.measureText(columnLabelText(column)).width);
+    header = Math.max(
+      header,
+      CELL * 2 +
+        HEADER_PADDING +
+        context.measureText(columnLabelText(column)).width,
+    );
   }
   return { gutter: Math.ceil(gutter), header: Math.ceil(header) };
 }
@@ -359,12 +536,21 @@ export function stickyDevice(entries, offset) {
     }
   }
   if (owner < 0 || owner * CELL >= offset) return null;
-  const next = entries.findIndex((entry, index) => index > owner && entry.kind === "device");
+  const next = entries.findIndex(
+    (entry, index) => index > owner && entry.kind === "device",
+  );
   const position = next < 0 ? 0 : Math.min(0, next * CELL - offset - CELL);
   return { index: owner, position };
 }
 
-export function ExpansionButtons({ label, expandLabel, collapseLabel, onExpand, onCollapse, vertical = false }) {
+export function ExpansionButtons({
+  label,
+  expandLabel,
+  collapseLabel,
+  onExpand,
+  onCollapse,
+  vertical = false,
+}) {
   const buttonClass = `btn btn-xs btn-square${vertical ? "" : " join-item"}`;
   return html`<div class=${vertical ? "matrix-expansion-stack" : "join"} role="group" aria-label=${label}>
     <button type="button" class=${buttonClass} title=${expandLabel} aria-label=${expandLabel} onClick=${onExpand}><${Icon} name="plus" /></button>
@@ -372,8 +558,20 @@ export function ExpansionButtons({ label, expandLabel, collapseLabel, onExpand, 
   </div>`;
 }
 
-export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: receivers, subscriptionIndex, flipped = false, locked = false,
-  onExpandDevices, receiverFilter = "", transmitterFilter = "", onReceiverFilter, onTransmitterFilter, pending = {} }) {
+export function RoutingMatrix({
+  columns: transmitters,
+  onOpenDevice,
+  rows: receivers,
+  subscriptionIndex,
+  flipped = false,
+  locked = false,
+  onExpandDevices,
+  receiverFilter = "",
+  transmitterFilter = "",
+  onReceiverFilter,
+  onTransmitterFilter,
+  pending = {},
+}) {
   const rows = flipped ? transmitters : receivers;
   const columns = flipped ? receivers : transmitters;
   const stage = useRef(null);
@@ -384,7 +582,10 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
   const [size, setSize] = useState({ height: 0, width: 0 });
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
   const [hover, setHover] = useState(null);
-  const [layout, setLayout] = useState({ gutter: MINIMUM_GUTTER, header: MINIMUM_HEADER });
+  const [layout, setLayout] = useState({
+    gutter: MINIMUM_GUTTER,
+    header: MINIMUM_HEADER,
+  });
   const busy = useRef(new Set());
 
   const contentWidth = layout.gutter + columns.length * CELL;
@@ -395,7 +596,9 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     if (!node) {
       return undefined;
     }
-    const observer = new ResizeObserver(() => setSize({ height: node.clientHeight, width: node.clientWidth }));
+    const observer = new ResizeObserver(() =>
+      setSize({ height: node.clientHeight, width: node.clientWidth }),
+    );
     const drawing = canvas.current;
     observer.observe(node);
     setSize({ height: node.clientHeight, width: node.clientWidth });
@@ -411,8 +614,16 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     if (!node) {
       return;
     }
-    const measured = measureMatrixLayout(node.getContext("2d"), rows, columns, theme);
-    if (measured.gutter !== layout.gutter || measured.header !== layout.header) {
+    const measured = measureMatrixLayout(
+      node.getContext("2d"),
+      rows,
+      columns,
+      theme,
+    );
+    if (
+      measured.gutter !== layout.gutter ||
+      measured.header !== layout.header
+    ) {
       setLayout(measured);
     }
   }, [columns, rows, theme]);
@@ -424,17 +635,40 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     }
     const frame = requestAnimationFrame(() => {
       const ratio = window.devicePixelRatio || 1;
-      const width = Math.floor(size.width * ratio), height = Math.floor(size.height * ratio);
+      const width = Math.floor(size.width * ratio),
+        height = Math.floor(size.height * ratio);
       if (node.width !== width) node.width = width;
       if (node.height !== height) node.height = height;
       node.style.width = `${size.width}px`;
       node.style.height = `${size.height}px`;
       const context = node.getContext("2d");
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      draw(context, { columns, flipped, hover, layout, pending, rows, scroll, size, subscriptionIndex, theme });
+      draw(context, {
+        columns,
+        flipped,
+        hover,
+        layout,
+        pending,
+        rows,
+        scroll,
+        size,
+        subscriptionIndex,
+        theme,
+      });
     });
     return () => cancelAnimationFrame(frame);
-  }, [columns, flipped, hover, layout, pending, rows, scroll, size, subscriptionIndex, theme]);
+  }, [
+    columns,
+    flipped,
+    hover,
+    layout,
+    pending,
+    rows,
+    scroll,
+    size,
+    subscriptionIndex,
+    theme,
+  ]);
 
   const locate = (event) => {
     const bounds = canvas.current.getBoundingClientRect();
@@ -442,8 +676,12 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     const y = event.clientY - bounds.top;
     const inGutter = x < layout.gutter;
     const inHeader = y < layout.header;
-    let columnIndex = inGutter ? -1 : Math.floor((x - layout.gutter + scroll.left) / CELL);
-    let rowIndex = inHeader ? -1 : Math.floor((y - layout.header + scroll.top) / CELL);
+    let columnIndex = inGutter
+      ? -1
+      : Math.floor((x - layout.gutter + scroll.left) / CELL);
+    let rowIndex = inHeader
+      ? -1
+      : Math.floor((y - layout.header + scroll.top) / CELL);
     if (inGutter && !inHeader) {
       const pinned = stickyDevice(rows, scroll.top);
       const top = layout.header + (pinned?.position ?? 0);
@@ -454,7 +692,10 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
       const left = layout.gutter + (pinned?.position ?? 0);
       if (pinned && x >= left && x < left + CELL) columnIndex = pinned.index;
     }
-    if ((!inGutter && (columnIndex < 0 || columnIndex >= columns.length)) || (!inHeader && (rowIndex < 0 || rowIndex >= rows.length))) {
+    if (
+      (!inGutter && (columnIndex < 0 || columnIndex >= columns.length)) ||
+      (!inHeader && (rowIndex < 0 || rowIndex >= rows.length))
+    ) {
       return null;
     }
     return { columnIndex, inGutter, inHeader, rowIndex, x, y };
@@ -481,7 +722,11 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
         toggleExpanded(flipped ? "transmitters" : "receivers", row.label);
       } else if (row.kind === "group") {
         const side = flipped ? "transmitters" : "receivers";
-        setGroupsExpanded(side, [row.key], !channelGroups.value[side].has(row.key));
+        setGroupsExpanded(
+          side,
+          [row.key],
+          !channelGroups.value[side].has(row.key),
+        );
       } else if (onOpenDevice && row.sourceKind !== "external") {
         onOpenDevice(row.label, flipped ? "transmit" : "receive");
       }
@@ -493,19 +738,31 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
         toggleExpanded(flipped ? "receivers" : "transmitters", column.label);
       } else if (column.kind === "group") {
         const side = flipped ? "receivers" : "transmitters";
-        setGroupsExpanded(side, [column.key], !channelGroups.value[side].has(column.key));
+        setGroupsExpanded(
+          side,
+          [column.key],
+          !channelGroups.value[side].has(column.key),
+        );
       } else if (onOpenDevice && column.sourceKind !== "external") {
         onOpenDevice(column.label, flipped ? "receive" : "transmit");
       }
       return;
     }
-    const row = flipped ? columns[position.columnIndex] : rows[position.rowIndex];
-    const column = flipped ? rows[position.rowIndex] : columns[position.columnIndex];
+    const row = flipped
+      ? columns[position.columnIndex]
+      : rows[position.rowIndex];
+    const column = flipped
+      ? rows[position.rowIndex]
+      : columns[position.columnIndex];
     if (row.kind !== "channel" || column.kind !== "channel") {
-      const entries = [[row, "receivers"], [column, "transmitters"]].filter(([entry]) => entry.kind !== "channel");
+      const entries = [
+        [row, "receivers"],
+        [column, "transmitters"],
+      ].filter(([entry]) => entry.kind !== "channel");
       const expand = entries.some(([entry]) => !entry.expanded);
       for (const [entry, side] of entries) {
-        if (entry.kind === "device") setAllExpanded(side, [entry.label], expand);
+        if (entry.kind === "device")
+          setAllExpanded(side, [entry.label], expand);
         else setGroupsExpanded(side, [entry.key], expand);
       }
       return;
@@ -514,7 +771,10 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
       return;
     }
 
-    if (!row.device.online || (column.sourceKind !== "external" && !column.device.online)) {
+    if (
+      !row.device.online ||
+      (column.sourceKind !== "external" && !column.device.online)
+    ) {
       setError(t("Both devices must be online to change this connection."));
       return;
     }
@@ -524,7 +784,10 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     }
     const state = cellState(row, column, subscriptionIndex, pending);
     if (state.kind === "pending") return;
-    if (state.kind === "self-unsupported" || state.kind === "self-unavailable") {
+    if (
+      state.kind === "self-unsupported" ||
+      state.kind === "self-unavailable"
+    ) {
       setError(state.reason);
       return;
     }
@@ -534,35 +797,74 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
       if (row.kind === "channel" && column.kind === "channel") {
         const subscribed = Boolean(state.subscription);
         if (column.sourceKind === "external") {
-          const outcome = await runAction(t("Route external audio to {device} {channel}", { device: row.label, channel: row.name }), () =>
-            api.subscribeExternal(externalSubscriptionRequest(column, requestName, row.number, subscribed)));
-          if (outcome.ok && outcome.result.arc_effective_state_confirmed !== true) {
-            markExternalPending(requestName, row.number, column.sourceKey, column.number, subscribed);
+          const outcome = await runAction(
+            t("Route external audio to {device} {channel}", {
+              device: row.label,
+              channel: row.name,
+            }),
+            () =>
+              api.subscribeExternal(
+                externalSubscriptionRequest(
+                  column,
+                  requestName,
+                  row.number,
+                  subscribed,
+                ),
+              ),
+          );
+          if (
+            outcome.ok &&
+            outcome.result.arc_effective_state_confirmed !== true
+          ) {
+            markExternalPending(
+              requestName,
+              row.number,
+              column.sourceKey,
+              column.number,
+              subscribed,
+            );
           }
           return;
         }
         const change = subscribed
           ? { action: "remove", rx_channel: row.number, rx_device: requestName }
-          : { action: "add", rx_channel: row.number, rx_device: requestName, tx_channel: column.name, tx_device: column.label };
-        await requestSubscriptionChange(change, () => runAction(
-          subscribed
-            ? t("unsubscribe {device} {channel}", { device: row.label, channel: row.name })
-            : t("subscribe {receiverDevice} {receiverChannel} to {transmitterChannel}@{transmitterDevice}", {
-                receiverDevice: row.label,
-                receiverChannel: row.name,
-                transmitterChannel: column.name,
-                transmitterDevice: column.label,
-              }),
-          () =>
+          : {
+              action: "add",
+              rx_channel: row.number,
+              rx_device: requestName,
+              tx_channel: column.name,
+              tx_device: column.label,
+            };
+        await requestSubscriptionChange(change, () =>
+          runAction(
             subscribed
-              ? api.unsubscribe({ rx_channel: row.number, rx_device: requestName })
-              : api.subscribe({
-                  rx_channel: row.number,
-                  rx_device: requestName,
-                  tx_channel: column.name,
-                  tx_device: column.label,
-                }),
-        ));
+              ? t("unsubscribe {device} {channel}", {
+                  device: row.label,
+                  channel: row.name,
+                })
+              : t(
+                  "subscribe {receiverDevice} {receiverChannel} to {transmitterChannel}@{transmitterDevice}",
+                  {
+                    receiverDevice: row.label,
+                    receiverChannel: row.name,
+                    transmitterChannel: column.name,
+                    transmitterDevice: column.label,
+                  },
+                ),
+            () =>
+              subscribed
+                ? api.unsubscribe({
+                    rx_channel: row.number,
+                    rx_device: requestName,
+                  })
+                : api.subscribe({
+                    rx_channel: row.number,
+                    rx_device: requestName,
+                    tx_channel: column.name,
+                    tx_device: column.label,
+                  }),
+          ),
+        );
         return;
       }
     } finally {
@@ -570,18 +872,49 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     }
   };
 
-  const statusHover = hover && ((hover.inHeader && !hover.inGutter && hover.y >= layout.header - CELL && columns[hover.columnIndex]?.activity?.count)
-    || (hover.inGutter && !hover.inHeader && hover.x >= layout.gutter - CELL && rows[hover.rowIndex]?.activity?.count));
-  const cellHover = hover && !hover.inHeader && !hover.inGutter
-    && rows[hover.rowIndex]?.kind === "channel" && columns[hover.columnIndex]?.kind === "channel";
-  const hoverText = hover && (cellHover || statusHover)
-    ? describeHover(hover, rows, columns, subscriptionIndex, pending, flipped) : "";
-  let cursor = !hover || (hover.inGutter && hover.inHeader) ? "default"
-    : hover.inGutter || hover.inHeader ? "pointer"
-    : rows[hover.rowIndex]?.kind !== "channel" || columns[hover.columnIndex]?.kind !== "channel" ? "pointer" : "crosshair";
+  const statusHover =
+    hover &&
+    ((hover.inHeader &&
+      !hover.inGutter &&
+      hover.y >= layout.header - CELL &&
+      columns[hover.columnIndex]?.activity?.count) ||
+      (hover.inGutter &&
+        !hover.inHeader &&
+        hover.x >= layout.gutter - CELL &&
+        rows[hover.rowIndex]?.activity?.count));
+  const cellHover =
+    hover &&
+    !hover.inHeader &&
+    !hover.inGutter &&
+    rows[hover.rowIndex]?.kind === "channel" &&
+    columns[hover.columnIndex]?.kind === "channel";
+  const hoverText =
+    hover && (cellHover || statusHover)
+      ? describeHover(hover, rows, columns, subscriptionIndex, pending, flipped)
+      : "";
+  let cursor =
+    !hover || (hover.inGutter && hover.inHeader)
+      ? "default"
+      : hover.inGutter || hover.inHeader
+        ? "pointer"
+        : rows[hover.rowIndex]?.kind !== "channel" ||
+            columns[hover.columnIndex]?.kind !== "channel"
+          ? "pointer"
+          : "crosshair";
   if (cellHover) {
-    const state = cellState(rows[hover.rowIndex], columns[hover.columnIndex], subscriptionIndex, pending, flipped);
-    if (locked || state.kind === "self-unsupported" || state.kind === "self-unavailable") cursor = "not-allowed";
+    const state = cellState(
+      rows[hover.rowIndex],
+      columns[hover.columnIndex],
+      subscriptionIndex,
+      pending,
+      flipped,
+    );
+    if (
+      locked ||
+      state.kind === "self-unsupported" ||
+      state.kind === "self-unavailable"
+    )
+      cursor = "not-allowed";
   }
 
   return html`
@@ -597,7 +930,13 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
           aria-describedby=${hoverText ? "routing-matrix-tooltip" : undefined}
           style=${`cursor:${cursor}`}
           ref=${viewport}
-          onScroll=${(event) => { setHover(null); setScroll({ left: event.target.scrollLeft, top: event.target.scrollTop }); }}
+          onScroll=${(event) => {
+            setHover(null);
+            setScroll({
+              left: event.target.scrollLeft,
+              top: event.target.scrollTop,
+            });
+          }}
           onMouseMove=${(event) => setHover(locate(event))}
           onMouseLeave=${() => setHover(null)}
           onClick=${onClick}
@@ -606,21 +945,39 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
         </div>
         ${hoverText && hover ? html`<${MatrixTooltip} id="routing-matrix-tooltip" text=${hoverText} point=${hover} bounds=${size} onDismiss=${() => setHover(null)} />` : null}
         <div class="matrix-filters" style=${`left:12px;width:${layout.gutter - CELL - 36}px;top:${Math.max(12, layout.header / 2 - 60)}px`}>
-          ${["transmitters", "receivers"].map((side) => html`<label class="matrix-filter-label">${side === "receivers" ? t("Filter receivers") : t("Filter transmitters")}
+          ${["transmitters", "receivers"].map(
+            (
+              side,
+            ) => html`<label class="matrix-filter-label">${side === "receivers" ? t("Filter receivers") : t("Filter transmitters")}
             <input type="search" aria-label=${side === "receivers" ? t("Receivers") : t("Transmitters")}
               value=${side === "receivers" ? receiverFilter : transmitterFilter}
               onInput=${(event) => (side === "receivers" ? onReceiverFilter : onTransmitterFilter)?.(event.target.value)} />
-          </label>`)}
+          </label>`,
+          )}
         </div>
         ${[false, true].map((columnAxis) => {
           const side = columnAxis !== flipped ? "transmitters" : "receivers";
-          const label = side === "receivers" ? t("receiver devices and groups") : t("transmitter devices and groups");
-          const expandLabel = side === "receivers" ? t("Expand all receiver devices and groups") : t("Expand all transmitter devices and groups");
-          const collapseLabel = side === "receivers" ? t("Collapse all receiver devices and groups") : t("Collapse all transmitter devices and groups");
-          const count = (columnAxis ? columns : rows).filter((entry) => entry.kind === "device").length;
+          const label =
+            side === "receivers"
+              ? t("receiver devices and groups")
+              : t("transmitter devices and groups");
+          const expandLabel =
+            side === "receivers"
+              ? t("Expand all receiver devices and groups")
+              : t("Expand all transmitter devices and groups");
+          const collapseLabel =
+            side === "receivers"
+              ? t("Collapse all receiver devices and groups")
+              : t("Collapse all transmitter devices and groups");
+          const count = (columnAxis ? columns : rows).filter(
+            (entry) => entry.kind === "device",
+          ).length;
           return html`<div class=${`matrix-axis-controls ${columnAxis ? "column-axis" : "row-axis"}`}
-            style=${columnAxis ? `left:${layout.gutter - CELL - 6}px;top:8px;width:${CELL}px`
-              : `left:12px;top:${layout.header - CELL}px;width:${layout.gutter - 24}px;height:${CELL}px`}>
+            style=${
+              columnAxis
+                ? `left:${layout.gutter - CELL - 6}px;top:8px;width:${CELL}px`
+                : `left:12px;top:${layout.header - CELL}px;width:${layout.gutter - 24}px;height:${CELL}px`
+            }>
             <span class="matrix-axis-title">${side === "receivers" ? t("Receivers ({count})", { count }) : t("Transmitters ({count})", { count })}</span>
             <div class="matrix-expansion-controls"><${ExpansionButtons} vertical=${columnAxis} label=${label} expandLabel=${expandLabel} collapseLabel=${collapseLabel} onExpand=${() => onExpandDevices(side, true)} onCollapse=${() => onExpandDevices(side, false)} /></div>
           </div>`;
@@ -630,7 +987,14 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
   `;
 }
 
-export function describeHover(hover, rows, columns, subscriptionIndex, pending, flipped) {
+export function describeHover(
+  hover,
+  rows,
+  columns,
+  subscriptionIndex,
+  pending,
+  flipped,
+) {
   if (!hover) {
     return "";
   }
@@ -641,31 +1005,74 @@ export function describeHover(hover, rows, columns, subscriptionIndex, pending, 
     const row = rows[hover.rowIndex];
     return row.kind === "device"
       ? flipped
-        ? tn(row.channelCount, "{device} — {count} transmit channel", "{device} — {count} transmit channels", { device: row.label })
-        : tn(row.channelCount, "{device} — {count} receive channel", "{device} — {count} receive channels", { device: row.label })
-      : row.kind === "group" ? tn(row.channelCount, "{device} — {group} ({count} channel)", "{device} — {group} ({count} channels)", { device: row.label, group: row.name })
-      : `${row.label} ${row.name}`;
+        ? tn(
+            row.channelCount,
+            "{device} — {count} transmit channel",
+            "{device} — {count} transmit channels",
+            { device: row.label },
+          )
+        : tn(
+            row.channelCount,
+            "{device} — {count} receive channel",
+            "{device} — {count} receive channels",
+            { device: row.label },
+          )
+      : row.kind === "group"
+        ? tn(
+            row.channelCount,
+            "{device} — {group} ({count} channel)",
+            "{device} — {group} ({count} channels)",
+            { device: row.label, group: row.name },
+          )
+        : `${row.label} ${row.name}`;
   }
   if (hover.inHeader) {
     const column = columns[hover.columnIndex];
     return column.kind === "device"
       ? flipped
-        ? tn(column.channelCount, "{device} — {count} receive channel", "{device} — {count} receive channels", { device: column.label })
-        : tn(column.channelCount, "{device} — {count} transmit channel", "{device} — {count} transmit channels", { device: column.label })
-      : column.kind === "group" ? tn(column.channelCount, "{device} — {group} ({count} channel)", "{device} — {group} ({count} channels)", { device: column.label, group: column.name })
-      : `${column.label} ${column.name}`;
+        ? tn(
+            column.channelCount,
+            "{device} — {count} receive channel",
+            "{device} — {count} receive channels",
+            { device: column.label },
+          )
+        : tn(
+            column.channelCount,
+            "{device} — {count} transmit channel",
+            "{device} — {count} transmit channels",
+            { device: column.label },
+          )
+      : column.kind === "group"
+        ? tn(
+            column.channelCount,
+            "{device} — {group} ({count} channel)",
+            "{device} — {group} ({count} channels)",
+            { device: column.label, group: column.name },
+          )
+        : `${column.label} ${column.name}`;
   }
   const row = flipped ? columns[hover.columnIndex] : rows[hover.rowIndex];
   const column = flipped ? rows[hover.rowIndex] : columns[hover.columnIndex];
   const state = cellState(row, column, subscriptionIndex, pending);
-  const receiver = row.kind === "device" ? row.label : `${row.name}@${row.label}`;
-  const transmitter = column.kind === "device" ? column.label : `${column.name}@${column.label}`;
+  const receiver =
+    row.kind === "device" ? row.label : `${row.name}@${row.label}`;
+  const transmitter =
+    column.kind === "device" ? column.label : `${column.name}@${column.label}`;
   if (state.kind === "aggregate") {
-    const summary = state.severity === "error"
-      ? tn(state.count, "{count} subscribed, some with errors", "{count} subscribed, some with errors")
-      : state.severity === "warning"
-        ? tn(state.count, "{count} subscribed, some with warnings", "{count} subscribed, some with warnings")
-        : tn(state.count, "{count} subscribed", "{count} subscribed");
+    const summary =
+      state.severity === "error"
+        ? tn(
+            state.count,
+            "{count} subscribed, some with errors",
+            "{count} subscribed, some with errors",
+          )
+        : state.severity === "warning"
+          ? tn(
+              state.count,
+              "{count} subscribed, some with warnings",
+              "{count} subscribed, some with warnings",
+            )
+          : tn(state.count, "{count} subscribed", "{count} subscribed");
     return `${receiver} ← ${transmitter}\n${summary}`;
   }
   if (state.kind === "pending") {
@@ -686,24 +1093,53 @@ export function describeHover(hover, rows, columns, subscriptionIndex, pending, 
   return `${receiver} ← ${transmitter}`;
 }
 
-function draw(context, { columns, flipped, hover, layout, pending, rows, scroll, size, subscriptionIndex, theme }) {
+function draw(
+  context,
+  {
+    columns,
+    flipped,
+    hover,
+    layout,
+    pending,
+    rows,
+    scroll,
+    size,
+    subscriptionIndex,
+    theme,
+  },
+) {
   const { gutter, header } = layout;
   context.clearRect(0, 0, size.width, size.height);
   context.fillStyle = theme.background;
   context.fillRect(0, 0, size.width, size.height);
 
   const firstColumn = Math.max(0, Math.floor(scroll.left / CELL));
-  const lastColumn = Math.min(columns.length, Math.ceil((scroll.left + size.width - gutter) / CELL) + 1);
+  const lastColumn = Math.min(
+    columns.length,
+    Math.ceil((scroll.left + size.width - gutter) / CELL) + 1,
+  );
   const firstRow = Math.max(0, Math.floor(scroll.top / CELL));
-  const lastRow = Math.min(rows.length, Math.ceil((scroll.top + size.height - header) / CELL) + 1);
+  const lastRow = Math.min(
+    rows.length,
+    Math.ceil((scroll.top + size.height - header) / CELL) + 1,
+  );
   const columnX = (index) => gutter + index * CELL - scroll.left;
   const rowY = (index) => header + index * CELL - scroll.top;
 
   context.save();
   context.beginPath();
-  context.rect(gutter, header,
-    Math.max(0, Math.min(size.width - gutter, columns.length * CELL - scroll.left)),
-    Math.max(0, Math.min(size.height - header, rows.length * CELL - scroll.top)));
+  context.rect(
+    gutter,
+    header,
+    Math.max(
+      0,
+      Math.min(size.width - gutter, columns.length * CELL - scroll.left),
+    ),
+    Math.max(
+      0,
+      Math.min(size.height - header, rows.length * CELL - scroll.top),
+    ),
+  );
   context.clip();
 
   context.fillStyle = theme.cell;
@@ -727,7 +1163,12 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
       context.fillRect(gutter, rowY(hover.rowIndex), size.width - gutter, CELL);
     }
     if (!hover.inGutter && columns[hover.columnIndex]) {
-      context.fillRect(columnX(hover.columnIndex), header, CELL, size.height - header);
+      context.fillRect(
+        columnX(hover.columnIndex),
+        header,
+        CELL,
+        size.height - header,
+      );
     }
   }
 
@@ -753,21 +1194,32 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
   context.font = `600 10px ${theme.uiFont}`;
   for (let rowIndex = firstRow; rowIndex < lastRow; rowIndex += 1) {
     const row = rows[rowIndex];
-    for (let columnIndex = firstColumn; columnIndex < lastColumn; columnIndex += 1) {
+    for (
+      let columnIndex = firstColumn;
+      columnIndex < lastColumn;
+      columnIndex += 1
+    ) {
       const column = columns[columnIndex];
       if (!column) {
         continue;
       }
       if (row.kind !== "channel" || column.kind !== "channel") {
         if (row.kind !== "device" || column.kind !== "device") continue;
-        const entries = [row, column].filter((entry) => entry.kind !== "channel");
+        const entries = [row, column].filter(
+          (entry) => entry.kind !== "channel",
+        );
         const expand = entries.some((entry) => !entry.expanded);
-        const x = columnX(columnIndex) + CELL / 2, y = rowY(rowIndex) + CELL / 2;
+        const x = columnX(columnIndex) + CELL / 2,
+          y = rowY(rowIndex) + CELL / 2;
         context.strokeStyle = theme.muted;
         context.lineWidth = 1.5;
         context.beginPath();
-        context.moveTo(x - 5, y); context.lineTo(x + 5, y);
-        if (expand) { context.moveTo(x, y - 5); context.lineTo(x, y + 5); }
+        context.moveTo(x - 5, y);
+        context.lineTo(x + 5, y);
+        if (expand) {
+          context.moveTo(x, y - 5);
+          context.lineTo(x, y + 5);
+        }
         context.stroke();
         context.lineWidth = 1;
         continue;
@@ -775,9 +1227,17 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
       const state = cellState(row, column, subscriptionIndex, pending, flipped);
       const x = columnX(columnIndex);
       const y = rowY(rowIndex);
-      if (state.kind === "self-unsupported" || state.kind === "self-unavailable") {
+      if (
+        state.kind === "self-unsupported" ||
+        state.kind === "self-unavailable"
+      ) {
         context.fillStyle = theme.panel;
-        context.fillRect(Math.floor(x) + 2, Math.floor(y) + 2, CELL - 4, CELL - 4);
+        context.fillRect(
+          Math.floor(x) + 2,
+          Math.floor(y) + 2,
+          CELL - 4,
+          CELL - 4,
+        );
         continue;
       }
       if (state.kind === "empty") {
@@ -787,15 +1247,40 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
         drawStatusIcon(context, x + CELL / 2, y + CELL / 2, "pending", theme);
         continue;
       }
-      const severity = state.kind === "aggregate" ? state.severity
-        : state.kind === "partial" ? severityName(severityRank(format.subscriptionTone(state.subscription))) : state.kind;
+      const severity =
+        state.kind === "aggregate"
+          ? state.severity
+          : state.kind === "partial"
+            ? severityName(
+                severityRank(format.subscriptionTone(state.subscription)),
+              )
+            : state.kind;
       drawStatusIcon(context, x + CELL / 2, y + CELL / 2, severity, theme);
     }
   }
   context.restore();
 
-  drawGutter(context, { firstRow, gutter, header, hover, rows, scroll, size, theme });
-  drawHeader(context, { columns, firstColumn, gutter, header, hover, lastColumn, scroll, size, theme });
+  drawGutter(context, {
+    firstRow,
+    gutter,
+    header,
+    hover,
+    rows,
+    scroll,
+    size,
+    theme,
+  });
+  drawHeader(context, {
+    columns,
+    firstColumn,
+    gutter,
+    header,
+    hover,
+    lastColumn,
+    scroll,
+    size,
+    theme,
+  });
 
   context.fillStyle = theme.panel;
   context.fillRect(0, 0, gutter, header);
@@ -803,9 +1288,15 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
   context.lineWidth = 4;
   context.beginPath();
   context.moveTo(0, header);
-  context.lineTo(Math.min(size.width, gutter + columns.length * CELL - scroll.left), header);
+  context.lineTo(
+    Math.min(size.width, gutter + columns.length * CELL - scroll.left),
+    header,
+  );
   context.moveTo(gutter, 0);
-  context.lineTo(gutter, Math.min(size.height, header + rows.length * CELL - scroll.top));
+  context.lineTo(
+    gutter,
+    Math.min(size.height, header + rows.length * CELL - scroll.top),
+  );
   context.stroke();
   context.lineWidth = 1;
 }
@@ -815,8 +1306,12 @@ function drawExpansionMark(context, x, y, expanded, theme) {
   context.lineWidth = 1;
   context.strokeRect(x - 6, y - 6, 12, 12);
   context.beginPath();
-  context.moveTo(x - 3, y); context.lineTo(x + 3, y);
-  if (!expanded) { context.moveTo(x, y - 3); context.lineTo(x, y + 3); }
+  context.moveTo(x - 3, y);
+  context.lineTo(x + 3, y);
+  if (!expanded) {
+    context.moveTo(x, y - 3);
+    context.lineTo(x, y + 3);
+  }
   context.stroke();
 }
 
@@ -856,11 +1351,16 @@ function drawStatusIcon(context, x, y, severity, theme, size = CELL - 4) {
   } else if (severity === "warning") {
     context.fillRect(0, 0, 26, 26);
     context.beginPath();
-    context.moveTo(13, 4); context.lineTo(22, 21); context.lineTo(4, 21); context.closePath();
+    context.moveTo(13, 4);
+    context.lineTo(22, 21);
+    context.lineTo(4, 21);
+    context.closePath();
     context.stroke();
     context.beginPath();
-    context.moveTo(13, 9); context.lineTo(13, 15);
-    context.moveTo(13, 17); context.lineTo(13, 19);
+    context.moveTo(13, 9);
+    context.lineTo(13, 15);
+    context.moveTo(13, 17);
+    context.lineTo(13, 19);
   } else if (severity === "error") {
     context.fillRect(0, 0, 26, 26);
     context.beginPath();
@@ -870,26 +1370,55 @@ function drawStatusIcon(context, x, y, severity, theme, size = CELL - 4) {
   } else {
     context.fillRect(0, 0, 26, 26);
     context.beginPath();
-    context.moveTo(6, 13); context.lineTo(11, 18); context.lineTo(21, 7);
+    context.moveTo(6, 13);
+    context.lineTo(11, 18);
+    context.lineTo(21, 7);
   }
   context.stroke();
   context.restore();
 }
 
-function drawGutter(context, { firstRow, gutter, header, hover, rows, scroll, size, theme }) {
+function drawGutter(
+  context,
+  { firstRow, gutter, header, hover, rows, scroll, size, theme },
+) {
   context.save();
   context.beginPath();
-  context.rect(0, header, gutter, Math.max(0, Math.min(size.height - header, rows.length * CELL - scroll.top)));
+  context.rect(
+    0,
+    header,
+    gutter,
+    Math.max(
+      0,
+      Math.min(size.height - header, rows.length * CELL - scroll.top),
+    ),
+  );
   context.clip();
   context.fillStyle = theme.panel;
   context.fillRect(0, header, gutter, size.height - header);
   context.textBaseline = "middle";
-  const lastRow = Math.min(rows.length, Math.ceil((scroll.top + size.height - header) / CELL) + 1);
+  const lastRow = Math.min(
+    rows.length,
+    Math.ceil((scroll.top + size.height - header) / CELL) + 1,
+  );
   for (let index = firstRow; index < lastRow; index += 1) {
-    drawGutterRow(context, rows[index], index, header + index * CELL - scroll.top, { gutter, hover, theme });
+    drawGutterRow(
+      context,
+      rows[index],
+      index,
+      header + index * CELL - scroll.top,
+      { gutter, hover, theme },
+    );
   }
   const pinned = stickyDevice(rows, scroll.top);
-  if (pinned) drawGutterRow(context, rows[pinned.index], pinned.index, header + pinned.position, { gutter, hover, theme });
+  if (pinned)
+    drawGutterRow(
+      context,
+      rows[pinned.index],
+      pinned.index,
+      header + pinned.position,
+      { gutter, hover, theme },
+    );
   context.restore();
 }
 
@@ -908,7 +1437,14 @@ function drawGutterRow(context, row, index, y, { gutter, hover, theme }) {
   context.fillStyle = theme.text;
   context.textAlign = "left";
   if (row.activity?.count) {
-    drawStatusIcon(context, gutter - CELL / 2, y + CELL / 2, row.activity.severity, theme, 18);
+    drawStatusIcon(
+      context,
+      gutter - CELL / 2,
+      y + CELL / 2,
+      row.activity.severity,
+      theme,
+      18,
+    );
     context.fillStyle = theme.text;
   }
   if (row.kind === "device") {
@@ -920,25 +1456,63 @@ function drawGutterRow(context, row, index, y, { gutter, hover, theme }) {
     const x = CELL + GUTTER_PADDING + (row.grouped ? INDENT * 2 : INDENT);
     context.strokeStyle = theme.lineStrong;
     context.beginPath();
-    context.moveTo(x - 16, y); context.lineTo(x - 16, y + CELL / 2); context.lineTo(x - 6, y + CELL / 2);
+    context.moveTo(x - 16, y);
+    context.lineTo(x - 16, y + CELL / 2);
+    context.lineTo(x - 6, y + CELL / 2);
     context.stroke();
-    if (row.kind === "group") drawExpansionMark(context, x + 6, y + CELL / 2, row.expanded, theme);
+    if (row.kind === "group")
+      drawExpansionMark(context, x + 6, y + CELL / 2, row.expanded, theme);
     context.fillText(rowLabelText(row), rowLabelX(row), y + CELL / 2);
   }
 }
 
-function drawHeader(context, { columns, firstColumn, gutter, header, hover, lastColumn, scroll, size, theme }) {
+function drawHeader(
+  context,
+  {
+    columns,
+    firstColumn,
+    gutter,
+    header,
+    hover,
+    lastColumn,
+    scroll,
+    size,
+    theme,
+  },
+) {
   context.save();
   context.beginPath();
-  context.rect(gutter, 0, Math.max(0, Math.min(size.width - gutter, columns.length * CELL - scroll.left)), header);
+  context.rect(
+    gutter,
+    0,
+    Math.max(
+      0,
+      Math.min(size.width - gutter, columns.length * CELL - scroll.left),
+    ),
+    header,
+  );
   context.clip();
   context.fillStyle = theme.panel;
   context.fillRect(gutter, 0, size.width - gutter, header);
   for (let index = firstColumn; index < lastColumn; index += 1) {
-    if (columns[index]) drawHeaderColumn(context, columns[index], index, gutter + index * CELL - scroll.left, { header, hover, theme });
+    if (columns[index])
+      drawHeaderColumn(
+        context,
+        columns[index],
+        index,
+        gutter + index * CELL - scroll.left,
+        { header, hover, theme },
+      );
   }
   const pinned = stickyDevice(columns, scroll.left);
-  if (pinned) drawHeaderColumn(context, columns[pinned.index], pinned.index, gutter + pinned.position, { header, hover, theme });
+  if (pinned)
+    drawHeaderColumn(
+      context,
+      columns[pinned.index],
+      pinned.index,
+      gutter + pinned.position,
+      { header, hover, theme },
+    );
   context.restore();
 }
 
@@ -958,18 +1532,37 @@ function drawHeaderColumn(context, column, index, x, { header, hover, theme }) {
     drawExpansionMark(context, x + CELL / 2, 14, column.expanded, theme);
   } else if (column.kind === "group") {
     context.font = `13px ${theme.uiFont}`;
-    drawExpansionMark(context, x + CELL / 2, header - HEADER_PADDING - CELL - context.measureText(columnLabelText(column)).width - 12, column.expanded, theme);
+    drawExpansionMark(
+      context,
+      x + CELL / 2,
+      header -
+        HEADER_PADDING -
+        CELL -
+        context.measureText(columnLabelText(column)).width -
+        12,
+      column.expanded,
+      theme,
+    );
   }
   context.save();
   if (column.activity?.count) {
-    drawStatusIcon(context, x + CELL / 2, header - CELL / 2, column.activity.severity, theme);
+    drawStatusIcon(
+      context,
+      x + CELL / 2,
+      header - CELL / 2,
+      column.activity.severity,
+      theme,
+    );
   }
   context.translate(x + CELL / 2, header - HEADER_PADDING - CELL);
   context.rotate(-Math.PI / 2);
   context.textAlign = "left";
   context.textBaseline = "middle";
   context.fillStyle = theme.text;
-  context.font = column.kind === "device" ? `600 13px ${theme.uiFont}` : `13px ${theme.uiFont}`;
+  context.font =
+    column.kind === "device"
+      ? `600 13px ${theme.uiFont}`
+      : `13px ${theme.uiFont}`;
   context.fillText(columnLabelText(column), 0, 0);
   context.restore();
 }

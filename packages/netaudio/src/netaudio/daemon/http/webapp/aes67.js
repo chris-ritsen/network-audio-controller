@@ -22,7 +22,9 @@ export function aes67Status(device) {
       ...status,
       label: "Managed by DDM",
       rtpAvailable: reportedBoolean(capabilities?.rtp_audio_supported),
-      rebootRequired: reportedBoolean(capabilities?.rtp_audio_support_suppressed),
+      rebootRequired: reportedBoolean(
+        capabilities?.rtp_audio_support_suppressed,
+      ),
     };
   }
   if (supported === false) {
@@ -35,7 +37,8 @@ export function aes67Status(device) {
       label: configured ? "Enable pending" : "Disable pending",
     };
   }
-  if (current !== null) return { ...status, label: current ? "Enabled" : "Disabled" };
+  if (current !== null)
+    return { ...status, label: current ? "Enabled" : "Disabled" };
   if (configured !== null) {
     return {
       ...status,

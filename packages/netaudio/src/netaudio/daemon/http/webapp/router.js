@@ -43,7 +43,13 @@ export function resolve(pathname, search) {
   for (const route of ROUTES) {
     const parameters = matchPattern(route.pattern, segments);
     if (parameters) {
-      return { found: true, parameters, path: pathname, query, view: route.view };
+      return {
+        found: true,
+        parameters,
+        path: pathname,
+        query,
+        view: route.view,
+      };
     }
   }
   return { found: false, parameters: {}, path: pathname, query, view: null };
@@ -93,7 +99,9 @@ export function setQueryParameters(values, { replace = true } = {}) {
     }
   }
   const serialized = parameters.toString();
-  const target = serialized ? `${window.location.pathname}?${serialized}` : window.location.pathname;
+  const target = serialized
+    ? `${window.location.pathname}?${serialized}`
+    : window.location.pathname;
   if (target === `${window.location.pathname}${window.location.search}`) {
     return;
   }
@@ -141,8 +149,14 @@ export function startRouter() {
     if (!shouldInterceptClick(event)) {
       return;
     }
-    const anchor = event.target.closest ? event.target.closest("a[href]") : null;
-    if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) {
+    const anchor = event.target.closest
+      ? event.target.closest("a[href]")
+      : null;
+    if (
+      !anchor ||
+      anchor.target === "_blank" ||
+      anchor.hasAttribute("download")
+    ) {
       return;
     }
     const url = new URL(anchor.href, window.location.origin);

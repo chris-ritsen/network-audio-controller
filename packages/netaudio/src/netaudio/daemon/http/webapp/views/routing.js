@@ -4,10 +4,27 @@ import { t } from "../i18n.js";
 import { html, useEffect, useLayoutEffect, useState } from "../lib/preact.js";
 import { RoutingControls } from "../routing-controls.js";
 import { Icon } from "../icons.js";
-import { buildMatrixModel, expanded, initializeExpansion, RoutingMatrix, setAllExpanded } from "../matrix.js";
-import { channelGroups, enableChannelGroups, groupChannels, setGroupsExpanded } from "../channel-groups.js";
+import {
+  buildMatrixModel,
+  expanded,
+  initializeExpansion,
+  RoutingMatrix,
+  setAllExpanded,
+} from "../matrix.js";
+import {
+  channelGroups,
+  enableChannelGroups,
+  groupChannels,
+  setGroupsExpanded,
+} from "../channel-groups.js";
 import { devicePath, navigate } from "../router.js";
-import { contextDevices, contextExternalFlows, deviceRequestName, pendingSubscriptions, scopedDevices as devices } from "../store.js";
+import {
+  contextDevices,
+  contextExternalFlows,
+  deviceRequestName,
+  pendingSubscriptions,
+  scopedDevices as devices,
+} from "../store.js";
 import { inventoryFilters, saveRoutingFilters } from "../device-filters.js";
 
 export const routingLayout = { compactQuery: "(max-width: 900px)" };
@@ -15,19 +32,27 @@ export const routingLayout = { compactQuery: "(max-width: 900px)" };
 function RoutingView() {
   const all = format.sortedDevices(contextDevices.value);
   useLayoutEffect(() => initializeExpansion(all), [devices.value]);
-  const [compact, setCompact] = useState(() => window.matchMedia(routingLayout.compactQuery).matches);
+  const [compact, setCompact] = useState(
+    () => window.matchMedia(routingLayout.compactQuery).matches,
+  );
   const filters = inventoryFilters.value;
   const listMode = filters.listMode === true;
   const receiverFilter = filters.receiverSearch || "";
   const transmitterFilter = filters.transmitterSearch || "";
   const updateFilters = saveRoutingFilters;
   const [gridLocked, setGridLocked] = useState(() => {
-    try { return window.localStorage.getItem("netaudio.matrix.locked") === "true"; }
-    catch { return false; }
+    try {
+      return window.localStorage.getItem("netaudio.matrix.locked") === "true";
+    } catch {
+      return false;
+    }
   });
   const [flipped, setFlipped] = useState(() => {
-    try { return window.localStorage.getItem("netaudio.matrix.flipped") !== "false"; }
-    catch { return true; }
+    try {
+      return window.localStorage.getItem("netaudio.matrix.flipped") !== "false";
+    } catch {
+      return true;
+    }
   });
   useEffect(() => {
     const media = window.matchMedia(routingLayout.compactQuery);
@@ -56,16 +81,31 @@ function RoutingView() {
     groups,
     pending,
   });
-  const receiverLabels = model.rows.filter((row) => row.kind === "device").map((row) => row.label);
-  const transmitterLabels = model.columns.filter((column) => column.kind === "device").map((column) => column.label);
+  const receiverLabels = model.rows
+    .filter((row) => row.kind === "device")
+    .map((row) => row.label);
+  const transmitterLabels = model.columns
+    .filter((column) => column.kind === "device")
+    .map((column) => column.label);
   const expandGroups = (side, value) => {
     const axis = side === "receivers" ? model.rows : model.columns;
-    const keys = axis.filter((entry) => entry.kind === "device" && entry.sourceKind !== "external").flatMap((entry) =>
-      groupChannels(deviceRequestName(entry.device), entry.channels).map((group) => group.key));
+    const keys = axis
+      .filter(
+        (entry) => entry.kind === "device" && entry.sourceKind !== "external",
+      )
+      .flatMap((entry) =>
+        groupChannels(deviceRequestName(entry.device), entry.channels).map(
+          (group) => group.key,
+        ),
+      );
     setGroupsExpanded(side, keys, value);
   };
   const expandDevices = (side, value) => {
-    setAllExpanded(side, side === "receivers" ? receiverLabels : transmitterLabels, value);
+    setAllExpanded(
+      side,
+      side === "receivers" ? receiverLabels : transmitterLabels,
+      value,
+    );
     expandGroups(side, value);
   };
 
@@ -74,29 +114,45 @@ function RoutingView() {
       <div class="content-header">
         <div class="toolbar">
           ${!compact ? html`<${Button} onClick=${() => updateFilters({ ...filters, listMode: !listMode })}>${listMode ? t("Show grid") : t("Channel list")}<//>` : null}
-          ${!showList ? html`
+          ${
+            !showList
+              ? html`
           <button class="btn btn-sm" type="button" aria-pressed=${gridLocked}
             onClick=${() => {
               setGridLocked(!gridLocked);
-              try { window.localStorage.setItem("netaudio.matrix.locked", String(!gridLocked)); } catch {}
+              try {
+                window.localStorage.setItem(
+                  "netaudio.matrix.locked",
+                  String(!gridLocked),
+                );
+              } catch {}
             }}><${Icon} name=${gridLocked ? "lock" : "unlock"} /><span class="steady-label">
               <span aria-hidden=${gridLocked ? null : "true"}>${t("Locked")}</span>
               <span aria-hidden=${gridLocked ? "true" : null}>${t("Unlocked")}</span>
             </span></button>
           <button class="btn btn-sm" type="button" aria-pressed=${!flipped} onClick=${() => {
             setFlipped(!flipped);
-            try { window.localStorage.setItem("netaudio.matrix.flipped", String(!flipped)); } catch {}
+            try {
+              window.localStorage.setItem(
+                "netaudio.matrix.flipped",
+                String(!flipped),
+              );
+            } catch {}
           }}><${Icon} name="flip" /> ${t("Flip axes")}</button>
           <button class="btn btn-sm" type="button" aria-pressed=${groups.enabled} onClick=${() => enableChannelGroups(!groups.enabled)}><${Icon} name="groups" /> ${t("Channel groups")}</button>
-          ` : null}
+          `
+              : null
+          }
         </div>
       </div>
       <div class="routing-workspace">
         <div class="routing-results">
-      ${showList ? html`<${RoutingControls} all=${visible.filter((device) => device.online)} />`
-        : model.rows.length === 0 || model.columns.length === 0
-        ? html`<${Notice}>${t("No devices match the current filters.")}<//>`
-        : html`<${RoutingMatrix}
+      ${
+        showList
+          ? html`<${RoutingControls} all=${visible.filter((device) => device.online)} />`
+          : model.rows.length === 0 || model.columns.length === 0
+            ? html`<${Notice}>${t("No devices match the current filters.")}<//>`
+            : html`<${RoutingMatrix}
             locked=${gridLocked}
             pending=${pending}
             key=${flipped ? "transposed" : "normal"}
@@ -110,7 +166,8 @@ function RoutingView() {
             columns=${model.columns}
             subscriptionIndex=${model.subscriptionIndex}
             onOpenDevice=${(label, tab) => navigate(devicePath("devices", label, tab))}
-          />`}
+          />`
+      }
         </div>
       </div>
     </div>

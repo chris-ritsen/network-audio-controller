@@ -13,7 +13,12 @@ import * as format from "../format.js";
 import { t, tn } from "../i18n.js";
 import { html, useLayoutEffect } from "../lib/preact.js";
 import { devicePath, navigate, setQueryParameter } from "../router.js";
-import { deviceByName, inventoryReady, renamedDevice, scopedDevices as devices } from "../store.js";
+import {
+  deviceByName,
+  inventoryReady,
+  renamedDevice,
+  scopedDevices as devices,
+} from "../store.js";
 import { ConfigurableTable } from "../table.js";
 
 function shown(value) {
@@ -26,7 +31,11 @@ function shown(value) {
 
 function capitalized(value) {
   const text = shown(value).replaceAll("_", " ");
-  if (!text || ["unknown", "none", "unset", "unavailable"].includes(text.toLowerCase())) return "";
+  if (
+    !text ||
+    ["unknown", "none", "unset", "unavailable"].includes(text.toLowerCase())
+  )
+    return "";
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
@@ -47,8 +56,10 @@ function DeviceState({ online }) {
 
 function clockSync(device) {
   const synchronization = device.clock_status?.synchronization;
-  if (format.clockStatusFresh(device) && synchronization === "synchronized") return t("Synchronized");
-  if (format.clockStatusFresh(device) && synchronization === "lost") return t("Not synchronized");
+  if (format.clockStatusFresh(device) && synchronization === "synchronized")
+    return t("Synchronized");
+  if (format.clockStatusFresh(device) && synchronization === "lost")
+    return t("Not synchronized");
   const locked = device.ddm_clocking_state?.locked;
   if (locked === true || locked === "LOCKED") return t("Synchronized");
   if (locked === false || locked === "UNLOCKED") return t("Not synchronized");
@@ -56,7 +67,9 @@ function clockSync(device) {
 }
 
 function megabits(value) {
-  return value == null || !Number.isFinite(Number(value)) ? "" : `${value} Mbps`;
+  return value == null || !Number.isFinite(Number(value))
+    ? ""
+    : `${value} Mbps`;
 }
 
 const INFO_COLUMNS = [
@@ -66,7 +79,11 @@ const INFO_COLUMNS = [
     id: "state",
     label: t("State"),
   },
-  { cell: (device) => format.deviceLabel(device), id: "name", label: t("Name") },
+  {
+    cell: (device) => format.deviceLabel(device),
+    id: "name",
+    label: t("Name"),
+  },
   {
     cell: (device) => format.deviceModelName(device),
     id: "model",
@@ -106,7 +123,11 @@ const INFO_COLUMNS = [
   },
   {
     cell: (device) =>
-      device.is_locked == null ? "" : device.is_locked ? t("Locked") : t("Unlocked"),
+      device.is_locked == null
+        ? ""
+        : device.is_locked
+          ? t("Locked")
+          : t("Unlocked"),
     id: "lock",
     label: t("Device lock"),
   },
@@ -116,7 +137,8 @@ const INFO_COLUMNS = [
     label: t("Primary address"),
   },
   {
-    cell: (device) => (device.link_speed_mbps ? megabits(device.link_speed_mbps) : ""),
+    cell: (device) =>
+      device.link_speed_mbps ? megabits(device.link_speed_mbps) : "",
     id: "link-speed",
     label: t("Primary link speed"),
   },
@@ -229,7 +251,10 @@ const INFO_COLUMNS = [
     defaultHidden: true,
   },
   {
-    cell: (device) => ({ dynamic: "DHCP", static: t("Static") })[device.interfaces?.[0]?.mode] || "",
+    cell: (device) =>
+      ({ dynamic: "DHCP", static: t("Static") })[
+        device.interfaces?.[0]?.mode
+      ] || "",
     id: "primary-mode",
     label: t("Primary mode"),
     defaultHidden: true,
@@ -441,20 +466,31 @@ function tabContent(tab, device) {
 }
 
 function channelCount(device, direction) {
-  const declared = device.channels?.[direction === "tx" ? "transmitters" : "receivers"];
-  const listed = declared && typeof declared === "object" ? Object.keys(declared).length : 0;
-  const reported = Number(direction === "tx" ? device.tx_count : device.rx_count);
+  const declared =
+    device.channels?.[direction === "tx" ? "transmitters" : "receivers"];
+  const listed =
+    declared && typeof declared === "object" ? Object.keys(declared).length : 0;
+  const reported = Number(
+    direction === "tx" ? device.tx_count : device.rx_count,
+  );
   return Math.max(listed, Number.isFinite(reported) ? reported : 0);
 }
 
 function flowCount(flows) {
-  return Array.isArray(flows) ? flows.length : flows && typeof flows === "object" ? Object.keys(flows).length : 0;
+  return Array.isArray(flows)
+    ? flows.length
+    : flows && typeof flows === "object"
+      ? Object.keys(flows).length
+      : 0;
 }
 
 const TAB_AVAILABILITY = {
-  receive: (device) => channelCount(device, "rx") > 0 || flowCount(device.receiver_flows) > 0,
-  transmit: (device) => channelCount(device, "tx") > 0 || flowCount(device.transmitter_flows) > 0,
-  metering: (device) => channelCount(device, "rx") > 0 || channelCount(device, "tx") > 0,
+  receive: (device) =>
+    channelCount(device, "rx") > 0 || flowCount(device.receiver_flows) > 0,
+  transmit: (device) =>
+    channelCount(device, "tx") > 0 || flowCount(device.transmitter_flows) > 0,
+  metering: (device) =>
+    channelCount(device, "rx") > 0 || channelCount(device, "tx") > 0,
   "aes67-config": (device) =>
     operationWritable(device, "aes67") ||
     (isEnrolled(device)
@@ -469,7 +505,10 @@ export function deviceTabs(device) {
   const tabs = isEnrolled(device)
     ? [...DEVICE_TABS, { id: "domain", label: t("Domain") }]
     : DEVICE_TABS;
-  return tabs.filter((entry) => !TAB_AVAILABILITY[entry.id] || TAB_AVAILABILITY[entry.id](device));
+  return tabs.filter(
+    (entry) =>
+      !TAB_AVAILABILITY[entry.id] || TAB_AVAILABILITY[entry.id](device),
+  );
 }
 
 function SectionRedirect({ path }) {
@@ -497,15 +536,27 @@ function DeviceView({ location }) {
   }
   const requested = location.parameters.section;
   const available = deviceTabs(device);
-  const known = DEVICE_TABS.some((entry) => entry.id === requested) || requested === "domain";
-  const waiting = !inventoryReady.value && known && !available.some((entry) => entry.id === requested);
+  const known =
+    DEVICE_TABS.some((entry) => entry.id === requested) ||
+    requested === "domain";
+  const waiting =
+    !inventoryReady.value &&
+    known &&
+    !available.some((entry) => entry.id === requested);
   const tabs = waiting
     ? [...DEVICE_TABS, { id: "domain", label: t("Domain") }].filter(
-        (entry) => entry.id === requested || available.some((item) => item.id === entry.id),
+        (entry) =>
+          entry.id === requested ||
+          available.some((item) => item.id === entry.id),
       )
     : available;
-  const tab = tabs.some((entry) => entry.id === requested) ? requested : tabs[0].id;
-  const redirect = tab === requested ? null : devicePath("devices", format.deviceLabel(device), tab);
+  const tab = tabs.some((entry) => entry.id === requested)
+    ? requested
+    : tabs[0].id;
+  const redirect =
+    tab === requested
+      ? null
+      : devicePath("devices", format.deviceLabel(device), tab);
 
   return html`
     <div class="flex flex-col gap-4">

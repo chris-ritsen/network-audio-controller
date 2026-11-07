@@ -46,19 +46,23 @@ const names = {
   "signal-clipping": "triangle-alert",
   "signal-unknown": "circle-help",
 };
-const symbols = Object.fromEntries(Object.entries(names).map(([id, name]) => {
-  const source = readFileSync(
-    new URL(
-      `../../node_modules/lucide-static/icons/${name}.svg`,
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  const body = source.match(/<svg[^>]*>([\s\S]*?)<\/svg>/)[1];
-  return [id, body];
-}));
-symbols["subscription-unicast"] = '<circle cx="5" cy="12" r="4"/><path d="M9 12h13m-3-3 3 3-3 3"/>';
-symbols["subscription-multicast"] = '<circle cx="5" cy="12" r="4"/><path d="M9 12h4m0 0V6q0-2 2-2h7m-9 8v6q0 2 2 2h7m-2-18 2 2-2 2m0 12 2 2-2 2"/>';
+const symbols = Object.fromEntries(
+  Object.entries(names).map(([id, name]) => {
+    const source = readFileSync(
+      new URL(
+        `../../node_modules/lucide-static/icons/${name}.svg`,
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const body = source.match(/<svg[^>]*>([\s\S]*?)<\/svg>/)[1];
+    return [id, body];
+  }),
+);
+symbols["subscription-unicast"] =
+  '<circle cx="5" cy="12" r="4"/><path d="M9 12h13m-3-3 3 3-3 3"/>';
+symbols["subscription-multicast"] =
+  '<circle cx="5" cy="12" r="4"/><path d="M9 12h4m0 0V6q0-2 2-2h7m-9 8v6q0 2 2 2h7m-2-18 2 2-2 2m0 12 2 2-2 2"/>';
 const output = new URL(
   "../../packages/netaudio/src/netaudio/daemon/http/webapp/",
   import.meta.url,

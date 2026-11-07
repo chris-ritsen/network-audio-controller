@@ -1,12 +1,21 @@
 import * as format from "./format.js";
 import { t } from "./i18n.js";
-import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
+import {
+  html,
+  signal,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "./lib/preact.js";
 import { navigate } from "./router.js";
 import { visibleNavigation } from "./navigation.js";
-import { scopedDevices as devices, visibleShureDevices as shureDevices } from "./store.js";
+import {
+  scopedDevices as devices,
+  visibleShureDevices as shureDevices,
+} from "./store.js";
 
 const paletteOpen = signal(false);
-
 
 export function openPalette() {
   paletteOpen.value = true;
@@ -21,7 +30,11 @@ export function closePalette() {
 }
 
 function buildEntries() {
-  const entries = visibleNavigation.value.map(({ label, path }) => ({ kind: "view", label, path }));
+  const entries = visibleNavigation.value.map(({ label, path }) => ({
+    kind: "view",
+    label,
+    path,
+  }));
   for (const device of format.sortedDevices(devices.value)) {
     const name = format.deviceLabel(device);
     entries.push({
@@ -49,7 +62,9 @@ function matches(entry, needle) {
   if (!needle) {
     return true;
   }
-  return `${entry.label} ${entry.detail || ""} ${entry.kind}`.toLowerCase().includes(needle);
+  return `${entry.label} ${entry.detail || ""} ${entry.kind}`
+    .toLowerCase()
+    .includes(needle);
 }
 
 export function CommandPalette() {
@@ -59,9 +74,14 @@ export function CommandPalette() {
   const dialog = useRef(null);
   const input = useRef(null);
 
-  const entries = useMemo(() => (open ? buildEntries() : []), [open, devices.value, shureDevices.value]);
+  const entries = useMemo(
+    () => (open ? buildEntries() : []),
+    [open, devices.value, shureDevices.value],
+  );
   const needle = query.trim().toLowerCase();
-  const results = entries.filter((entry) => matches(entry, needle)).slice(0, 60);
+  const results = entries
+    .filter((entry) => matches(entry, needle))
+    .slice(0, 60);
   const activeIndex = Math.min(highlighted, Math.max(results.length - 1, 0));
 
   useLayoutEffect(() => {
@@ -117,7 +137,13 @@ export function CommandPalette() {
       onClick=${(event) => {
         if (event.target !== event.currentTarget) return;
         const bounds = event.currentTarget.getBoundingClientRect();
-        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closePalette();
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        )
+          closePalette();
       }}>
       <input
         ref=${input}
@@ -131,25 +157,29 @@ export function CommandPalette() {
         onKeyDown=${onKeyDown}
       />
       <div class="palette-results">
-        ${results.length === 0
-          ? html`<div class="palette-empty">${t("No matches")}</div>`
-          : results.map(
-              (entry, index) => html`
+        ${
+          results.length === 0
+            ? html`<div class="palette-empty">${t("No matches")}</div>`
+            : results.map(
+                (entry, index) => html`
                 <div
                   key=${`${entry.kind}:${entry.path}`}
                   class="palette-item${index === activeIndex ? " active" : ""}"
                   onPointerEnter=${() => setHighlighted(index)}
                   onClick=${() => choose(entry)}
                 >
-                  ${entry.kind === "view"
-                    ? null
-                    : html`<span class="status-dot${entry.online ? " online" : ""}"></span>`}
+                  ${
+                    entry.kind === "view"
+                      ? null
+                      : html`<span class="status-dot${entry.online ? " online" : ""}"></span>`
+                  }
                   <span class="palette-item-name">${entry.label}</span>
                   ${entry.detail ? html`<span class="palette-item-detail">${entry.detail}</span>` : null}
                   <span class="palette-item-kind">${t(entry.kind)}</span>
                 </div>
               `,
-            )}
+              )
+        }
       </div>
     </dialog>
   `;

@@ -8,19 +8,31 @@ export function NewDomainDialog({ server, onClose }) {
   const input = useRef(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  useLayoutEffect(() => { dialog.current.showModal(); }, []);
+  useLayoutEffect(() => {
+    dialog.current.showModal();
+  }, []);
   const create = async (event) => {
     event.preventDefault();
     if (busy) return;
-    setBusy(true); setError("");
+    setBusy(true);
+    setError("");
     try {
       await api.createDdmDomain(server, input.current.value);
       onClose();
-    } catch (failure) { setError(failure.message); }
-    finally { setBusy(false); }
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setBusy(false);
+    }
   };
-  return html`<dialog class="modal" aria-labelledby="new-domain-title" ref=${dialog} onClose=${onClose} onCancel=${(event) => { if (busy) event.preventDefault(); }}
-    onClick=${(event) => { if (!busy && event.target === event.currentTarget) onClose(); }}>
+  return html`<dialog class="modal" aria-labelledby="new-domain-title" ref=${dialog} onClose=${onClose} onCancel=${(
+    event,
+  ) => {
+    if (busy) event.preventDefault();
+  }}
+    onClick=${(event) => {
+      if (!busy && event.target === event.currentTarget) onClose();
+    }}>
     <form class="modal-box max-w-sm flex flex-col gap-4" onSubmit=${create}>
       <h2 id="new-domain-title" class="text-lg font-semibold">${t("New domain")}</h2>
       <label class="flex flex-col gap-2">${t("Server")}<input class="w-full" value=${server} readonly /></label>

@@ -22,7 +22,13 @@ function channelState(levels, mac, channel) {
   const key = `${mac}|${channel}`;
   let state = levels.get(key);
   if (!state) {
-    state = { peak: null, freshAt: null, ad4d: undefined, p10t: [[], []], p10tSeen: [false, false] };
+    state = {
+      peak: null,
+      freshAt: null,
+      ad4d: undefined,
+      p10t: [[], []],
+      p10tSeen: [false, false],
+    };
     levels.set(key, state);
   }
   return state;
@@ -47,7 +53,10 @@ function observeAd4d(state, values, now) {
 function p10tDecibels(window) {
   const loudest = Math.max(0, ...window);
   if (!(loudest > 0)) return null;
-  return 20 * Math.log10(Math.min(loudest, P10T_METER_FULL_SCALE) / P10T_METER_FULL_SCALE);
+  return (
+    20 *
+    Math.log10(Math.min(loudest, P10T_METER_FULL_SCALE) / P10T_METER_FULL_SCALE)
+  );
 }
 
 export function observeShureMeters(levels, mac, channel, values, now) {
@@ -57,7 +66,10 @@ export function observeShureMeters(levels, mac, channel, values, now) {
   for (const [key, side] of P10T_SIDES) {
     if (!(key in values)) continue;
     const raw = integer(values[key]);
-    state.p10t[side] = [...state.p10t[side], raw !== null && raw > 0 ? raw : 0].slice(-P10T_SAMPLE_WINDOW);
+    state.p10t[side] = [
+      ...state.p10t[side],
+      raw !== null && raw > 0 ? raw : 0,
+    ].slice(-P10T_SAMPLE_WINDOW);
     state.p10tSeen[side] = true;
   }
 }
@@ -65,6 +77,7 @@ export function observeShureMeters(levels, mac, channel, values, now) {
 export function shureLevels(levels, mac, channel) {
   const state = levels.get(`${mac}|${channel}`);
   if (!state) return [];
-  if (state.p10tSeen[0] || state.p10tSeen[1]) return state.p10t.map((window) => p10tDecibels(window));
+  if (state.p10tSeen[0] || state.p10tSeen[1])
+    return state.p10t.map((window) => p10tDecibels(window));
   return state.ad4d === undefined ? [] : [state.ad4d];
 }

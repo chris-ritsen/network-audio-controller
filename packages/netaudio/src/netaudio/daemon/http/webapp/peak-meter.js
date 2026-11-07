@@ -25,14 +25,22 @@ function steps(size) {
   return ticks;
 }
 
-export const SCALE_TICK_SETS = [steps(3), steps(6), steps(12), [0, -18, -40, -60], [0, -30, -60], [0, -60]];
+export const SCALE_TICK_SETS = [
+  steps(3),
+  steps(6),
+  steps(12),
+  [0, -18, -40, -60],
+  [0, -30, -60],
+  [0, -60],
+];
 
 function seconds(elapsed) {
   return Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0;
 }
 
 export function meterLevel(reading) {
-  if (typeof reading !== "number" || Number.isNaN(reading)) return METER_FLOOR_DBFS;
+  if (typeof reading !== "number" || Number.isNaN(reading))
+    return METER_FLOOR_DBFS;
   return Math.min(METER_CEILING_DBFS, Math.max(METER_FLOOR_DBFS, reading));
 }
 
@@ -42,17 +50,27 @@ export function levelFraction(decibels) {
 
 export function levelRegion(decibels) {
   const level = meterLevel(decibels);
-  return METER_REGIONS.find((region) => level < region.to) || METER_REGIONS[METER_REGIONS.length - 1];
+  return (
+    METER_REGIONS.find((region) => level < region.to) ||
+    METER_REGIONS[METER_REGIONS.length - 1]
+  );
 }
 
 export function createPeakMeter() {
-  return { level: METER_FLOOR_DBFS, peak: METER_FLOOR_DBFS, peakHeldSeconds: 0 };
+  return {
+    level: METER_FLOOR_DBFS,
+    peak: METER_FLOOR_DBFS,
+    peakHeldSeconds: 0,
+  };
 }
 
 export function advancePeakMeter(meter, reading, elapsed) {
   const target = meterLevel(reading);
   const duration = seconds(elapsed);
-  meter.level = target >= meter.level ? target : Math.max(target, meter.level - FALL_DECIBELS_PER_SECOND * duration);
+  meter.level =
+    target >= meter.level
+      ? target
+      : Math.max(target, meter.level - FALL_DECIBELS_PER_SECOND * duration);
   if (meter.level >= meter.peak) {
     meter.peak = meter.level;
     meter.peakHeldSeconds = 0;
@@ -60,13 +78,22 @@ export function advancePeakMeter(meter, reading, elapsed) {
   }
   const heldBefore = meter.peakHeldSeconds;
   meter.peakHeldSeconds = heldBefore + duration;
-  const falling = Math.max(0, meter.peakHeldSeconds - Math.max(heldBefore, PEAK_HOLD_SECONDS));
-  meter.peak = Math.max(meter.level, meter.peak - PEAK_FALL_DECIBELS_PER_SECOND * falling);
+  const falling = Math.max(
+    0,
+    meter.peakHeldSeconds - Math.max(heldBefore, PEAK_HOLD_SECONDS),
+  );
+  meter.peak = Math.max(
+    meter.level,
+    meter.peak - PEAK_FALL_DECIBELS_PER_SECOND * falling,
+  );
   return meter;
 }
 
 export function isOverReading(reading, clipping) {
-  return clipping === true || (typeof reading === "number" && reading >= METER_CEILING_DBFS);
+  return (
+    clipping === true ||
+    (typeof reading === "number" && reading >= METER_CEILING_DBFS)
+  );
 }
 
 export function createOverIndicator() {
@@ -75,7 +102,8 @@ export function createOverIndicator() {
 
 export function advanceOverIndicator(indicator, over, elapsed) {
   if (over) {
-    if (!indicator.over) indicator.count = Math.min(OVER_COUNT_LIMIT, indicator.count + 1);
+    if (!indicator.over)
+      indicator.count = Math.min(OVER_COUNT_LIMIT, indicator.count + 1);
     indicator.over = true;
     indicator.sinceOverSeconds = 0;
     return indicator;
@@ -101,8 +129,16 @@ export function createReadout() {
 }
 
 export function advanceReadout(readout, text, elapsed) {
-  readout.sinceRefreshSeconds = Math.min(READOUT_INTERVAL_SECONDS, readout.sinceRefreshSeconds + seconds(elapsed));
-  if (readout.shown === null || (readout.shown !== text && readout.sinceRefreshSeconds >= READOUT_INTERVAL_SECONDS - TIMING_TOLERANCE_SECONDS)) {
+  readout.sinceRefreshSeconds = Math.min(
+    READOUT_INTERVAL_SECONDS,
+    readout.sinceRefreshSeconds + seconds(elapsed),
+  );
+  if (
+    readout.shown === null ||
+    (readout.shown !== text &&
+      readout.sinceRefreshSeconds >=
+        READOUT_INTERVAL_SECONDS - TIMING_TOLERANCE_SECONDS)
+  ) {
     readout.shown = text;
     readout.sinceRefreshSeconds = 0;
   }
@@ -117,7 +153,12 @@ export function formatDecibels(decibels) {
 export function stripReadout(meters, readings) {
   let loudest = null;
   (readings || []).forEach((reading, index) => {
-    if (typeof reading !== "number" || Number.isNaN(reading) || reading === Number.NEGATIVE_INFINITY) return;
+    if (
+      typeof reading !== "number" ||
+      Number.isNaN(reading) ||
+      reading === Number.NEGATIVE_INFINITY
+    )
+      return;
     const meter = meters[index];
     const shown = reading < METER_FLOOR_DBFS || !meter ? reading : meter.level;
     if (loudest === null || shown > loudest) loudest = shown;
@@ -130,15 +171,22 @@ export function scaleLabel(tick) {
 }
 
 export function chooseScaleTicks(length, labelExtent, minimumGap = 2) {
-  const extent = typeof labelExtent === "function" ? labelExtent : () => labelExtent;
+  const extent =
+    typeof labelExtent === "function" ? labelExtent : () => labelExtent;
   const fallback = SCALE_TICK_SETS[SCALE_TICK_SETS.length - 1];
   if (!Number.isFinite(length) || length <= 0) return fallback;
   for (const ticks of SCALE_TICK_SETS) {
     const placed = ticks
-      .map((tick) => ({ position: levelFraction(tick) * length, extent: Number(extent(tick)) || 0 }))
+      .map((tick) => ({
+        position: levelFraction(tick) * length,
+        extent: Number(extent(tick)) || 0,
+      }))
       .sort((first, second) => first.position - second.position);
     const fits = placed.every(
-      (label, index) => index === 0 || label.position - placed[index - 1].position >= (label.extent + placed[index - 1].extent) / 2 + minimumGap,
+      (label, index) =>
+        index === 0 ||
+        label.position - placed[index - 1].position >=
+          (label.extent + placed[index - 1].extent) / 2 + minimumGap,
     );
     if (fits) return ticks;
   }

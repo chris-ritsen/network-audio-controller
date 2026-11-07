@@ -2316,10 +2316,7 @@
       }
     },
     "configured_latency_ms": 6.0,
-    "control_transports": [
-      "direct",
-      "ddm"
-    ],
+    "control_transports": ["direct", "ddm"],
     "dante_model": "Dante Virtual Soundcard Windows",
     "dante_model_id": "44767357696e0000",
     "ddm_capabilities": {
@@ -2385,10 +2382,7 @@
     },
     "firmware_version": "4.4.0",
     "inventory_id": "ddm:lab:unenrolled:9169ebd59e69496fb197b8d823c41d88",
-    "inventory_sources": [
-      "direct",
-      "ddm"
-    ],
+    "inventory_sources": ["direct", "ddm"],
     "ipv4": "192.168.1.38",
     "is_locked": null,
     "kind": "emulated",
@@ -2451,14 +2445,7 @@
       }
     },
     "software_version": "4.2.0",
-    "standard_latency_choices_ms": [
-      0.15,
-      0.25,
-      0.5,
-      1.0,
-      2.0,
-      5.0
-    ],
+    "standard_latency_choices_ms": [0.15, 0.25, 0.5, 1.0, 2.0, 5.0],
     "subscriptions": [
       {
         "rx_channel": "01",
@@ -3614,28 +3601,9 @@
     "clock_port_state_code": 9,
     "clock_role": "Follower",
     "clock_source_code": 0,
-    "clock_subdomain": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
+    "clock_subdomain": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     "configured_latency_ms": 1.0,
-    "control_transports": [
-      "direct"
-    ],
+    "control_transports": ["direct"],
     "dante_model": "Audinate Dante AVIO Bluetooth",
     "dante_model_id": "DIOBT",
     "default_latency_ms": 1.0,
@@ -3658,9 +3626,7 @@
       }
     ],
     "inventory_id": "001dc15279b6",
-    "inventory_sources": [
-      "direct"
-    ],
+    "inventory_sources": ["direct"],
     "ipv4": "192.168.1.61",
     "is_locked": false,
     "kind": "hardware",
@@ -3684,11 +3650,7 @@
       "record_protocol_identifier": 1848,
       "status_code": 4,
       "unmapped_prefix_word": 0,
-      "unmapped_trailer_words": [
-        0,
-        0,
-        0
-      ]
+      "unmapped_trailer_words": [0, 0, 0]
     },
     "mac_address": "001dc1fffe5279b6",
     "management_state": null,
@@ -3923,11 +3885,7 @@
       }
     ],
     "software_version": "4.1.0",
-    "standard_latency_choices_ms": [
-      1.0,
-      2.0,
-      5.0
-    ],
+    "standard_latency_choices_ms": [1.0, 2.0, 5.0],
     "subscriptions": [
       {
         "rx_channel": "mic-mix",
@@ -3952,12 +3910,8 @@
         "rx_channel_number": 1
       }
     ],
-    "supported_encodings": [
-      24
-    ],
-    "supported_sample_rates_hz": [
-      48000
-    ],
+    "supported_encodings": [24],
+    "supported_sample_rates_hz": [48000],
     "tx_count": 2,
     "tx_count_raw": 2
   },
@@ -4100,29 +4054,9 @@
     "clock_port_state_code": 9,
     "clock_role": "Follower",
     "clock_source_code": 0,
-    "clock_subdomain": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
+    "clock_subdomain": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     "configured_latency_ms": 1.0,
-    "control_transports": [
-      "direct",
-      "ddm"
-    ],
+    "control_transports": ["direct", "ddm"],
     "dante_model": "AVIO-USB",
     "dante_model_id": "DIOUSB",
     "ddm_capabilities": {
@@ -4199,10 +4133,7 @@
       }
     ],
     "inventory_id": "ddm:lab:unenrolled:001dc1fffe50368b:0",
-    "inventory_sources": [
-      "direct",
-      "ddm"
-    ],
+    "inventory_sources": ["direct", "ddm"],
     "ipv4": "192.168.1.247",
     "is_locked": false,
     "kind": "hardware",
@@ -4226,11 +4157,7 @@
       "record_protocol_identifier": 1848,
       "status_code": 4,
       "unmapped_prefix_word": 0,
-      "unmapped_trailer_words": [
-        0,
-        0,
-        0
-      ]
+      "unmapped_trailer_words": [0, 0, 0]
     },
     "mac_address": "001dc1fffe50368b",
     "management_state": "unenrolled",
@@ -4465,11 +4392,7 @@
       }
     ],
     "software_version": "4.1.0",
-    "standard_latency_choices_ms": [
-      1.0,
-      2.0,
-      5.0
-    ],
+    "standard_latency_choices_ms": [1.0, 2.0, 5.0],
     "subscriptions": [
       {
         "rx_channel": "mic-mix-1",
@@ -4516,12 +4439,8 @@
         "rx_channel_number": 2
       }
     ],
-    "supported_encodings": [
-      24
-    ],
-    "supported_sample_rates_hz": [
-      48000
-    ],
+    "supported_encodings": [24],
+    "supported_sample_rates_hz": [48000],
     "tx_count": 2,
     "tx_count_raw": 2
   },
@@ -4531,9 +4450,7 @@
       "receivers": {},
       "transmitters": {}
     },
-    "control_transports": [
-      "ddm"
-    ],
+    "control_transports": ["ddm"],
     "dante_model": "Brooklyn II",
     "dante_model_id": "426b6c796e320000",
     "ddm_capabilities": {
@@ -4612,9 +4529,7 @@
       }
     ],
     "inventory_id": "ddm:lab:ce1d98eb183c45c9967b4ba94fcf9921:0200000000280000:0",
-    "inventory_sources": [
-      "ddm"
-    ],
+    "inventory_sources": ["ddm"],
     "ipv4": "192.168.1.22",
     "mac_address": "02:00:00:00:00:28",
     "management_state": "managed",
@@ -6707,29 +6622,9 @@
     "clock_port_state_code": 6,
     "clock_role": "Leader",
     "clock_source_code": 0,
-    "clock_subdomain": [
-      0,
-      0,
-      0,
-      2,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
+    "clock_subdomain": [0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     "configured_latency_ms": 1.0,
-    "control_transports": [
-      "direct",
-      "ddm"
-    ],
+    "control_transports": ["direct", "ddm"],
     "dante_model": "LX-DANTE",
     "dante_model_id": "5043496500000000",
     "ddm_capabilities": {
@@ -6812,10 +6707,7 @@
       }
     ],
     "inventory_id": "ddm:lab:unenrolled:001dc10812580000:0",
-    "inventory_sources": [
-      "direct",
-      "ddm"
-    ],
+    "inventory_sources": ["direct", "ddm"],
     "ipv4": "192.168.1.108",
     "is_locked": false,
     "kind": "hardware",
@@ -6834,11 +6726,7 @@
       "record_protocol_identifier": 1828,
       "status_code": 0,
       "unmapped_prefix_word": 0,
-      "unmapped_trailer_words": [
-        0,
-        0,
-        0
-      ]
+      "unmapped_trailer_words": [0, 0, 0]
     },
     "mac_address": "001dc10812580000",
     "management_state": "unenrolled",
@@ -7095,14 +6983,7 @@
       }
     ],
     "software_version": "4.0.0",
-    "standard_latency_choices_ms": [
-      0.15,
-      0.25,
-      0.5,
-      1.0,
-      2.0,
-      5.0
-    ],
+    "standard_latency_choices_ms": [0.15, 0.25, 0.5, 1.0, 2.0, 5.0],
     "subscriptions": [
       {
         "rx_channel": "wireless-mic:1",
@@ -9255,17 +9136,8 @@
         "rx_channel_number": 128
       }
     ],
-    "supported_encodings": [
-      24
-    ],
-    "supported_sample_rates_hz": [
-      44100,
-      48000,
-      88200,
-      96000,
-      176400,
-      192000
-    ],
+    "supported_encodings": [24],
+    "supported_sample_rates_hz": [44100, 48000, 88200, 96000, 176400, 192000],
     "tx_count": 128,
     "tx_count_raw": 128
   }

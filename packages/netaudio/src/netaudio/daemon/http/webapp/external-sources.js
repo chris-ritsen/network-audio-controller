@@ -61,7 +61,9 @@ export function externalColumns(flows, filter = "") {
       number: index + 1,
       name: t("Channel {number}", { number: index + 1 }),
     }));
-    const reason = (flow.routability_errors || []).map((error) => t(error)).join("; ");
+    const reason = (flow.routability_errors || [])
+      .map((error) => t(error))
+      .join("; ");
     const common = {
       sourceKind: "external",
       sourceKey,

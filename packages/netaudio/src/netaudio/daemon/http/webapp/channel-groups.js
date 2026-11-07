@@ -7,8 +7,12 @@ function read() {
     const value = JSON.parse(window.localStorage.getItem(KEY));
     return {
       enabled: value?.enabled === true,
-      receivers: new Set(Array.isArray(value?.receivers) ? value.receivers : []),
-      transmitters: new Set(Array.isArray(value?.transmitters) ? value.transmitters : []),
+      receivers: new Set(
+        Array.isArray(value?.receivers) ? value.receivers : [],
+      ),
+      transmitters: new Set(
+        Array.isArray(value?.transmitters) ? value.transmitters : [],
+      ),
     };
   } catch {
     return { enabled: false, receivers: new Set(), transmitters: new Set() };
@@ -20,9 +24,14 @@ export const channelGroups = signal(read());
 function save(next) {
   channelGroups.value = next;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify({
-      enabled: next.enabled, receivers: [...next.receivers], transmitters: [...next.transmitters],
-    }));
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        enabled: next.enabled,
+        receivers: [...next.receivers],
+        transmitters: [...next.transmitters],
+      }),
+    );
   } catch {}
 }
 

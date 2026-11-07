@@ -18,18 +18,30 @@ const STRIP_READOUTS = {
 };
 
 function stripChannels(device, direction) {
-  const declared = (device.channels && device.channels[direction === "tx" ? "transmitters" : "receivers"]) || {};
+  const declared =
+    (device.channels &&
+      device.channels[direction === "tx" ? "transmitters" : "receivers"]) ||
+    {};
   return Object.keys(declared)
     .map(Number)
     .sort((first, second) => first - second)
     .map((number) => {
       const name = declared[number].name || "";
-      return { key: `${direction}:${number}`, channel: number, number, name: name === String(number) ? "" : name, tracks: 1 };
+      return {
+        key: `${direction}:${number}`,
+        channel: number,
+        number,
+        name: name === String(number) ? "" : name,
+        tracks: 1,
+      };
     });
 }
 
 function DeviceStrips({ device, direction }) {
-  const strips = useMemo(() => stripChannels(device, direction), [device, direction]);
+  const strips = useMemo(
+    () => stripChannels(device, direction),
+    [device, direction],
+  );
   const read = useCallback(
     (strip) => {
       const latest = meterValuesFor(device.server_name);
@@ -41,7 +53,12 @@ function DeviceStrips({ device, direction }) {
       return {
         levels: [decibels !== null ? decibels : clipping ? 0 : null],
         clipping,
-        readout: decibels !== null ? formatDecibels(decibels) : raw === undefined || raw === null ? "" : STRIP_READOUTS[presence] || "",
+        readout:
+          decibels !== null
+            ? formatDecibels(decibels)
+            : raw === undefined || raw === null
+              ? ""
+              : STRIP_READOUTS[presence] || "",
       };
     },
     [device.server_name, direction],
@@ -71,7 +88,8 @@ function LayoutSwitch() {
 }
 
 export function DeviceMeters({ device }) {
-  if (!device.online) return html`<${Notice}>${t("Monitoring is unavailable while this device is offline.")}<//>`;
+  if (!device.online)
+    return html`<${Notice}>${t("Monitoring is unavailable while this device is offline.")}<//>`;
   const strips = meterLayout.value === "strips";
   const directions = [
     ["rx", t("Receive levels")],

@@ -5,13 +5,24 @@ import "./ui-preferences.js";
 import { inventoryFilters, saveRoutingFilters } from "./device-filters.js";
 import { DeviceFilterPanel } from "./filter-panel.js";
 import { ContextSelector } from "./ddm-connections.js";
-import { html, render, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
+import {
+  html,
+  render,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "./lib/preact.js";
 import { CommandPalette, openPalette } from "./palette.js";
 import { location, navigate, startRouter } from "./router.js";
 import { matchesCommandKey } from "./shortcuts.js";
 import { connect, contextDevices } from "./store.js";
 import { ddmView } from "./views/ddm.js";
-import { devicesView, clockStatusView, networkStatusView } from "./views/devices.js";
+import {
+  devicesView,
+  clockStatusView,
+  networkStatusView,
+} from "./views/devices.js";
 import { visibleNavigation } from "./navigation.js";
 import { eventsView } from "./views/events.js";
 import { routingView } from "./views/routing.js";
@@ -39,8 +50,10 @@ function viewById(identifier) {
 
 function ViewTabs() {
   return html`<nav class="view-tabs" aria-label=${t("Views")}>
-    ${visibleNavigation.value.map((view) => html`<a key=${view.id} href=${view.path}
-      aria-current=${location.value.view === view.id ? "page" : null}>${view.tab || view.label}</a>`)}
+    ${visibleNavigation.value.map(
+      (view) => html`<a key=${view.id} href=${view.path}
+      aria-current=${location.value.view === view.id ? "page" : null}>${view.tab || view.label}</a>`,
+    )}
   </nav>`;
 }
 
@@ -50,7 +63,8 @@ function ViewSwitcher() {
   const [fits, setFits] = useState(true);
   useLayoutEffect(() => {
     const update = () => {
-      if (slot.current && measure.current) setFits(measure.current.scrollWidth <= slot.current.clientWidth);
+      if (slot.current && measure.current)
+        setFits(measure.current.scrollWidth <= slot.current.clientWidth);
     };
     update();
     const observer = new ResizeObserver(update);
@@ -69,8 +83,12 @@ function ViewSwitcher() {
 function ViewPicker() {
   const pointerSelection = useRef(false);
   return html`<select class="select view-picker" aria-label=${t("View")} value=${visibleNavigation.value.find((view) => view.id === location.value.view)?.path || "/devices"}
-    onPointerDown=${() => { pointerSelection.current = true; }}
-    onKeyDown=${() => { pointerSelection.current = false; }}
+    onPointerDown=${() => {
+      pointerSelection.current = true;
+    }}
+    onKeyDown=${() => {
+      pointerSelection.current = false;
+    }}
     onChange=${(event) => {
       navigate(event.currentTarget.value);
       if (pointerSelection.current) {
@@ -86,13 +104,17 @@ function TopBar({ compact, filtersAvailable, filtersOpen }) {
   const panel = compact ? "top-panel" : "sidebar";
   return html`
     <header class="topbar">
-      ${filtersAvailable ? html`<button type="button" class="header-icon-button filter-panel-toggle"
+      ${
+        filtersAvailable
+          ? html`<button type="button" class="header-icon-button filter-panel-toggle"
         aria-label=${filtersOpen ? t("Hide filters") : t("Show filters")}
         title=${filtersOpen ? t("Hide filters") : t("Show filters")}
         aria-expanded=${filtersOpen} aria-controls="inventory-filters"
         onClick=${() => saveRoutingFilters({ ...inventoryFilters.value, panelOpen: !filtersOpen })}>
         <${Icon} name=${`${panel}-${filtersOpen ? "close" : "open"}`} />
-      </button>` : html`<span class="filter-panel-toggle-slot" aria-hidden="true"></span>`}
+      </button>`
+          : html`<span class="filter-panel-toggle-slot" aria-hidden="true"></span>`
+      }
       <a class="brand" href="/routing" aria-label="netaudio">
         <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
           <rect width="64" height="64" rx="13" fill="#ff2323" />
@@ -120,17 +142,23 @@ function Content({ compact, filtersOpen }) {
   const current = location.value;
   const view = viewById(current.view);
   return html`<div class=${`app-workspace${filtersOpen ? " with-filters" : ""}`}>
-    ${filtersOpen ? html`<div id="inventory-filters" class="routing-filter-container">
+    ${
+      filtersOpen
+        ? html`<div id="inventory-filters" class="routing-filter-container">
       ${compact ? html`<${ContextSelector} />` : null}
       <${DeviceFilterPanel} all=${Object.values(contextDevices.value)} filters=${inventoryFilters.value} onChange=${saveRoutingFilters} />
-    </div>` : null}
+    </div>`
+        : null
+    }
     <main class=${`content${current.parameters.device ? " selectable-content" : ""}`} id="content">
     <${view.component} location=${current} />
   </main></div>`;
 }
 
 function App() {
-  const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 900px)").matches);
+  const [compact, setCompact] = useState(
+    () => window.matchMedia("(max-width: 900px)").matches,
+  );
   useEffect(() => {
     const media = window.matchMedia("(max-width: 900px)");
     const update = () => setCompact(media.matches);
@@ -138,7 +166,8 @@ function App() {
     return () => media.removeEventListener("change", update);
   }, []);
   const filtersAvailable = viewById(location.value.view).filters !== false;
-  const filtersOpen = filtersAvailable && (inventoryFilters.value.panelOpen ?? !compact);
+  const filtersOpen =
+    filtersAvailable && (inventoryFilters.value.panelOpen ?? !compact);
   return html`
     <${TopBar} compact=${compact} filtersAvailable=${filtersAvailable} filtersOpen=${filtersOpen} />
     <${Content} compact=${compact} filtersOpen=${filtersOpen} />

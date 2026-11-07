@@ -10,7 +10,13 @@ export function useAnimationFrames(running, onFrame) {
     let previous = null;
     const step = (timestamp) => {
       handle = window.requestAnimationFrame(step);
-      const elapsed = previous === null ? 0 : Math.min(MAXIMUM_FRAME_SECONDS, Math.max(0, (timestamp - previous) / 1000));
+      const elapsed =
+        previous === null
+          ? 0
+          : Math.min(
+              MAXIMUM_FRAME_SECONDS,
+              Math.max(0, (timestamp - previous) / 1000),
+            );
       previous = timestamp;
       latest.current(elapsed);
     };

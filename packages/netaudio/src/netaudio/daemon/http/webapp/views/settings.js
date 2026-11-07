@@ -1,7 +1,12 @@
 import { api } from "../api.js";
 import { APPEARANCES, appearance, setAppearance } from "../color-scheme.js";
 import { Panel } from "../components.js";
-import { LANGUAGES, languagePreference, setLanguagePreference, t } from "../i18n.js";
+import {
+  LANGUAGES,
+  languagePreference,
+  setLanguagePreference,
+  t,
+} from "../i18n.js";
 import { Icon } from "../icons.js";
 import { html, useEffect, useState } from "../lib/preact.js";
 import { backendSettings } from "../store.js";
@@ -14,9 +19,17 @@ function SettingsView() {
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
-    api.getSettings().then((result) => { if (active) backendSettings.value = result; })
-      .catch((failure) => { if (active) setError(failure.message); });
-    return () => { active = false; };
+    api
+      .getSettings()
+      .then((result) => {
+        if (active) backendSettings.value = result;
+      })
+      .catch((failure) => {
+        if (active) setError(failure.message);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
   const changed = settings && Number(port) !== settings.monitoring_port;
   return html`<div class="flex flex-col gap-6 w-full max-w-lg">
@@ -44,16 +57,21 @@ function SettingsView() {
       </select>
     <//>
     <${Panel} title=${t("Metering")}>
-      <form class="flex flex-col items-start gap-4" onSubmit=${async (event) => {
+      <form class="flex flex-col items-start gap-4" onSubmit=${async (
+        event,
+      ) => {
         event.preventDefault();
         if (busy || !changed) return;
-        setBusy(true); setError("");
+        setBusy(true);
+        setError("");
         try {
           backendSettings.value = await api.setMonitoringPort(Number(port));
           setPort(null);
+        } catch (failure) {
+          setError(failure.message);
+        } finally {
+          setBusy(false);
         }
-        catch (failure) { setError(failure.message); }
-        finally { setBusy(false); }
       }}>
         <label class="flex flex-col gap-2">${t("UDP port")}<input class="w-32" type="number" min="1024" max="65535" required disabled=${busy || !settings} value=${port} onInput=${(event) => setPort(event.target.value)} /></label>
         ${Number(port) === 8751 ? html`<p class="text-sm text-warning" role="alert"><${Icon} name="warning" /> ${t("Dante Controller meters on UDP 8751. Use another port, such as 8752.")}</p>` : null}
@@ -64,4 +82,9 @@ function SettingsView() {
     <//></div>`;
 }
 
-export const settingsView = { component: SettingsView, filters: false, id: "settings", label: t("Settings") };
+export const settingsView = {
+  component: SettingsView,
+  filters: false,
+  id: "settings",
+  label: t("Settings"),
+};

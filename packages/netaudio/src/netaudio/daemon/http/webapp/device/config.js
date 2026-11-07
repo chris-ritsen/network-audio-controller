@@ -6,9 +6,7 @@ import * as format from "../format.js";
 import { t } from "../i18n.js";
 import { html, useRef, useState } from "../lib/preact.js";
 import { deviceRequestName, recordDeviceRename } from "../store.js";
-import {
-  operationWritable,
-} from "./availability.js";
+import { operationWritable } from "./availability.js";
 import { isEnrolled } from "./managed.js";
 
 function RenameControl({ device, requestName }) {
@@ -235,7 +233,12 @@ const PORT_CLOCK_FIELDS = [
   ["ttl", t("Multicast TTL"), 0, 255],
   ["sync_interval", t("Sync interval (log seconds)"), -128, 127],
   ["announce_interval", t("Announce interval (log seconds)"), -128, 127],
-  ["delay_request_interval", t("Delay-request interval (log seconds)"), -128, 127],
+  [
+    "delay_request_interval",
+    t("Delay-request interval (log seconds)"),
+    -128,
+    127,
+  ],
   ["peer_delay_interval", t("Peer-delay interval (log seconds)"), -128, 127],
 ];
 
@@ -278,26 +281,44 @@ function ClockingControls({ device, requestName }) {
   if (!fresh) return null;
   const sourceChoices = device.clock_source_choices || [];
   const preferredAllowed = allowed.preferred_leader === true;
-  const sourceAllowed = allowed.clock_source === true && sourceChoices.length > 0;
+  const sourceAllowed =
+    allowed.clock_source === true && sourceChoices.length > 0;
   const named = allowed.subdomain === true;
   const perPort = allowed.aggregate_ptpv1_unicast_delay_requests === true;
-  const unicastAllowed = perPort || allowed.global_unicast_delay_requests === true;
+  const unicastAllowed =
+    perPort || allowed.global_unicast_delay_requests === true;
   const extendedFields = EXTENDED_CLOCK_FIELDS.filter(
     ([name]) => allowed[name] === true && device.clock_status?.[name] != null,
   );
-  const ports = allowed.ports === true
-    ? (device.clock_status?.extended_ports || []).filter((port) => port.port_id >= 1 && port.port_id <= 64)
-    : [];
-  if (!preferredAllowed && !sourceAllowed && !named && !unicastAllowed && !extendedFields.length && !ports.length) {
+  const ports =
+    allowed.ports === true
+      ? (device.clock_status?.extended_ports || []).filter(
+          (port) => port.port_id >= 1 && port.port_id <= 64,
+        )
+      : [];
+  if (
+    !preferredAllowed &&
+    !sourceAllowed &&
+    !named &&
+    !unicastAllowed &&
+    !extendedFields.length &&
+    !ports.length
+  ) {
     return null;
   }
   const apply = async () => {
-    const changes = Object.fromEntries(Object.entries(extended).filter(([name]) => allowed[name] === true));
+    const changes = Object.fromEntries(
+      Object.entries(extended).filter(([name]) => allowed[name] === true),
+    );
     if (ports.length) {
-      const changedPorts = Object.entries(portChanges).map(([port_id, fields]) => ({
-        port_id: Number(port_id),
-        ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value != null)),
-      })).filter((port) => Object.keys(port).length > 1);
+      const changedPorts = Object.entries(portChanges)
+        .map(([port_id, fields]) => ({
+          port_id: Number(port_id),
+          ...Object.fromEntries(
+            Object.entries(fields).filter(([, value]) => value != null),
+          ),
+        }))
+        .filter((port) => Object.keys(port).length > 1);
       if (changedPorts.length) changes.ports = changedPorts;
     }
     if (preferredAllowed && preferred.current?.value !== "keep")
@@ -305,7 +326,11 @@ function ClockingControls({ device, requestName }) {
     if (sourceAllowed && source.current?.value !== "keep")
       changes.clock_source = Number(source.current.value);
     const currentSubdomain = device.clock_subdomain_presentation?.text ?? "";
-    if (named && subdomain.current && subdomain.current.value !== currentSubdomain)
+    if (
+      named &&
+      subdomain.current &&
+      subdomain.current.value !== currentSubdomain
+    )
       changes.subdomain = subdomain.current.value;
     if (unicastAllowed && unicast.current?.value !== "keep")
       changes[
@@ -318,39 +343,83 @@ function ClockingControls({ device, requestName }) {
   return html`
     <${Panel} title=${t("Clocking")}>
       ${preferredAllowed ? html`<${FieldRow} label=${t("Preferred leader")}><${OnOffSelect} reference=${preferred} label=${t("Preferred leader")} /><//>` : null}
-      ${sourceAllowed ? html`<${FieldRow} label=${t("Clock source")}>
+      ${
+        sourceAllowed
+          ? html`<${FieldRow} label=${t("Clock source")}>
         <select ref=${source} aria-label=${t("Clock source")}>
           <option value="keep">${t("Keep current setting")}</option>
           ${sourceChoices.map((choice) => html`<option value=${choice.code}>${format.stateLabel(choice.label)}</option>`)}
         </select>
-      <//>` : null}
-      ${named ? html`<${FieldRow} label=${t("Clock subdomain")}>
+      <//>`
+          : null
+      }
+      ${
+        named
+          ? html`<${FieldRow} label=${t("Clock subdomain")}>
         <input ref=${subdomain} aria-label=${t("Clock subdomain")} defaultValue=${device.clock_subdomain_presentation?.text ?? ""} />
-      <//>` : null}
-      ${unicastAllowed ? html`<${FieldRow} label=${perPort ? t("PTPv1 unicast delay requests") : t("Unicast delay requests")}>
+      <//>`
+          : null
+      }
+      ${
+        unicastAllowed
+          ? html`<${FieldRow} label=${perPort ? t("PTPv1 unicast delay requests") : t("Unicast delay requests")}>
         <${OnOffSelect} reference=${unicast} label=${perPort ? t("PTPv1 unicast delay requests") : t("Unicast delay requests")} />
-      <//>` : null}
-      ${extendedFields.length || ports.length ? html`<details><summary>${t("Advanced clock settings")}</summary>
-        ${extendedFields.map(([name, label, maximum]) => html`<${FieldRow} label=${label}>
-          ${maximum == null
-            ? html`<${OnOffSelect} label=${label} onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "keep" ? null : event.target.value === "true" })} />`
-            : html`<input type="number" aria-label=${label} min="0" max=${maximum} step="1" defaultValue=${device.clock_status[name]}
-                onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "" ? null : Number(event.target.value) })} />`}
-        <//>`)}
-        ${ports.map((port) => html`
+      <//>`
+          : null
+      }
+      ${
+        extendedFields.length || ports.length
+          ? html`<details><summary>${t("Advanced clock settings")}</summary>
+        ${extendedFields.map(
+          ([name, label, maximum]) => html`<${FieldRow} label=${label}>
+          ${
+            maximum == null
+              ? html`<${OnOffSelect} label=${label} onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "keep" ? null : event.target.value === "true" })} />`
+              : html`<input type="number" aria-label=${label} min="0" max=${maximum} step="1" defaultValue=${device.clock_status[name]}
+                onChange=${(event) => setExtended({ ...extended, [name]: event.target.value === "" ? null : Number(event.target.value) })} />`
+          }
+        <//>`,
+        )}
+        ${ports.map(
+          (port) => html`
           <fieldset><legend>${t("Port {port}", { port: port.port_id })}</legend>
-            ${PORT_CLOCK_FIELDS.filter(([name]) => port[name] != null).map(([name, label, minimum, maximum]) => html`
+            ${PORT_CLOCK_FIELDS.filter(([name]) => port[name] != null).map(
+              ([name, label, minimum, maximum]) => html`
               <${FieldRow} label=${label}><input type="number" aria-label=${t("Port {port} {setting}", { port: port.port_id, setting: label })} min=${minimum} max=${maximum} step="1" defaultValue=${port[name]}
-                onChange=${(event) => setPortChanges({ ...portChanges, [port.port_id]: {
-                  ...portChanges[port.port_id], [name]: event.target.value === "" ? null : Number(event.target.value),
-                } })} /><//>`)}
-            ${port.follower_only != null ? html`<${FieldRow} label=${t("Follower only")}><${OnOffSelect}
+                onChange=${(event) =>
+                  setPortChanges({
+                    ...portChanges,
+                    [port.port_id]: {
+                      ...portChanges[port.port_id],
+                      [name]:
+                        event.target.value === ""
+                          ? null
+                          : Number(event.target.value),
+                    },
+                  })} /><//>`,
+            )}
+            ${
+              port.follower_only != null
+                ? html`<${FieldRow} label=${t("Follower only")}><${OnOffSelect}
               label=${t("Port {port} follower only", { port: port.port_id })}
-              onChange=${(event) => setPortChanges({ ...portChanges, [port.port_id]: {
-                ...portChanges[port.port_id], follower_only: event.target.value === "keep" ? null : event.target.value === "true",
-              } })} /><//>` : null}
-          </fieldset>`)}
-      </details>` : null}
+              onChange=${(event) =>
+                setPortChanges({
+                  ...portChanges,
+                  [port.port_id]: {
+                    ...portChanges[port.port_id],
+                    follower_only:
+                      event.target.value === "keep"
+                        ? null
+                        : event.target.value === "true",
+                  },
+                })} /><//>`
+                : null
+            }
+          </fieldset>`,
+        )}
+      </details>`
+          : null
+      }
       <${AsyncButton}
         variant="primary"
         small
@@ -361,7 +430,6 @@ function ClockingControls({ device, requestName }) {
     <//>
   `;
 }
-
 
 export function DeviceConfigSection({ device }) {
   const requestName = deviceRequestName(device);
@@ -485,7 +553,12 @@ function LatencyControl({ device }) {
           const input =
             custom || !choices.length ? customInput.current : control.current;
           if (!input.checkValidity())
-            throw new Error(t("Enter a latency from {minimum} to {maximum} ms", { minimum, maximum }));
+            throw new Error(
+              t("Enter a latency from {minimum} to {maximum} ms", {
+                minimum,
+                maximum,
+              }),
+            );
           return api.setLatency(requestName, Number(input.value));
         }}
       >

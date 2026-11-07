@@ -2,8 +2,20 @@ import { api } from "./api.js";
 import { Panel } from "./components.js";
 import { Icon } from "./icons.js";
 import { NewDomainDialog } from "./new-domain.js";
-import { html, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
-import { connectionProfiles, managedDomains, reconnect, selectContext, selectedContext } from "./store.js";
+import {
+  html,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "./lib/preact.js";
+import {
+  connectionProfiles,
+  managedDomains,
+  reconnect,
+  selectContext,
+  selectedContext,
+} from "./store.js";
 import { t } from "./i18n.js";
 
 export function ContextSelector() {
@@ -12,39 +24,82 @@ export function ContextSelector() {
   const domains = managedDomains.value;
   const loaded = connectionProfiles.value !== null;
   let options = [
-    { value: "all", label: t("All devices") }, { value: "local", label: t("Unmanaged") },
-    ...servers.map((server) => ({ value: `server:${server.name}`, label: t("{server} · All domains", { server: server.name }) })),
-    ...contexts.map((context) => ({ value: context.name, label: `${context.server} · ${context.domain_name || t("Domain")}` })),
-    ...domains.filter((domain) => !contexts.some((context) => context.server === domain.ddm_server_profile && context.domain_id === domain.id))
-      .map((domain) => ({ value: `domain:${JSON.stringify([domain.ddm_server_profile, domain.id])}`, label: `${domain.ddm_server_profile} · ${domain.name || t("Domain")}` })),
+    { value: "all", label: t("All devices") },
+    { value: "local", label: t("Unmanaged") },
+    ...servers.map((server) => ({
+      value: `server:${server.name}`,
+      label: t("{server} · All domains", { server: server.name }),
+    })),
+    ...contexts.map((context) => ({
+      value: context.name,
+      label: `${context.server} · ${context.domain_name || t("Domain")}`,
+    })),
+    ...domains
+      .filter(
+        (domain) =>
+          !contexts.some(
+            (context) =>
+              context.server === domain.ddm_server_profile &&
+              context.domain_id === domain.id,
+          ),
+      )
+      .map((domain) => ({
+        value: `domain:${JSON.stringify([domain.ddm_server_profile, domain.id])}`,
+        label: `${domain.ddm_server_profile} · ${domain.name || t("Domain")}`,
+      })),
   ];
   const liveOptions = JSON.stringify(options);
   if (!loaded) {
     try {
-      const saved = JSON.parse(window.localStorage.getItem("netaudio.context-options"));
-      if (Array.isArray(saved) && saved.every((option) => typeof option?.value === "string" && typeof option.label === "string")) options = saved;
+      const saved = JSON.parse(
+        window.localStorage.getItem("netaudio.context-options"),
+      );
+      if (
+        Array.isArray(saved) &&
+        saved.every(
+          (option) =>
+            typeof option?.value === "string" &&
+            typeof option.label === "string",
+        )
+      )
+        options = saved;
     } catch {}
   }
   useLayoutEffect(() => {
     if (!loaded) return;
-    try { window.localStorage.setItem("netaudio.context-options", liveOptions); } catch {}
+    try {
+      window.localStorage.setItem("netaudio.context-options", liveOptions);
+    } catch {}
   }, [loaded, liveOptions]);
   const current = selectedContext.value;
   const selected = options.find((option) => option.value === current);
   let rememberedLabel = current;
   try {
-    const saved = JSON.parse(window.localStorage.getItem("netaudio.context-label"));
-    if (saved?.value === current && typeof saved.label === "string") rememberedLabel = saved.label;
+    const saved = JSON.parse(
+      window.localStorage.getItem("netaudio.context-label"),
+    );
+    if (saved?.value === current && typeof saved.label === "string")
+      rememberedLabel = saved.label;
   } catch {}
   useLayoutEffect(() => {
     if (!selected) return;
-    try { window.localStorage.setItem("netaudio.context-label", JSON.stringify(selected)); } catch {}
+    try {
+      window.localStorage.setItem(
+        "netaudio.context-label",
+        JSON.stringify(selected),
+      );
+    } catch {}
   }, [current, selected?.label]);
   if (!selected) options.push({ value: current, label: rememberedLabel });
   return html`<select aria-label=${t("Server and domain")} class="context-selector" value=${current}
     onChange=${(event) => {
       const option = options.find((item) => item.value === event.target.value);
-      try { window.localStorage.setItem("netaudio.context-label", JSON.stringify(option)); } catch {}
+      try {
+        window.localStorage.setItem(
+          "netaudio.context-label",
+          JSON.stringify(option),
+        );
+      } catch {}
       selectContext(event.target.value);
     }}>
     ${options.map((option) => html`<option key=${option.value} value=${option.value}>${option.label}</option>`)}
@@ -58,77 +113,139 @@ export function DdmConnections() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [creatingDomain, setCreatingDomain] = useState(false);
-  const name = useRef(null), url = useRef(null), username = useRef(null), secret = useRef(null);
+  const name = useRef(null),
+    url = useRef(null),
+    username = useRef(null),
+    secret = useRef(null);
   const profiles = config?.servers || [];
   const profile = profiles.find((entry) => entry.name === server);
-  const domains = managedDomains.value.filter((domain) => domain.ddm_server_profile === server);
+  const domains = managedDomains.value.filter(
+    (domain) => domain.ddm_server_profile === server,
+  );
 
   useEffect(() => {
     let active = true;
-    api.getConnections().then((result) => { if (active) connectionProfiles.value = result; })
-      .catch((failure) => { if (active) setError(failure.message); });
-    return () => { active = false; };
+    api
+      .getConnections()
+      .then((result) => {
+        if (active) connectionProfiles.value = result;
+      })
+      .catch((failure) => {
+        if (active) setError(failure.message);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
   useEffect(() => {
     if (!config || server) return;
-    const preferred = config.contexts.find((context) => context.name === config.default_context)?.server;
+    const preferred = config.contexts.find(
+      (context) => context.name === config.default_context,
+    )?.server;
     setServer(preferred || config.servers[0]?.name || "new");
-    if (!config.servers.find((entry) => entry.name === (preferred || config.servers[0]?.name))?.configured) setMethod("password");
+    if (
+      !config.servers.find(
+        (entry) => entry.name === (preferred || config.servers[0]?.name),
+      )?.configured
+    )
+      setMethod("password");
   }, [config]);
 
   const login = async (event) => {
     event.preventDefault();
     if (busy) return;
-    setBusy(true); setError("");
+    setBusy(true);
+    setError("");
     try {
-      const body = { server: profile?.name || name.current.value, url: profile?.url || url.current.value, method };
-      if (method === "password") { body.username = username.current.value; body.password = secret.current.value; }
+      const body = {
+        server: profile?.name || name.current.value,
+        url: profile?.url || url.current.value,
+        method,
+      };
+      if (method === "password") {
+        body.username = username.current.value;
+        body.password = secret.current.value;
+      }
       if (method === "api_key") body.api_key = secret.current.value;
       const result = await api.loginDdm(body);
       connectionProfiles.value = result;
       setServer(body.server);
       setMethod("saved");
       reconnect();
-    } catch (failure) { setError(failure.message); }
-    finally { if (secret.current) secret.current.value = ""; setBusy(false); }
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      if (secret.current) secret.current.value = "";
+      setBusy(false);
+    }
   };
   const chooseDomain = async (domainId) => {
     if (!domainId || busy) return;
-    setBusy(true); setError("");
+    setBusy(true);
+    setError("");
     try {
-      const result = await api.selectDdmContext({ server, domain_id: domainId });
+      const result = await api.selectDdmContext({
+        server,
+        domain_id: domainId,
+      });
       connectionProfiles.value = result;
       selectContext(result.default_context);
       reconnect();
-    } catch (failure) { setError(failure.message); }
-    finally { setBusy(false); }
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setBusy(false);
+    }
   };
   const logout = async () => {
-    setBusy(true); setError("");
+    setBusy(true);
+    setError("");
     try {
       connectionProfiles.value = await api.logoutDdm(server);
       setMethod("password");
       selectContext("all");
       reconnect();
-    } catch (failure) { setError(failure.message); }
-    finally { setBusy(false); }
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setBusy(false);
+    }
   };
-  const selected = config?.contexts.find((context) => context.name === selectedContext.value);
+  const selected = config?.contexts.find(
+    (context) => context.name === selectedContext.value,
+  );
   return html`<${Panel} title=${t("Connection")}>
     <form class="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 w-full max-w-2xl" onSubmit=${login}>
       <div class="flex flex-col gap-4 min-w-0">
         <label class="flex flex-col gap-2">${t("Server")}
-        <select class="w-full" aria-label=${t("DDM server")} disabled=${busy} value=${server} onChange=${(event) => {
-          setServer(event.target.value); setMethod(profiles.find((entry) => entry.name === event.target.value)?.configured ? "saved" : "password"); setError("");
+        <select class="w-full" aria-label=${t("DDM server")} disabled=${busy} value=${server} onChange=${(
+          event,
+        ) => {
+          setServer(event.target.value);
+          setMethod(
+            profiles.find((entry) => entry.name === event.target.value)
+              ?.configured
+              ? "saved"
+              : "password",
+          );
+          setError("");
         }}>${profiles.map((entry) => html`<option value=${entry.name}>${entry.name}</option>`)}<option value="new">${t("Add server")}</option></select>
       </label>
-      ${profile ? html`<label class="flex flex-col gap-2">${t("Address")}<input class="w-full" readonly value=${profile.url} title=${profile.url} /></label>` : html`
+      ${
+        profile
+          ? html`<label class="flex flex-col gap-2">${t("Address")}<input class="w-full" readonly value=${profile.url} title=${profile.url} /></label>`
+          : html`
         <label class="flex flex-col gap-2">${t("Profile name")}<input class="w-full" required ref=${name} placeholder=${t("Studio")} /></label>
-        <label class="flex flex-col gap-2">${t("Server URL")}<input class="w-full" required type="url" ref=${url} placeholder="https://ddm.example/graphql" /></label>`}
-      ${domains.length ? html`<label class="flex flex-col gap-2">${t("Domain")}
+        <label class="flex flex-col gap-2">${t("Server URL")}<input class="w-full" required type="url" ref=${url} placeholder="https://ddm.example/graphql" /></label>`
+      }
+      ${
+        domains.length
+          ? html`<label class="flex flex-col gap-2">${t("Domain")}
         <select class="w-full" aria-label=${t("DDM domain")} disabled=${busy} value=${selected?.server === server ? selected.domain_id : ""} onChange=${(event) => chooseDomain(event.target.value)}>
           <option value="">${t("Choose domain")}</option>${domains.map((domain) => html`<option value=${domain.id}>${domain.name || t("Unnamed domain")}</option>`)}
-        </select></label>` : null}
+        </select></label>`
+          : null
+      }
       ${profile?.configured ? html`<button class="btn btn-sm self-start" type="button" disabled=${busy} onClick=${() => setCreatingDomain(true)}><${Icon} name="plus" />${t("New domain")}</button>` : null}
       </div>
       <div class="flex flex-col gap-4 min-w-0">

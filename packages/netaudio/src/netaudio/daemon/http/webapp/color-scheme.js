@@ -37,8 +37,12 @@ function applyColorScheme() {
 }
 
 export function setAppearance(value) {
-  appearance.value = APPEARANCES.some(([id]) => id === value) ? value : "system";
-  try { window.localStorage.setItem(APPEARANCE_KEY, appearance.value); } catch {}
+  appearance.value = APPEARANCES.some(([id]) => id === value)
+    ? value
+    : "system";
+  try {
+    window.localStorage.setItem(APPEARANCE_KEY, appearance.value);
+  } catch {}
   applyColorScheme();
 }
 

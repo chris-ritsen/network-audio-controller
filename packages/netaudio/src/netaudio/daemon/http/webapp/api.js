@@ -24,7 +24,11 @@ async function fetchTransport(method, path, body) {
       payload = JSON.parse(raw);
     } catch (error) {
       throw new ApiError(
-        t("{method} {path} returned invalid JSON: {raw}", { method, path, raw }),
+        t("{method} {path} returned invalid JSON: {raw}", {
+          method,
+          path,
+          raw,
+        }),
         response.status,
         raw,
       );

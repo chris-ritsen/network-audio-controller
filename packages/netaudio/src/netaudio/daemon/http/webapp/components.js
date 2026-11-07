@@ -1,4 +1,14 @@
-import { Fragment, cloneElement, createContext, html, toChildArray, useCallback, useRef, useSignal, useState } from "./lib/preact.js";
+import {
+  Fragment,
+  cloneElement,
+  createContext,
+  html,
+  toChildArray,
+  useCallback,
+  useRef,
+  useSignal,
+  useState,
+} from "./lib/preact.js";
 import { runAction } from "./actions.js";
 import { t } from "./i18n.js";
 
@@ -13,12 +23,14 @@ export function Panel({ actions, children, headerActions, title, wide }) {
   return html`
     <${PanelHeaderControls.Provider} value=${title == null ? null : controls}>
     <section class="card bg-base-100 border border-base-300 min-w-0${wide ? " wide" : ""}">
-      ${title === undefined || title === null
-        ? null
-        : html`<header class="flex flex-wrap items-center gap-3 border-b border-base-300 px-4 py-3">
+      ${
+        title === undefined || title === null
+          ? null
+          : html`<header class="flex flex-wrap items-center gap-3 border-b border-base-300 px-4 py-3">
             <h2 class="card-title text-base">${title}</h2>
             <${HeaderActions} actions=${headerActions} controls=${controls} />
-          </header>`}
+          </header>`
+      }
       <div class="card-body block min-[901px]:overflow-x-auto p-4 space-y-3">
         ${actions ? html`<div class="flex flex-wrap gap-2 mb-4">${actions}</div>` : null}
         ${children}
@@ -45,7 +57,9 @@ export function Fields({ entries }) {
   return html`
     <dl class="fields">
       ${entries
-        .filter(([, value]) => value !== undefined && value !== null && value !== "")
+        .filter(
+          ([, value]) => value !== undefined && value !== null && value !== "",
+        )
         .map(
           ([term, value]) => html`
             <${Fragment} key=${term}>
@@ -96,16 +110,36 @@ export function DataTable({ headers, rows, numericColumns = [] }) {
           </tr>
         </thead>
         <tbody>
-          ${toChildArray(rows).map((row) => row?.type === "tr" ? cloneElement(row, {},
-            toChildArray(row.props.children).map((cell, index) => cell?.type === "td" ? cloneElement(cell, { "data-label": headers[index] || "" }) : cell)
-          ) : row)}
+          ${toChildArray(rows).map((row) =>
+            row?.type === "tr"
+              ? cloneElement(
+                  row,
+                  {},
+                  toChildArray(row.props.children).map((cell, index) =>
+                    cell?.type === "td"
+                      ? cloneElement(cell, {
+                          "data-label": headers[index] || "",
+                        })
+                      : cell,
+                  ),
+                )
+              : row,
+          )}
         </tbody>
       </table>
     </div>
   `;
 }
 
-export function AsyncButton({ children, description, disabled, onRun, small, title, variant }) {
+export function AsyncButton({
+  children,
+  description,
+  disabled,
+  onRun,
+  small,
+  title,
+  variant,
+}) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const run = useCallback(async () => {
@@ -147,7 +181,10 @@ export function Button({ children, onClick, small, title, variant, disabled }) {
 
 export function useValueReference(initialValue) {
   const reference = useRef(null);
-  const read = useCallback(() => (reference.current ? reference.current.value : initialValue), [initialValue]);
+  const read = useCallback(
+    () => (reference.current ? reference.current.value : initialValue),
+    [initialValue],
+  );
   return [reference, read];
 }
 
@@ -172,6 +209,8 @@ export function Value({ value }) {
     if (!value.length) return null;
     return html`<span>${value.map((entry, index) => html`<${Fragment} key=${index}>${index ? ", " : ""}<${Value} value=${entry} /><//>`)}</span>`;
   }
-  const summary = [value.label, value.summary, value.name].find((entry) => typeof entry === "string" && entry.length);
+  const summary = [value.label, value.summary, value.name].find(
+    (entry) => typeof entry === "string" && entry.length,
+  );
   return summary ? html`<span>${summary}</span>` : null;
 }

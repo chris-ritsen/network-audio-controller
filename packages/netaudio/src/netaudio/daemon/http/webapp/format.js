@@ -62,7 +62,8 @@ export function deviceLabel(device) {
 }
 
 export function channelLabel(channel, number) {
-  const name = channel && channel.name ? channel.name : t("channel {number}", { number });
+  const name =
+    channel && channel.name ? channel.name : t("channel {number}", { number });
   return `${number}: ${name}`;
 }
 
@@ -114,11 +115,14 @@ export const METER_FLOOR_DBFS = -61;
 let meteringScale = {};
 
 export function setMeteringScale(scale) {
-  meteringScale = scale && typeof scale === "object" && !Array.isArray(scale) ? scale : {};
+  meteringScale =
+    scale && typeof scale === "object" && !Array.isArray(scale) ? scale : {};
 }
 
 export function meteringDecibelsFullScale(value, source) {
-  return Number.isInteger(value) ? (meteringScale[source]?.[value]?.dbfs ?? null) : null;
+  return Number.isInteger(value)
+    ? (meteringScale[source]?.[value]?.dbfs ?? null)
+    : null;
 }
 
 export function meteringSignalPresence(value, source) {

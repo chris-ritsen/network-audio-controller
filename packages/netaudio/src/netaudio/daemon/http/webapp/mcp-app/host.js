@@ -27,7 +27,14 @@ function answer(identifier, method, params) {
     })
     .then(
       (result) => post({ id: identifier, result: result ?? {} }),
-      (error) => post({ id: identifier, error: { code: error.code ?? -32000, message: error.message || String(error) } }),
+      (error) =>
+        post({
+          id: identifier,
+          error: {
+            code: error.code ?? -32000,
+            message: error.message || String(error),
+          },
+        }),
     );
 }
 
@@ -40,7 +47,13 @@ window.addEventListener("message", (event) => {
     if (!entry) return;
     pending.delete(message.id);
     clearTimeout(entry.timer);
-    if (message.error) entry.reject(new HostError(message.error.message || "host error", message.error.code));
+    if (message.error)
+      entry.reject(
+        new HostError(
+          message.error.message || "host error",
+          message.error.code,
+        ),
+      );
     else entry.resolve(message.result);
     return;
   }
@@ -80,7 +93,10 @@ export function onRequest(method, handler) {
 export async function callTool(name, args) {
   const result = await request("tools/call", { name, arguments: args });
   if (result?.isError) {
-    const text = (result.content || []).map((block) => block.text).filter(Boolean).join("\n");
+    const text = (result.content || [])
+      .map((block) => block.text)
+      .filter(Boolean)
+      .join("\n");
     throw new HostError(text || `${name} failed`);
   }
   return result?.structuredContent ?? {};

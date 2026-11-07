@@ -1,12 +1,19 @@
 import { test, expect } from "@playwright/test";
 import { serveWebapp } from "./fixture.mjs";
 
-test("failed startup shows a recoverable error and reload renders the app", async ({ page }, testInfo) => {
+test("failed startup shows a recoverable error and reload renders the app", async ({
+  page,
+}, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await serveWebapp(page);
   let release;
-  const pending = new Promise((resolve) => { release = resolve; });
-  const holdModule = async (route) => { await pending; await route.abort(); };
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const holdModule = async (route) => {
+    await pending;
+    await route.abort();
+  };
   await page.route("**/app.js", holdModule);
   await page.goto("http://netaudio.test/", { waitUntil: "domcontentloaded" });
   try {

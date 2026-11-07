@@ -16,8 +16,11 @@ export function DetailedMonitoring({ requestName, online }) {
     started.catch((failure) => {
       if (!disposed) setError(failure.message);
     });
-    const release = () => api.stopMetering(requestName, clientId).catch(() => {});
-    const leave = () => { void started.then(release, release); };
+    const release = () =>
+      api.stopMetering(requestName, clientId).catch(() => {});
+    const leave = () => {
+      void started.then(release, release);
+    };
     window.addEventListener("pagehide", leave);
     return () => {
       disposed = true;
@@ -25,7 +28,9 @@ export function DetailedMonitoring({ requestName, online }) {
       leave();
     };
   }, [requestName, online, ready, attempt]);
-  return error ? html`<div role="alert">${t("Detailed monitoring could not start: {error}", { error: t(error) })}
+  return error
+    ? html`<div role="alert">${t("Detailed monitoring could not start: {error}", { error: t(error) })}
     <button class="btn btn-sm" onClick=${() => setAttempt(attempt + 1)}>${t("Retry monitoring")}</button>
-  </div>` : null;
+  </div>`
+    : null;
 }

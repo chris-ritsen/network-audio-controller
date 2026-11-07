@@ -1,59 +1,115 @@
 import { test, expect } from "@playwright/test";
 import { serveWebapp } from "./fixture.mjs";
 
-test("wrapped and single-line filter options have the same spacing", async ({ page }) => {
+test("wrapped and single-line filter options have the same spacing", async ({
+  page,
+}) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/routing");
   const panel = page.getByRole("complementary", { name: "Device filters" });
-  await panel.locator("summary").filter({ hasText: /^Model$/ }).click();
-  const labels = panel.locator("details").filter({ has: page.locator("summary", { hasText: /^Model$/ }) }).locator(".routing-filter-options label");
-  await labels.first().locator("span").first().evaluate((node) => { node.textContent = "A deliberately long model name that wraps onto several lines"; });
-  const gaps = await labels.evaluateAll((nodes) => nodes.slice(1).map((node, index) => {
-    const previous = nodes[index].querySelector("span").getBoundingClientRect();
-    return node.querySelector("span").getBoundingClientRect().top - previous.bottom;
-  }));
+  await panel
+    .locator("summary")
+    .filter({ hasText: /^Model$/ })
+    .click();
+  const labels = panel
+    .locator("details")
+    .filter({ has: page.locator("summary", { hasText: /^Model$/ }) })
+    .locator(".routing-filter-options label");
+  await labels
+    .first()
+    .locator("span")
+    .first()
+    .evaluate((node) => {
+      node.textContent =
+        "A deliberately long model name that wraps onto several lines";
+    });
+  const gaps = await labels.evaluateAll((nodes) =>
+    nodes.slice(1).map((node, index) => {
+      const previous = nodes[index]
+        .querySelector("span")
+        .getBoundingClientRect();
+      return (
+        node.querySelector("span").getBoundingClientRect().top - previous.bottom
+      );
+    }),
+  );
   expect(gaps.length).toBeGreaterThan(1);
   for (const gap of gaps) expect(gap).toBe(12);
 });
 
-test("filter checkboxes do not move controls and survive refresh with search values", async ({ page }) => {
+test("filter checkboxes do not move controls and survive refresh with search values", async ({
+  page,
+}) => {
   await serveWebapp(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://netaudio.test/routing");
   const panel = page.getByRole("complementary", { name: "Device filters" });
   await expect(panel.locator("details[open]")).toHaveCount(0);
-  await panel.locator("summary").filter({ hasText: /^Sample rate$/ }).click();
+  await panel
+    .locator("summary")
+    .filter({ hasText: /^Sample rate$/ })
+    .click();
   const rate = panel.getByRole("checkbox", { name: /^48 kHz\b/ });
-  const positions = () => panel.locator("summary").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().y));
+  const positions = () =>
+    panel
+      .locator("summary")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.getBoundingClientRect().y),
+      );
   const before = await positions();
   await rate.check();
   expect(await positions()).toEqual(before);
   await expect(panel.getByRole("button")).toHaveCount(1);
-  await expect(panel.getByRole("button", { name: "Clear all", exact: true })).toBeVisible();
-  await page.getByRole("searchbox", { name: "Search devices", exact: true }).fill("Windows");
-  await page.getByRole("searchbox", { name: "Receivers", exact: true }).fill("01");
-  await page.getByRole("searchbox", { name: "Transmitters", exact: true }).fill("02");
+  await expect(
+    panel.getByRole("button", { name: "Clear all", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("searchbox", { name: "Search devices", exact: true })
+    .fill("Windows");
+  await page
+    .getByRole("searchbox", { name: "Receivers", exact: true })
+    .fill("01");
+  await page
+    .getByRole("searchbox", { name: "Transmitters", exact: true })
+    .fill("02");
   await page.reload();
   await expect(panel.locator("details[open]")).toHaveCount(1);
   await expect(rate).toBeChecked();
-  await expect(page.getByRole("searchbox", { name: "Search devices", exact: true })).toHaveValue("Windows");
-  await expect(page.getByRole("searchbox", { name: "Receivers", exact: true })).toHaveValue("01");
-  await expect(page.getByRole("searchbox", { name: "Transmitters", exact: true })).toHaveValue("02");
+  await expect(
+    page.getByRole("searchbox", { name: "Search devices", exact: true }),
+  ).toHaveValue("Windows");
+  await expect(
+    page.getByRole("searchbox", { name: "Receivers", exact: true }),
+  ).toHaveValue("01");
+  await expect(
+    page.getByRole("searchbox", { name: "Transmitters", exact: true }),
+  ).toHaveValue("02");
   await rate.uncheck();
   await page.reload();
   await expect(rate).not.toBeChecked();
   await panel.getByRole("button", { name: "Clear all", exact: true }).click();
   await page.reload();
-  await expect(page.getByRole("searchbox", { name: "Search devices", exact: true })).toHaveValue("");
-  await expect(page.getByRole("searchbox", { name: "Receivers", exact: true })).toHaveValue("");
-  await expect(page.getByRole("searchbox", { name: "Transmitters", exact: true })).toHaveValue("");
+  await expect(
+    page.getByRole("searchbox", { name: "Search devices", exact: true }),
+  ).toHaveValue("");
+  await expect(
+    page.getByRole("searchbox", { name: "Receivers", exact: true }),
+  ).toHaveValue("");
+  await expect(
+    page.getByRole("searchbox", { name: "Transmitters", exact: true }),
+  ).toHaveValue("");
   await expect(panel.locator('input[type="checkbox"]:checked')).toHaveCount(0);
   await expect(panel.locator("details[open]")).toHaveCount(1);
-  await panel.locator("summary").filter({ hasText: /^Sample rate$/ }).click();
+  await panel
+    .locator("summary")
+    .filter({ hasText: /^Sample rate$/ })
+    .click();
   await page.getByRole("button", { name: "Channel list", exact: true }).click();
   await page.getByRole("button", { name: "Hide filters", exact: true }).click();
   await page.reload();
-  await expect(page.getByRole("button", { name: "Show grid", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Show grid", exact: true }),
+  ).toBeVisible();
   await expect(panel).toHaveCount(0);
   await page.getByRole("button", { name: "Show filters", exact: true }).click();
   await expect(panel.locator("details[open]")).toHaveCount(0);

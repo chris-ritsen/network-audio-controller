@@ -2,8 +2,11 @@ import { test, expect } from "@playwright/test";
 import { deviceFixture, serveWebapp } from "./fixture.mjs";
 
 function inventoryWith(state) {
-  const source = structuredClone(Object.values(deviceFixture).find((device) => device.name === "avio-bt-1"));
-  for (const key of Object.keys(source)) if (key.startsWith("aes67_") || key.startsWith("ddm_")) delete source[key];
+  const source = structuredClone(
+    Object.values(deviceFixture).find((device) => device.name === "avio-bt-1"),
+  );
+  for (const key of Object.keys(source))
+    if (key.startsWith("aes67_") || key.startsWith("ddm_")) delete source[key];
   Object.assign(source, state);
   const supported =
     typeof source.aes67_configuration_supported === "boolean"
@@ -30,13 +33,21 @@ function inventoryWith(state) {
   return { [source.server_name]: source };
 }
 
-test("AES67 readiness views make no writes and unknown support has no controls", async ({ page }) => {
+test("AES67 readiness views make no writes and unknown support has no controls", async ({
+  page,
+}) => {
   await serveWebapp(page, { devices: inventoryWith({}) });
   const writes = [];
-  page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
+  page.on("request", (request) => {
+    if (request.method() !== "GET") writes.push(request.url());
+  });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
-  await expect(page.getByRole("button", { name: /^(Enable|Disable)$/ })).toHaveCount(0);
-  await expect(page.getByLabel("AES67 multicast address prefix")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /^(Enable|Disable)$/ }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("AES67 multicast address prefix")).toHaveCount(
+    0,
+  );
   expect(writes).toEqual([]);
 });
 
@@ -51,14 +62,28 @@ test("pending AES67 changes show current and configured modes on desktop and mob
     }),
   });
   const writes = [];
-  page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
+  page.on("request", (request) => {
+    if (request.method() !== "GET") writes.push(request.url());
+  });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
-  await expect(page.locator("#content").getByText("Enable pending", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Disable", exact: true })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Reboot", exact: true })).toHaveCount(0);
+  await expect(
+    page.locator("#content").getByText("Enable pending", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Disable", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Reboot", exact: true }),
+  ).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator("#content").getByText("Enable pending", { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(
+    page.locator("#content").getByText("Enable pending", { exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
   expect(writes).toEqual([]);
 });
 
@@ -79,11 +104,17 @@ test("enrolled devices show DDM RTP readiness without local configuration button
     }),
   });
   const writes = [];
-  page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
+  page.on("request", (request) => {
+    if (request.method() !== "GET") writes.push(request.url());
+  });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
-  await expect(page.locator("#content dl")).toContainText("RTP flowsReboot required");
+  await expect(page.locator("#content dl")).toContainText(
+    "RTP flowsReboot required",
+  );
   await expect(page.locator("#content").getByRole("button")).toHaveCount(0);
-  await expect(page.getByLabel("AES67 multicast address prefix")).toHaveCount(0);
+  await expect(page.getByLabel("AES67 multicast address prefix")).toHaveCount(
+    0,
+  );
   expect(writes).toEqual([]);
 });
 
@@ -107,9 +138,15 @@ test("managed AES67 permission exposes mode actions without a local prefix actio
   };
   await serveWebapp(page, { devices });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
-  await expect(page.getByRole("button", { name: "Enable", exact: true })).toBeEnabled();
-  await expect(page.getByLabel("AES67 multicast address prefix")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Apply", exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Enable", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByLabel("AES67 multicast address prefix")).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("button", { name: "Apply", exact: true }),
+  ).toHaveCount(0);
 });
 
 test("known direct devices retain explicit mode and multicast-prefix actions", async ({
@@ -126,11 +163,17 @@ test("known direct devices retain explicit mode and multicast-prefix actions", a
   const writes = [];
   await page.route("**/set-aes67", (route) => {
     writes.push(route.request().postDataJSON());
-    return route.fulfill({ contentType: "application/json", body: '{"success":true}' });
+    return route.fulfill({
+      contentType: "application/json",
+      body: '{"success":true}',
+    });
   });
   await page.route("**/set-aes67-multicast-prefix", (route) => {
     writes.push(route.request().postDataJSON());
-    return route.fulfill({ contentType: "application/json", body: '{"success":true}' });
+    return route.fulfill({
+      contentType: "application/json",
+      body: '{"success":true}',
+    });
   });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
   expect(writes).toEqual([]);

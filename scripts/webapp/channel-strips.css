@@ -117,7 +117,8 @@
     background: linear-gradient(
       to top,
       var(--meter-nominal-unlit) 0 var(--channel-strip-nominal-top),
-      var(--meter-high-unlit) var(--channel-strip-nominal-top) var(--channel-strip-high-top),
+      var(--meter-high-unlit) var(--channel-strip-nominal-top)
+        var(--channel-strip-high-top),
       var(--meter-critical-unlit) var(--channel-strip-high-top) 100%
     );
     outline: 1px solid var(--meter-well);
@@ -130,7 +131,8 @@
     background: repeating-linear-gradient(
       to top,
       transparent 0 calc(var(--channel-strip-segment) - 1px),
-      var(--meter-well) calc(var(--channel-strip-segment) - 1px) var(--channel-strip-segment)
+      var(--meter-well) calc(var(--channel-strip-segment) - 1px)
+        var(--channel-strip-segment)
     );
     pointer-events: none;
   }
@@ -141,7 +143,8 @@
     background: linear-gradient(
       to top,
       var(--meter-nominal) 0 var(--channel-strip-nominal-top),
-      var(--meter-high) var(--channel-strip-nominal-top) var(--channel-strip-high-top),
+      var(--meter-high) var(--channel-strip-nominal-top)
+        var(--channel-strip-high-top),
       var(--meter-critical) var(--channel-strip-high-top) 100%
     );
     clip-path: inset(100% 0 0 0);

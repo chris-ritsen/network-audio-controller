@@ -15,7 +15,8 @@ const modeLabel = (value) =>
     static: t("Static"),
   })[value];
 
-const usableAddress = (value) => (value && value !== "0.0.0.0" ? value : undefined);
+const usableAddress = (value) =>
+  value && value !== "0.0.0.0" ? value : undefined;
 
 const INTERFACE_TEXT = {
   primary: {
@@ -82,24 +83,35 @@ function InterfaceCard({
       <h3 class="section-label">${title}</h3>
       <${Fields}
         entries=${[
-        [t("Mode"), modeLabel(entry.mode)],
-        [t("Address"), usableAddress(entry.ip_address)],
-        [t("Subnet mask"), usableAddress(entry.netmask)],
-        [t("Gateway"), usableAddress(entry.gateway)],
-        [t("DNS server"), usableAddress(entry.dns_server)],
-        [t("MAC address"), entry.mac_address || undefined],
-        ...(configured && !editable && configured.mode !== entry.mode
-          ? [[t("Mode after reboot"), modeLabel(configured.mode)]]
-          : []),
-        ...(configured?.mode === "static" && !editable && configured.ip_address !== entry.ip_address
-          ? [
-              [t("Address after reboot"), usableAddress(configured.ip_address)],
-              [t("Subnet mask after reboot"), usableAddress(configured.netmask)],
-              [t("Gateway after reboot"), usableAddress(configured.gateway)],
-              [t("DNS server after reboot"), usableAddress(configured.dns_server)],
-            ]
-          : []),
-      ]}
+          [t("Mode"), modeLabel(entry.mode)],
+          [t("Address"), usableAddress(entry.ip_address)],
+          [t("Subnet mask"), usableAddress(entry.netmask)],
+          [t("Gateway"), usableAddress(entry.gateway)],
+          [t("DNS server"), usableAddress(entry.dns_server)],
+          [t("MAC address"), entry.mac_address || undefined],
+          ...(configured && !editable && configured.mode !== entry.mode
+            ? [[t("Mode after reboot"), modeLabel(configured.mode)]]
+            : []),
+          ...(configured?.mode === "static" &&
+          !editable &&
+          configured.ip_address !== entry.ip_address
+            ? [
+                [
+                  t("Address after reboot"),
+                  usableAddress(configured.ip_address),
+                ],
+                [
+                  t("Subnet mask after reboot"),
+                  usableAddress(configured.netmask),
+                ],
+                [t("Gateway after reboot"), usableAddress(configured.gateway)],
+                [
+                  t("DNS server after reboot"),
+                  usableAddress(configured.dns_server),
+                ],
+              ]
+            : []),
+        ]}
       />
       ${entry.reboot_required ? html`<p role="status">${t("Reboot to apply the new network settings.")}</p>` : null}
       ${
@@ -116,8 +128,8 @@ function InterfaceCard({
                 </select>
               <//>
               ${
-          mode === "static"
-            ? html`
+                mode === "static"
+                  ? html`
                 <${FieldRow} label=${t("IP address")}
                   ><input
                     disabled=${saving}
@@ -147,28 +159,28 @@ function InterfaceCard({
                     defaultValue=${configured.dns_server || ""}
                 /><//>
               `
-            : null
-        }
+                  : null
+              }
               <${AsyncButton}
                 description=${roleText.description}
                 onRun=${async () => {
-            setSaving(true);
-            try {
-              const result = await api.setInterface({
-                device: requestName,
-                interface: role,
-                mode,
-                ip: ip.current?.value,
-                netmask: mask.current?.value,
-                gateway: gateway.current?.value,
-                dns: dns.current?.value,
-              });
-              onReadback(result);
-              return result;
-            } finally {
-              setSaving(false);
-            }
-          }}
+                  setSaving(true);
+                  try {
+                    const result = await api.setInterface({
+                      device: requestName,
+                      interface: role,
+                      mode,
+                      ip: ip.current?.value,
+                      netmask: mask.current?.value,
+                      gateway: gateway.current?.value,
+                      dns: dns.current?.value,
+                    });
+                    onReadback(result);
+                    return result;
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
                 >${roleText.save}<//
               >
             `
@@ -234,7 +246,10 @@ function Redundancy({ device, status, requestName, onReadback }) {
           : html`<${Fields}
               entries=${[
                 [t("Mode"), active],
-                [t("Mode after reboot"), configured && configured !== active ? configured : undefined],
+                [
+                  t("Mode after reboot"),
+                  configured && configured !== active ? configured : undefined,
+                ],
               ]}
             />`
       }
@@ -277,9 +292,8 @@ export function NetworkSection({ device }) {
     <div class="network-config">
       <${Panel} title=${t("Network config")}>
         ${speed ? html`<${Fields} entries=${[[t("Link speed"), `${speed} Mbps`]]} />` : null}
-        ${
-        interfaces.map(
-              (entry) => html`
+        ${interfaces.map(
+          (entry) => html`
                 <${InterfaceCard}
                   key=${requestName + entry.interface + JSON.stringify(entry.configured)}
                   device=${availabilityDevice}
@@ -290,8 +304,7 @@ export function NetworkSection({ device }) {
                   single=${interfaces.length < 2 && entry.interface === "primary"}
                 />
               `,
-            )
-      }
+        )}
         <${Redundancy}
           key=${requestName + status?.configured_mode}
           device=${availabilityDevice}

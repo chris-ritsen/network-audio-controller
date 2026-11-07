@@ -118,10 +118,19 @@ function Setting({ device, category, editor, title }) {
 
   if (category === "video_format") {
     inputs = html`<${Fields} entries=${[
-        [t("Configured"), editor.details.configured ? t(editor.details.configured) : undefined],
-        [t("Actual"), editor.details.actual ? t(editor.details.actual) : undefined],
-        [t("Direction"), editor.details.direction ? t(editor.details.direction) : undefined],
-      ]} />
+      [
+        t("Configured"),
+        editor.details.configured ? t(editor.details.configured) : undefined,
+      ],
+      [
+        t("Actual"),
+        editor.details.actual ? t(editor.details.actual) : undefined,
+      ],
+      [
+        t("Direction"),
+        editor.details.direction ? t(editor.details.direction) : undefined,
+      ],
+    ]} />
       ${select(t("Resolution"), "resolution")}${select(t("Bit depth"), "bit_depth")}${select(t("Color space"), "color_space")}`;
   }
 
@@ -133,22 +142,27 @@ function Setting({ device, category, editor, title }) {
         small
         disabled=${!writable}
         onRun=${async () => {
-        const result = await api.deviceControls(
-          deviceRequestName(device),
-          "plan",
-          category,
-          value,
-        );
-        setPlan(result);
-        return result;
-      }}
+          const result = await api.deviceControls(
+            deviceRequestName(device),
+            "plan",
+            category,
+            value,
+          );
+          setPlan(result);
+          return result;
+        }}
         >${t("Preview")}<//
       >
       <${AsyncButton}
         small
         disabled=${!writable || plan?.action !== "change"}
         onRun=${async () => {
-          const result = await api.deviceControls(deviceRequestName(device), "apply", category, value);
+          const result = await api.deviceControls(
+            deviceRequestName(device),
+            "apply",
+            category,
+            value,
+          );
           setDirty(false);
           setPlan(null);
           return result;
@@ -165,9 +179,16 @@ export function DeviceControls({ device }) {
   const [confirm, setConfirm] = useState(false);
   const lastInspection = useRef(0);
   const inspect = () => {
-    if (!state.family || !state.readable || Date.now() - lastInspection.current < 5000) return;
+    if (
+      !state.family ||
+      !state.readable ||
+      Date.now() - lastInspection.current < 5000
+    )
+      return;
     lastInspection.current = Date.now();
-    api.deviceControls(deviceRequestName(device), "inspect").catch((error) => console.error(error));
+    api
+      .deviceControls(deviceRequestName(device), "inspect")
+      .catch((error) => console.error(error));
   };
   useEffect(() => {
     lastInspection.current = 0;
@@ -188,23 +209,53 @@ export function DeviceControls({ device }) {
   };
   return html`<div class="device-controls" onPointerEnter=${inspect} onPointerDown=${inspect} onFocusIn=${inspect}><${Panel}
       title=${state.family === "bluetooth" ? "Bluetooth" : t("Video and serial")}
-      headerActions=${state.readable ? html`<${AsyncButton}
+      headerActions=${
+        state.readable
+          ? html`<${AsyncButton}
       small
       description=${device.name ? t("refresh device controls on {device}", { device: device.name }) : t("refresh device controls on device")}
       onRun=${() => api.deviceControls(deviceRequestName(device), "inspect")}
       >${t("Refresh")}<//
-    >` : null}
+    >`
+          : null
+      }
     >
       <${Fields} entries=${[
-        [t("Connection"), connection ? [presentation?.summary.connection && t(presentation.summary.connection), connection.peer_name].filter(Boolean).join(" · ") || undefined : undefined],
-        [t("Signal"), observations.video_channel && presentation?.summary.signal ? t(presentation.summary.signal) : undefined],
-        ["HDCP", observations.video_channel && presentation?.summary.observed_hdcp ? t(presentation.summary.observed_hdcp) : undefined],
-        [t("Remembered devices"), observations.bluetooth_pairing?.value > 0 ? observations.bluetooth_pairing.value : undefined],
+        [
+          t("Connection"),
+          connection
+            ? [
+                presentation?.summary.connection &&
+                  t(presentation.summary.connection),
+                connection.peer_name,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined
+            : undefined,
+        ],
+        [
+          t("Signal"),
+          observations.video_channel && presentation?.summary.signal
+            ? t(presentation.summary.signal)
+            : undefined,
+        ],
+        [
+          "HDCP",
+          observations.video_channel && presentation?.summary.observed_hdcp
+            ? t(presentation.summary.observed_hdcp)
+            : undefined,
+        ],
+        [
+          t("Remembered devices"),
+          observations.bluetooth_pairing?.value > 0
+            ? observations.bluetooth_pairing.value
+            : undefined,
+        ],
       ]} />
       ${
-      observations.bluetooth_pairing?.value > 0 &&
-      state.writable &&
-      html`<label
+        observations.bluetooth_pairing?.value > 0 &&
+        state.writable &&
+        html`<label
           ><input
             type="checkbox"
             checked=${confirm}
@@ -216,32 +267,33 @@ export function DeviceControls({ device }) {
           variant="danger"
           disabled=${!confirm}
           onRun=${async () => {
-          const result = await api.deviceControls(
-            deviceRequestName(device),
-            "apply",
-            "bluetooth_pairing",
-            "clear",
-            true,
-          );
-          setConfirm(false);
-          return result;
-        }}
+            const result = await api.deviceControls(
+              deviceRequestName(device),
+              "apply",
+              "bluetooth_pairing",
+              "clear",
+              true,
+            );
+            setConfirm(false);
+            return result;
+          }}
           >${t("Clear pairing list")}<//
         >`
-    }
+      }
     <//>
     ${Object.entries(labels)
-    .filter(
-      ([category]) => presentation?.editors[category] && observations[category],
-    )
-    .map(
-      ([category, title]) =>
-        html`<${Setting}
+      .filter(
+        ([category]) =>
+          presentation?.editors[category] && observations[category],
+      )
+      .map(
+        ([category, title]) =>
+          html`<${Setting}
           key=${`${device.server_name}:${category}`}
           device=${device}
           category=${category}
           editor=${presentation.editors[category]}
           title=${title}
         />`,
-    )}</div>`;
+      )}</div>`;
 }

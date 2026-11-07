@@ -10,7 +10,9 @@ function finite(value) {
 }
 
 function milliseconds(nanoseconds) {
-  return finite(nanoseconds) ? `${Number((Number(nanoseconds) / 1_000_000).toFixed(3))} ms` : "";
+  return finite(nanoseconds)
+    ? `${Number((Number(nanoseconds) / 1_000_000).toFixed(3))} ms`
+    : "";
 }
 
 function partsPerMillion(value) {
@@ -26,7 +28,10 @@ function Sparkline({ series, label }) {
   const begin = samples[0][0];
   const duration = Math.max(samples.at(-1)[0] - begin, 1e-9);
   const points = samples
-    .map(([time, value]) => `${(((time - begin) / duration) * 158 + 1).toFixed(1)},${(31 - ((Number(value) - low) / span) * 30).toFixed(1)}`)
+    .map(
+      ([time, value]) =>
+        `${(((time - begin) / duration) * 158 + 1).toFixed(1)},${(31 - ((Number(value) - low) / span) * 30).toFixed(1)}`,
+    )
     .join(" ");
   return html`<svg class="sparkline" width="160" height="32" viewBox="0 0 160 32" role="img" aria-label=${label}>
     <polyline fill="none" stroke="currentColor" stroke-width="1.5" points=${points} />
@@ -82,10 +87,15 @@ function ReceiveLatency({ data, endpoint, onReset }) {
         <tbody>
           ${paths.map((path) => {
             const latency = path.latency || {};
-            const budget = path.evidence?.configured_latency_nanoseconds ?? latency.current?.evidence?.configured_latency_nanoseconds;
+            const budget =
+              path.evidence?.configured_latency_nanoseconds ??
+              latency.current?.evidence?.configured_latency_nanoseconds;
             const current = latency.current?.value;
             const peak = latency.statistics?.maximum;
-            const headroom = finite(budget) && finite(current) ? Number(budget) - Number(current) : null;
+            const headroom =
+              finite(budget) && finite(current)
+                ? Number(budget) - Number(current)
+                : null;
             return html`<tr key=${`${path.telemetry_index}:${path.network_interface_index}`}>
               <td data-label=${t("Flow")}>${flowLabel(path)}</td>
               <td class="numeric" data-label=${t("Latency setting")}>${milliseconds(budget)}</td>
@@ -105,7 +115,12 @@ function ReceiveLatency({ data, endpoint, onReset }) {
 function frequencySeries(data) {
   const candidates = ["conmon", "heartbeat"]
     .map((name) => data?.clock?.[name])
-    .filter((series) => series?.fresh && finite(series.current?.value) && (series.statistics?.count || 0) >= MINIMUM_FREQUENCY_OBSERVATIONS);
+    .filter(
+      (series) =>
+        series?.fresh &&
+        finite(series.current?.value) &&
+        (series.statistics?.count || 0) >= MINIMUM_FREQUENCY_OBSERVATIONS,
+    );
   return candidates[0] || null;
 }
 
@@ -128,7 +143,15 @@ function ClockFrequency({ data, onWarnings }) {
       <${Fields}
         entries=${[
           [t("Offset now"), partsPerMillion(series.current.value)],
-          [t("Range"), finite(stats.minimum) && finite(stats.maximum) ? t("{minimum} to {maximum}", { minimum: partsPerMillion(stats.minimum), maximum: partsPerMillion(stats.maximum) }) : undefined],
+          [
+            t("Range"),
+            finite(stats.minimum) && finite(stats.maximum)
+              ? t("{minimum} to {maximum}", {
+                  minimum: partsPerMillion(stats.minimum),
+                  maximum: partsPerMillion(stats.maximum),
+                })
+              : undefined,
+          ],
         ]}
       />
       <${Sparkline} series=${series} label=${t("Clock frequency offset over the last 5 minutes")} />
@@ -137,7 +160,11 @@ function ClockFrequency({ data, onWarnings }) {
 }
 
 async function post(path, body) {
-  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error);
   return payload;
@@ -152,7 +179,9 @@ export function DiagnosticsSection({ device }) {
     let timer = 0;
     async function refresh() {
       try {
-        const response = await fetch(`${endpoint}?history=points`, { signal: controller.signal });
+        const response = await fetch(`${endpoint}?history=points`, {
+          signal: controller.signal,
+        });
         const body = await response.json();
         if (!response.ok) throw new Error(body.error);
         setData(body);
@@ -161,7 +190,8 @@ export function DiagnosticsSection({ device }) {
         if (controller.signal.aborted) return;
         setError(failure.message);
       }
-      if (!controller.signal.aborted) timer = setTimeout(refresh, REFRESH_MILLISECONDS);
+      if (!controller.signal.aborted)
+        timer = setTimeout(refresh, REFRESH_MILLISECONDS);
     }
     refresh();
     return () => {
@@ -169,7 +199,8 @@ export function DiagnosticsSection({ device }) {
       clearTimeout(timer);
     };
   }, [endpoint]);
-  const run = (path, body) => post(path, body).then(setData, (failure) => setError(failure.message));
+  const run = (path, body) =>
+    post(path, body).then(setData, (failure) => setError(failure.message));
   return html`
     ${error ? html`<${Notice}>${t(error)}<//>` : null}
     <${ReceiveLatency}

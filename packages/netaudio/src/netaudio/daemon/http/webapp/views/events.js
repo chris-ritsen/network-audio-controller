@@ -6,7 +6,11 @@ import { html, useEffect, useState } from "../lib/preact.js";
 import { setQueryParameters } from "../router.js";
 import { events } from "../store.js";
 
-const SEVERITY_LABELS = { error: t("Error"), info: t("Information"), warning: t("Warning") };
+const SEVERITY_LABELS = {
+  error: t("Error"),
+  info: t("Information"),
+  warning: t("Warning"),
+};
 
 const SEVERITY_RANK = { info: 0, warning: 1, error: 2 };
 
@@ -29,31 +33,84 @@ function danteEvents(entry) {
   if (!before || !after) return [];
   if (entry.kind === "clock_status_changed") {
     const found = [];
-    if (before.synchronization === "synchronized" && after.synchronization === "lost") {
-      found.push(event("Clock Sync Unlocked", "error", t("{device} lost clock sync.", { device })));
+    if (
+      before.synchronization === "synchronized" &&
+      after.synchronization === "lost"
+    ) {
+      found.push(
+        event(
+          "Clock Sync Unlocked",
+          "error",
+          t("{device} lost clock sync.", { device }),
+        ),
+      );
     }
-    if (before.synchronization === "lost" && after.synchronization === "synchronized") {
-      found.push(event("Clock Sync Locked", "error", t("{device} regained clock sync.", { device })));
+    if (
+      before.synchronization === "lost" &&
+      after.synchronization === "synchronized"
+    ) {
+      found.push(
+        event(
+          "Clock Sync Locked",
+          "error",
+          t("{device} regained clock sync.", { device }),
+        ),
+      );
     }
-    if (Number.isInteger(before.mute_flags) && Number.isInteger(after.mute_flags)) {
-      if (!before.mute_flags && after.mute_flags) found.push(event("Audio Mute", "error", t("{device} was muted.", { device })));
-      if (before.mute_flags && !after.mute_flags) found.push(event("Audio Unmute", "error", t("{device} was unmuted.", { device })));
+    if (
+      Number.isInteger(before.mute_flags) &&
+      Number.isInteger(after.mute_flags)
+    ) {
+      if (!before.mute_flags && after.mute_flags)
+        found.push(
+          event("Audio Mute", "error", t("{device} was muted.", { device })),
+        );
+      if (before.mute_flags && !after.mute_flags)
+        found.push(
+          event(
+            "Audio Unmute",
+            "error",
+            t("{device} was unmuted.", { device }),
+          ),
+        );
     }
     return found;
   }
   if (entry.kind === "clock_role_changed") {
     if (!isLeader(before) && isLeader(after)) {
-      return [event("Elevation to Clock Leader", "error", t("{device} is now the clock leader.", { device }))];
+      return [
+        event(
+          "Elevation to Clock Leader",
+          "error",
+          t("{device} is now the clock leader.", { device }),
+        ),
+      ];
     }
     if (isLeader(before) && !isLeader(after)) {
-      return [event("Demotion from Clock Leader", "info", t("{device} is no longer the clock leader.", { device }))];
+      return [
+        event(
+          "Demotion from Clock Leader",
+          "info",
+          t("{device} is no longer the clock leader.", { device }),
+        ),
+      ];
     }
     return [];
   }
-  if (entry.kind === "setting_changed" && typeof before.is_locked === "boolean" && typeof after.is_locked === "boolean") {
+  if (
+    entry.kind === "setting_changed" &&
+    typeof before.is_locked === "boolean" &&
+    typeof after.is_locked === "boolean"
+  ) {
     return after.is_locked
       ? [event("Device Locked", "info", t("{device} was locked.", { device }))]
-      : [event("Device Unlocked", "info", t("{device} was unlocked.", { device }))];
+      : [
+          event(
+            "Device Unlocked",
+            "info",
+            t("{device} was unlocked.", { device }),
+          ),
+        ];
   }
   return [];
 }
@@ -72,7 +129,13 @@ function SeverityIcon({ severity }) {
 
 function saveLog(entries) {
   const lines = entries.map((event) =>
-    [format.timestamp(event.timestamp), event.device, SEVERITY_LABELS[event.severity], event.name, event.description].join("\t"),
+    [
+      format.timestamp(event.timestamp),
+      event.device,
+      SEVERITY_LABELS[event.severity],
+      event.name,
+      event.description,
+    ].join("\t"),
   );
   const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/plain" });
   const link = document.createElement("a");
@@ -104,7 +167,8 @@ function EventDetails({ event }) {
 function EventLog({ query }) {
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState(null);
-  const minimumSeverity = SEVERITY_RANK[query.severity] === undefined ? "info" : query.severity;
+  const minimumSeverity =
+    SEVERITY_RANK[query.severity] === undefined ? "info" : query.severity;
   const filter = query.search || "";
   const selectedKey = query.event || null;
   const setSelectedKey = (key) => setQueryParameters({ event: key });
@@ -140,7 +204,9 @@ function EventLog({ query }) {
   const visible = entries.filter((event) => {
     if (SEVERITY_RANK[event.severity] < minimumRank) return false;
     if (!needle) return true;
-    return `${event.device} ${event.name} ${event.description}`.toLowerCase().includes(needle);
+    return `${event.device} ${event.name} ${event.description}`
+      .toLowerCase()
+      .includes(needle);
   });
   const selected = visible.find((event) => event.key === selectedKey);
   const toggle = (event) => {
@@ -209,7 +275,11 @@ function EventLog({ query }) {
             aria-label=${t("Minimum severity")}
             value=${minimumSeverity}
             onChange=${(event) =>
-              setQueryParameters({ event: null, severity: event.target.value === "info" ? null : event.target.value })}
+              setQueryParameters({
+                event: null,
+                severity:
+                  event.target.value === "info" ? null : event.target.value,
+              })}
           >
             <option value="info">${t("All Events")}</option>
             <option value="warning">${t("Warnings and Errors")}</option>

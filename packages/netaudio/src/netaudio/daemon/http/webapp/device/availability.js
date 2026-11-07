@@ -11,7 +11,9 @@ export function operationAvailability(device, operation) {
 
 export function operationWritable(device, operation) {
   const availability = operationAvailability(device, operation);
-  return availability?.writable === true || availability?.write_permitted === true;
+  return (
+    availability?.writable === true || availability?.write_permitted === true
+  );
 }
 
 export function performanceOperationAvailability(device, operation) {

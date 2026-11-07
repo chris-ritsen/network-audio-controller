@@ -23,7 +23,10 @@ function onAirSlot(properties, rows) {
   const deviceId = text(properties.TX_DEVICE_ID);
   if (!model || model === "UNKNOWN" || !deviceId) return null;
   const matches = rows.filter(
-    ({ values }) => values.SLOT_STATUS === "STANDARD" && text(values.SLOT_TX_MODEL) === model && text(values.SLOT_TX_DEVICE_ID) === deviceId,
+    ({ values }) =>
+      values.SLOT_STATUS === "STANDARD" &&
+      text(values.SLOT_TX_MODEL) === model &&
+      text(values.SLOT_TX_DEVICE_ID) === deviceId,
   );
   return matches.length === 1 ? matches[0].slot : null;
 }
@@ -32,13 +35,30 @@ export function slotRows(properties) {
   const rows = SLOTS.map((slot) => ({
     slot,
     onAir: false,
-    values: Object.fromEntries(SLOT_COLUMNS.map((column) => [column.key, (properties[column.key] || {})[String(slot)]])),
+    values: Object.fromEntries(
+      SLOT_COLUMNS.map((column) => [
+        column.key,
+        (properties[column.key] || {})[String(slot)],
+      ]),
+    ),
   }));
   const slot = onAirSlot(properties, rows);
   if (slot === null) return rows;
   return rows.map((row) =>
     row.slot === slot
-      ? { ...row, onAir: true, values: { ...row.values, ...Object.fromEntries(Object.entries(ON_AIR_SOURCES).map(([key, source]) => [key, properties[source]])) } }
+      ? {
+          ...row,
+          onAir: true,
+          values: {
+            ...row.values,
+            ...Object.fromEntries(
+              Object.entries(ON_AIR_SOURCES).map(([key, source]) => [
+                key,
+                properties[source],
+              ]),
+            ),
+          },
+        }
       : row,
   );
 }

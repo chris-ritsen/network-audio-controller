@@ -32,9 +32,14 @@ export function languagePreference() {
 export function matchLanguage(requested) {
   for (const tag of requested || []) {
     const lower = String(tag).toLowerCase();
-    if (lower.startsWith("zh")) return /hant|-tw|-hk|-mo/.test(lower) ? "zh-Hant" : "zh-Hans";
+    if (lower.startsWith("zh"))
+      return /hant|-tw|-hk|-mo/.test(lower) ? "zh-Hant" : "zh-Hans";
     if (lower === "pt" || lower.startsWith("pt-")) return "pt-BR";
-    const match = LANGUAGES.find(([code]) => lower === code.toLowerCase() || lower.startsWith(`${code.toLowerCase()}-`));
+    const match = LANGUAGES.find(
+      ([code]) =>
+        lower === code.toLowerCase() ||
+        lower.startsWith(`${code.toLowerCase()}-`),
+    );
     if (match) return match[0];
   }
   return "en";
@@ -44,7 +49,8 @@ export function currentLanguage() {
   return active;
 }
 
-let loadCatalog = async (code) => (await import(new URL(`./i18n/${code}.js`, import.meta.url))).default;
+let loadCatalog = async (code) =>
+  (await import(new URL(`./i18n/${code}.js`, import.meta.url))).default;
 
 export function setCatalogLoader(loader) {
   loadCatalog = loader;
@@ -52,11 +58,18 @@ export function setCatalogLoader(loader) {
 
 export async function loadLanguage(requested) {
   const preference = languagePreference();
-  const browser = globalThis.navigator?.languages?.length ? globalThis.navigator.languages : [globalThis.navigator?.language || "en"];
-  const code = requested ? matchLanguage([requested]) : preference === "system" ? matchLanguage(browser) : preference;
+  const browser = globalThis.navigator?.languages?.length
+    ? globalThis.navigator.languages
+    : [globalThis.navigator?.language || "en"];
+  const code = requested
+    ? matchLanguage([requested])
+    : preference === "system"
+      ? matchLanguage(browser)
+      : preference;
   active = code;
   pluralRules = new Intl.PluralRules(code);
-  if (globalThis.document?.documentElement) globalThis.document.documentElement.lang = code;
+  if (globalThis.document?.documentElement)
+    globalThis.document.documentElement.lang = code;
   if (code === "en") return;
   try {
     catalog = await loadCatalog(code);
@@ -78,12 +91,17 @@ export function setLanguagePreference(value) {
 
 function fill(text, values) {
   if (!values) return text;
-  return text.replace(/\{(\w+)\}/g, (match, name) => (name in values ? String(values[name]) : match));
+  return text.replace(/\{(\w+)\}/g, (match, name) =>
+    name in values ? String(values[name]) : match,
+  );
 }
 
 export function t(text, values) {
   const translated = catalog[text];
-  return fill(typeof translated === "string" && translated ? translated : text, values);
+  return fill(
+    typeof translated === "string" && translated ? translated : text,
+    values,
+  );
 }
 
 export function tn(count, one, other, values = {}) {
