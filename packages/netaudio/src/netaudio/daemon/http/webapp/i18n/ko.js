@@ -575,7 +575,7 @@ export default {
   "Connectivity": "연결성",
   "Devices": "장치",
   "Reading domains…": "도메인 읽는 중…",
-  "Enroll {device} in {domain}? This may interrupt audio. Device configuration will be retained.": "{device}을(를) {domain}에 등록하겠습니까? 오디오가 중단될 수 있습니다. 장치 구성은 유지됩니다.",
+  "Enroll {device} in {domain}?": "{device}을(를) {domain}에 등록하겠습니까?",
   "Domain for {device}": "{device}의 도메인",
   "No domains available": "사용 가능한 도메인 없음",
   "Unenroll": "등록 해제",

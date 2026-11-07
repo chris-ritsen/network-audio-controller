@@ -563,7 +563,7 @@ export default {
   "Connectivity": "இணைப்புநிலை",
   "Devices": "சாதனங்கள்",
   "Reading domains…": "டொமைன்களைப் படிக்கிறது…",
-  "Enroll {device} in {domain}? This may interrupt audio. Device configuration will be retained.": "{device}-ஐ {domain}-இல் பதிவுசெய்யவா? இது ஆடியோவைத் தடைசெய்யக்கூடும். சாதன உள்ளமைவு தக்கவைக்கப்படும்.",
+  "Enroll {device} in {domain}?": "{device}-ஐ {domain}-இல் பதிவுசெய்யவா?",
   "Domain for {device}": "{device}-க்கான டொமைன்",
   "No domains available": "டொமைன்கள் எதுவும் கிடைக்கவில்லை",
   "Unenroll": "பதிவுநீக்கு",
