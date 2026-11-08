@@ -1,7 +1,7 @@
 use reqwest::{header::HeaderMap, Method, Url};
+use rustls::pki_types::{pem::PemObject, CertificateDer};
 use rustls::{crypto::ring, ClientConfig, RootCertStore};
 use std::fmt;
-use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -153,8 +153,7 @@ impl Transport {
         let mut trusted = Vec::new();
 
         if let Some(bytes) = certificate_bytes {
-            let mut reader = BufReader::new(bytes);
-            trusted = rustls_pemfile::certs(&mut reader)
+            trusted = CertificateDer::pem_slice_iter(bytes)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| Error::Tls("Managed service trust certificate file is invalid"))?;
 

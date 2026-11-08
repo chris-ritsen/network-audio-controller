@@ -1,5 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use rustls::pki_types::pem::{self, PemObject};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use rustls::{crypto, ServerConfig};
@@ -282,8 +284,9 @@ fn load_certificate(paths: &CertificatePaths, require_names: bool) -> Result<Cer
         File::open(&paths.certificate)
             .with_context(|| format!("open TLS certificate {}", paths.certificate.display()))?,
     );
-    let chain: Vec<_> =
-        rustls_pemfile::certs(&mut certificate_reader).collect::<std::io::Result<_>>()?;
+    let chain = CertificateDer::pem_reader_iter(&mut certificate_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .with_context(|| format!("read TLS certificate {}", paths.certificate.display()))?;
     let leaf = chain
         .first()
         .context("TLS certificate file contains no certificates")?;
@@ -342,8 +345,13 @@ fn load_certificate(paths: &CertificatePaths, require_names: bool) -> Result<Cer
         File::open(&paths.key)
             .with_context(|| format!("open TLS private key {}", paths.key.display()))?,
     );
-    let key = rustls_pemfile::private_key(&mut key_reader)?
-        .context("TLS key file contains no supported private key")?;
+    let key = PrivateKeyDer::from_pem_reader(&mut key_reader).map_err(|error| match error {
+        pem::Error::NoItemsFound => {
+            anyhow::anyhow!("TLS key file contains no supported private key")
+        }
+        error => anyhow::Error::new(error)
+            .context(format!("read TLS private key {}", paths.key.display())),
+    })?;
     let key = CertifiedKey::from_der(chain, key, &crypto::ring::default_provider())?;
     let certificate = Certificate {
         key: Arc::new(key),
