@@ -94,12 +94,11 @@ jobs:
           for checkout in "$GITHUB_WORKSPACE" "$release"; do
             name="master"
             [ "$checkout" = "$release" ] && name="$tag"
-            if [ ! -f "$checkout/scripts/audit_dependencies.py" ]; then
-              echo "### $name"$'\n\n'"Predates the dependency audit." >> "$GITHUB_STEP_SUMMARY"
-              continue
+            if report="$(uv run --no-project --python 3.13 python scripts/audit_dependencies.py --root "$checkout" 2>&1)"; then
+              result=0
+            else
+              result=$?
             fi
-            report="$(cd "$checkout" && uv run --no-project --python 3.13 python scripts/audit_dependencies.py)"
-            result=$?
             echo "$report"
             printf '### %s\n\n```\n%s\n```\n\n' "$name" "$report" >> "$GITHUB_STEP_SUMMARY"
             [ "$result" -ne 0 ] && status=1

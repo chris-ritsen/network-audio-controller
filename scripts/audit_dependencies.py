@@ -15,10 +15,24 @@ except ImportError:
 
 
 ROOT = Path(__file__).resolve().parent.parent
-CORE_MANIFEST = ROOT / "packages" / "netaudio-core" / "Cargo.toml"
-CORE_LOCK = ROOT / "packages" / "netaudio-core" / "Cargo.lock"
 OSV_QUERY_BATCH = "https://api.osv.dev/v1/querybatch"
 OSV_VULNERABILITY = "https://api.osv.dev/v1/vulns/{}"
+
+
+@dataclass(frozen=True)
+class Acceptance:
+    identifiers: frozenset[str]
+    reason: str
+
+
+ACCEPTED = {
+    ("Python", "cryptography", "48.0.1"): Acceptance(
+        frozenset({"PYSEC-2026-3552", "PYSEC-2026-3553", "PYSEC-2026-3554"}),
+        "Locked only for Intel macOS, where cryptography 49 and later publish no wheels. "
+        "NetAudio uses it only to generate its TLS certificate, not for PKCS#7 decryption "
+        "or X.509 chain verification.",
+    ),
+}
 
 
 @dataclass
@@ -30,8 +44,22 @@ class Finding:
     fixed_versions: set[str] = field(default_factory=set)
     summaries: set[str] = field(default_factory=set)
 
+    def acceptance(self) -> Acceptance | None:
+        acceptance = ACCEPTED.get((self.ecosystem, self.package, self.version))
+        if acceptance is None or not self.identifiers <= acceptance.identifiers:
+            return None
+        return acceptance
 
-def _python_findings() -> list[Finding]:
+
+@dataclass(frozen=True)
+class Notice:
+    package: str
+    version: str
+    identifier: str
+    summary: str
+
+
+def _python_findings(root: Path) -> list[Finding]:
     result = subprocess.run(
         [
             "uv",
@@ -43,7 +71,7 @@ def _python_findings() -> list[Finding]:
             "--output-format",
             "json",
         ],
-        cwd=ROOT,
+        cwd=root,
         capture_output=True,
         text=True,
         check=False,
@@ -72,8 +100,8 @@ def _osv_request(url: str, payload: dict | None = None) -> dict:
         return json.load(response)
 
 
-def _rust_findings() -> list[Finding]:
-    lock = tomllib.loads(CORE_LOCK.read_text())
+def _rust_findings(root: Path) -> tuple[list[Finding], list[Notice]]:
+    lock = tomllib.loads((root / "Cargo.lock").read_text())
     packages = [package for package in lock["package"] if package.get("source", "").startswith("registry+")]
     queries = [
         {"package": {"name": package["name"], "ecosystem": "crates.io"}, "version": package["version"]}
@@ -81,6 +109,7 @@ def _rust_findings() -> list[Finding]:
     ]
     results = _osv_request(OSV_QUERY_BATCH, {"queries": queries})["results"]
     findings = []
+    notices = []
     for package, result in zip(packages, results):
         vulnerabilities = result.get("vulns") or []
         if not vulnerabilities:
@@ -88,71 +117,108 @@ def _rust_findings() -> list[Finding]:
         finding = Finding("Rust", package["name"], package["version"])
         for vulnerability in vulnerabilities:
             details = _osv_request(OSV_VULNERABILITY.format(vulnerability["id"]))
+            affected = [
+                entry
+                for entry in details.get("affected", [])
+                if entry.get("package", {}).get("name") == package["name"]
+            ]
+            if any((entry.get("database_specific") or {}).get("informational") == "unmaintained" for entry in affected):
+                notices.append(Notice(package["name"], package["version"], details["id"], details.get("summary", "")))
+                continue
             finding.identifiers.add(details["id"])
             if details.get("summary"):
                 finding.summaries.add(details["summary"])
-            for affected in details.get("affected", []):
-                if affected.get("package", {}).get("name") != package["name"]:
-                    continue
-                for version_range in affected.get("ranges", []):
+            for entry in affected:
+                for version_range in entry.get("ranges", []):
                     for event in version_range.get("events", []):
                         if "fixed" in event:
                             finding.fixed_versions.add(event["fixed"])
-        findings.append(finding)
-    return findings
+        if finding.identifiers:
+            findings.append(finding)
+    return findings, notices
 
 
-def _audit() -> list[Finding]:
-    return [*_python_findings(), *_rust_findings()]
+def _audit(root: Path) -> tuple[list[Finding], list[Notice]]:
+    rust_findings, notices = _rust_findings(root)
+    return [*_python_findings(root), *rust_findings], notices
 
 
-def _upgrade(findings: list[Finding]) -> None:
+def _upgrade(root: Path, findings: list[Finding]) -> None:
     python_packages = sorted({finding.package for finding in findings if finding.ecosystem == "Python"})
     rust_packages = sorted({finding.package for finding in findings if finding.ecosystem == "Rust"})
     if python_packages:
         command = ["uv", "lock"]
         for package in python_packages:
             command += ["--upgrade-package", package]
-        subprocess.run(command, cwd=ROOT, check=True)
+        subprocess.run(command, cwd=root, check=True)
     if rust_packages:
-        command = ["cargo", "update", "--manifest-path", str(CORE_MANIFEST)]
+        command = ["cargo", "update", "--manifest-path", str(root / "Cargo.toml")]
         for package in rust_packages:
             command += ["--package", package]
-        subprocess.run(command, cwd=ROOT, check=True)
+        subprocess.run(command, cwd=root, check=True)
 
 
-def _report(findings: list[Finding]) -> str:
-    if not findings:
-        return "No known vulnerabilities in the locked Python and Rust dependencies."
-    lines = [f"{len(findings)} locked dependencies have known vulnerabilities:", ""]
-    for finding in sorted(findings, key=lambda item: (item.ecosystem, item.package)):
-        fixed = ", ".join(sorted(finding.fixed_versions)) or "no fixed version yet"
-        lines.append(f"- {finding.ecosystem} {finding.package} {finding.version}: fixed in {fixed}")
-        lines.append(f"  {', '.join(sorted(finding.identifiers))}")
-        for summary in sorted(finding.summaries):
-            lines.append(f"  {summary}")
+def _describe(finding: Finding) -> list[str]:
+    fixed = ", ".join(sorted(finding.fixed_versions)) or "no fixed version yet"
+    lines = [
+        f"- {finding.ecosystem} {finding.package} {finding.version}: fixed in {fixed}",
+        f"  {', '.join(sorted(finding.identifiers))}",
+    ]
+    lines += [f"  {summary}" for summary in sorted(finding.summaries)]
+    return lines
+
+
+def _report(findings: list[Finding], notices: list[Notice]) -> str:
+    ordered = sorted(findings, key=lambda item: (item.ecosystem, item.package, item.version))
+    unaccepted = [finding for finding in ordered if finding.acceptance() is None]
+    accepted = [finding for finding in ordered if finding.acceptance() is not None]
+    lines = []
+    if unaccepted:
+        lines += [f"{len(unaccepted)} locked dependencies have known vulnerabilities:", ""]
+        for finding in unaccepted:
+            lines += _describe(finding)
+    else:
+        lines.append("No unaccepted vulnerabilities in the locked Python and Rust dependencies.")
+    if accepted:
+        lines += ["", f"{len(accepted)} accepted:", ""]
+        for finding in accepted:
+            lines += _describe(finding)
+            lines.append(f"  Accepted: {finding.acceptance().reason}")
+    if notices:
+        lines += ["", f"{len(notices)} unmaintained, with no fix to apply:", ""]
+        for notice in sorted(notices, key=lambda item: (item.package, item.version, item.identifier)):
+            lines.append(f"- Rust {notice.package} {notice.version}: {notice.identifier} {notice.summary}")
     return "\n".join(lines)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Check uv.lock and the Rust core's Cargo.lock for known vulnerabilities."
+        description="Check uv.lock and the workspace Cargo.lock for known vulnerabilities."
     )
     parser.add_argument(
         "--fix",
         action="store_true",
         help="upgrade each vulnerable package in its lockfile, then audit again",
     )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=ROOT,
+        help="checkout whose lockfiles to audit",
+    )
     arguments = parser.parse_args()
+    root = arguments.root.resolve()
 
-    findings = _audit()
-    if findings and arguments.fix:
-        print(_report(findings))
+    findings, notices = _audit(root)
+    unaccepted = [finding for finding in findings if finding.acceptance() is None]
+    if unaccepted and arguments.fix:
+        print(_report(findings, notices))
         print()
-        _upgrade(findings)
-        findings = _audit()
-    print(_report(findings))
-    return 1 if findings else 0
+        _upgrade(root, unaccepted)
+        findings, notices = _audit(root)
+        unaccepted = [finding for finding in findings if finding.acceptance() is None]
+    print(_report(findings, notices))
+    return 1 if unaccepted else 0
 
 
 if __name__ == "__main__":
