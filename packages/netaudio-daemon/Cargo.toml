@@ -14,15 +14,15 @@ caseless = "0.2.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
-if-addrs = "0.15"
-fs4 = "1"
 flate2 = "1"
+fs4 = "1"
 futures-core = "0.3"
 futures-util = "0.3"
-hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
-hostname = "0.4"
 hex = "0.4"
-if-watch = { version = "3.2.2", default-features = false, features = ["tokio"] }
+hostname = "0.4"
+hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
+if-addrs = "0.15"
+ipnet = "2.12"
 jsonschema = { version = "0.59", default-features = false }
 mdns-sd = "=0.21.5"
 netaudio-core = { path = "../netaudio-core", features = ["schema"] }
@@ -31,12 +31,12 @@ pbkdf2 = "0.12"
 percent-encoding = "2"
 rand = "0.8"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
-reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-manual-roots"] }
 redis = { version = "=1.7.1", default-features = false, features = ["tokio-rustls-comp"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-manual-roots"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 rustls-webpki = { version = "0.103", default-features = false, features = ["alloc"] }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
 schemars = "=1.2.1"
 serde.workspace = true
 serde_json.workspace = true
@@ -65,8 +65,8 @@ serde_json = "1"
 sha2 = "0.10"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-netlink-packet-core = "0.8.2"
-netlink-packet-route = "0.28"
+netlink-packet-core = "0.9"
+netlink-packet-route = "0.34"
 netlink-sys = "0.8.8"
 sd-notify = "0.5"
 tracing-journald = "0.3"
@@ -77,4 +77,4 @@ nix = { version = "0.30", features = ["net", "socket", "uio"] }
 zbus = { version = "=5.19.0", default-features = false, features = ["tokio"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock", "Win32_System_IO"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_System_IO"] }

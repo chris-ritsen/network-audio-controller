@@ -1,6 +1,7 @@
+mod changes;
+
 use anyhow::{Context, Result};
-use futures_util::StreamExt;
-use if_watch::{tokio::IfWatcher, IpNet};
+use ipnet::IpNet;
 use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 use tokio::sync::watch;
@@ -96,15 +97,15 @@ impl NetworkSnapshot {
 }
 
 pub struct NetworkMonitor {
-    watcher: IfWatcher,
+    changes: changes::Changes,
     snapshots: watch::Sender<NetworkSnapshot>,
 }
 
 impl NetworkMonitor {
     pub fn new() -> Result<Self> {
-        let watcher = IfWatcher::new().context("watch network interface changes")?;
+        let changes = changes::Changes::new().context("watch network interface changes")?;
         let (snapshots, _) = watch::channel(NetworkSnapshot::read()?);
-        Ok(Self { watcher, snapshots })
+        Ok(Self { changes, snapshots })
     }
 
     pub fn subscribe(&self) -> watch::Receiver<NetworkSnapshot> {
@@ -115,8 +116,8 @@ impl NetworkMonitor {
         loop {
             tokio::select! {
                 _ = cancellation.cancelled() => return Ok(()),
-                event = self.watcher.next() => {
-                    event.context("network interface watcher stopped")??;
+                changed = self.changes.next() => {
+                    changed.context("network interface watcher stopped")?;
                     let snapshot = NetworkSnapshot::read()?;
                     self.snapshots.send_if_modified(|previous| {
                         if *previous == snapshot {

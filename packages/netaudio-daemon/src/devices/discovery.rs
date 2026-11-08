@@ -58,7 +58,7 @@ impl DiscoveredService {
     fn resolved(
         service_type: &str,
         service: &ResolvedService,
-        networks: &[if_watch::IpNet],
+        networks: &[ipnet::IpNet],
     ) -> Result<Self> {
         let ipv4 = service
             .get_addresses_v4()
@@ -70,7 +70,7 @@ impl DiscoveredService {
                 let prefix = networks
                     .iter()
                     .filter(|network| network.contains(&IpAddr::V4(*address)))
-                    .map(if_watch::IpNet::prefix_len)
+                    .map(ipnet::IpNet::prefix_len)
                     .max();
                 let secondary = address.octets()[..2] == [172, 31];
                 (

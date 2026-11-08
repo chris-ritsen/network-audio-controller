@@ -225,7 +225,7 @@ fn apply(entries: &mut Entries, message: RouteNetlinkMessage) {
         .attributes
         .iter()
         .find_map(|attribute| match attribute {
-            NeighbourAttribute::LinkLocalAddress(bytes)
+            NeighbourAttribute::LinkLayerAddress(bytes)
                 if bytes.len() == 6 && bytes.starts_with(&[0x00, 0x0e, 0xdd]) =>
             {
                 Some(
