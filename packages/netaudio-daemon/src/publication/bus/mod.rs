@@ -41,11 +41,11 @@ pub async fn run(model: Arc<ReadModel>, cancellation: CancellationToken) -> Resu
 }
 
 async fn connected(model: &ReadModel, delay: &mut Duration) -> Result<()> {
-    let builder = zbus::connection::Builder::session()?
-        .name("com.netaudio.Daemon")?
+    let builder = zbus::connection::Builder::session()
+        .name("com.netaudio.Daemon")
         .allow_name_replacements(false)
         .replace_existing_names(false)
-        .serve_at(ROOT, zbus::fdo::ObjectManager)?;
+        .serve_at(ROOT, zbus::fdo::ObjectManager);
     let connection = tokio::time::timeout(Duration::from_secs(5), builder.build())
         .await
         .context("D-Bus connection exceeded its deadline")??;
@@ -288,7 +288,7 @@ async fn install<T: Interface>(
         }
     } else {
         ensure!(
-            server.at(path, current).await?,
+            server.at(path, current).await?.is_none(),
             "D-Bus interface registration conflicted"
         );
     }
