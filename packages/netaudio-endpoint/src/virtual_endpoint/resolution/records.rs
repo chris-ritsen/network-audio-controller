@@ -91,29 +91,29 @@ pub fn response(bytes: &[u8]) -> Result<Vec<Record>> {
     let mut decoder = BinDecoder::new(bytes);
     let header = Header::read(&mut decoder)?;
 
-    if header.message_type() != MessageType::Response {
+    if header.metadata.message_type != MessageType::Response {
         return Ok(Vec::new());
     }
 
-    if header.id() != 0
-        || header.op_code() != OpCode::Query
-        || header.response_code() != ResponseCode::NoError
-        || header.truncated()
+    if header.metadata.id != 0
+        || header.metadata.op_code != OpCode::Query
+        || header.metadata.response_code != ResponseCode::NoError
+        || header.metadata.truncation
     {
         bail!("discovery response is outside the complete multicast response profile");
     }
 
-    for _ in 0..header.query_count() {
+    for _ in 0..header.counts.queries {
         Name::read(&mut decoder)?;
         decoder.read_u16()?;
         decoder.read_u16()?;
     }
 
-    let total = usize::from(header.answer_count())
-        + usize::from(header.name_server_count())
-        + usize::from(header.additional_count());
-    let authority_start = usize::from(header.answer_count());
-    let authority_end = authority_start + usize::from(header.name_server_count());
+    let total = usize::from(header.counts.answers)
+        + usize::from(header.counts.authorities)
+        + usize::from(header.counts.additionals);
+    let authority_start = usize::from(header.counts.answers);
+    let authority_end = authority_start + usize::from(header.counts.authorities);
     let mut records = Vec::new();
 
     for index in 0..total {
@@ -167,7 +167,7 @@ pub fn response(bytes: &[u8]) -> Result<Vec<Record>> {
 }
 
 pub fn query(keys: impl IntoIterator<Item = Key>) -> Result<Vec<u8>> {
-    let mut message = Message::new();
+    let mut message = Message::new(0, MessageType::Query, OpCode::Query);
 
     for key in keys {
         message.add_query(Query::query(key.name, key.kind.record_type()));
