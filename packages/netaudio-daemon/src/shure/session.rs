@@ -368,7 +368,7 @@ impl Connection {
                                 | "AUDIO_IN_LVL_R"
                         )
                     {
-                        self.registry.model.publish(json!({"event": "shure_meter_values", "mac": self.device.mac, "channel": channel, "key": report.key, "value": report.value, "observed_at": observed.to_rfc3339()}))?;
+                        self.registry.model.publish(json!({"event": crate::events::SHURE_METER_VALUES, "mac": self.device.mac, "channel": channel, "key": report.key, "value": report.value, "observed_at": observed.to_rfc3339()}))?;
                     }
                 }
             }
@@ -385,7 +385,7 @@ impl Connection {
                         values.insert(report.key.clone(), json!(report.value));
                     }
                 }
-                self.registry.model.publish(json!({"event": "shure_meter_values", "mac": self.device.mac, "channel": reports.first().and_then(|report| report.channel), "values": values, "observed_at": observed.to_rfc3339()}))?;
+                self.registry.model.publish(json!({"event": crate::events::SHURE_METER_VALUES, "mac": self.device.mac, "channel": reports.first().and_then(|report| report.channel), "values": values, "observed_at": observed.to_rfc3339()}))?;
             }
         }
         self.registry

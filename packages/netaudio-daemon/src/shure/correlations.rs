@@ -50,7 +50,7 @@ impl Configuration {
         model.observe(
             "shure_correlations",
             json!(snapshot),
-            json!({"event": "shure_correlations_changed", "correlations": snapshot}),
+            json!({"event": crate::events::SHURE_CORRELATIONS_CHANGED, "correlations": snapshot}),
         )
     }
 

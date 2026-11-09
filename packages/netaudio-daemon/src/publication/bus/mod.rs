@@ -79,11 +79,11 @@ async fn connected(model: &ReadModel, delay: &mut Duration) -> Result<()> {
                         let name = event.value["server_name"].as_str().context("D-Bus removed device identity missing")?;
                         inventory.dante(&connection, name, Value::Null).await?;
                     }
-                    "shure_device_discovered" | "shure_device_updated" => {
+                    crate::events::SHURE_DEVICE_DISCOVERED | crate::events::SHURE_DEVICE_UPDATED => {
                         let mac = event.value["mac"].as_str().context("D-Bus wireless identity missing")?;
                         inventory.wireless(&connection, mac, event.value["device"].clone()).await?;
                     }
-                    "shure_device_removed" => {
+                    crate::events::SHURE_DEVICE_REMOVED => {
                         let mac = event.value["mac"].as_str().context("D-Bus removed wireless identity missing")?;
                         inventory.wireless(&connection, mac, Value::Null).await?;
                     }

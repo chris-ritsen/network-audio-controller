@@ -204,9 +204,9 @@ impl Registry {
             mac,
             record,
             substantive.then_some(if first {
-                "shure_device_discovered"
+                crate::events::SHURE_DEVICE_DISCOVERED
             } else {
-                "shure_device_updated"
+                crate::events::SHURE_DEVICE_UPDATED
             }),
         )
     }
@@ -230,7 +230,7 @@ impl Registry {
             let mut record = device.presentation();
             record["control_status"] = entry.status.clone();
             self.model
-                .shure_device(mac, record, Some("shure_device_updated"))?;
+                .shure_device(mac, record, Some(crate::events::SHURE_DEVICE_UPDATED))?;
         }
         Ok(())
     }
@@ -274,7 +274,7 @@ impl Registry {
         self.model.observe(
             "shure_discovery",
             status.clone(),
-            json!({"event": "shure_discovery_status", "discovery": status}),
+            json!({"event": crate::events::SHURE_DISCOVERY_STATUS, "discovery": status}),
         )
     }
 
@@ -392,8 +392,11 @@ impl Registry {
                     device.online = false;
                     let mut record = device.presentation();
                     record["control_status"] = entry.status.clone();
-                    self.model
-                        .shure_device(mac, record, Some("shure_device_updated"))?;
+                    self.model.shure_device(
+                        mac,
+                        record,
+                        Some(crate::events::SHURE_DEVICE_UPDATED),
+                    )?;
                 }
             }
         }

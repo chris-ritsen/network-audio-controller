@@ -62,7 +62,7 @@ impl Records {
             crate::events::MANAGED_STATUS => {
                 self.managed(&event["managed"], &event["managed_domains"])
             }
-            "shure_device_discovered" | "shure_device_updated" => {
+            crate::events::SHURE_DEVICE_DISCOVERED | crate::events::SHURE_DEVICE_UPDATED => {
                 let mac = event["mac"]
                     .as_str()
                     .context("Published wireless device has no identity")?;
@@ -73,7 +73,7 @@ impl Records {
                 }
                 self.correlate();
             }
-            "shure_device_removed" => {
+            crate::events::SHURE_DEVICE_REMOVED => {
                 let mac = event["mac"]
                     .as_str()
                     .context("Removed wireless device has no identity")?;
@@ -81,7 +81,7 @@ impl Records {
                 self.values.remove(&format!("netaudio:shure:{mac}"));
                 self.values.remove(&format!("netaudio:shure:meters:{mac}"));
             }
-            "shure_correlations_changed" => {
+            crate::events::SHURE_CORRELATIONS_CHANGED => {
                 self.correlations = serde_json::from_value(event["correlations"].clone())?;
                 self.correlate();
             }

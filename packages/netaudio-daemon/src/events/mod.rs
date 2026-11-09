@@ -12,15 +12,20 @@ use std::sync::Arc;
 
 pub const CLIENT_QUEUE_CAPACITY: usize = 128;
 pub const DEVICE_DISCOVERED: &str = "device_discovered";
-pub const DEVICE_UPDATED: &str = "device_updated";
-pub const DEVICE_REMOVED: &str = "device_removed";
 pub const DEVICE_PATCH: &str = "device_patch";
-pub const TELEMETRY_UPDATED: &str = "telemetry_updated";
-pub const METER_VALUES: &str = "meter_values";
-pub const SHURE_METER_VALUES: &str = "shure_meter_values";
-pub const MANAGED_STATUS: &str = "managed_status";
-pub const SNAPSHOT: &str = "snapshot";
+pub const DEVICE_REMOVED: &str = "device_removed";
+pub const DEVICE_UPDATED: &str = "device_updated";
 pub const EXTERNAL_FLOW_CHANGED: &str = "external_flow_changed";
+pub const MANAGED_STATUS: &str = "managed_status";
+pub const METER_VALUES: &str = "meter_values";
+pub const SHURE_CORRELATIONS_CHANGED: &str = "shure_correlations_changed";
+pub const SHURE_DEVICE_DISCOVERED: &str = "shure_device_discovered";
+pub const SHURE_DEVICE_REMOVED: &str = "shure_device_removed";
+pub const SHURE_DEVICE_UPDATED: &str = "shure_device_updated";
+pub const SHURE_DISCOVERY_STATUS: &str = "shure_discovery_status";
+pub const SHURE_METER_VALUES: &str = "shure_meter_values";
+pub const SNAPSHOT: &str = "snapshot";
+pub const TELEMETRY_UPDATED: &str = "telemetry_updated";
 
 #[derive(Clone, Debug)]
 pub struct Event {
