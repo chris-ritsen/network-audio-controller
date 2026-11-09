@@ -121,7 +121,7 @@ def preset_load(
         return
     typer.echo(f"Preset: {preset_name} ({len(preset_devices)} devices)", err=True)
 
-    run_command(run_preset_load, preset_devices, confirm_destructive, store_current_configuration)
+    run_command(run_preset_load, preset_devices, store_current_configuration)
 
 
 @app.command("show", help="Show what a saved preset would apply, without changing anything.")

@@ -16,7 +16,6 @@ pub struct LoadRequest {
     pub name: String,
     pub digest: String,
     pub targets: Vec<Target>,
-    pub confirm_destructive: bool,
     pub store_current_configuration: bool,
     pub confirmed_plan: Option<Value>,
 }
@@ -36,7 +35,7 @@ impl LoadRequest {
                 value.as_bool().ok_or_else(|| Error::Invalid(message))
             })
         };
-        let confirm_destructive = boolean(
+        boolean(
             "confirm_destructive",
             "Destructive-change confirmation must be a boolean.".into(),
         )?;
@@ -103,7 +102,6 @@ impl LoadRequest {
             name: parsed.document.name,
             digest: parsed.digest,
             targets,
-            confirm_destructive,
             store_current_configuration,
             confirmed_plan: None,
         })

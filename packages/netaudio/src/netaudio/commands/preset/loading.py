@@ -92,7 +92,6 @@ async def run_preset_load(
     application,
     devices,
     preset_devices: dict,
-    confirm_destructive: bool,
     store_current_configuration: bool,
 ) -> None:
     application.verify_mutations = True
@@ -104,7 +103,6 @@ async def run_preset_load(
     report = await apply_preset_plan(
         application,
         plan,
-        confirm_destructive=confirm_destructive,
         store_current_configuration=store_current_configuration,
     )
     _report_preset_load(report)

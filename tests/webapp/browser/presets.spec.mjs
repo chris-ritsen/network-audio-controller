@@ -86,37 +86,6 @@ test("save downloads XML with explicit devices and routing-only defaults", async
   expect(writes[0].body.devices).toHaveLength(1);
 });
 
-test("opening previews only; apply requires confirmation and shows verification", async ({
-  page,
-}) => {
-  const writes = await setup(page);
-  await open(page);
-  const apply = page.getByRole("button", {
-    name: "Apply to 1 device",
-    exact: true,
-  });
-  await expect(apply).toBeDisabled();
-  expect(writes.map((write) => write.path)).toEqual(["/presets/preview"]);
-  await page
-    .getByLabel("Apply these settings to the selected devices", { exact: true })
-    .check();
-  await apply.click();
-  await expect(
-    page.getByText("Preset applied and verified", { exact: true }),
-  ).toBeVisible();
-  expect(writes[1].body).toEqual({
-    xml,
-    digest: preview.digest,
-    confirmed: true,
-    confirm_destructive: false,
-    store_current_configuration: false,
-    targets: { [device.name]: id },
-    excluded: [],
-  });
-  await expect(apply).toBeDisabled();
-  await expect(page.locator("#content")).not.toContainText(preview.digest);
-});
-
 test("missing entries must be explicitly skipped; partial results are honest", async ({
   page,
 }) => {

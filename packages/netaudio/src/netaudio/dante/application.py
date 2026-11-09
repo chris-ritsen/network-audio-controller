@@ -2828,7 +2828,6 @@ class DanteApplication:
         self,
         device,
         sample_rate_hertz: int,
-        confirm_destructive: bool = False,
         timeout: float = 4.0,
     ):
         from netaudio.dante.sample_rate_topology import change_sample_rate_topology_safe
@@ -2855,7 +2854,6 @@ class DanteApplication:
                 sample_rate_hertz,
                 probe,
                 mutate,
-                confirm_destructive=confirm_destructive,
                 load_channel_capacities=load_channel_capacities,
             )
             if result.changed:

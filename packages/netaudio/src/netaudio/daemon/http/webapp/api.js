@@ -178,12 +178,8 @@ export const api = {
   lock: (device, pin) => post("/lock", { device, pin }),
   unlock: (device, pin) => post("/unlock", { device, pin }),
   refresh: (device) => post("/refresh", device ? { device } : {}),
-  setSampleRate: (device, sampleRate, confirmDestructive) =>
-    post("/set-sample-rate", {
-      device,
-      sample_rate: sampleRate,
-      confirm_destructive: confirmDestructive === true,
-    }),
+  setSampleRate: (device, sampleRate) =>
+    post("/set-sample-rate", { device, sample_rate: sampleRate }),
   setEncoding: (device, encoding) =>
     post("/set-encoding", { device, encoding }),
   setGain: (device, channelNumber, gainLevel, deviceType) =>

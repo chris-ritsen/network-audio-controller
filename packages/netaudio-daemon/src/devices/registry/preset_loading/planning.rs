@@ -54,16 +54,12 @@ fn reject_conflicting_performance(
 }
 
 impl DeviceRegistry {
-    pub(super) async fn plan_preset_device(
-        &self,
-        target: &Selected,
-        confirm_destructive: bool,
-    ) -> Result<PreparedDevice> {
+    pub(super) async fn plan_preset_device(&self, target: &Selected) -> Result<PreparedDevice> {
         let evidence = self.preset_inventory(target).await?;
         let mut actions = Vec::new();
         let mut projected_audio = Map::new();
         for request in &target.target.actions {
-            let mut operations = operations::operations(request, confirm_destructive)?;
+            let mut operations = operations::operations(request)?;
             let presentation = match Box::pin(self.plan_preset_action(
                 target,
                 &evidence,

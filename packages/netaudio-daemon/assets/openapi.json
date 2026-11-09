@@ -5899,7 +5899,7 @@
       "post": {
         "operationId": "setSampleRate",
         "summary": "Set sample rate with topology verification",
-        "description": "sample_rate is in hertz. Fresh topology and capacity evidence gate the write. confirm_destructive=true explicitly permits identified or uncharacterized transmitter-flow loss. A peer rate mismatch can prevent media; this response does not prove audio playback.",
+        "description": "sample_rate is in hertz. The predicted effect on transmitter flows is reported and does not gate the write. confirm_destructive is accepted and has no effect. A peer rate mismatch can prevent media; this response does not prove audio playback.",
         "tags": [
           "Audio configuration"
         ],
@@ -6069,7 +6069,8 @@
                   },
                   "confirm_destructive": {
                     "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "description": "Accepted for compatibility; has no effect."
                   }
                 },
                 "required": [
@@ -13851,7 +13852,7 @@
           "confirm_destructive": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly permit sample-rate changes that may remove transmit-flow members. Uncharacterized transitions remain refused."
+            "description": "Accepted for compatibility; has no effect."
           },
           "store_current_configuration": {
             "type": "boolean",
@@ -13894,7 +13895,7 @@
           "confirm_destructive": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly permit sample-rate changes that may remove transmit-flow members. Uncharacterized transitions remain refused."
+            "description": "Accepted for compatibility; has no effect."
           },
           "store_current_configuration": {
             "type": "boolean",

@@ -173,7 +173,6 @@ class PresetLoadReport:
 @dataclass
 class PresetLoadContext:
     application: Any
-    confirm_destructive: bool
     report: PresetLoadReport
 
 
@@ -1045,9 +1044,7 @@ async def _apply_sample_rate(context: PresetLoadContext, entry: PresetDeviceActi
     report = context.report
 
     try:
-        result = await context.application.set_sample_rate(
-            entry.device, action.payload, confirm_destructive=context.confirm_destructive
-        )
+        result = await context.application.set_sample_rate(entry.device, action.payload)
     except SampleRateTopologyChangedButUnverifiedError as exception:
         report.operation(
             entry.device_name,
@@ -2098,14 +2095,12 @@ async def apply_preset_plan(
     application,
     plan: PresetLoadPlan,
     *,
-    confirm_destructive: bool = False,
     report: PresetLoadReport | None = None,
     stop_on_failure: bool = False,
     store_current_configuration: bool = False,
 ) -> PresetLoadReport:
     context = PresetLoadContext(
         application=application,
-        confirm_destructive=confirm_destructive,
         report=report if report is not None else PresetLoadReport(),
     )
     recorder = getattr(application, "operation_recorder", None)

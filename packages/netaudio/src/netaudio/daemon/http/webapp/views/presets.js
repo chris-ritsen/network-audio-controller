@@ -134,7 +134,6 @@ function LoadPreset() {
   const [preview, setPreview] = useState(null);
   const [choices, setChoices] = useState([]);
   const [confirmed, setConfirmed] = useState(false);
-  const [destructive, setDestructive] = useState(false);
   const [storeCurrent, setStoreCurrent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -159,7 +158,6 @@ function LoadPreset() {
     setPreview(null);
     setChoices([]);
     setConfirmed(false);
-    setDestructive(false);
     setStoreCurrent(false);
     setResult(null);
     setError("");
@@ -217,7 +215,6 @@ function LoadPreset() {
         xml,
         digest: preview.digest,
         confirmed: true,
-        confirm_destructive: destructive,
         store_current_configuration: storeCurrent,
         targets: Object.fromEntries(
           selected.map((choice) => [choice.name, choice.target]),
@@ -290,16 +287,6 @@ function LoadPreset() {
                 )}
                 <details>
                   <summary class="cursor-pointer">${t("Advanced")}</summary>
-                  <label class="flex items-start gap-2 mt-3 text-sm"
-                    ><input
-                      type="checkbox"
-                      checked=${destructive}
-                      onChange=${(event) => {
-                        setDestructive(event.target.checked);
-                        setConfirmed(false);
-                      }}
-                    />${t("Allow sample-rate changes that rebuild routing")}</label
-                  >
                   <label class="flex items-start gap-2 mt-3 text-sm"
                     ><input
                       type="checkbox"

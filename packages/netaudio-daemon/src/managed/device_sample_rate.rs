@@ -33,8 +33,10 @@ impl Registry {
             &self.journal,
             request.record.clone(),
             "set_sample_rate",
-            json!({"sample_rate": operation.target, "confirm_destructive": operation.confirm_destructive, "preview": operation.preview}),
-        ).await.map_err(|error| ControlError::Unavailable(error.to_string()))?;
+            json!({"sample_rate": operation.target, "preview": operation.preview}),
+        )
+        .await
+        .map_err(|error| ControlError::Unavailable(error.to_string()))?;
         let mut value = json!({
             "operation_id": audit.identifier(), "operation": "set_sample_rate",
             "device_reference": request.record["server_name"],

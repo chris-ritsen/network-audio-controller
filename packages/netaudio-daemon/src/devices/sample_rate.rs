@@ -11,7 +11,6 @@ use serde_json::{json, Value};
 #[derive(Clone, Debug)]
 pub struct Operation {
     pub target: u32,
-    pub confirm_destructive: bool,
     pub preview: bool,
 }
 
@@ -24,18 +23,16 @@ impl Operation {
             .ok_or_else(|| {
                 ControlError::Invalid("sample_rate must be a positive integer".to_owned())
             })?;
-        let confirm_destructive = match parameters.get("confirm_destructive") {
-            None => false,
-            Some(Value::Bool(value)) => *value,
-            _ => {
-                return Err(ControlError::Invalid(
-                    "confirm_destructive must be a boolean".to_owned(),
-                ));
-            }
-        };
+        if parameters
+            .get("confirm_destructive")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(ControlError::Invalid(
+                "confirm_destructive must be a boolean".to_owned(),
+            ));
+        }
         Ok(Self {
             target,
-            confirm_destructive,
             preview: false,
         })
     }

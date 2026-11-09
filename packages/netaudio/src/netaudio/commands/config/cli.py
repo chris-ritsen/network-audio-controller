@@ -287,7 +287,7 @@ def _sample_rate_error_data(exception) -> dict:
     return error_data
 
 
-async def run_sample_rate(application, devices, rate: int | None, all_devices: bool, confirm_destructive: bool) -> None:
+async def run_sample_rate(application, devices, rate: int | None, all_devices: bool) -> None:
     targets = select_device(filter_devices(devices), allow_many=all_devices)
 
     if rate is None:
@@ -307,11 +307,7 @@ async def run_sample_rate(application, devices, rate: int | None, all_devices: b
 
     async def change_target(server_name, device):
         try:
-            result = await application.set_sample_rate(
-                device,
-                rate,
-                confirm_destructive=confirm_destructive,
-            )
+            result = await application.set_sample_rate(device, rate)
             return server_name, device, result, None
         except (*MUTATION_ERRORS, SampleRateTopologyError) as exception:
             return server_name, device, None, exception
@@ -344,7 +340,7 @@ def sample_rate(
     ),
 ):
     """Get or set the sample rate."""
-    run_command(run_sample_rate, rate, all_devices, confirm_destructive)
+    run_command(run_sample_rate, rate, all_devices)
 
 
 def _pullup_cell(exception, value):

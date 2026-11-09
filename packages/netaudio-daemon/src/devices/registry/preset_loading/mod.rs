@@ -67,7 +67,7 @@ impl Selected {
                 .actions
                 .iter()
                 .map(|request| {
-                    crate::presets::operations::operations(request, true).map(|operations| {
+                    crate::presets::operations::operations(request).map(|operations| {
                         operations
                             .iter()
                             .map(|operation| operation.precondition(&record))
@@ -184,9 +184,7 @@ impl DeviceRegistry {
                     serial.push(device.refresh.lock().await);
                 }
             }
-            let prepared = self
-                .prepare_preset(&selected, request.confirm_destructive)
-                .await?;
+            let prepared = self.prepare_preset(&selected).await?;
             Ok::<_, anyhow::Error>(presentation(
                 &request.name,
                 &request.digest,
@@ -237,7 +235,7 @@ impl DeviceRegistry {
                     }
                 }
                 let prepared = registry
-                    .prepare_preset(&selected, request.confirm_destructive)
+                    .prepare_preset(&selected)
                     .await?;
                 Ok::<_, anyhow::Error>((guards, prepared))
             };
@@ -271,21 +269,17 @@ impl DeviceRegistry {
         })?
     }
 
-    async fn prepare_preset(
-        &self,
-        selected: &[Selected],
-        confirm_destructive: bool,
-    ) -> Result<Vec<PreparedDevice>> {
+    async fn prepare_preset(&self, selected: &[Selected]) -> Result<Vec<PreparedDevice>> {
         for target in selected {
             target.presentation()?;
             for action in &target.target.actions {
-                crate::presets::operations::operations(action, confirm_destructive)?;
+                crate::presets::operations::operations(action)?;
             }
         }
         let mut prepared = Vec::new();
         for target in selected {
             prepared.push(
-                self.plan_preset_device(target, confirm_destructive)
+                self.plan_preset_device(target)
                     .await
                     .with_context(|| format!("{}: fresh preset planning", target.target.name))?,
             );

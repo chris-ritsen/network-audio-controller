@@ -84,7 +84,7 @@
           },
           "confirm_destructive": {
             "type": "boolean",
-            "description": "Set true only after the user accepted that a sample-rate change may remove transmit flow channels."
+            "description": "Accepted for compatibility; has no effect."
           },
           "store_current_configuration": {
             "type": "boolean",
@@ -2796,7 +2796,7 @@
           },
           "confirm_destructive": {
             "type": "boolean",
-            "description": "Set true only after the user accepted that the device's transmit flows may lose channels at the new rate. Without it, the server refuses a change whose effect on those flows it cannot predict."
+            "description": "Accepted for compatibility; has no effect."
           },
           "confirmed": {
             "type": "boolean",

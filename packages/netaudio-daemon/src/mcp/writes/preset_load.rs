@@ -146,7 +146,6 @@ pub(super) async fn prepare(
     let request = json!({
         "xml": content, "digest": parsed.digest, "confirmed": true, "targets": targets,
         "excluded": skipped_names,
-        "confirm_destructive": arguments.get("confirm_destructive").cloned().unwrap_or(json!(false)),
         "store_current_configuration": arguments.get("store_current_configuration").cloned().unwrap_or(json!(false)),
     });
     let observed = presets.plan_load(&request, registry).await?;

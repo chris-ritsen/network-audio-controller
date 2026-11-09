@@ -8,10 +8,7 @@ use crate::devices::{
 use netaudio_core::presets::planning::{ActionKind, RequestedAction};
 use serde_json::json;
 
-pub fn operations(
-    request: &RequestedAction,
-    confirm_destructive: bool,
-) -> Result<Vec<ControlOperation>, ControlError> {
+pub fn operations(request: &RequestedAction) -> Result<Vec<ControlOperation>, ControlError> {
     let value = &request.requested;
     let single = match request.kind {
         ActionKind::DeviceName => {
@@ -26,7 +23,7 @@ pub fn operations(
             network::Change::Redundancy(redundancy::Configuration::new(value)?),
         ),
         ActionKind::SampleRate => ControlOperation::SampleRate(sample_rate::Operation::new(
-            &json!({"sample_rate": value, "confirm_destructive": confirm_destructive}),
+            &json!({"sample_rate": value}),
         )?),
         ActionKind::Encoding | ActionKind::SampleRatePullup => {
             ControlOperation::AudioConfiguration(audio_configuration::AudioConfiguration::new(

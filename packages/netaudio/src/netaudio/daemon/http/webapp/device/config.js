@@ -38,31 +38,8 @@ function RenameControl({ device, requestName }) {
 
 function SampleRateControl({ device, requestName }) {
   const select = useRef(null);
-  const [pending, setPending] = useState(null);
   const supported = device.supported_sample_rates_hz || [];
   const writable = operationWritable(device, "sample_rate");
-  const apply = async () => {
-    setPending(null);
-    const rate = Number(select.current.value);
-    try {
-      return await api.setSampleRate(requestName, rate, false);
-    } catch (error) {
-      const preflight = error.payload?.preflight;
-      if (
-        error.status !== 409 ||
-        preflight?.requires_destructive_confirmation !== true ||
-        preflight?.is_classified !== true ||
-        preflight?.topology_characterized !== true ||
-        preflight?.target_sample_rate_hertz !== rate
-      )
-        throw error;
-      setPending({
-        requestName,
-        rate,
-        losses: preflight.destructive_transmitter_membership_loss,
-      });
-    }
-  };
   if (!writable || !supported.length) {
     if (device.sample_rate_hz == null) return null;
     return html`<${FieldRow} label=${t("Sample rate")}>
@@ -75,7 +52,6 @@ function SampleRateControl({ device, requestName }) {
         key=${`sample-rate-${requestName}`}
         ref=${select}
         aria-label=${t("Sample rate")}
-        onChange=${() => setPending(null)}
       >
         ${supported.map(
           (value) =>
@@ -92,46 +68,10 @@ function SampleRateControl({ device, requestName }) {
         variant="primary"
         small
         description=${device.name ? t("set sample rate on {device}", { device: device.name }) : t("set sample rate on device")}
-        onRun=${apply}
+        onRun=${() => api.setSampleRate(requestName, Number(select.current.value))}
       >
         ${t("Apply")}
       <//>
-      ${
-        pending?.requestName === requestName
-          ? html`
-              <div class="flex flex-col gap-2" role="alert">
-                <span
-                  >${t("Changing to {rate} removes these transmitter channels from existing flows:", { rate: format.sampleRate(pending.rate) })}</span
-                >
-                <ul>
-                  ${pending.losses.map((loss) => html`<li>${t("Flow {flow}: channels {channels}", { flow: loss.flow_number, channels: loss.removed_channel_members.join(", ") })}</li>`)}
-                </ul>
-                <${AsyncButton}
-                  small
-                  variant="danger"
-                  description=${device.name ? t("change sample rate and remove flow channels on {device}", { device: device.name }) : t("change sample rate and remove flow channels on device")}
-                  onRun=${async () => {
-                    const result = await api.setSampleRate(
-                      requestName,
-                      pending.rate,
-                      true,
-                    );
-                    setPending(null);
-                    return result;
-                  }}
-                  >${t("Change rate and remove channels")}<//
-                >
-                <button
-                  type="button"
-                  class="btn btn-sm"
-                  onClick=${() => setPending(null)}
-                >
-                  ${t("Cancel")}
-                <//>
-              </div>
-            `
-          : null
-      }
     <//>
   `;
 }

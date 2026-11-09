@@ -413,7 +413,6 @@ async def change_sample_rate_topology_safe(
     target_sample_rate_hertz: int,
     probe_sample_rate_status: Callable[[], Awaitable[dict | None]],
     mutate: Callable[[], Awaitable[None]],
-    confirm_destructive: bool = False,
     load_channel_capacities: Callable[[], Awaitable[None]] | None = None,
 ) -> SampleRateTopologyChangeResult:
     preflight = await preflight_sample_rate_change(

@@ -49,7 +49,7 @@ impl Audit {
             ControlOperation::SampleRate(operation) if operation.preview => return Ok(None),
             ControlOperation::SampleRate(operation) => (
                 "set_sample_rate".to_owned(),
-                json!({"sample_rate": operation.target, "confirm_destructive": operation.confirm_destructive}),
+                json!({"sample_rate": operation.target}),
                 None,
             ),
             ControlOperation::MulticastPrefix(configuration) => (
