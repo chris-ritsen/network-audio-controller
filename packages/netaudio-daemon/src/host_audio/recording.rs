@@ -145,14 +145,13 @@ impl Worker {
         });
     }
 
-    async fn save(&self, session: &mut Session, record: &Record) -> Result<()> {
+    fn save(&self, session: &mut Session, record: &Record) -> Result<()> {
         let sequence = session
             .sequence
             .checked_add(1)
             .context("Recording sequence exhausted")?;
         self.store
-            .record_host_audio(&session.identity, sequence, record, self.history.clone())
-            .await?;
+            .record_host_audio(&session.identity, sequence, record, &self.history)?;
         session.sequence = sequence;
         if matches!(record, Record::Finished { .. }) {
             session.finished = true;
@@ -185,8 +184,7 @@ impl Worker {
                 configuration: configuration.clone(),
                 observed_at: chrono::Utc::now().to_rfc3339(),
             },
-        )
-        .await?;
+        )?;
         let mut process =
             match Process::spawn(&self.path, Provider::Jack, Purpose::Record, &self.host).await {
                 Ok(process) => process,
@@ -197,8 +195,7 @@ impl Worker {
                             observed_at: chrono::Utc::now().to_rfc3339(),
                             error: Some(format!("{error:#}")),
                         },
-                    )
-                    .await?;
+                    )?;
                     return Err(error);
                 }
             };
@@ -229,7 +226,7 @@ impl Worker {
         }
         let stopped = process.stop().await;
         if !session.finished {
-            self.save(&mut session, &Record::Finished { observed_at: chrono::Utc::now().to_rfc3339(), error: Some(result.as_ref().err().map_or_else(|| "The JACK recorder ended without a final record; missing coverage is unknown".to_owned(), |error| format!("{error:#}"))) }).await?;
+            self.save(&mut session, &Record::Finished { observed_at: chrono::Utc::now().to_rfc3339(), error: Some(result.as_ref().err().map_or_else(|| "The JACK recorder ended without a final record; missing coverage is unknown".to_owned(), |error| format!("{error:#}"))) })?;
         }
         stopped?;
         self.unavailable("JACK recording configuration changed");
@@ -340,7 +337,7 @@ impl Worker {
             }
             Record::Requested { .. } => bail!("JACK worker cannot create a recording request"),
         }
-        self.save(session, &record).await?;
+        self.save(session, &record)?;
         if let Record::Started { observed_at, .. } = record {
             self.state.send_replace(json!({"enabled":true,"recording":true,"ports":configuration.sources.len(),"started_at":observed_at,"reason":null,"session":session.identity}));
         } else if let Record::Finished {

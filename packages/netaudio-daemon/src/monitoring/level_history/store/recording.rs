@@ -1,12 +1,53 @@
 use super::{HistoryStore, LevelHistory, SECOND_SLOTS};
 use anyhow::{ensure, Context, Result};
 use netaudio_core::host_audio::recording::Record;
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, Transaction};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub(super) const EXPIRY_BATCH: usize = 2000;
+const PENDING_LIMIT: usize = 4096;
 const RETENTION_SECONDS: i64 = SECOND_SLOTS as i64;
+
+#[derive(Default)]
+pub(super) struct Pending {
+    records: Vec<Stored>,
+    sessions: BTreeMap<String, i64>,
+}
+
+pub(super) struct Stored {
+    finished: bool,
+    requested: bool,
+    second: i64,
+    sequence: i64,
+    session: String,
+    value: String,
+}
+
+pub(super) fn store(transaction: &Transaction, records: &[Stored]) -> Result<()> {
+    let mut sessions =
+        transaction.prepare("INSERT INTO native_host_recording_sessions VALUES (?1, 0, 0)")?;
+    let mut inserts = transaction.prepare(
+        "INSERT INTO native_host_recording_records (session, sequence, record, measured_second) VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    let mut updates = transaction.prepare(
+        "UPDATE native_host_recording_sessions SET sequence = ?2, finished = ?3 WHERE session = ?1",
+    )?;
+    for record in records {
+        if record.requested {
+            sessions.execute([&record.session])?;
+        }
+        inserts.execute(params![
+            record.session,
+            record.sequence,
+            record.value,
+            record.second
+        ])?;
+        updates.execute(params![record.session, record.sequence, record.finished])?;
+    }
+    Ok(())
+}
 
 pub(super) fn initialize(connection: &mut Connection) -> Result<()> {
     let transaction = connection.transaction()?;
@@ -86,25 +127,21 @@ pub(super) fn expire(transaction: &Transaction, now: i64) -> Result<usize> {
 }
 
 impl HistoryStore {
-    pub async fn record_host_audio(
-        self: &Arc<Self>,
+    pub fn record_host_audio(
+        &self,
         session: &str,
         sequence: u64,
         record: &Record,
-        history: Arc<LevelHistory>,
+        history: &LevelHistory,
     ) -> Result<()> {
         ensure!(
             sequence > 0 && sequence <= i64::MAX as u64,
             "Invalid recording sequence"
         );
         let sequence = sequence as i64;
-        let store = self.clone();
-        let session = session.to_owned();
-        let value = serde_json::to_string(record)?;
         let requested = matches!(record, Record::Requested { .. });
         let finished = matches!(record, Record::Finished { .. });
-        let record = record.clone();
-        let second = match &record {
+        let second = match record {
             Record::Finished { observed_at, .. }
             | Record::Requested { observed_at, .. }
             | Record::Started { observed_at, .. } => {
@@ -112,24 +149,65 @@ impl HistoryStore {
             }
             Record::Frame(frame) => frame.second,
         };
-        tokio::task::spawn_blocking(move || {
-            let mut connection = store.connection.lock().map_err(|_| anyhow::anyhow!("Signal history database lock poisoned"))?;
-            let transaction = connection.transaction()?;
+        let value = serde_json::to_string(record)?;
+        {
+            let mut pending = self
+                .pending
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Recording history queue lock poisoned"))?;
+            ensure!(
+                pending.records.len() < PENDING_LIMIT,
+                "The recording history is not being saved"
+            );
+            let previous = pending.sessions.get(session).copied();
             if requested {
                 ensure!(sequence == 1, "A recording must start at sequence one");
-                transaction.execute("INSERT INTO native_host_recording_sessions VALUES (?1, 0, 0)", [&session])?;
+                ensure!(
+                    previous.is_none(),
+                    "The recording history already has this recording"
+                );
+            } else {
+                ensure!(
+                    previous == Some(sequence - 1),
+                    "The recording history sequence has a gap or has already ended"
+                );
             }
-            let previous: Option<(i64, bool)> = transaction.query_row(
-                "SELECT sequence, finished FROM native_host_recording_sessions WHERE session = ?1",
-                [&session], |row| Ok((row.get(0)?, row.get(1)?)),
-            ).optional()?;
-            ensure!(previous == Some((sequence - 1, false)), "The recording history sequence has a gap or has already ended");
-            transaction.execute("INSERT INTO native_host_recording_records (session, sequence, record, measured_second) VALUES (?1, ?2, ?3, ?4)", params![session, sequence, value, second])?;
-            transaction.execute("UPDATE native_host_recording_sessions SET sequence = ?2, finished = ?3 WHERE session = ?1", params![session, sequence, finished])?;
-            transaction.commit()?;
-            project(&record, &history)?;
-            Ok(())
-        }).await.context("Recording persistence worker failed")?
+            if finished {
+                pending.sessions.remove(session);
+            } else {
+                pending.sessions.insert(session.to_owned(), sequence);
+            }
+            pending.records.push(Stored {
+                finished,
+                requested,
+                second,
+                sequence,
+                session: session.to_owned(),
+                value,
+            });
+        }
+        project(record, history)?;
+        history.changed.notify_one();
+        Ok(())
+    }
+
+    pub(super) fn pending_records(&self) -> Result<Vec<Stored>> {
+        Ok(std::mem::take(
+            &mut self
+                .pending
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Recording history queue lock poisoned"))?
+                .records,
+        ))
+    }
+
+    pub(super) fn requeue(&self, records: Vec<Stored>) -> Result<()> {
+        self.pending
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Recording history queue lock poisoned"))?
+            .records
+            .splice(0..0, records);
+        Ok(())
     }
 
     pub async fn host_audio_records(self: &Arc<Self>, after: u64, limit: u32) -> Result<Value> {

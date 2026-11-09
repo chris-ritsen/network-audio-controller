@@ -50,6 +50,7 @@ CREATE INDEX IF NOT EXISTS native_history_expiry ON native_history_tracks (newes
 pub struct HistoryStore {
     _ownership: std::fs::File,
     connection: Mutex<Connection>,
+    pending: Mutex<recording::Pending>,
     recording_reads: Arc<tokio::sync::Semaphore>,
 }
 
@@ -117,6 +118,7 @@ impl HistoryStore {
             Ok(Arc::new(Self {
                 _ownership: ownership,
                 connection: Mutex::new(connection),
+                pending: Mutex::default(),
                 recording_reads: Arc::new(tokio::sync::Semaphore::new(2)),
             }))
         })
@@ -149,10 +151,12 @@ impl HistoryStore {
         tokio::task::spawn_blocking(move || {
             let now = chrono::Utc::now().timestamp();
             let changes = changed_tracks(&history, now)?;
-            let outcome = store.write(&changes, now);
+            let records = store.pending_records()?;
+            let outcome = store.write(&changes, &records, now);
 
             if outcome.is_err() {
                 restore_dirty(&history, &changes)?;
+                store.requeue(records)?;
             }
 
             outcome
@@ -161,7 +165,12 @@ impl HistoryStore {
         .context("signal history persistence worker failed")?
     }
 
-    fn write(&self, changes: &[ChangedTrack], now: i64) -> Result<()> {
+    fn write(
+        &self,
+        changes: &[ChangedTrack],
+        records: &[recording::Stored],
+        now: i64,
+    ) -> Result<()> {
         let mut connection = self
             .connection
             .lock()
@@ -223,6 +232,7 @@ impl HistoryStore {
             "DELETE FROM native_history_tracks WHERE newest_second < ?1",
             [now - RETENTION_SECONDS],
         )?;
+        recording::store(&transaction, records)?;
         let expired = recording::expire(&transaction, now)?;
         transaction.commit()?;
 
