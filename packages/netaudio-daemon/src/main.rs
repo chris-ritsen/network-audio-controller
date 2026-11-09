@@ -6,6 +6,10 @@ use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::prelude::*;
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(Parser)]
 #[command(version, about = "NetAudio native daemon")]
 struct Arguments {
