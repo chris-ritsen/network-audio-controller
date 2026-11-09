@@ -73,14 +73,6 @@ impl Records {
                 }
                 self.correlate();
             }
-            crate::events::SHURE_DEVICE_REMOVED => {
-                let mac = event["mac"]
-                    .as_str()
-                    .context("Removed wireless device has no identity")?;
-                self.wireless.remove(mac);
-                self.values.remove(&format!("netaudio:shure:{mac}"));
-                self.values.remove(&format!("netaudio:shure:meters:{mac}"));
-            }
             crate::events::SHURE_CORRELATIONS_CHANGED => {
                 self.correlations = serde_json::from_value(event["correlations"].clone())?;
                 self.correlate();

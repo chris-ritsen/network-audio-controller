@@ -431,12 +431,6 @@ function applyEvent(payload) {
     };
     return;
   }
-  if (kind === "shure_device_removed") {
-    const next = { ...shureDevices.value };
-    delete next[payload.mac];
-    shureDevices.value = next;
-    return;
-  }
   if (kind === "shure_meter_values") {
     const device = shureMeterLatest.get(payload.mac) || {};
     const channel = device[payload.channel] || {};

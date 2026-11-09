@@ -20,7 +20,6 @@ pub const MANAGED_STATUS: &str = "managed_status";
 pub const METER_VALUES: &str = "meter_values";
 pub const SHURE_CORRELATIONS_CHANGED: &str = "shure_correlations_changed";
 pub const SHURE_DEVICE_DISCOVERED: &str = "shure_device_discovered";
-pub const SHURE_DEVICE_REMOVED: &str = "shure_device_removed";
 pub const SHURE_DEVICE_UPDATED: &str = "shure_device_updated";
 pub const SHURE_DISCOVERY_STATUS: &str = "shure_discovery_status";
 pub const SHURE_METER_VALUES: &str = "shure_meter_values";

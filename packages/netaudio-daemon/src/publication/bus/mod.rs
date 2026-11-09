@@ -83,10 +83,6 @@ async fn connected(model: &ReadModel, delay: &mut Duration) -> Result<()> {
                         let mac = event.value["mac"].as_str().context("D-Bus wireless identity missing")?;
                         inventory.wireless(&connection, mac, event.value["device"].clone()).await?;
                     }
-                    crate::events::SHURE_DEVICE_REMOVED => {
-                        let mac = event.value["mac"].as_str().context("D-Bus removed wireless identity missing")?;
-                        inventory.wireless(&connection, mac, Value::Null).await?;
-                    }
                     crate::events::SHURE_METER_VALUES => {
                         let mac = event.value["mac"].as_str().context("D-Bus meter identity missing")?;
                         let snapshot = model.snapshot()?;
@@ -182,20 +178,6 @@ impl Inventory {
             .unwrap_or_else(|| safe_name(&mac.to_ascii_lowercase()))?;
         let path = format!("{ROOT}/shure/devices/{identity}");
         let exists = self.wireless.contains_key(mac);
-        if record.is_null() {
-            self.children::<ShureChannel>(connection, &path, BTreeSet::new())
-                .await?;
-            if exists {
-                connection
-                    .object_server()
-                    .remove::<ShureDevice, _>(path.as_str())
-                    .await?;
-                self.wireless.remove(mac);
-                self.manager(connection).await?;
-                Manager::shure_device_removed(&SignalEmitter::new(connection, ROOT)?, mac).await?;
-            }
-            return Ok(());
-        }
         install(
             connection,
             &path,

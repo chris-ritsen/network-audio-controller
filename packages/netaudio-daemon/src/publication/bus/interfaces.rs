@@ -67,12 +67,6 @@ impl Manager {
         emitter: &zbus::object_server::SignalEmitter<'_>,
         identity: &str,
     ) -> zbus::Result<()>;
-
-    #[zbus(signal)]
-    pub async fn shure_device_removed(
-        emitter: &zbus::object_server::SignalEmitter<'_>,
-        identity: &str,
-    ) -> zbus::Result<()>;
 }
 
 record_interface!(DanteDevice, "com.netaudio.DanteDevice",
