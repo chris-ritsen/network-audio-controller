@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 const LAYOUT_VERSION: i64 = 1;
-const COMMIT_COALESCING: Duration = Duration::from_secs(1);
+const COMMIT_COALESCING: Duration = Duration::from_secs(60);
 const DATABASE_BUSY_DEADLINE: Duration = Duration::from_secs(2);
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS native_history_layout (
