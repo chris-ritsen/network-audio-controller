@@ -9,9 +9,6 @@ license=(Unlicense)
 depends=('alsa-lib' 'libpulse' 'python' 'python-click' 'python-cryptography' 'python-dbus-fast' 'python-ifaddr' 'python-rich'
          'python-segno' 'python-typer' 'python-typing_extensions' 'python-yaml' 'python-zeroconf')
 optdepends=('jack: native JACK audio'
-            'python-jack-client: follow JACK audio with host_audio'
-            'python-numpy: record JACK audio'
-            'python-pulsectl-asyncio: follow PulseAudio audio with host_audio'
             'python-redis: publish device state to Redis'
             'wireshark-cli: live network capture')
 makedepends=('git' 'python-build' 'python-hatchling' 'python-installer' 'python-wheel' 'rust')

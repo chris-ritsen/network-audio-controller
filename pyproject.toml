@@ -21,9 +21,6 @@ dependencies = [
     "typing-extensions>=4.0.0",
     "dbus-fast>=2.0.0; sys_platform == 'linux'",
     "pywin32>=306; sys_platform == 'win32'",
-    "jack-client>=0.5.4",
-    "pulsectl-asyncio>=1.2.0; sys_platform == 'linux'",
-    "numpy>=1.26 ; sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]
@@ -134,7 +131,6 @@ include = [
     "packages/netaudio/src/netaudio/dante/dissection/header.py",
     "packages/netaudio/src/netaudio/dante/flow_lifecycle.py",
     "packages/netaudio/src/netaudio/dante/flows.py",
-    "packages/netaudio/src/netaudio/dante/heartbeat_connection_health.py",
     "packages/netaudio/src/netaudio/dante/latency.py",
     "packages/netaudio/src/netaudio/dante/lock.py",
     "packages/netaudio/src/netaudio/dante/metering.py",
@@ -151,7 +147,6 @@ include = [
     "packages/netaudio/src/netaudio/dante/sdp.py",
     "packages/netaudio/src/netaudio/dante/self_connection.py",
     "packages/netaudio/src/netaudio/dante/services/cmc.py",
-    "packages/netaudio/src/netaudio/dante/services/heartbeat.py",
     "packages/netaudio/src/netaudio/dante/subscription_operations.py",
     "packages/netaudio/src/netaudio/dante/transmit_flow.py",
     "packages/netaudio/src/netaudio/dante/transmitter_channel_name_reconciliation.py",
@@ -163,7 +158,6 @@ include = [
     "packages/netaudio/src/netaudio/presets/parsing.py",
     "packages/netaudio/src/netaudio/presets/schema.py",
     "packages/netaudio/src/netaudio/shure/discovery.py",
-    "packages/netaudio/src/netaudio/shure/manager.py",
 ]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
