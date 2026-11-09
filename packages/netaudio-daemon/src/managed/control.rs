@@ -13,10 +13,15 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::Instant;
 
-const READBACK_INTERVAL: Duration = Duration::from_millis(500);
-const READBACK_LIMIT: Duration = Duration::from_secs(10);
+const READBACK_DELAYS: [Duration; 6] = [
+    Duration::from_millis(500),
+    Duration::from_millis(1000),
+    Duration::from_millis(1500),
+    Duration::from_millis(2000),
+    Duration::from_millis(2000),
+    Duration::from_millis(3000),
+];
 
 pub struct DeviceRequest {
     pub caller: super::sessions::Caller,
@@ -503,8 +508,6 @@ impl Registry {
                         matches(&command, target) && !establishing(&command, target)
                     })
             },
-            READBACK_INTERVAL,
-            READBACK_LIMIT,
         )
         .await;
         match readback {
@@ -649,24 +652,20 @@ impl Registry {
     }
 }
 
-async fn settle<T, R, F>(
-    mut read: R,
-    settled: impl Fn(&T) -> bool,
-    interval: Duration,
-    limit: Duration,
-) -> T
+pub(super) async fn settle<T, R, F>(mut read: R, settled: impl Fn(&T) -> bool) -> T
 where
     R: FnMut() -> F,
     F: Future<Output = T>,
 {
-    let deadline = Instant::now() + limit;
-    loop {
-        let result = read().await;
-        if settled(&result) || Instant::now() + interval > deadline {
-            return result;
+    let mut result = read().await;
+    for delay in READBACK_DELAYS {
+        if settled(&result) {
+            break;
         }
-        tokio::time::sleep(interval).await;
+        tokio::time::sleep(delay).await;
+        result = read().await;
     }
+    result
 }
 
 fn pending_events(record: &Value, operation: &ControlOperation) -> Vec<Value> {

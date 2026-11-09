@@ -9,21 +9,12 @@ use crate::{
     monitoring::requests::StatusQuery,
 };
 use serde_json::{json, Value};
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 mod channel;
 mod latency;
 mod request;
 pub(super) use request::Configuration;
-
-const INVENTORY_READBACK_DELAYS: [Duration; 6] = [
-    Duration::from_millis(500),
-    Duration::from_millis(1000),
-    Duration::from_millis(1500),
-    Duration::from_millis(2000),
-    Duration::from_millis(2000),
-    Duration::from_millis(3000),
-];
 
 struct Prepared {
     fresh: FreshTarget,
@@ -106,19 +97,21 @@ impl Registry {
             }
             let readback = async {
                 if requested.inventory_readback() {
-                    self.refresh_configuration_inventory(source, &prepared.fresh)
-                        .await?;
-                    for delay in INVENTORY_READBACK_DELAYS {
-                        if value["accepted"] != true
-                            || requested
-                                .inventory_settled(self.status_record(&prepared.fresh)?.as_ref())
-                        {
-                            break;
-                        }
-                        tokio::time::sleep(delay).await;
-                        self.refresh_configuration_inventory(source, &prepared.fresh)
-                            .await?;
-                    }
+                    let accepted = value["accepted"] == true;
+                    super::control::settle(
+                        || async {
+                            self.refresh_configuration_inventory(source, &prepared.fresh)
+                                .await?;
+                            self.status_record(&prepared.fresh)
+                        },
+                        |record: &Result<Arc<Value>, ControlError>| {
+                            !accepted
+                                || record
+                                    .as_ref()
+                                    .map_or(true, |record| requested.inventory_settled(record))
+                        },
+                    )
+                    .await?;
                 } else if transport_failed {
                     prepared.session = DeviceSession::open(source, &prepared.fresh).await?;
                 }
