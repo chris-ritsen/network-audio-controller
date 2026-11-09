@@ -94,10 +94,10 @@ pub fn recovered(
         | Kind::ReceiverLatencyPressure
         | Kind::ReceiverLatePackets => receivers::recovered(issue, record, thresholds),
         Kind::ClockSynchronization | Kind::ClockMuted => {
-            if issue.evidence_source == "device_clock_status" {
-                clock.confirmed(issue) && clock::fresh_clock(record, timestamp).is_some()
+            let managed = &record["ddm_clocking_state"];
+            if !managed.is_object() {
+                clock.confirmed(issue)
             } else {
-                let managed = &record["ddm_clocking_state"];
                 (managed["locked"] == true
                     || managed["locked"].as_str().is_some_and(|value| {
                         matches!(value.to_lowercase().as_str(), "locked" | "true" | "ok")

@@ -15,7 +15,7 @@ const VIDEO_FAILURE_STATES: &[u64] = &[32, 33, 34, 36, 48, 49, 50, 51, 52, 53, 5
 
 #[derive(Default)]
 pub struct Recovery {
-    observations: BTreeMap<(String, Kind), (DateTime<Utc>, DateTime<Utc>)>,
+    observations: BTreeMap<(String, Kind), DateTime<Utc>>,
     recovered: BTreeSet<(String, Kind)>,
 }
 
@@ -45,11 +45,13 @@ impl Recovery {
             return Ok(issues);
         }
 
-        let Some(observed) = fresh_clock(record, timestamp) else {
+        let Some((observed, now)) = reported_clock(record, timestamp) else {
             self.forget(&identity);
             return Ok(issues);
         };
         let status = &record["clock_status"];
+        let fresh = status["observation_state"] != "stale"
+            && now - observed <= TimeDelta::seconds(CLOCK_FRESHNESS_SECONDS);
         for (kind, bad, good, title) in [
             (
                 Kind::ClockSynchronization,
@@ -68,8 +70,18 @@ impl Recovery {
         ] {
             let key = (identity.clone(), kind);
             self.recovered.remove(&key);
+            let previous = active
+                .values()
+                .find(|issue| issue.scope.device_identity == identity && issue.kind == kind);
 
-            if bad {
+            if bad && !fresh {
+                self.observations.remove(&key);
+                if let Some(previous) = previous {
+                    let mut current = previous.clone();
+                    current.observation_state = super::model::ObservationState::Observed;
+                    issues.push(current);
+                }
+            } else if bad {
                 self.observations.remove(&key);
                 let finding = Finding {
                     kind,
@@ -101,26 +113,18 @@ impl Recovery {
                     finding,
                 )?);
             } else if good {
-                let (mut first, last) = self
+                let first = *self
                     .observations
-                    .get(&key)
-                    .copied()
-                    .unwrap_or((observed, observed));
-                if observed < last || observed - last > TimeDelta::seconds(CLOCK_FRESHNESS_SECONDS)
-                {
-                    first = observed;
-                }
-                self.observations.insert(key.clone(), (first, observed));
-                if observed - first >= TimeDelta::seconds(CLOCK_RECOVERY_SECONDS) {
+                    .entry(key.clone())
+                    .and_modify(|first| *first = observed.min(*first))
+                    .or_insert(observed);
+                if now - first >= TimeDelta::seconds(CLOCK_RECOVERY_SECONDS) {
                     self.recovered.insert(key);
-                } else if let Some(previous) = active
-                    .values()
-                    .find(|issue| issue.scope.device_identity == identity && issue.kind == kind)
-                {
+                } else if let Some(previous) = previous {
                     let mut current = previous.clone();
                     current.observation_state = super::model::ObservationState::Observed;
                     current.summary =
-                        "Recovering; waiting for five seconds of continuous healthy clock status."
+                        "Recovering; waiting for the healthy clock status to hold for five seconds."
                             .to_owned();
                     current.raw_source_fields = json!({"clock_status": status, "clock_observed_at": record["clock_observed_at"]});
                     issues.push(current);
@@ -133,11 +137,8 @@ impl Recovery {
     }
 }
 
-pub fn fresh_clock(record: &Value, timestamp: &str) -> Option<DateTime<Utc>> {
-    if record["online"] == false
-        || record["clock_status"]["status_supported"] != true
-        || record["clock_status"]["observation_state"] == "stale"
-    {
+fn reported_clock(record: &Value, timestamp: &str) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
+    if record["online"] == false || record["clock_status"]["status_supported"] != true {
         return None;
     }
     let observed = DateTime::parse_from_rfc3339(record["clock_observed_at"].as_str()?)
@@ -146,9 +147,7 @@ pub fn fresh_clock(record: &Value, timestamp: &str) -> Option<DateTime<Utc>> {
     let now = DateTime::parse_from_rfc3339(timestamp)
         .ok()?
         .with_timezone(&Utc);
-    let age = now - observed;
-    (age >= TimeDelta::zero() && age <= TimeDelta::seconds(CLOCK_FRESHNESS_SECONDS))
-        .then_some(observed)
+    (now >= observed).then_some((observed, now))
 }
 
 fn managed(record: &Value, timestamp: &str) -> Result<Vec<Issue>> {
