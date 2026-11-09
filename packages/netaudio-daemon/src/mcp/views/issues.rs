@@ -1,4 +1,5 @@
 use super::{channels, compact, last_seen, local_time, resolve, subscriptions, waiting, Records};
+use crate::monitoring::journal::model::device_identity;
 use caseless::Caseless;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -92,7 +93,13 @@ pub fn issues_view(payload: &Value, arguments: &Value, records: &Records) -> Val
     for issue in issues {
         let name = device_name(issue);
         let record = resolve(records, &name).ok().flatten();
-        if arguments["device"].is_null() && record.is_some_and(|record| record["online"] == false) {
+        if arguments["device"].is_null()
+            && record.is_some_and(|record| {
+                record["online"] == false
+                    || device_identity(record)
+                        .is_ok_and(|identity| issue["scope"]["device_identity"] != identity)
+            })
+        {
             continue;
         }
 
