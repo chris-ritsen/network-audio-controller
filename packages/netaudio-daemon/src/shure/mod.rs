@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
+
 mod audit;
 pub mod correlations;
 #[cfg(target_os = "linux")]

@@ -73,12 +73,7 @@ impl DeviceRegistry {
                     .collect(),
             };
             if state.association.as_ref() != Some(&signature) {
-                let generation = self
-                    .association_generation
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-                        value.checked_add(1)
-                    })
-                    .map_err(|_| anyhow::anyhow!("device association generations exhausted"))?;
+                let generation = self.association_generation.fetch_add(1, Ordering::Relaxed);
                 state.association = Some(signature);
                 state.associated_at = Instant::now();
                 state.generation += 1;
