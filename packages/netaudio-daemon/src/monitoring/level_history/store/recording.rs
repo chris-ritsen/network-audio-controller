@@ -1,9 +1,12 @@
-use super::{HistoryStore, LevelHistory, RETENTION_SECONDS};
+use super::{HistoryStore, LevelHistory, SECOND_SLOTS};
 use anyhow::{ensure, Context, Result};
 use netaudio_core::host_audio::recording::Record;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Value};
 use std::sync::Arc;
+
+pub(super) const EXPIRY_BATCH: usize = 2000;
+const RETENTION_SECONDS: i64 = SECOND_SLOTS as i64;
 
 pub(super) fn initialize(connection: &mut Connection) -> Result<()> {
     let transaction = connection.transaction()?;
@@ -34,14 +37,15 @@ pub(super) fn initialize(connection: &mut Connection) -> Result<()> {
             })?
             .collect::<Result<Vec<_>, _>>()?
     };
+    let now = chrono::Utc::now();
     for (session, sequence) in unfinished {
         let record = Record::Finished {
-            observed_at: chrono::Utc::now().to_rfc3339(),
+            observed_at: now.to_rfc3339(),
             error: Some("The previous recorder owner ended without a final record; the stop time and missing coverage are unknown".to_owned()),
         };
         transaction.execute(
-            "INSERT INTO native_host_recording_records (session, sequence, record) VALUES (?1, ?2, ?3)",
-            params![session, sequence + 1, serde_json::to_string(&record)?],
+            "INSERT INTO native_host_recording_records (session, sequence, record, measured_second) VALUES (?1, ?2, ?3, ?4)",
+            params![session, sequence + 1, serde_json::to_string(&record)?, now.timestamp()],
         )?;
         transaction.execute(
             "UPDATE native_host_recording_sessions SET sequence = ?2, finished = 1 WHERE session = ?1",
@@ -50,6 +54,35 @@ pub(super) fn initialize(connection: &mut Connection) -> Result<()> {
     }
     transaction.commit()?;
     Ok(())
+}
+
+pub(super) fn expire(transaction: &Transaction, now: i64) -> Result<usize> {
+    let undated = transaction.execute(
+        "DELETE FROM native_host_recording_records WHERE cursor IN (
+             SELECT cursor FROM native_host_recording_records
+             WHERE measured_second IS NULL LIMIT ?1
+         )",
+        [EXPIRY_BATCH as i64],
+    )?;
+    let dated = transaction.execute(
+        "DELETE FROM native_host_recording_records WHERE cursor IN (
+             SELECT cursor FROM native_host_recording_records
+             WHERE measured_second < ?1 ORDER BY measured_second LIMIT ?2
+         )",
+        params![now - RETENTION_SECONDS, (EXPIRY_BATCH - undated) as i64],
+    )?;
+
+    if undated + dated > 0 {
+        transaction.execute(
+            "DELETE FROM native_host_recording_sessions WHERE finished = 1 AND NOT EXISTS (
+                 SELECT 1 FROM native_host_recording_records AS record
+                 WHERE record.session = native_host_recording_sessions.session
+             )",
+            [],
+        )?;
+    }
+
+    Ok(undated + dated)
 }
 
 impl HistoryStore {
@@ -72,8 +105,12 @@ impl HistoryStore {
         let finished = matches!(record, Record::Finished { .. });
         let record = record.clone();
         let second = match &record {
-            Record::Frame(frame) => Some(frame.second),
-            _ => None,
+            Record::Finished { observed_at, .. }
+            | Record::Requested { observed_at, .. }
+            | Record::Started { observed_at, .. } => {
+                chrono::DateTime::parse_from_rfc3339(observed_at)?.timestamp()
+            }
+            Record::Frame(frame) => frame.second,
         };
         tokio::task::spawn_blocking(move || {
             let mut connection = store.connection.lock().map_err(|_| anyhow::anyhow!("Signal history database lock poisoned"))?;
@@ -130,7 +167,7 @@ impl HistoryStore {
 }
 
 pub(super) fn restore(connection: &Connection, history: &LevelHistory, now: i64) -> Result<()> {
-    let mut statement = connection.prepare("SELECT record FROM native_host_recording_records WHERE measured_second >= ?1 ORDER BY cursor")?;
+    let mut statement = connection.prepare("SELECT record FROM native_host_recording_records WHERE measured_second >= ?1 ORDER BY measured_second, cursor")?;
     let mut rows = statement.query([now - RETENTION_SECONDS])?;
     while let Some(row) = rows.next()? {
         project(

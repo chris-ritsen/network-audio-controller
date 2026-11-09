@@ -10305,7 +10305,7 @@
       "post": {
         "operationId": "readHostAudioRecordings",
         "summary": "Read retained JACK recording records",
-        "description": "Records are ordered by a stable cursor. Send after=next_cursor for the following page. Limit defaults to 100, ranges from 1 to 1000, and each page is bounded to approximately 8 MiB. has_more indicates retained records beyond the page. Full requested, started, frame and finished records are retained; frames include source timing, exact frame counts, raw amplitude/energy and completeness. This endpoint does not initiate recording.",
+        "description": "Records are ordered by a stable cursor. Send after=next_cursor for the following page. Limit defaults to 100, ranges from 1 to 1000, and each page is bounded to approximately 8 MiB. has_more indicates retained records beyond the page. Full requested, started, frame and finished records are retained for fifteen minutes; frames include source timing, exact frame counts, raw amplitude/energy and completeness. This endpoint does not initiate recording.",
         "tags": [
           "Host audio"
         ],

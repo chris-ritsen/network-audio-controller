@@ -106,6 +106,7 @@ impl HistoryStore {
 
             transaction.commit()?;
             recording::initialize(&mut connection)?;
+            release_free_pages(&connection)?;
             load(&connection, &history, chrono::Utc::now().timestamp())?;
             recording::restore(&connection, &history, chrono::Utc::now().timestamp())?;
             *history
@@ -222,9 +223,28 @@ impl HistoryStore {
             "DELETE FROM native_history_tracks WHERE newest_second < ?1",
             [now - RETENTION_SECONDS],
         )?;
+        let expired = recording::expire(&transaction, now)?;
         transaction.commit()?;
+
+        if (1..recording::EXPIRY_BATCH).contains(&expired)
+            && let Err(error) = release_free_pages(&connection)
+        {
+            tracing::warn!(%error, "Signal history compaction failed");
+        }
+
         Ok(())
     }
+}
+
+fn release_free_pages(connection: &Connection) -> Result<()> {
+    let free: i64 = connection.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+    let pages: i64 = connection.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+
+    if free > pages / 2 {
+        connection.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
+    }
+
+    Ok(())
 }
 
 fn changed_tracks(history: &LevelHistory, now: i64) -> Result<Vec<ChangedTrack>> {
