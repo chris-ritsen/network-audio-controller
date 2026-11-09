@@ -775,3 +775,60 @@ fn control_error(error: Error) -> ControlError {
         error => ControlError::Unavailable(error.to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn receiver(source: &str, channel: &str) -> Observation {
+        Observation {
+            device: serde_json::from_value(json!({
+                "id": "receiver", "name": "receiver", "domainId": "domain",
+                "rxChannels": [{"id": "rx-1", "index": 1, "subscribedDevice": source, "subscribedChannel": channel}],
+            }))
+            .expect("receiver fixture"),
+            domain_id: Some("domain".into()),
+            domain_name: None,
+            observed_at: None,
+            fresh: true,
+            server_profile: "server".into(),
+            context_name: None,
+            operation_permissions: None,
+            discovery: None,
+        }
+    }
+
+    #[test]
+    fn a_self_connection_names_the_device_ddm_knows() {
+        let record = json!({"name": "receiver", "server_name": "receiver.local", "channels": {"receivers": {"1": {}}}});
+        for transmitter_device in [".", "receiver", "RECEIVER.local"] {
+            let operation = ControlOperation::Subscriptions {
+                changes: vec![SubscriptionChange::Set {
+                    receiver_channel: 1,
+                    transmitter_device: transmitter_device.into(),
+                    transmitter_channel: "01".into(),
+                }],
+            };
+            let Control::Subscriptions { subscriptions } =
+                plan(&record, &operation).expect("planned self-connection")
+            else {
+                panic!("subscription command expected");
+            };
+            assert_eq!(subscriptions[0].transmitter_device, "receiver");
+        }
+    }
+
+    #[test]
+    fn a_self_connection_ddm_reports_as_a_dot_matches_the_device_name() {
+        let command = Control::Subscriptions {
+            subscriptions: vec![Subscription {
+                receiver_channel: 1,
+                transmitter_device: "receiver".into(),
+                transmitter_channel: "01".into(),
+            }],
+        };
+        assert!(matches(&command, &receiver(".", "01")));
+        assert!(matches(&command, &receiver("receiver", "01")));
+        assert!(!matches(&command, &receiver(".", "02")));
+    }
+}
