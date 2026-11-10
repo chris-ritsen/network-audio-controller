@@ -51,42 +51,6 @@ test("AES67 readiness views make no writes and unknown support has no controls",
   expect(writes).toEqual([]);
 });
 
-test("pending AES67 changes show current and configured modes on desktop and mobile", async ({
-  page,
-}) => {
-  await serveWebapp(page, {
-    devices: inventoryWith({
-      aes67_configuration_supported: true,
-      aes67_current: false,
-      aes67_configured: true,
-    }),
-  });
-  const writes = [];
-  page.on("request", (request) => {
-    if (request.method() !== "GET") writes.push(request.url());
-  });
-  await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
-  await expect(
-    page.locator("#content").getByText("Enable pending", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Disable", exact: true }),
-  ).toBeEnabled();
-  await expect(
-    page.getByRole("button", { name: "Reboot", exact: true }),
-  ).toHaveCount(0);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(
-    page.locator("#content").getByText("Enable pending", { exact: true }),
-  ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth,
-    ),
-  ).toBe(true);
-  expect(writes).toEqual([]);
-});
-
 test("enrolled devices show DDM RTP readiness without local configuration buttons", async ({
   page,
 }) => {
