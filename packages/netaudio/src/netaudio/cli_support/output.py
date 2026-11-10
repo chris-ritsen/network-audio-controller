@@ -16,7 +16,9 @@ _XML_ELEMENT_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 
 
 def local_time(value: str | None) -> str:
-    return datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M:%S") if value else ""
+    if not value:
+        return ""
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def readable(value: Any) -> str:

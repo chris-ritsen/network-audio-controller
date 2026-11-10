@@ -24,6 +24,34 @@ def _fetch(**filters) -> dict:
     return asyncio.run(call_daemon("GET", f"/event-journal?{query}" if query else "/event-journal"))
 
 
+def _field(key: str, value) -> str:
+    if key.endswith(("_at", "_seen")) and isinstance(value, str):
+        value = local_time(value)
+    return f"{key.replace('_', ' ')} {readable(value)}"
+
+
+def _shown(key: str, value) -> bool:
+    return value is not None and not isinstance(value, (dict, list)) and not key.endswith(("_id", "_sha256", "icon"))
+
+
+def _summary(value: dict) -> str:
+    if "issue_id" in value:
+        count = value.get("occurrence_count")
+        seen = "seen once" if count == 1 else f"seen {count} times"
+        return f"{readable(value.get('kind')).replace('_', ' ')}, {readable(value.get('observation_state'))}, {seen}"
+    return ": ".join(str(value[key]) for key in ("label", "detail") if value.get(key))
+
+
+def _values(previous, current) -> list[str]:
+    if not isinstance(previous, dict) and not isinstance(current, dict):
+        return [readable(previous), readable(current)]
+    sides = [side if isinstance(side, dict) else {} for side in (previous, current)]
+    if any("issue_id" in side or "label" in side for side in sides):
+        return [_summary(side) for side in sides]
+    changed = sorted(key for key in sides[0].keys() | sides[1].keys() if sides[0].get(key) != sides[1].get(key))
+    return [", ".join(_field(key, side[key]) for key in changed if _shown(key, side.get(key))) for side in sides]
+
+
 def _row(event: dict) -> list[str]:
     return [
         local_time(event.get("timestamp")),
@@ -33,8 +61,7 @@ def _row(event: dict) -> list[str]:
         str(event.get("flow_identity") or event.get("channel_identity") or event.get("interface_identity") or ""),
         str(event.get("operation_name") or "").replace("_", " "),
         str(event.get("lifecycle_phase") or "").replace("_", " "),
-        readable(event.get("previous_value")),
-        readable(event.get("current_value")),
+        *_values(event.get("previous_value"), event.get("current_value")),
     ]
 
 
