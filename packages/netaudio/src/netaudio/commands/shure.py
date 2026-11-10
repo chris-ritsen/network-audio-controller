@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from typing import NoReturn, Optional
 from urllib.parse import quote
 
@@ -10,7 +9,7 @@ import typer
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import daemon_devices
-from netaudio.cli_support.output import output_single, output_table, structured_output_selected
+from netaudio.cli_support.output import local_time, output_single, output_table, structured_output_selected
 from netaudio.daemon.client import DaemonRefusal, ask_daemon, call_daemon
 
 app = typer.Typer(help="Shure wireless device control.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
@@ -35,10 +34,6 @@ def _text(value) -> str:
 def _control(record: dict) -> str:
     status = record.get("control_status") or {}
     return ": ".join(str(part) for part in (status.get("state"), status.get("error")) if part)
-
-
-def _local_time(value: str | None) -> str:
-    return datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M:%S") if value else ""
 
 
 def _frequency(value) -> str:
@@ -113,7 +108,7 @@ async def run_device_show(selector: str | None) -> None:
         ("Encryption Mode", record.get("encryption_mode")),
         ("Status", "online" if record.get("online") else "offline"),
         ("Control", _control(record)),
-        ("Last Seen", _local_time(record.get("last_seen"))),
+        ("Last Seen", local_time(record.get("last_seen"))),
     )
     output_table(
         ["Field", "Value"],

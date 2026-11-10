@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
 
@@ -12,7 +11,7 @@ import typer
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import run_with_devices
-from netaudio.cli_support.output import output_single, output_table, structured_output_selected
+from netaudio.cli_support.output import local_time, output_single, output_table, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.device.display import (
     format_encoding,
@@ -61,10 +60,6 @@ def _read_specification(path: str) -> dict:
 
 def _destination(destination: dict | None) -> str:
     return f"{destination['address']}:{destination['port']}" if destination else ""
-
-
-def _local_time(value: str | None) -> str:
-    return datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M:%S") if value else ""
 
 
 async def _author(path: str, body: dict) -> None:
@@ -238,8 +233,8 @@ async def run_external_flow_list() -> None:
             _destination(flow.get("primary_destination")),
             _destination(flow.get("secondary_destination")),
             flow.get("announcement_interface") or "",
-            _local_time(flow.get("refreshed_at")),
-            _local_time(flow.get("expires_at")),
+            local_time(flow.get("refreshed_at")),
+            local_time(flow.get("expires_at")),
             "; ".join(flow.get("routability_errors") or []),
         ]
         for flow in flows.values()

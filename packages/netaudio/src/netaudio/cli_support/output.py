@@ -3,6 +3,7 @@ import io
 import json as json_module
 import re
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from typing import Any, Optional
 
 import typer
@@ -12,6 +13,22 @@ from netaudio.cli_support.context import _get_state, _iconize_headers
 
 
 _XML_ELEMENT_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
+
+
+def local_time(value: str | None) -> str:
+    return datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M:%S") if value else ""
+
+
+def readable(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, dict):
+        return ", ".join(f"{str(key).replace('_', ' ')} {readable(item)}" for key, item in sorted(value.items()))
+    if isinstance(value, list):
+        return ", ".join(readable(item) for item in value)
+    return str(value)
 
 
 def _format_text(headers: list[str], rows: list[list[str]]) -> str:
