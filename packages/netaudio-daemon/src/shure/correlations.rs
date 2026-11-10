@@ -113,6 +113,17 @@ impl Configuration {
     }
 }
 
+pub fn device_address(identifier: &str) -> Option<String> {
+    let digits = identifier.replace([':', '-', '.'], "").to_ascii_lowercase();
+    if digits.len() != 16 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return normalize(identifier);
+    }
+    if let Some(address) = digits.strip_suffix("0000") {
+        return Some(address.to_owned());
+    }
+    (&digits[6..10] == "fffe").then(|| format!("{}{}", &digits[..6], &digits[10..]))
+}
+
 pub fn normalize(value: &str) -> Option<String> {
     let normalized = value.replace([':', '-', '.'], "").to_ascii_lowercase();
     (normalized.len() == 12 && normalized.bytes().all(|byte| byte.is_ascii_hexdigit()))
@@ -184,7 +195,7 @@ pub fn linked_device<'a>(
         if let Some(target) = explicit {
             return record["mac_address"]
                 .as_str()
-                .and_then(crate::shure::correlations::normalize)
+                .and_then(crate::shure::correlations::device_address)
                 .as_ref()
                 == Some(target);
         }

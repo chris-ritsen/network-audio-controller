@@ -254,7 +254,7 @@ impl Service {
                             if let Some(explicit) = explicit {
                                 record["mac_address"]
                                     .as_str()
-                                    .and_then(crate::shure::correlations::normalize)
+                                    .and_then(crate::shure::correlations::device_address)
                                     .as_ref()
                                     == Some(explicit)
                             } else {
