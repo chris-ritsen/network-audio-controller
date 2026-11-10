@@ -6,31 +6,16 @@ from typing import Optional
 
 import typer
 
-from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS, _get_state
-from netaudio.cli_support.execution import (
-    CapabilityProbeTimeout,
-    _enrich_lock_states,
-    _load_device_for_show,
-    _log_unreachable,
-    run_command,
-    selected_device_identifiers,
-)
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.execution import run_with_devices
 from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.config.cli import app as device_config_app
-from netaudio.dante.readback import MUTATION_ERRORS, readback_after_notification
-from netaudio.commands.device.display import (
-    _device_show_rows,
-    _diagnostic_audio_capabilities_data,
-    _diagnostic_audio_capability_rows,
-)
-from netaudio.commands.device.exports import export_capability, export_logs, select_export_device
+from netaudio.commands.device.display import _device_show_rows
 from netaudio.commands.device.network_status import network_status
 from netaudio.commands.status import status as status_command
-from netaudio.dante.conmon_export import ConmonExportUnavailableError
-from netaudio.dante.commands import validate_dante_name
+from netaudio.daemon.client import call_daemon
 from netaudio.dante.device_serializer import DanteDeviceSerializer
-from netaudio.dante.diagnostic_logs import DeviceLogExportError
 from netaudio.icons import icon
 
 logger = logging.getLogger("netaudio")
@@ -90,18 +75,12 @@ from netaudio.commands.device.controls import app as controls_app
 app.add_typer(controls_app, name="controls")
 
 
-async def run_show(application, devices) -> None:
-    from netaudio.cli import OutputFormat, state
-
-    include_channels = state.output_format in (OutputFormat.json, OutputFormat.yaml, OutputFormat.xml)
-    server_name, device = await _load_device_for_show(application, include_channels=include_channels)
-    for _, reason in (await _enrich_lock_states(application, {server_name: device}, only_unknown=True)).items():
-        _log_unreachable(device, reason)
-    data = DanteDeviceSerializer.to_json(device)
+async def run_show(devices) -> None:
+    [(server_name, device)] = select_device(filter_devices(devices))
     output_table(
         ["Field", "Value"],
         _device_show_rows(device),
-        json_data=data,
+        json_data=DanteDeviceSerializer.to_json(device),
         title=device.name or server_name,
         devices={server_name: device},
     )
@@ -110,44 +89,14 @@ async def run_show(application, devices) -> None:
 @app.command("show")
 def device_show():
     """Show detailed device information."""
-    run_command(run_show, discover_devices=False)
+    run_with_devices(run_show)
 
 
-async def run_capabilities(application, devices, timeout: float) -> None:
-    device_name, device = select_export_device(filter_devices(devices))
-    try:
-        result = await application.export_device_logs(device.ipv4, timeout=timeout)
-    except (CapabilityProbeTimeout, ConmonExportUnavailableError, DeviceLogExportError) as exception:
-        typer.echo(f"Error: {exception}", err=True)
-        raise typer.Exit(code=1) from None
-    capabilities = result.audio_capabilities
-    if capabilities is None:
-        typer.echo(
-            f"Error: {device_name} returned diagnostic logs without recognized audio capability records.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    output_table(
-        ["Capability", "Value"],
-        _diagnostic_audio_capability_rows(capabilities),
-        json_data=_diagnostic_audio_capabilities_data(capabilities),
-        title=device_name,
-    )
-
-
-@app.command("capabilities")
-def device_capabilities(
-    timeout: float = typer.Option(15.0, "--timeout", min=0.1, help="Diagnostic response timeout in seconds."),
-):
-    """Inspect licensed and sample-rate-dependent audio capabilities."""
-    run_command(run_capabilities, timeout)
-
-
-async def run_identify(application, devices, all_devices: bool) -> None:
+async def run_identify(devices, all_devices: bool) -> None:
     targets = select_device(filter_devices(devices), allow_many=all_devices)
     identified = []
     for server_name, device in targets:
-        await application.identify(device)
+        await call_daemon("POST", "/identify", {"device": server_name})
         identified.append(device.name or server_name)
         if not structured_output_selected():
             typer.echo(f"{icon('identify')}Identified: {device.name or server_name}")
@@ -164,13 +113,13 @@ def identify(
     ),
 ):
     """Blink the identify LED on a device."""
-    run_command(run_identify, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_identify, all_devices)
 
 
-async def run_reboot(application, devices, all_devices: bool) -> None:
+async def run_reboot(devices, all_devices: bool) -> None:
     targets = select_device(filter_devices(devices), allow_many=all_devices)
     for server_name, device in targets:
-        await application.reboot(device)
+        await call_daemon("POST", "/reboot", {"device": server_name})
         typer.echo(f"Reboot requested: {device.name or server_name}")
 
 
@@ -183,7 +132,7 @@ def reboot(
     ),
 ):
     """Reboot a device."""
-    run_command(run_reboot, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_reboot, all_devices)
 
 
 def _confirmed_device(filtered, confirm: str):
@@ -192,12 +141,12 @@ def _confirmed_device(filtered, confirm: str):
     if confirm != device_name:
         typer.echo(f"Error: --confirm must exactly match {device_name!r}.", err=True)
         raise typer.Exit(code=1)
-    return device_name, device
+    return server_name, device_name
 
 
-async def run_factory_reset(application, devices, confirm: str) -> None:
-    device_name, device = _confirmed_device(filter_devices(devices), confirm)
-    await application.factory_reset(device)
+async def run_factory_reset(devices, confirm: str) -> None:
+    server_name, device_name = _confirmed_device(filter_devices(devices), confirm)
+    await call_daemon("POST", "/factory-reset", {"device": server_name})
     typer.echo(f"Factory reset requested: {device_name}")
 
 
@@ -210,23 +159,20 @@ def factory_reset(
     ),
 ):
     """Erase all retained configuration and request a factory reset."""
-    run_command(run_factory_reset, confirm)
+    run_with_devices(run_factory_reset, confirm)
 
 
-async def run_clear_configuration(application, devices, mode: ClearConfigurationMode, confirm: str) -> None:
-    device_name, device = _confirmed_device(filter_devices(devices), confirm)
-    if not getattr(device, "requires_managed_control", False) and device.ipv4 is None:
-        typer.echo(f"Error: {device_name} has no control address.", err=True)
-        raise typer.Exit(code=1)
-
-    preserve_internet_protocol_settings = mode is ClearConfigurationMode.PRESERVE_INTERNET_PROTOCOL_SETTINGS
-    status = await application.clear_configuration(
-        device,
-        preserve_internet_protocol_settings,
+async def run_clear_configuration(devices, mode: ClearConfigurationMode, confirm: str) -> None:
+    server_name, device_name = _confirmed_device(filter_devices(devices), confirm)
+    await call_daemon(
+        "POST",
+        "/clear-configuration",
+        {
+            "device": server_name,
+            "mode": "all" if mode is ClearConfigurationMode.ALL else "keep_network",
+        },
     )
-    typer.echo(
-        f"Clear-configuration acknowledged: {device_name} (executed mode {status['executed_mode']}, mode {mode.value})"
-    )
+    typer.echo(f"Configuration cleared: {device_name} (mode {mode.value})")
 
 
 @app.command("clear-configuration")
@@ -243,80 +189,25 @@ def clear_configuration(
     ),
 ):
     """Clear retained configuration with verified device acknowledgement."""
-    run_command(run_clear_configuration, mode, confirm)
+    run_with_devices(run_clear_configuration, mode, confirm)
 
 
 app.add_typer(device_config_app, name="config")
-app.command("export-capability")(export_capability)
-app.command("export-logs")(export_logs)
 app.command("network-status")(network_status)
 
 
-async def run_name(application, devices, new_name: str | None) -> None:
+async def run_name(devices, new_name: str | None) -> None:
     [(server_name, device)] = select_device(filter_devices(devices))
 
     if new_name is None:
         output_value("Device name", "device_name", device.name)
         return
 
+    await call_daemon("POST", "/rename-device", {"device": server_name, "name": new_name})
     if new_name == "":
-        try:
-            await application.reset_device_name(device)
-        except MUTATION_ERRORS as exception:
-            typer.echo(f"Error: could not request name reset for {server_name}: {exception}", err=True)
-            raise typer.Exit(code=1)
-        typer.echo(f"{icon('name')}Name reset requested for {server_name}; not verified.")
-        return
-
-    for candidate_server_name, candidate_device in devices.items():
-        if candidate_device is device:
-            continue
-        if candidate_device.name and candidate_device.name.lower() == new_name.lower():
-            typer.echo(
-                f"Error: name '{new_name}' already in use by {candidate_device.name} ({candidate_server_name})",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-
-    error = validate_dante_name(new_name)
-    if error:
-        typer.echo(f"Error: {error}", err=True)
-        raise typer.Exit(code=1)
-
-    try:
-        await application.set_device_name(device, new_name)
-    except MUTATION_ERRORS as exception:
-        typer.echo(f"Error: could not send name change to {device.name or server_name}: {exception}", err=True)
-        raise typer.Exit(code=1)
-
-    if not _get_state().verify:
-        typer.echo(f"{icon('name')}Set name: {new_name} (sent)")
-        return
-
-    async def _read_name():
-        reported_name = await device.fetch_device_name()
-        if not isinstance(reported_name, str):
-            raise RuntimeError("device name readback was unavailable")
-        return reported_name
-
-    result = await readback_after_notification(_read_name, new_name)
-    if result.matched:
-        typer.echo(f"{icon('name')}Set name: {new_name} (verified)")
-        return
-
-    label = device.name or server_name
-    if result.observed_available:
-        typer.echo(
-            f"Error: name change sent to {label}, but the device reports {result.observed!r} instead of {new_name!r}.",
-            err=True,
-        )
+        typer.echo(f"{icon('name')}Name reset: {server_name}")
     else:
-        detail = f": {result.error}" if result.error is not None else ""
-        typer.echo(
-            f"Error: name change sent to {label}, but readback was unavailable{detail}; the change was not verified.",
-            err=True,
-        )
-    raise typer.Exit(code=1)
+        typer.echo(f"{icon('name')}Set name: {new_name}")
 
 
 @app.command()
@@ -324,4 +215,4 @@ def name(
     new_name: Optional[str] = typer.Argument(None, help="New name (omit to get, empty string to reset)."),
 ):
     """Get or set device name."""
-    run_command(run_name, new_name)
+    run_with_devices(run_name, new_name)

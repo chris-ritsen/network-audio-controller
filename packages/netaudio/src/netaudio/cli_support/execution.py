@@ -14,7 +14,7 @@ from netaudio.cli_support.context import _get_state
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.common.app_config import settings
 from netaudio.common.probe_answer_cache import ProbeAnswerCache, default_probe_answer_cache_path
-from netaudio.daemon.client import append_operation_event_on_daemon, get_devices_from_daemon
+from netaudio.daemon.client import DaemonUnavailable, append_operation_event_on_daemon, get_devices_from_daemon
 from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.state import apply_device_status
 from netaudio.monitoring import MonitoringEventJournal, MutationAuditRecorder, remote_recorder
@@ -274,6 +274,20 @@ def run_command(
             device_identifiers=device_identifiers,
         ) as (devices, application):
             return await run(application, devices, *arguments, **options)
+
+    return asyncio.run(_run())
+
+
+async def daemon_devices() -> dict[str, DanteDevice]:
+    devices = await get_devices_from_daemon()
+    if devices is None:
+        raise DaemonUnavailable()
+    return devices
+
+
+def run_with_devices(run: Callable[..., Awaitable[Any]], *arguments, **options) -> Any:
+    async def _run():
+        return await run(await daemon_devices(), *arguments, **options)
 
     return asyncio.run(_run())
 

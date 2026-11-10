@@ -30,14 +30,32 @@ async def get_diagnostics_from_daemon(device: str, *, reset: bool = False):
     return await _daemon_request("GET", "/diagnostics/" + quote(device, safe=""))
 
 
-async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.0):
+class DaemonUnavailable(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("the NetAudio daemon is not running; start it with `netaudio daemon start`")
+
+
+class DaemonSilent(RuntimeError):
+    def __init__(self, method: str, path: str, reason: object) -> None:
+        super().__init__(f"the NetAudio daemon did not answer {method} {path}: {reason or 'no response'}")
+
+
+class DaemonRefusal(RuntimeError):
+    def __init__(self, status: int, data) -> None:
+        self.status = status
+        self.data = data
+        detail = data.get("error") if isinstance(data, dict) else None
+        super().__init__(str(detail) if detail else f"the NetAudio daemon answered with status {status}")
+
+
+async def _exchange(method: str, path: str, body, timeout: float):
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(DAEMON_HOST, daemon_port()),
             timeout=1.0,
         )
-    except (ConnectionRefusedError, OSError, asyncio.TimeoutError):
-        return None, None
+    except (OSError, asyncio.TimeoutError):
+        raise DaemonUnavailable() from None
 
     try:
         payload = json.dumps(body).encode() if body is not None else b""
@@ -54,7 +72,7 @@ async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.
 
         status_line = await asyncio.wait_for(reader.readline(), timeout=timeout)
         if not status_line:
-            return None, None
+            raise DaemonSilent(method, path, "connection closed")
         status = int(status_line.decode().split(" ", 2)[1])
 
         content_length = 0
@@ -71,22 +89,35 @@ async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.
             data = await asyncio.wait_for(reader.readexactly(content_length), timeout=timeout)
 
         return status, json.loads(data) if data else None
-    except (
-        asyncio.TimeoutError,
-        asyncio.IncompleteReadError,
-        ConnectionResetError,
-        BrokenPipeError,
-        ValueError,
-        json.JSONDecodeError,
-    ) as exception:
-        logger.debug(f"Daemon request {method} {path} failed: {exception}")
-        return None, None
+    except asyncio.TimeoutError:
+        raise DaemonSilent(method, path, f"no answer within {timeout:g} seconds") from None
+    except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError, ValueError) as exception:
+        raise DaemonSilent(method, path, exception) from None
     finally:
         writer.close()
         try:
             await writer.wait_closed()
-        except (ConnectionResetError, BrokenPipeError, OSError) as exception:
+        except OSError as exception:
             logger.debug(f"Daemon connection close error: {exception}")
+
+
+async def ask_daemon(method: str, path: str, body=None, *, timeout: float = 90.0):
+    return await _exchange(method, path, body, timeout)
+
+
+async def call_daemon(method: str, path: str, body=None, *, timeout: float = 90.0):
+    status, data = await _exchange(method, path, body, timeout)
+    if status not in (200, 202):
+        raise DaemonRefusal(status, data)
+    return data
+
+
+async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.0):
+    try:
+        return await _exchange(method, path, body, timeout)
+    except (DaemonUnavailable, DaemonSilent) as exception:
+        logger.debug(f"Daemon request {method} {path} failed: {exception}")
+        return None, None
 
 
 def daemon_is_accessible() -> bool:
