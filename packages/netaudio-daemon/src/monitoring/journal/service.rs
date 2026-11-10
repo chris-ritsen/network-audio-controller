@@ -509,12 +509,12 @@ impl Worker {
             self.persist_changes(events, &changes)?;
 
             self.remembered.observe(&identity, record, timestamp);
-            if first || changed || payload["event"] != TELEMETRY_UPDATED {
+            if first || changed {
                 self.remembered.save(&mut self.database, &identity)?;
             }
         }
 
-        Ok(())
+        self.remembered.flush_due(&mut self.database)
     }
 
     fn persist_changes(

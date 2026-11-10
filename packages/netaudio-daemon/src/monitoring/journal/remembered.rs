@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+const SAVE_COALESCING: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Device {
@@ -17,6 +20,7 @@ pub type Devices = BTreeMap<String, Device>;
 pub struct Inventory {
     devices: Devices,
     dirty: BTreeSet<String>,
+    saved: Instant,
 }
 
 impl Inventory {
@@ -35,6 +39,7 @@ impl Inventory {
         Ok(Self {
             devices,
             dirty: BTreeSet::new(),
+            saved: Instant::now(),
         })
     }
 
@@ -74,15 +79,30 @@ impl Inventory {
 
     pub fn save(&mut self, database: &mut JournalDatabase, identity: &str) -> Result<()> {
         if let Some(device) = self.devices.get(identity) {
-            database.remember(identity, &device.record, device.seen_at.as_deref())?;
+            database.remember([(identity, device.record.as_ref(), device.seen_at.as_deref())])?;
             self.dirty.remove(identity);
         }
         Ok(())
     }
 
     pub fn flush(&mut self, database: &mut JournalDatabase) -> Result<()> {
-        for identity in self.dirty.iter().cloned().collect::<Vec<_>>() {
-            self.save(database, &identity)?;
+        database.remember(self.dirty.iter().filter_map(|identity| {
+            self.devices.get(identity).map(|device| {
+                (
+                    identity.as_str(),
+                    device.record.as_ref(),
+                    device.seen_at.as_deref(),
+                )
+            })
+        }))?;
+        self.dirty.clear();
+        self.saved = Instant::now();
+        Ok(())
+    }
+
+    pub fn flush_due(&mut self, database: &mut JournalDatabase) -> Result<()> {
+        if !self.dirty.is_empty() && self.saved.elapsed() >= SAVE_COALESCING {
+            self.flush(database)?;
         }
         Ok(())
     }

@@ -392,17 +392,21 @@ impl JournalDatabase {
         }))
     }
 
-    pub fn remember(
+    pub fn remember<'a>(
         &mut self,
-        identity: &str,
-        record: &Value,
-        seen_at: Option<&str>,
+        devices: impl IntoIterator<Item = (&'a str, &'a Value, Option<&'a str>)>,
     ) -> Result<()> {
-        self.connection.execute(
-            "INSERT INTO devices VALUES (?1, ?2, ?3) ON CONFLICT (identity) DO UPDATE SET
-             seen_at = COALESCE(excluded.seen_at, devices.seen_at), record = excluded.record",
-            params![identity, seen_at, serde_json::to_string(record)?],
-        )?;
+        let transaction = self.connection.transaction()?;
+        {
+            let mut statement = transaction.prepare(
+                "INSERT INTO devices VALUES (?1, ?2, ?3) ON CONFLICT (identity) DO UPDATE SET
+                 seen_at = COALESCE(excluded.seen_at, devices.seen_at), record = excluded.record",
+            )?;
+            for (identity, record, seen_at) in devices {
+                statement.execute(params![identity, seen_at, serde_json::to_string(record)?])?;
+            }
+        }
+        transaction.commit()?;
         Ok(())
     }
 
