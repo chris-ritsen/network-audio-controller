@@ -174,10 +174,14 @@ pub fn recovered(
                                 .iter()
                                 .find(|interface| interface.identity == identity)
                                 .is_some_and(|interface| {
+                                    let dynamic = interface.raw["configured"]["mode"] == "dynamic"
+                                        && interface.active["mode"] == "dynamic";
                                     differences[effective].as_object().is_some_and(|fields| {
                                         fields.keys().all(|field| {
-                                            !interface.configured[field].is_null()
-                                                && !interface.active[field].is_null()
+                                            if interface.configured[field].is_null() {
+                                                return dynamic;
+                                            }
+                                            !interface.active[field].is_null()
                                                 && interface.configured[field]
                                                     == interface.active[field]
                                         })
