@@ -71,7 +71,7 @@ pub fn recent_changes(page: &Value) -> String {
 
 fn address(value: &Value) -> Option<String> {
     let value = value.as_str()?.replace([':', '-'], "").to_lowercase();
-    (value.len() == 12
+    (matches!(value.len(), 12 | 16)
         && value.bytes().all(|byte| byte.is_ascii_hexdigit())
         && value.bytes().any(|byte| byte != b'0'))
     .then_some(value)
