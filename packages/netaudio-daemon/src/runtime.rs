@@ -180,12 +180,6 @@ pub async fn run(
             "transport": "streamable-http",
         }) } else { json!({"enabled": false}) },
     }));
-    let relay = crate::relay::Advertisement::new(
-        &information,
-        settings.as_ref().map_or(port, |settings| settings.port),
-        identity.is_some(),
-        identity.as_ref().map(TlsIdentity::subscribe_fingerprint),
-    )?;
     let host_audio = crate::host_audio::manager::Manager::open(
         &configuration,
         information["hostname"]
@@ -203,6 +197,13 @@ pub async fn run(
         Some((manager, worker)) => (Some(manager), Some(worker)),
         None => (None, None),
     };
+    let relay = crate::relay::Advertisement::new(
+        &information,
+        settings.as_ref().map_or(port, |settings| settings.port),
+        identity.is_some(),
+        identity.as_ref().map(TlsIdentity::subscribe_fingerprint),
+        host_audio.is_some(),
+    )?;
     let assets = crate::http::web::WebAssets::open(configuration.directory()?.join("web-assets"))?;
     let lifetime = cancellation.child_token();
     let _cancel_on_drop = lifetime.clone().drop_guard();

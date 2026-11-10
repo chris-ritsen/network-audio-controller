@@ -25,6 +25,7 @@ impl Advertisement {
         port: u16,
         encrypted: bool,
         fingerprint: Option<watch::Receiver<String>>,
+        host_audio: bool,
     ) -> Result<Self> {
         let hostname = information["hostname"]
             .as_str()
@@ -32,11 +33,15 @@ impl Advertisement {
             .context("relay hostname is unavailable")?
             .to_owned();
         let mut properties = HashMap::from([
-            ("version".to_owned(), "1".to_owned()),
+            (
+                "host_audio".to_owned(),
+                if host_audio { "1" } else { "0" }.to_owned(),
+            ),
             (
                 "scheme".to_owned(),
                 if encrypted { "https" } else { "http" }.to_owned(),
             ),
+            ("version".to_owned(), "1".to_owned()),
         ]);
 
         if let Some(path) = information["mcp"]["path"].as_str() {

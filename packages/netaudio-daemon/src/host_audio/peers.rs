@@ -74,6 +74,7 @@ impl Peers {
             .services
             .borrow()
             .values()
+            .filter(|service| service.property("host_audio") != Some("0"))
             .map(|service| {
                 service
                     .server_name
