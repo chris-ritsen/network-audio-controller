@@ -31,6 +31,7 @@ use tokio_util::time::DelayQueue;
 const MAXIMUM_CONCURRENT_REFRESHES: usize = 16;
 const MAXIMUM_PENDING_OPERATIONS: usize = 128;
 const CLOCK_FRESHNESS: Duration = Duration::from_secs(5);
+const CLOCK_FRESHNESS_LIMIT: Duration = Duration::from_secs(30);
 
 mod association;
 mod audio;
@@ -1666,6 +1667,7 @@ impl DeviceRegistry {
                     packet.received_at,
                 )?
             {
+                let mut clock_interval = None;
                 let mut clock_updated = false;
                 let mut changed = false;
 
@@ -1678,7 +1680,14 @@ impl DeviceRegistry {
                         continue;
                     }
 
-                    clock_updated |= field == "clock_status";
+                    if field == "clock_status" {
+                        clock_interval = state.field_observed_at.get(field).map(|previous| {
+                            packet
+                                .received_monotonic
+                                .saturating_duration_since(*previous)
+                        });
+                        clock_updated = true;
+                    }
                     changed = true;
                     state
                         .field_observed_at
@@ -1708,7 +1717,7 @@ impl DeviceRegistry {
                     let mut expires = None;
 
                     if let Some(status) = state.record.properties.get_mut("clock_status") {
-                        let deadline = packet.received_monotonic + CLOCK_FRESHNESS;
+                        let deadline = packet.received_monotonic + clock_freshness(clock_interval);
 
                         if status.get("status_supported").and_then(Value::as_bool) == Some(false) {
                             status["observation_state"] = json!("unavailable");
@@ -1813,6 +1822,12 @@ impl DeviceRegistry {
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
         Ok(state.record.control_address())
     }
+}
+
+fn clock_freshness(interval: Option<Duration>) -> Duration {
+    interval.map_or(CLOCK_FRESHNESS, |interval| {
+        (interval * 2).clamp(CLOCK_FRESHNESS, CLOCK_FRESHNESS_LIMIT)
+    })
 }
 
 fn expire_clock_status(status: &mut Value) {
