@@ -468,17 +468,15 @@ impl ControlOperation {
                 (vec![command], Vec::new())
             }
             Self::Identify => {
-                match record
+                if record
                     .properties
                     .get("identify_supported")
                     .and_then(Value::as_bool)
+                    == Some(false)
                 {
-                    Some(false) => {
-                        return Err(ControlError::Conflict(
-                            "device does not support identification".to_owned(),
-                        ));
-                    }
-                    Some(true) | None => {}
+                    return Err(ControlError::Conflict(
+                        "device does not support identification".to_owned(),
+                    ));
                 }
 
                 (
@@ -510,15 +508,12 @@ impl ControlOperation {
                     ))
                 })?;
 
-                if *direction == ChannelDirection::Receiver {
-                    match channel.get("can_rename").and_then(Value::as_bool) {
-                        Some(false) => {
-                            return Err(ControlError::Conflict(format!(
-                                "receiver channel {number} rename capability prohibits renaming"
-                            )));
-                        }
-                        Some(true) | None => {}
-                    }
+                if *direction == ChannelDirection::Receiver
+                    && channel.get("can_rename").and_then(Value::as_bool) == Some(false)
+                {
+                    return Err(ControlError::Conflict(format!(
+                        "receiver channel {number} rename capability prohibits renaming"
+                    )));
                 }
 
                 let command = if name.trim().is_empty() {
@@ -560,15 +555,13 @@ impl ControlOperation {
                             || transmitter_device.eq_ignore_ascii_case(&record.name)
                             || transmitter_device.eq_ignore_ascii_case(&record.key);
 
-                        if self_connection {
-                            match channel.get("can_subscribe_self").and_then(Value::as_bool) {
-                                Some(false) => {
-                                    return Err(ControlError::Conflict(format!(
-                                        "receiver channel {receiver_channel} does not support self-connections"
-                                    )));
-                                }
-                                Some(true) | None => {}
-                            }
+                        if self_connection
+                            && channel.get("can_subscribe_self").and_then(Value::as_bool)
+                                == Some(false)
+                        {
+                            return Err(ControlError::Conflict(format!(
+                                "receiver channel {receiver_channel} does not support self-connections"
+                            )));
                         }
                     }
                 }

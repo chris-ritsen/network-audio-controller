@@ -104,10 +104,10 @@ impl Session {
                 }
             }
 
-            if let Some(error) = step.device_lookup_error {
-                if receive(StreamEvent::LookupRejected(error))?.is_break() {
-                    return Ok(());
-                }
+            if let Some(error) = step.device_lookup_error
+                && receive(StreamEvent::LookupRejected(error))?.is_break()
+            {
+                return Ok(());
             }
 
             if let Some(publication) = step.signal_presence {

@@ -218,9 +218,8 @@ impl Registry {
             } else {
                 "observed_topology_consistency"
             });
-            if let Err(error) = (!prepared.preflight["current_topology"].is_null())
-                .then(|| operation.verify(&prepared.preflight, &topology))
-                .unwrap_or(Ok(()))
+            if !prepared.preflight["current_topology"].is_null()
+                && let Err(error) = operation.verify(&prepared.preflight, &topology)
             {
                 if prepared.preflight["capacity_known"] == true {
                     value["topology_preservation_confirmed"] = json!(false);
