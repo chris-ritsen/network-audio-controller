@@ -5,24 +5,20 @@ from typing import NoReturn, Optional
 import typer
 
 from netaudio._exit_codes import ExitCode
-from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS, _get_state
-from netaudio.cli_support.execution import populate_devices, run_command, selected_device_identifiers
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.execution import ansi, run_with_devices
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import (
     filter_devices,
-    require_selected_devices,
     match_device_identifier,
     parse_qualified_channel,
+    require_selected_devices,
     resolve_channel,
     select_device,
     sort_devices,
 )
-from netaudio.dante.readback import MUTATION_ERRORS
-from netaudio.dante.subscription_operations import (
-    subscription_sources,
-    reconcile_receiver_subscriptions,
-)
-from netaudio.icons import icon
+from netaudio.daemon.client import call_daemon
+from netaudio.icons import SEVERITY_PRESENTATION, icon, severity_icon
 
 app = typer.Typer(help="Manage audio subscriptions.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
@@ -32,82 +28,46 @@ def _fail(message: str) -> NoReturn:
     raise typer.Exit(code=ExitCode.ERROR)
 
 
-def _device_label(device) -> str:
-    return (
-        getattr(device, "name", None) or getattr(device, "server_name", None) or str(getattr(device, "ipv4", "device"))
-    )
-
-
 def _device_by_identifier(devices, identifier: str, side: str):
     matches = match_device_identifier(devices, identifier)
     if not matches:
-        typer.echo(f"Error: {side} device '{identifier}' not found.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-    [(_, device)] = select_device(matches)
-    return device
+        _fail(f"{side} device '{identifier}' not found.")
+    [(server_name, device)] = select_device(matches)
+    return server_name, device
 
 
-def _device_identifier(value: str) -> str:
-    return value.rpartition("@")[2].strip()
+def _status_label(status: dict) -> str:
+    label = status.get("label") or status.get("status") or ""
+    severity = status.get("severity") or ""
+    marker = severity_icon(severity)
+    color = SEVERITY_PRESENTATION.get(severity, {}).get("color")
+    colored = ansi(color, label) if color else label
+    return f"{marker} {colored}" if marker else colored
 
 
-def _subscription_has_configured_source(subscription) -> bool:
-    return bool(getattr(subscription, "has_configured_source", getattr(subscription, "tx_device_name", None)))
-
-
-async def run_subscription_list(application, devices, include_unused: bool) -> None:
-    from netaudio.core import (
-        subscription_status,
-    )
-    from netaudio.dante.device_serializer import DanteDeviceSerializer
-
+async def run_subscription_list(devices, include_unused: bool) -> None:
     devices = require_selected_devices(filter_devices(devices))
-
-    all_subscriptions = []
-
-    for server_name, device in sort_devices(devices):
-        for subscription in device.subscriptions:
-            if include_unused or _subscription_has_configured_source(subscription):
-                all_subscriptions.append(subscription)
-
-    from netaudio.cli_support.execution import ansi, report_inventory_failures
-    from netaudio.icons import SEVERITY_PRESENTATION, severity_icon
-
-    def _status_label(subscription):
-        code = subscription.status_code
-        if code is None:
-            return "; ".join(subscription.status_text())
-        entry = subscription_status(code, subscription.rx_channel_status_code)
-        severity = str(entry["severity"])
-        label = str(entry["label"])
-        if subscription.status_message:
-            label = "; ".join((label, *subscription.status_message))
-            if severity == "ok":
-                severity = "warning"
-        marker = severity_icon(severity)
-        color = SEVERITY_PRESENTATION.get(severity, {}).get("color")
-        colored_label = ansi(color, label) if color else label
-        return f"{marker} {colored_label}" if marker else colored_label
-
-    headers = ["RX Channel", "RX Device", "TX Channel", "TX Device", "Status"]
-    rows = []
-    json_data = [DanteDeviceSerializer.subscription_to_json(s) for s in all_subscriptions]
-
-    for subscription in all_subscriptions:
-        configured = _subscription_has_configured_source(subscription)
-        rows.append(
+    subscriptions = [
+        subscription
+        for _, device in sort_devices(devices)
+        for subscription in device.record.get("subscriptions") or []
+        if include_unused or subscription.get("tx_device")
+    ]
+    output_table(
+        ["RX Channel", "RX Device", "TX Channel", "TX Device", "Status"],
+        [
             [
-                subscription.rx_channel_name or "",
-                subscription.rx_device_name or "",
-                (subscription.tx_channel_name or "") if configured else "",
-                (subscription.tx_device_name or "") if configured else "",
-                _status_label(subscription),
+                subscription.get("rx_channel") or "",
+                subscription.get("rx_device") or "",
+                subscription.get("tx_channel") or "",
+                subscription.get("tx_device") or "",
+                _status_label(subscription.get("status") or {}),
             ]
-        )
-
-    output_table(headers, rows, json_data=json_data, empty_message="No active subscriptions.")
-    if report_inventory_failures(devices, "subscriptions"):
-        raise typer.Exit(code=ExitCode.ERROR)
+            for subscription in subscriptions
+        ],
+        json_data=subscriptions,
+        empty_message="No active subscriptions.",
+    )
 
 
 @app.command("list")
@@ -119,50 +79,45 @@ def subscription_list(
     ),
 ):
     """List configured subscriptions."""
-    run_command(run_subscription_list, include_unused)
+    run_with_devices(run_subscription_list, include_unused)
 
 
-async def run_subscription_add_single(application, devices, tx: str, rx: str) -> None:
+async def _apply(routes: list[dict], labels: list[str], done: str) -> None:
+    result = await call_daemon("POST", "/subscriptions/apply", {"routes": routes})
+    failed = False
+    for label, outcome in zip(labels, result["routes"]):
+        if outcome.get("ok"):
+            typer.echo(f"{done}{label}")
+        else:
+            failed = True
+            typer.echo(f"{icon('fail')}FAILED {label}: {outcome.get('error') or 'not applied'}", err=True)
+    if failed:
+        raise typer.Exit(code=ExitCode.ERROR)
+
+
+async def run_subscription_add_single(devices, tx: str, rx: str) -> None:
     tx_reference, tx_device_id = parse_qualified_channel(tx, "tx")
     rx_reference, rx_device_id = parse_qualified_channel(rx, "rx")
     if tx_reference.direction != "tx":
         _fail(f"--tx must name a transmitter channel (tx:1@DEVICE, 1@DEVICE, or NAME@DEVICE), got {tx!r}")
     if rx_reference.direction != "rx":
         _fail(f"--rx must name a receiver channel (rx:1@DEVICE, 1@DEVICE, or NAME@DEVICE), got {rx!r}")
-
-    tx_device = _device_by_identifier(devices, tx_device_id, "TX")
-    rx_device = _device_by_identifier(devices, rx_device_id, "RX")
-    await populate_devices(application, [tx_device, rx_device])
-
+    _, tx_device = _device_by_identifier(devices, tx_device_id, "TX")
+    rx_server_name, rx_device = _device_by_identifier(devices, rx_device_id, "RX")
     _, tx_channel = resolve_channel(tx_device, tx_reference)
     _, rx_channel = resolve_channel(rx_device, rx_reference)
-
-    tx_channel_name = tx_channel.friendly_name or tx_channel.name
-
-    if not tx_channel_name or not tx_device.name:
-        _fail("the TX channel and device must have Dante names")
-
-    try:
-        result = await reconcile_receiver_subscriptions(
-            application, rx_device, {rx_channel.number: (tx_channel_name, tx_device.name)}, verify=_get_state().verify
-        )
-    except MUTATION_ERRORS as error:
-        _fail(f"could not request subscription: {error}")
-
-    if result.failures:
-        _fail(result.failures[rx_channel.number])
-
-    label = f"{rx_reference.identifier}@{rx_device.name} <- {tx_reference.identifier}@{tx_device.name}"
-
-    if result.unconfirmed:
-        typer.echo(f"UNCONFIRMED {label}: sent, but {result.unconfirmed[rx_channel.number]}", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-    if result.unchanged:
-        typer.echo(f"UNCHANGED {label} (already subscribed)")
-    elif result.sent:
-        typer.echo(f"{icon('add')}{label} (sent)")
-    else:
-        typer.echo(f"{icon('add')}{label} (verified)")
+    await _apply(
+        [
+            {
+                "rx_device": rx_server_name,
+                "rx_channel": rx_channel.number,
+                "tx_device": tx_device.name,
+                "tx_channel": tx_channel.friendly_name or tx_channel.name,
+            }
+        ],
+        [f"{rx_reference.identifier}@{rx_device.name} <- {tx_reference.identifier}@{tx_device.name}"],
+        icon("add"),
+    )
 
 
 def _bulk_pairs(tx_device, rx_device, count: int, offset_tx: int, offset_rx: int):
@@ -190,56 +145,24 @@ def _bulk_pairs(tx_device, rx_device, count: int, offset_tx: int, offset_rx: int
     return pairs
 
 
-async def run_subscription_add_bulk(
-    application,
-    devices,
-    tx: str,
-    rx: str,
-    count: int,
-    offset_tx: int,
-    offset_rx: int,
-) -> None:
-    tx_device = _device_by_identifier(devices, tx, "TX")
-    rx_device = _device_by_identifier(devices, rx, "RX")
-    await populate_devices(application, [tx_device, rx_device])
-
-    try:
-        await rx_device.get_rx_channels()
-    except MUTATION_ERRORS as error:
-        _fail(f"could not read current subscriptions from {_device_label(rx_device)} before making changes: {error}")
-
-    desired = {}
-    labels = {}
-
+async def run_subscription_add_bulk(devices, tx: str, rx: str, count: int, offset_tx: int, offset_rx: int) -> None:
+    _, tx_device = _device_by_identifier(devices, tx, "TX")
+    rx_server_name, rx_device = _device_by_identifier(devices, rx, "RX")
+    routes = []
+    labels = []
     for tx_channel, rx_channel in _bulk_pairs(tx_device, rx_device, count, offset_tx, offset_rx):
         tx_name = tx_channel.friendly_name or tx_channel.name
-
-        if not tx_name:
-            _fail(f"TX channel {tx_channel.number} has no Dante name")
-
         rx_name = rx_channel.friendly_name or rx_channel.name
-        desired[rx_channel.number] = (tx_name, tx_device.name)
-        labels[rx_channel.number] = f"{rx_name}@{rx_device.name} <- {tx_name}@{tx_device.name}"
-
-    try:
-        result = await reconcile_receiver_subscriptions(application, rx_device, desired, verify=_get_state().verify)
-    except MUTATION_ERRORS as error:
-        _fail(f"could not apply subscriptions to {_device_label(rx_device)}: {error}")
-
-    for number, label in labels.items():
-        if number in result.unchanged:
-            typer.echo(f"UNCHANGED {label} (already subscribed)")
-        elif number in result.verified:
-            typer.echo(f"MODIFIED {label} (verified)")
-        elif number in result.sent:
-            typer.echo(f"MODIFIED {label} (sent)")
-        elif number in result.unconfirmed:
-            typer.echo(f"UNCONFIRMED {label}: sent, but {result.unconfirmed[number]}", err=True)
-        else:
-            typer.echo(f"{icon('fail')}FAILED {label}: {result.failures[number]}", err=True)
-
-    if result.failures or result.unconfirmed:
-        raise typer.Exit(code=ExitCode.ERROR)
+        routes.append(
+            {
+                "rx_device": rx_server_name,
+                "rx_channel": rx_channel.number,
+                "tx_device": tx_device.name,
+                "tx_channel": tx_name,
+            }
+        )
+        labels.append(f"{rx_name}@{rx_device.name} <- {tx_name}@{tx_device.name}")
+    await _apply(routes, labels, icon("add"))
 
 
 @app.command()
@@ -285,62 +208,27 @@ def add(
     if is_single:
         if count or offset_tx or offset_rx:
             _fail("--count and channel offsets are only valid for bulk subscriptions")
-        run_command(
-            run_subscription_add_single,
-            tx,
-            rx,
-            populate_controls=False,
-            device_identifiers=(_device_identifier(tx), _device_identifier(rx)),
-        )
+        run_with_devices(run_subscription_add_single, tx, rx)
         return
 
     if "@" in tx or "@" in rx:
         _fail("both --tx and --rx must be CHANNEL@DEVICE or both must be device names")
-    run_command(
-        run_subscription_add_bulk,
-        tx,
-        rx,
-        count,
-        offset_tx,
-        offset_rx,
-        populate_controls=False,
-        device_identifiers=(tx, rx),
-    )
+    run_with_devices(run_subscription_add_bulk, tx, rx, count, offset_tx, offset_rx)
 
 
-def _subscribed_channels(device):
-    sources = subscription_sources(device, (channel.number for channel in device.rx_channels.values()))
-
-    return [
-        channel
-        for channel in sorted(device.rx_channels.values(), key=lambda candidate: candidate.number)
-        if sources[channel.number] is not None
-    ]
-
-
-async def _removals_for_all(application, devices) -> dict[int, dict]:
-    device_removals: dict[int, dict] = {}
-    selected = filter_devices(devices)
-    if not selected:
-        _fail("no devices matched the global filters")
-    await populate_devices(application, selected.values())
-    for device in selected.values():
-        try:
-            await device.get_rx_channels()
-        except MUTATION_ERRORS as error:
-            _fail(f"could not read current subscriptions from {_device_label(device)}: {error}")
-        channels = _subscribed_channels(device)
-        if not channels:
-            typer.echo(f"No active subscriptions on {_device_label(device)}.")
-            continue
-        device_removals[id(device)] = {"device": device, "channels": channels}
-    return device_removals
-
-
-async def _removals_for_channels(application, devices, rx: list[str]) -> dict[int, dict]:
-    device_removals: dict[int, dict] = {}
-    refreshed_devices = set()
-    for rx_spec in rx:
+async def run_subscription_remove(devices, rx: list[str] | None, all_channels: bool) -> None:
+    routes = []
+    labels = []
+    if all_channels:
+        selected = filter_devices(devices)
+        if not selected:
+            _fail("no devices matched the global filters")
+        for server_name, device in sort_devices(selected):
+            for subscription in device.record.get("subscriptions") or []:
+                if subscription.get("tx_device"):
+                    routes.append({"rx_device": server_name, "rx_channel": subscription["rx_channel_number"]})
+                    labels.append(f"{subscription['rx_channel']}@{device.name}")
+    for rx_spec in rx or []:
         if "@" not in rx_spec:
             _fail(
                 f"expected CHANNEL@DEVICE for --rx {rx_spec!r} (rx:1@DEVICE, 1@DEVICE, or NAME@DEVICE); "
@@ -349,70 +237,16 @@ async def _removals_for_channels(application, devices, rx: list[str]) -> dict[in
         rx_reference, rx_device_id = parse_qualified_channel(rx_spec, "rx")
         if rx_reference.direction != "rx":
             _fail(f"--rx must name a receiver channel (rx:1@DEVICE, 1@DEVICE, or NAME@DEVICE), got {rx_spec!r}")
-        rx_device = _device_by_identifier(devices, rx_device_id, "RX")
-
-        if id(rx_device) not in refreshed_devices:
-            await populate_devices(application, [rx_device])
-            try:
-                await rx_device.get_rx_channels()
-            except MUTATION_ERRORS as error:
-                _fail(f"could not read current subscriptions from {_device_label(rx_device)}: {error}")
-            refreshed_devices.add(id(rx_device))
-
+        server_name, rx_device = _device_by_identifier(devices, rx_device_id, "RX")
         _, rx_channel = resolve_channel(rx_device, rx_reference)
-        if subscription_sources(rx_device, [rx_channel.number])[rx_channel.number] is None:
-            _fail(f"RX channel '{rx_reference.identifier}' on {rx_device.name} is not subscribed")
-
-        entry = device_removals.setdefault(id(rx_device), {"device": rx_device, "channels": []})
-        if all(existing.number != rx_channel.number for existing in entry["channels"]):
-            entry["channels"].append(rx_channel)
-    return device_removals
-
-
-async def run_subscription_remove(application, devices, rx: list[str] | None, all_channels: bool) -> None:
-    if all_channels:
-        device_removals = await _removals_for_all(application, devices)
-    else:
-        device_removals = await _removals_for_channels(application, devices, rx or [])
-
-    failures = 0
-    for entry in device_removals.values():
-        rx_device = entry["device"]
-        channels = entry["channels"]
-        if not channels:
-            continue
-
-        try:
-            result = await reconcile_receiver_subscriptions(
-                application, rx_device, {channel.number: None for channel in channels}, verify=_get_state().verify
-            )
-        except MUTATION_ERRORS as error:
-            failures += 1
-            typer.echo(
-                f"{icon('fail')}FAILED to request subscription removal on {rx_device.name}: {error}",
-                err=True,
-            )
-            continue
-
-        for channel in channels:
-            channel_name = channel.friendly_name or channel.name
-            label = f"{channel_name}@{rx_device.name}"
-
-            if channel.number in result.failures:
-                failures += 1
-                typer.echo(f"{icon('fail')}FAILED {label}: {result.failures[channel.number]}", err=True)
-            elif channel.number in result.unconfirmed:
-                failures += 1
-                typer.echo(f"UNCONFIRMED {label}: removal sent, but {result.unconfirmed[channel.number]}", err=True)
-            elif channel.number in result.unchanged:
-                typer.echo(f"UNCHANGED {label} (already unsubscribed)")
-            elif channel.number in result.sent:
-                typer.echo(f"{icon('remove')}Removed: {label} (sent)")
-            else:
-                typer.echo(f"{icon('remove')}Removed: {label} (verified)")
-
-    if failures:
-        raise typer.Exit(code=ExitCode.ERROR)
+        route = {"rx_device": server_name, "rx_channel": rx_channel.number}
+        if route not in routes:
+            routes.append(route)
+            labels.append(f"{rx_channel.friendly_name or rx_channel.name}@{rx_device.name}")
+    if not routes:
+        typer.echo("No active subscriptions.")
+        return
+    await _apply(routes, labels, f"{icon('remove')}Removed: ")
 
 
 @app.command()
@@ -433,7 +267,4 @@ def remove(
         _fail("use either specific --rx channels or --all, not both")
     if not all_channels and not rx:
         _fail("--rx is required unless --all is used")
-    identifiers = (
-        selected_device_identifiers() if all_channels else tuple(_device_identifier(spec) for spec in rx or [])
-    )
-    run_command(run_subscription_remove, rx, all_channels, populate_controls=False, device_identifiers=identifiers)
+    run_with_devices(run_subscription_remove, rx, all_channels)
