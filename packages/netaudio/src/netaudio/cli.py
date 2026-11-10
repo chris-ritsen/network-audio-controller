@@ -227,7 +227,6 @@ def _global_options(
 from netaudio.commands import (
     channel,
     daemon,
-    discovery,
     events,
     flow,
     issues,
@@ -271,7 +270,6 @@ app.add_typer(config_app, name="config")
 app.add_typer(daemon.app, name="daemon")
 app.add_typer(ddm_app, name="ddm")
 app.add_typer(device_app, name="device")
-app.add_typer(discovery.app, name="discovery")
 app.add_typer(events.app, name="events")
 app.add_typer(flow.app, name="flow")
 app.add_typer(issues.app, name="issues")

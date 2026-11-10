@@ -178,11 +178,6 @@ async def shutdown_daemon() -> bool:
     return status == 200 and bool(data and data.get("success"))
 
 
-async def refresh_discovery_on_daemon(address: str | None = None) -> tuple[int | None, dict | None]:
-    body = {"address": address} if address is not None else {}
-    return await _daemon_request("POST", "/discovery/refresh", body)
-
-
 async def meter_snapshot_from_daemon(server_name: str) -> dict | None:
     status, data = await _daemon_request("GET", f"/metering/snapshot/{quote(server_name, safe='')}", timeout=6.0)
     if status != 200 or data is None:

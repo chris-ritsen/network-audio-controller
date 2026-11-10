@@ -9,7 +9,7 @@ import typer
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import run_with_devices
 from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
-from netaudio.cli_support.selection import filter_devices, select_device
+from netaudio.cli_support.selection import filter_devices, select_device, selection_is_explicit
 from netaudio.commands.config.cli import app as device_config_app
 from netaudio.commands.device.display import _device_show_rows
 from netaudio.commands.device.network_status import network_status
@@ -112,6 +112,21 @@ def identify(
 ):
     """Blink the identify LED on a device."""
     run_with_devices(run_identify, all_devices)
+
+
+async def run_refresh(devices) -> None:
+    if not selection_is_explicit():
+        await call_daemon("POST", "/refresh", {}, timeout=120.0)
+        typer.echo("Read every device again")
+        return
+    for server_name, device in filter_devices(devices).items():
+        await call_daemon("POST", "/refresh", {"device": server_name}, timeout=120.0)
+        typer.echo(f"Read {device.name or server_name} again")
+
+
+@app.command(help="Read the matched devices again now, or every device when none is selected.")
+def refresh():
+    run_with_devices(run_refresh)
 
 
 async def run_reboot(devices, all_devices: bool) -> None:

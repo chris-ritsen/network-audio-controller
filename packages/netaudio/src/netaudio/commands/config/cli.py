@@ -756,7 +756,7 @@ async def run_redundancy(devices, mode: str | None, all_devices: bool) -> None:
                 _redundancy_label(status.get("current_mode")),
                 _redundancy_label(status.get("configured_mode")),
                 ", ".join(_redundancy_label(choice.get("mode")) for choice in status.get("available_modes") or []),
-                "yes" if availability["writable"] else ", ".join(availability["reasons"]),
+                "yes" if availability["writable"] else ", ".join(availability["reasons"]).replace("_", " "),
                 "yes" if status["reboot_required"] else "no",
             ]
         )
