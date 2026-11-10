@@ -3,25 +3,21 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-import time
 import uuid
 from typing import Optional
 
 import typer
 
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
-from netaudio.cli_support.execution import ansi, run_command
+from netaudio.cli_support.execution import ansi, run_with_devices
 from netaudio.cli_support.output import output_single, output_table, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.device.display import _channel_matches
 from netaudio.commands.meter import tui
 from netaudio.commands.meter.models import METER_DISPLAY_FLOOR_DBFS, format_meter_sample
 from netaudio.commands.meter.tui import MeterViewOptions
-from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon import client as daemon_client
-from netaudio.dante.const import MULTICAST_GROUP_CONTROL_MONITORING
 from netaudio.dante.metering import classify_signal_presence, metering_value_dbfs
-from netaudio.dante.service import DanteMulticastService
 from netaudio.icons import icon
 
 meter_app = typer.Typer(
@@ -168,7 +164,7 @@ def _filter_json_levels(levels: dict, options: MeterViewOptions) -> dict:
     return filtered_levels
 
 
-async def run_meter(application, devices, options: MeterViewOptions, timeout: float, snapshot: bool) -> None:
+async def run_meter(devices, options: MeterViewOptions, timeout: float, snapshot: bool) -> None:
     from netaudio.cli import OutputFormat
     from netaudio.cli import state as cli_state
 
@@ -240,10 +236,10 @@ def meter_callback(
         show_rx=rx or not tx,
         show_tx=tx or not rx,
     )
-    run_command(run_meter, options, timeout, snapshot)
+    run_with_devices(run_meter, options, timeout, snapshot)
 
 
-async def run_meter_start(application, devices) -> None:
+async def run_meter_start(devices) -> None:
     for server_name, device in select_device(filter_devices(devices), allow_many=True):
         await daemon_client.meter_start_on_daemon(server_name, "cli")
         typer.echo(f"{icon('meter')}Metering started for {device.name or server_name}.")
@@ -251,11 +247,11 @@ async def run_meter_start(application, devices) -> None:
 
 @meter_app.command()
 def start():
-    """Start persistent metering (requires daemon)."""
-    run_command(run_meter_start)
+    """Start persistent metering."""
+    run_with_devices(run_meter_start)
 
 
-async def run_meter_stop(application, devices) -> None:
+async def run_meter_stop(devices) -> None:
     for server_name, device in select_device(filter_devices(devices), allow_many=True):
         await daemon_client.meter_stop_on_daemon(server_name, "cli")
         typer.echo(f"{icon('meter')}Metering stopped for {device.name or server_name}.")
@@ -263,115 +259,11 @@ async def run_meter_stop(application, devices) -> None:
 
 @meter_app.command()
 def stop():
-    """Stop persistent metering (requires daemon)."""
-    run_command(run_meter_stop)
+    """Stop persistent metering."""
+    run_with_devices(run_meter_stop)
 
 
-def _report_metering_timing(timestamps_by_ip: dict[str, list[float]], device_names: dict[str, str], start_time: float):
-    typer.echo("")
-    for source_ip, timestamps in sorted(timestamps_by_ip.items()):
-        device_name = device_names.get(source_ip, source_ip)
-        count = len(timestamps)
-        if count == 0:
-            continue
-
-        duration = timestamps[-1] - timestamps[0]
-        first_offset = timestamps[0] - start_time
-
-        gaps = [timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)]
-        average_gap = sum(gaps) / len(gaps) if gaps else 0
-        max_gap = max(gaps) if gaps else 0
-        min_gap = min(gaps) if gaps else 0
-
-        typer.echo(f"{device_name} ({source_ip}):")
-        typer.echo(f"  Packets:       {count}")
-        typer.echo(f"  First packet:  {first_offset:.2f}s after start")
-        typer.echo(f"  Duration:      {duration:.2f}s")
-        typer.echo(f"  Avg interval:  {average_gap * 1000:.1f}ms")
-        typer.echo(f"  Min interval:  {min_gap * 1000:.1f}ms")
-        typer.echo(f"  Max interval:  {max_gap * 1000:.1f}ms")
-        typer.echo(f"  Rate:          {count / duration:.1f} packets/sec" if duration > 0 else "")
-        typer.echo("")
-
-
-async def run_measure_timeout(application, devices, gap: float, max_wait: float) -> None:
-    filtered = dict(select_device(filter_devices(devices), allow_many=True))
-    metering_port = app_settings.metering_port
-    timestamps_by_ip: dict[str, list[float]] = {}
-    device_names: dict[str, str] = {}
-
-    listener = DanteMulticastService(
-        MULTICAST_GROUP_CONTROL_MONITORING,
-        metering_port,
-        interface_name=app_settings.interface,
-        on_packet=lambda _data, address: timestamps_by_ip.setdefault(address[0], []).append(time.monotonic()),
-    )
-    await listener.start()
-    started = []
-
-    try:
-        for server_name, device in filtered.items():
-            device_ip = str(device.ipv4)
-            device_name = device.name or server_name
-            device_names[device_ip] = device_name
-            host_ip, host_mac = application.cmc.controller_identity(device_ip)
-            typer.echo(f"Sending single metering start to {device_name} ({device_ip})")
-            ports = device._service_ports()
-            await application.cmc.start_metering(device_ip, device_name, host_ip, host_mac, metering_port, ports=ports)
-            started.append((device_ip, device_name, host_ip, host_mac, ports))
-
-        start_time = time.monotonic()
-        last_any_packet = start_time
-
-        while True:
-            await asyncio.sleep(0.5)
-            elapsed = time.monotonic() - start_time
-            now = time.monotonic()
-
-            all_timestamps = [timestamp for timestamps in timestamps_by_ip.values() for timestamp in timestamps]
-            if all_timestamps:
-                last_any_packet = max(all_timestamps)
-
-            silence = now - last_any_packet
-            total_packets = len(all_timestamps)
-
-            if all_timestamps and silence >= gap:
-                typer.echo(f"\nNo packets for {silence:.1f}s — stream ended.")
-                break
-
-            if elapsed >= max_wait:
-                if all_timestamps:
-                    typer.echo(f"\nMax wait reached ({max_wait}s) — still receiving packets.")
-                else:
-                    typer.echo(f"\nMax wait reached ({max_wait}s) — no packets received.")
-                break
-
-            if int(elapsed) % 5 == 0 and elapsed > 0 and abs(elapsed - int(elapsed)) < 0.5:
-                typer.echo(f"  {elapsed:.0f}s elapsed, {total_packets} packets, last packet {silence:.1f}s ago")
-
-        _report_metering_timing(timestamps_by_ip, device_names, start_time)
-
-    finally:
-        await asyncio.gather(
-            *(
-                application.cmc.stop_metering(device_ip, device_name, host_ip, host_mac, metering_port, ports=ports)
-                for device_ip, device_name, host_ip, host_mac, ports in started
-            ),
-            return_exceptions=True,
-        )
-        await listener.stop()
-
-
-@meter_app.command(name="measure-timeout")
-def measure_timeout(
-    gap: float = typer.Option(15.0, "--gap", "-g", help="Seconds of silence before declaring stream ended."),
-    max_wait: float = typer.Option(120.0, "--max-wait", help="Maximum seconds to listen."),
-):
-    """Measure how long a device streams metering after a single start command."""
-    run_command(run_measure_timeout, gap, max_wait)
-
-
-async def run_meter_status(application, devices) -> None:
+async def run_meter_status() -> None:
     result = await daemon_client.meter_status_from_daemon()
     if result is None:
         typer.echo(f"{icon('offline')}Daemon is not running.", err=True)
@@ -407,4 +299,4 @@ async def run_meter_status(application, devices) -> None:
 @meter_app.command()
 def status():
     """Show which devices have persistent metering active."""
-    run_command(run_meter_status, discover_devices=False)
+    asyncio.run(run_meter_status())
