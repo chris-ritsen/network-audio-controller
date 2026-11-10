@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex, Notify, Semaphore};
+use tokio::sync::{mpsc, oneshot, watch, Mutex as AsyncMutex, Notify, Semaphore};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -119,6 +119,7 @@ pub struct DeviceRegistry {
     refreshes: Arc<Semaphore>,
     refresh_queue: RefreshQueue,
     refresh_ready: Notify,
+    refreshing: watch::Sender<bool>,
     pending: Arc<Semaphore>,
     tasks: TaskTracker,
     cancellation: CancellationToken,
@@ -149,6 +150,7 @@ impl DeviceRegistry {
             refreshes: Arc::new(Semaphore::new(MAXIMUM_CONCURRENT_REFRESHES)),
             refresh_queue: RefreshQueue::default(),
             refresh_ready: Notify::new(),
+            refreshing: watch::channel(false).0,
             pending: Arc::new(Semaphore::new(MAXIMUM_PENDING_OPERATIONS)),
             tasks: TaskTracker::new(),
             cancellation: CancellationToken::new(),
@@ -161,6 +163,10 @@ impl DeviceRegistry {
             observation_origin: Instant::now(),
             wire_observer: std::sync::OnceLock::new(),
         })
+    }
+
+    pub fn refreshing(&self) -> watch::Receiver<bool> {
+        self.refreshing.subscribe()
     }
 
     pub fn configure_capture(&self, observer: crate::capture::Observer) -> Result<()> {
@@ -195,6 +201,10 @@ impl DeviceRegistry {
                         refresh.key
                     });
                 }
+
+                let refreshing = !workers.is_empty();
+                self.refreshing
+                    .send_if_modified(|current| std::mem::replace(current, refreshing) != refreshing);
 
                 tokio::select! {
                     _ = self.cancellation.cancelled() => return Ok(()),

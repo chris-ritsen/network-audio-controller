@@ -8,12 +8,13 @@ use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod index;
 
 const DATABASE_LAYOUT: &str = "2";
 const DATABASE_BUSY_DEADLINE: Duration = Duration::from_secs(2);
+const OWNERSHIP_RETRY: Duration = Duration::from_millis(100);
 const NEXT_SEQUENCE_KEY: &str = "next_sequence";
 const STOPPED_AT_KEY: &str = "stopped_at";
 const SCHEMA: &str = "
@@ -88,7 +89,7 @@ impl JournalDatabase {
         Ok(())
     }
 
-    pub fn open(path: &Path, view_limit: usize) -> Result<Self> {
+    pub fn open(path: &Path, view_limit: usize, ownership_wait: Duration) -> Result<Self> {
         ensure!(view_limit != 0, "event_history_limit must be positive");
 
         if let Some(parent) = path.parent() {
@@ -101,8 +102,22 @@ impl JournalDatabase {
             .create(true)
             .truncate(false)
             .open(path.with_extension("sqlite.lock"))?;
-        fs4::FileExt::try_lock(&ownership)
-            .with_context(|| format!("acquire event journal ownership {}", path.display()))?;
+        let deadline = Instant::now() + ownership_wait;
+
+        loop {
+            match fs4::FileExt::try_lock(&ownership) {
+                Ok(()) => break,
+                Err(fs4::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    std::thread::sleep(OWNERSHIP_RETRY);
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("acquire event journal ownership {}", path.display())
+                    });
+                }
+            }
+        }
+
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(DATABASE_BUSY_DEADLINE)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;

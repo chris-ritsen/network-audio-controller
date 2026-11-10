@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from urllib.parse import quote, urlencode
 
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
+from netaudio.daemon import engine
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 
@@ -21,7 +22,7 @@ EVENT_STREAM_LINE_LIMIT = EVENT_STREAM_EVENT_LIMIT + 1024
 def daemon_port() -> int:
     from netaudio.common.app_config import settings as app_settings
 
-    return app_settings.daemon_port or DEFAULT_DAEMON_PORT
+    return engine.port() or app_settings.daemon_port or DEFAULT_DAEMON_PORT
 
 
 async def get_diagnostics_from_daemon(device: str, *, reset: bool = False):
@@ -31,8 +32,8 @@ async def get_diagnostics_from_daemon(device: str, *, reset: bool = False):
 
 
 class DaemonUnavailable(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("the NetAudio daemon is not running; start it with `netaudio daemon start`")
+    def __init__(self, reason: object = None) -> None:
+        super().__init__(str(reason) if reason else "the NetAudio daemon is not running")
 
 
 class DaemonSilent(RuntimeError):
@@ -49,14 +50,24 @@ class DaemonRefusal(RuntimeError):
         super().__init__(str(detail) if detail else f"the NetAudio daemon answered with status {status}")
 
 
-async def _exchange(method: str, path: str, body, timeout: float):
+async def _connect():
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(DAEMON_HOST, daemon_port()),
-            timeout=1.0,
-        )
+        return await asyncio.wait_for(asyncio.open_connection(DAEMON_HOST, daemon_port()), timeout=1.0)
     except (OSError, asyncio.TimeoutError):
-        raise DaemonUnavailable() from None
+        return None
+
+
+async def _exchange(method: str, path: str, body, timeout: float, *, own_engine: bool = True):
+    connection = await _connect()
+    if connection is None and own_engine and engine.port() is None:
+        try:
+            await asyncio.to_thread(engine.start)
+        except engine.EngineFailure as failure:
+            raise DaemonUnavailable(failure) from None
+        connection = await _connect()
+    if connection is None:
+        raise DaemonUnavailable()
+    reader, writer = connection
 
     try:
         payload = json.dumps(body).encode() if body is not None else b""
@@ -113,9 +124,9 @@ async def call_daemon(method: str, path: str, body=None, *, timeout: float = 90.
     return data
 
 
-async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.0):
+async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.0, *, own_engine: bool = True):
     try:
-        return await _exchange(method, path, body, timeout)
+        return await _exchange(method, path, body, timeout, own_engine=own_engine)
     except (DaemonUnavailable, DaemonSilent) as exception:
         logger.debug(f"Daemon request {method} {path} failed: {exception}")
         return None, None
@@ -274,7 +285,7 @@ async def get_shure_devices_from_daemon() -> dict | None:
 
 
 async def shutdown_daemon() -> bool:
-    status, data = await _daemon_request("POST", "/shutdown")
+    status, data = await _daemon_request("POST", "/shutdown", own_engine=False)
     return status == 200 and bool(data and data.get("success"))
 
 

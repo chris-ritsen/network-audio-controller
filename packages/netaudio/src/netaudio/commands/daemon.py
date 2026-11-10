@@ -7,7 +7,6 @@ import os
 import socket
 import sys
 import time
-from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("netaudio")
@@ -17,6 +16,7 @@ import typer
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.output import output_single, structured_output_selected
 from netaudio.daemon import service_install
+from netaudio.daemon import engine
 from netaudio.daemon.client import forget_devices_on_daemon, get_device_summaries_from_daemon, shutdown_daemon
 from netaudio.icons import icon
 
@@ -63,8 +63,7 @@ def _run_foreground(daemon_port):
     from netaudio.common.app_config import settings as app_settings
 
     effective_port = _effective_daemon_port(daemon_port)
-    name = "netaudio-daemon.exe" if sys.platform == "win32" else "netaudio-daemon"
-    executable = Path(__file__).resolve().parents[1] / "bin" / name
+    executable = engine.executable()
     if not executable.is_file():
         typer.echo("Error: the native daemon is missing; rebuild or reinstall NetAudio.", err=True)
         raise typer.Exit(code=1)
@@ -75,10 +74,8 @@ def _run_foreground(daemon_port):
         arguments.append("--capture")
     if state.dissect:
         arguments.append("--dissect")
-    level = logging.getLevelName(logging.getLogger().getEffectiveLevel()).lower()
-    level = {"warning": "warn", "critical": "error", "notset": "trace"}.get(level, level)
     environment = dict(os.environ)
-    environment.setdefault("RUST_LOG", level)
+    environment.setdefault("RUST_LOG", engine.log_level())
     os.execve(str(executable), arguments, environment)
 
 
@@ -335,7 +332,6 @@ def install(
     print_only: bool = typer.Option(False, "--print", help="Print the generated service file without writing it."),
 ):
     """Install the daemon as a boot service (systemd on Linux, launchd on macOS, Task Scheduler on Windows)."""
-    import sys
 
     platform = service_install.platform_name()
     if platform == "unsupported":

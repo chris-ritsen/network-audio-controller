@@ -36,6 +36,7 @@ pub struct Registry {
     pub(super) requests: mpsc::Sender<Request>,
     changed: Notify,
     signal_changes: watch::Sender<()>,
+    startup_finished: watch::Sender<bool>,
 }
 
 struct State {
@@ -153,6 +154,10 @@ pub struct Output {
 }
 
 impl Registry {
+    pub fn startup_finished(&self) -> watch::Receiver<bool> {
+        self.startup_finished.subscribe()
+    }
+
     pub async fn open(
         configuration: &crate::configuration::Configuration,
         model: Arc<ReadModel>,
@@ -185,6 +190,7 @@ impl Registry {
             requests,
             changed: Notify::new(),
             signal_changes: watch::channel(()).0,
+            startup_finished: watch::channel(false).0,
         });
         registry.publish()?;
         let worker = Worker {
@@ -815,6 +821,7 @@ impl Worker {
             } else if let Err(error) = registry.read_settings().await {
                 tracing::error!(%error, "managed startup settings read failed");
             }
+            registry.startup_finished.send_replace(true);
         });
         loop {
             let deadline = self.registry.deadline()?;

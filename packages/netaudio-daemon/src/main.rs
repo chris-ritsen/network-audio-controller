@@ -25,6 +25,8 @@ struct Arguments {
     capture: bool,
     #[arg(long)]
     dissect: bool,
+    #[arg(long)]
+    private: bool,
 }
 
 fn main() -> Result<()> {
@@ -47,6 +49,18 @@ async fn run(arguments: Arguments) -> Result<()> {
     let configuration =
         Configuration::load(arguments.config.as_deref(), arguments.profile.as_deref())?;
     let cancellation = CancellationToken::new();
+
+    if arguments.private {
+        let cancellation = cancellation.clone();
+        std::thread::spawn(move || {
+            if let Err(error) = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()) {
+                tracing::debug!(%error, "owner pipe closed with an error");
+            }
+
+            cancellation.cancel();
+        });
+    }
+
     let daemon = runtime::run(
         configuration,
         RuntimeOptions {
@@ -54,6 +68,7 @@ async fn run(arguments: Arguments) -> Result<()> {
             interface: arguments.interface,
             capture: arguments.capture,
             dissect: arguments.dissect,
+            private: arguments.private,
         },
         cancellation.clone(),
     );

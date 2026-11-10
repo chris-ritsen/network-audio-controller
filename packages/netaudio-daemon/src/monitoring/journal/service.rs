@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 const REQUEST_CAPACITY: usize = 128;
@@ -114,10 +115,11 @@ impl Journal {
         model: Arc<ReadModel>,
         view_limit: usize,
         thresholds: Thresholds,
+        ownership_wait: Duration,
     ) -> Result<(Arc<Self>, Worker)> {
         let path = path.to_owned();
         let (database, restored, remembered) = tokio::task::spawn_blocking(move || {
-            let mut database = JournalDatabase::open(&path, view_limit)?;
+            let mut database = JournalDatabase::open(&path, view_limit, ownership_wait)?;
             let restored = database.restore_issues()?;
             let remembered = remembered::Inventory::load(&database)?;
             Ok::<_, anyhow::Error>((database, restored, remembered))

@@ -19,12 +19,15 @@ use serde_json::{json, Value};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 const DISCOVERY_QUEUE_CAPACITY: usize = 128;
+const JOURNAL_OWNERSHIP_WAIT: Duration = Duration::from_secs(20);
 const MONITORING_QUEUE_CAPACITY: usize = 256;
+const SETTLE_DEADLINE: Duration = Duration::from_secs(12);
+const SETTLE_QUIET: Duration = Duration::from_millis(1500);
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
@@ -33,6 +36,7 @@ pub struct RuntimeOptions {
     pub interface: Option<String>,
     pub capture: bool,
     pub dissect: bool,
+    pub private: bool,
 }
 
 struct ServerState {
@@ -45,12 +49,16 @@ pub async fn run(
     options: RuntimeOptions,
     cancellation: CancellationToken,
 ) -> Result<()> {
-    let mcp_enabled = configuration.mcp_enabled()?;
+    let mcp_enabled = !options.private && configuration.mcp_enabled()?;
     let network = NetworkMonitor::new()?;
     let snapshots = network.subscribe();
     let initial_network = snapshots.borrow().clone();
     let local_address = interface_address(&initial_network, options.interface.as_deref())?;
     let port = options.port.map(Ok).unwrap_or_else(|| {
+        if options.private {
+            return Ok(0);
+        }
+
         configuration
             .daemon
             .get("port")
@@ -61,8 +69,12 @@ pub async fn run(
                     .context("[daemon] port must be an integer from 1 through 65535")
             })
     })?;
-    ensure!(port != 0, "daemon port must be nonzero");
-    let settings = configuration.tls()?;
+    ensure!(options.private || port != 0, "daemon port must be nonzero");
+    let settings = if options.private {
+        None
+    } else {
+        configuration.tls()?
+    };
     let identity = if let Some(settings) = &settings {
         ensure!(
             settings.port != port,
@@ -98,6 +110,14 @@ pub async fn run(
         })
         .transpose()?
         .unwrap_or(configured_metering_port);
+    let metering_port = if options.private {
+        std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))
+            .and_then(|socket| socket.local_addr())
+            .context("choose a metering port")?
+            .port()
+    } else {
+        metering_port
+    };
     ensure!(
         metering_port >= 1024,
         "monitoring_port must be between 1024 and 65535"
@@ -114,7 +134,11 @@ pub async fn run(
         Some((observer, worker)) => (Some(observer), Some(worker)),
         None => (None, None),
     };
-    let publication = crate::publication::Publisher::new(&configuration, Arc::clone(&model))?;
+    let publication = if options.private {
+        None
+    } else {
+        crate::publication::Publisher::new(&configuration, Arc::clone(&model))?
+    };
     let sap = crate::sap::Discovery::bind(
         crate::sap::Settings::from_environment()?,
         Arc::clone(&model),
@@ -138,6 +162,11 @@ pub async fn run(
         Arc::clone(&model),
         journal_limit,
         crate::monitoring::journal::model::Thresholds::from_configuration(&configuration.daemon)?,
+        if options.private {
+            JOURNAL_OWNERSHIP_WAIT
+        } else {
+            Duration::ZERO
+        },
     )
     .await?;
     let devices = DeviceRegistry::new(Arc::clone(&model), local_address, Arc::clone(&journal));
@@ -180,19 +209,23 @@ pub async fn run(
             "transport": "streamable-http",
         }) } else { json!({"enabled": false}) },
     }));
-    let host_audio = crate::host_audio::manager::Manager::open(
-        &configuration,
-        information["hostname"]
-            .as_str()
-            .context("Daemon hostname is unavailable")?
-            .to_owned(),
-        Arc::clone(&journal),
-        Arc::clone(&model),
-        (
-            Arc::clone(&history_store),
-            Arc::clone(&devices.metering.history),
-        ),
-    )?;
+    let host_audio = if options.private {
+        None
+    } else {
+        crate::host_audio::manager::Manager::open(
+            &configuration,
+            information["hostname"]
+                .as_str()
+                .context("Daemon hostname is unavailable")?
+                .to_owned(),
+            Arc::clone(&journal),
+            Arc::clone(&model),
+            (
+                Arc::clone(&history_store),
+                Arc::clone(&devices.metering.history),
+            ),
+        )?
+    };
     let (host_audio, host_audio_worker) = match host_audio {
         Some((manager, worker)) => (Some(manager), Some(worker)),
         None => (None, None),
@@ -321,7 +354,7 @@ pub async fn run(
         ))
         .layer(middleware::from_fn(crate::http::origin::protect));
     let plain = Listener::bind(
-        http_address(port, identity.is_some()),
+        http_address(port, identity.is_some() || options.private),
         None,
         ListenerOptions::default(),
     )
@@ -368,8 +401,9 @@ pub async fn run(
     if let Some(publication) = publication {
         tasks.spawn(publication.run(lifetime.clone()));
     }
-    if std::env::var("NETAUDIO_DBUS")
-        .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+    if !options.private
+        && std::env::var("NETAUDIO_DBUS")
+            .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
     {
         #[cfg(unix)]
         tasks.spawn(crate::publication::bus::run(
@@ -402,7 +436,7 @@ pub async fn run(
         discovered,
         lifetime.clone(),
         snapshots.clone(),
-        Some(relay),
+        (!options.private).then_some(relay),
         host_audio.map(|manager| Arc::clone(&manager.peers)),
     ));
     tasks.spawn(Arc::clone(&devices).run(discovery_events));
@@ -419,7 +453,8 @@ pub async fn run(
         snapshots.clone(),
         local_address,
     ));
-    tracing::info!(address = %plain.local_address()?, "native HTTP listener ready");
+    let address = plain.local_address()?;
+    tracing::info!(%address, "native HTTP listener ready");
     tasks.spawn(plain.serve(router.clone(), lifetime.clone()));
 
     if let Some(encrypted) = encrypted {
@@ -447,6 +482,15 @@ pub async fn run(
     .await
     .context("Daemon initialization exceeded its deadline")
     .and_then(|result| result);
+    let initialization = match initialization {
+        Ok(()) if options.private => {
+            tokio::select! {
+                _ = cancellation.cancelled() => Ok(()),
+                _ = settle(devices.refreshing(), managed.startup_finished()) => announce(address),
+            }
+        }
+        other => other,
+    };
     let outcome = match initialization {
         Err(error) => Err(error),
         Ok(()) => {
@@ -543,6 +587,42 @@ async fn shutdown(
 
     state.cancellation.cancel();
     Ok(Json(json!({"success": true})))
+}
+
+async fn settle(mut refreshing: watch::Receiver<bool>, mut managed: watch::Receiver<bool>) {
+    let settled = async {
+        if managed.wait_for(|finished| *finished).await.is_err() {
+            return;
+        }
+
+        while refreshing.wait_for(|refreshing| !refreshing).await.is_ok() {
+            tokio::select! {
+                _ = tokio::time::sleep(SETTLE_QUIET) => return,
+                changed = refreshing.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    };
+
+    if tokio::time::timeout(SETTLE_DEADLINE, settled)
+        .await
+        .is_err()
+    {
+        tracing::warn!("devices were still being read when the private engine began serving");
+    }
+}
+
+fn announce(address: SocketAddr) -> Result<()> {
+    use std::io::Write;
+
+    let mut output = std::io::stdout().lock();
+    writeln!(output, "{address}").context("announce the private engine address")?;
+    output
+        .flush()
+        .context("announce the private engine address")
 }
 
 fn notify_ready() -> Result<()> {
