@@ -111,38 +111,25 @@ def _visible_shure_summaries(shure_summaries: dict) -> list[dict]:
     return sorted(visible, key=lambda entry: (entry.get("name") or "").lower())
 
 
-async def gather_status(
-    application,
-    devices,
-    verbose: bool = False,
-) -> tuple[list[str], list[list[str]], list[list[str]], dict]:
-    from netaudio.daemon.client import daemon_is_accessible, get_shure_devices_from_daemon
-
-    dante_headers = device_list_headers(True) if verbose else list(DANTE_STATUS_HEADERS)
-    dante_rows: list[list[str]] = []
-    shure_rows: list[list[str]] = []
-    json_data: dict = {}
-
-    shure_summaries = None
-    if daemon_is_accessible():
-        shure_summaries = await get_shure_devices_from_daemon()
-
-    from netaudio.cli_support.execution import _load_display_devices
+async def gather_status(devices, verbose: bool = False) -> tuple[list[str], list[list[str]], list[list[str]], dict]:
+    from netaudio.cli_support.selection import filter_devices
+    from netaudio.daemon.client import get_shure_devices_from_daemon
     from netaudio.dante.device_serializer import DanteDeviceSerializer
 
-    devices = await _load_display_devices(application)
     visible_dante = {
-        server_name: device for server_name, device in devices.items() if _has_presence(device.online, device.last_seen)
+        server_name: device
+        for server_name, device in filter_devices(devices).items()
+        if _has_presence(device.online, device.last_seen)
     }
-    json_data["dante"] = {
-        server_name: DanteDeviceSerializer.to_json(device) for server_name, device in visible_dante.items()
+    json_data: dict = {
+        "dante": {server_name: DanteDeviceSerializer.to_json(device) for server_name, device in visible_dante.items()}
     }
-    for server_name, device in sort_devices(visible_dante):
-        if verbose:
-            dante_rows.append(device_list_row(server_name, device, verbose=True))
-        else:
-            dante_rows.append(_dante_row_from_device(device))
-
+    dante_rows = [
+        device_list_row(server_name, device, verbose=True) if verbose else _dante_row_from_device(device)
+        for server_name, device in sort_devices(visible_dante)
+    ]
+    shure_rows: list[list[str]] = []
+    shure_summaries = await get_shure_devices_from_daemon()
     if shure_summaries:
         visible_shure = _visible_shure_summaries(shure_summaries)
         json_data["shure"] = {
@@ -150,38 +137,26 @@ async def gather_status(
             for index, summary in enumerate(visible_shure)
         }
         shure_rows = [_shure_row(summary) for summary in visible_shure]
-
-    return dante_headers, dante_rows, shure_rows, json_data
+    return (device_list_headers(True) if verbose else list(DANTE_STATUS_HEADERS)), dante_rows, shure_rows, json_data
 
 
 def status():
     """Show all discovered network audio devices."""
     from netaudio.cli import OutputFormat, state
-    from netaudio.cli_support.execution import run_command
+    from netaudio.cli_support.execution import run_with_devices
 
-    dante_headers, dante_rows, shure_rows, json_data = run_command(
-        gather_status,
-        verbose=state.verbose,
-        discover_devices=False,
-    )
+    dante_headers, dante_rows, shure_rows, json_data = run_with_devices(gather_status, verbose=state.verbose)
 
     if state.output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.yaml):
         output_single(json_data)
         return
 
     if not dante_rows and not shure_rows:
-        from netaudio.daemon.client import daemon_is_accessible
-
         typer.echo("No devices found.")
-        if not daemon_is_accessible():
-            typer.echo("The netaudio daemon is not running; discovery used a one-shot mDNS scan.")
-            typer.echo(
-                "Start it with 'netaudio daemon start', or install it as a boot service with 'netaudio daemon install'."
-            )
-        typer.echo("Run 'netaudio --help' to see all commands.")
         return
 
     if dante_rows:
         output_table(dante_headers, dante_rows, omit_empty_columns=state.verbose)
+
     if shure_rows:
         output_table(SHURE_STATUS_HEADERS, shure_rows, title="Shure")

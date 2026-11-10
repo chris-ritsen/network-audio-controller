@@ -1,9 +1,9 @@
 import typer
 
+from netaudio.cli_support.execution import run_with_devices
 from netaudio.cli_support.output import output_table
-from netaudio.cli_support.selection import sort_devices
+from netaudio.cli_support.selection import filter_devices, sort_devices
 from netaudio.dante.ptpv1_uuid import canonical_ptpv1_uuid
-from netaudio.dante.device_serializer import DanteDeviceSerializer
 
 
 def _matching_leader_name(entries, follower):
@@ -21,15 +21,10 @@ def _matching_leader_name(entries, follower):
     return candidates[0].get("name") or None
 
 
-async def run_clock(application, devices) -> None:
-    from netaudio.cli_support.execution import _load_display_devices
-
-    devices = await _load_display_devices(application)
+async def run_clock(devices) -> None:
     entries = [
-        dict(DanteDeviceSerializer.to_json(device), server_name=server_name)
-        for server_name, device in sort_devices(devices)
+        dict(device.record, server_name=server_name) for server_name, device in sort_devices(filter_devices(devices))
     ]
-
     if not entries:
         typer.echo("No device found.", err=True)
         raise typer.Exit(code=1)
@@ -76,6 +71,4 @@ async def run_clock(application, devices) -> None:
 
 def clock():
     """Show PTP clock status (leader, followers, preferred leader)."""
-    from netaudio.cli_support.execution import run_command
-
-    run_command(run_clock, discover_devices=False)
+    run_with_devices(run_clock)
