@@ -504,12 +504,11 @@ impl Worker {
                 .insert(identity.clone(), event.sequence);
             let first = self.observer.snapshot(&identity).is_none();
             let events = self.observer.observe(Arc::clone(&record), timestamp)?;
-            let changed = !events.is_empty();
             let changes = self.issues.observe(Arc::clone(&record), timestamp)?;
             self.persist_changes(events, &changes)?;
 
             self.remembered.observe(&identity, record, timestamp);
-            if first || changed {
+            if first {
                 self.remembered.save(&mut self.database, &identity)?;
             }
         }
