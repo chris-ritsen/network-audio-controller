@@ -5,8 +5,10 @@ from enum import Enum
 from typing import Optional
 
 import typer
-from netaudio.cli_support.execution import _load_device_for_show, run_command
+from netaudio.cli_support.execution import run_with_devices
 from netaudio.cli_support.output import output_table
+from netaudio.cli_support.selection import filter_devices, select_device
+from netaudio.daemon.client import DaemonRefusal, ask_daemon
 
 app = typer.Typer(help="Inspect and change analog, Bluetooth, video and serial settings.", no_args_is_help=True)
 
@@ -23,11 +25,15 @@ class Category(str, Enum):
     hdcp = "hdcp"
 
 
-async def _run(application, devices, action, category=None, value=None, confirm=False):
-    application.verify_mutations = True
-    _, device = await _load_device_for_show(application, include_channels=False)
+async def _run(devices, action, category=None, value=None, confirm=False):
+    [(server_name, _)] = select_device(filter_devices(devices))
+    request = {"device": server_name, "action": action}
+    if category is not None:
+        request.update(category=category, requested=value, confirm_clear=confirm)
+    status, result = await ask_daemon("POST", "/device-controls", request)
     if action == "inspect":
-        result = await application.inspect_device_controls(device)
+        if status != 200:
+            raise DaemonRefusal(status, result)
         rows = [
             [
                 name.replace("_", " "),
@@ -48,27 +54,29 @@ async def _run(application, devices, action, category=None, value=None, confirm=
             )
         output_table(["Setting", "Reported value", "State"], rows, json_data=result)
         return
-    if category is None:
-        raise ValueError("Choose a setting category.")
+
     if action == "plan":
-        result = await application.plan_device_control(device, category, value, confirm_clear=confirm)
+        if "action" not in (result or {}):
+            raise DaemonRefusal(status, result)
         output_table(["Action", "Reason"], [[result["action"], result.get("reason") or ""]], json_data=result)
-    else:
-        result = await application.apply_device_control(device, category, value, confirm_clear=confirm)
-        output_table(
-            ["Setting", "Result"],
+        return
+
+    if "effective_state_confirmed" not in (result or {}):
+        raise DaemonRefusal(status, result)
+    output_table(
+        ["Setting", "Result"],
+        [
             [
-                [
-                    category.replace("_", " "),
-                    "Confirmed"
-                    if result["effective_state_confirmed"]
-                    else result.get("reason") or result["plan"].get("reason") or "Sent; readback unavailable",
-                ]
-            ],
-            json_data=result,
-        )
-        if not result["effective_state_confirmed"]:
-            raise typer.Exit(1)
+                category.replace("_", " "),
+                "Confirmed"
+                if result["effective_state_confirmed"]
+                else result.get("reason") or (result.get("plan") or {}).get("reason") or "Sent; readback unavailable",
+            ]
+        ],
+        json_data=result,
+    )
+    if not result["effective_state_confirmed"]:
+        raise typer.Exit(1)
 
 
 def _settings(text):
@@ -81,7 +89,7 @@ def _settings(text):
 @app.command("inspect")
 def inspect_controls():
     """Read the device's settings and supported choices."""
-    run_command(_run, "inspect")
+    run_with_devices(_run, "inspect")
 
 
 @app.command()
@@ -90,7 +98,7 @@ def plan(
     settings: str = typer.Argument(..., help="Requested setting as JSON."),
 ):
     """Preview one setting without sending a change."""
-    run_command(_run, "plan", category.value, _settings(settings), False)
+    run_with_devices(_run, "plan", category.value, _settings(settings), False)
 
 
 @app.command()
@@ -100,7 +108,7 @@ def apply(
     confirm_clear: bool = typer.Option(False, help="Confirm clearing all remembered Bluetooth devices."),
 ):
     """Apply one setting once, then check its readback."""
-    run_command(_run, "apply", category.value, _settings(settings), confirm_clear)
+    run_with_devices(_run, "apply", category.value, _settings(settings), confirm_clear)
 
 
 @app.command("analog-level")
@@ -110,7 +118,7 @@ def analog_level(
     apply: bool = typer.Option(False, "--apply", help="Apply the change; otherwise preview it."),
 ):
     """Set analog reference level 1–5 on a reported channel."""
-    run_command(_run, "apply" if apply else "plan", "analog_level", {"channel": channel, "level": level})
+    run_with_devices(_run, "apply" if apply else "plan", "analog_level", {"channel": channel, "level": level})
 
 
 @app.command("bluetooth-name")
@@ -122,7 +130,7 @@ def bluetooth_name(
     """Use a custom Bluetooth name or --device-name."""
     if (name is None) == (not device_name):
         raise typer.BadParameter("Specify a name or --device-name.")
-    run_command(
+    run_with_devices(
         _run,
         "apply" if apply else "plan",
         "bluetooth_identification",
@@ -136,7 +144,7 @@ def bluetooth_discovery(
     apply: bool = typer.Option(False, help="Apply; otherwise preview."),
 ):
     """Allow or prevent Bluetooth discovery."""
-    run_command(_run, "apply" if apply else "plan", "bluetooth_discovery", enabled)
+    run_with_devices(_run, "apply" if apply else "plan", "bluetooth_discovery", enabled)
 
 
 @app.command("clear-pairing")
@@ -144,7 +152,7 @@ def clear_pairing(confirm: bool = typer.Option(False, "--confirm", help="Clear a
     """Forget all paired Bluetooth devices."""
     if not confirm:
         raise typer.BadParameter("Use --confirm to clear the remembered pairing list.")
-    run_command(_run, "apply", "bluetooth_pairing", "clear", True)
+    run_with_devices(_run, "apply", "bluetooth_pairing", "clear", True)
 
 
 @app.command("bandwidth")
@@ -153,7 +161,7 @@ def bandwidth(
     apply: bool = typer.Option(False, help="Apply; otherwise preview."),
 ):
     """Set transmitter bandwidth within the device's reported bounds."""
-    run_command(_run, "apply" if apply else "plan", "bandwidth", {"target": target, "enabled": target != 0})
+    run_with_devices(_run, "apply" if apply else "plan", "bandwidth", {"target": target, "enabled": target != 0})
 
 
 @app.command("serial")
@@ -165,7 +173,7 @@ def serial(
     apply: bool = typer.Option(False, help="Apply; otherwise preview."),
 ):
     """Set the serial port format; sends no serial data."""
-    run_command(
+    run_with_devices(
         _run,
         "apply" if apply else "plan",
         "serial",
