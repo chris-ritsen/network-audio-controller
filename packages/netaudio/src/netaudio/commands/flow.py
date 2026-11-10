@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
 
@@ -10,7 +11,7 @@ import typer
 
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
-from netaudio.cli_support.execution import run_command
+from netaudio.cli_support.execution import run_with_devices
 from netaudio.cli_support.output import output_single, output_table, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.device.display import (
@@ -18,16 +19,7 @@ from netaudio.commands.device.display import (
     format_latency_nanoseconds,
     format_sample_rate_hertz,
 )
-from netaudio.core.binding import NetaudioCoreError
-from netaudio.dante import flows
-from netaudio.core import _requests, subscription_status
-from netaudio.dante.flow_lifecycle import (
-    create_transmit_flow,
-    delete_transmit_flow,
-    inspect_transmit_flows,
-    plan_create_transmit_flow,
-)
-from netaudio.dante.transmit_flow import parse_transmit_flow_specification
+from netaudio.daemon.client import DaemonRefusal, ask_daemon, call_daemon
 
 app = typer.Typer(
     help="Inspect receiver flows and manage transmitter multicast flows on the selected device.",
@@ -36,120 +28,71 @@ app = typer.Typer(
 )
 
 
-def _fail_validation(exception: flows.FlowValidationError) -> NoReturn:
-    typer.echo(f"Error: {exception}", err=True)
+def _fail(message: str) -> NoReturn:
+    typer.echo(f"Error: {message}", err=True)
     raise typer.Exit(code=ExitCode.ERROR)
 
 
-def _parse_channel_numbers(value: str) -> list[int]:
-    tokens = [token.strip() for token in value.split(",")]
-    if not tokens or any(not token for token in tokens):
-        _fail_validation(flows.FlowValidationError("channels must be a comma-separated list of integers"))
+def _numbers(value: str, label: str, minimum: int) -> list[int]:
     try:
-        channel_numbers = [int(token) for token in tokens]
+        numbers = [int(token) for token in value.split(",")]
     except ValueError:
-        _fail_validation(flows.FlowValidationError("channels must be a comma-separated list of integers"))
-    try:
-        return flows.validate_flow_channels(channel_numbers)
-    except flows.FlowValidationError as exception:
-        _fail_validation(exception)
+        _fail(f"{label} must be a comma-separated list of integers")
+    if any(number < minimum for number in numbers):
+        _fail(f"{label} must be {minimum} or greater")
+    return numbers
 
 
-def _parse_flow_slot_assignments(value: str) -> list[int]:
-    tokens = [token.strip() for token in value.split(",")]
-    if not tokens or any(not token for token in tokens):
-        _fail_validation(flows.FlowValidationError("flow slots must be a comma-separated list of integers"))
-    try:
-        assignments = [int(token) for token in tokens]
-    except ValueError:
-        _fail_validation(flows.FlowValidationError("flow slots must be a comma-separated list of integers"))
-    if any(value < 0 for value in assignments):
-        _fail_validation(flows.FlowValidationError("flow slots must be zero or positive integers"))
-    return assignments
+def _selected(devices):
+    [(server_name, device)] = select_device(filter_devices(devices))
+    return server_name, device
 
 
-def _managed_transport_option(device) -> dict:
-    return {"device": device} if getattr(device, "requires_managed_control", False) else {}
-
-
-async def _detect_flow_protocol(application, device, arc_port):
-    if device.flow_protocol_id is not None:
-        return device.flow_protocol_id
-
-    flow_protocol_id = await flows.detect_flow_protocol(str(device.ipv4), arc_port, device=device)
-    if flow_protocol_id is not None:
-        device.flow_protocol_id = flow_protocol_id
-    return flow_protocol_id
-
-
-def _selected_device(devices):
-    [(_, device)] = select_device(filter_devices(devices))
-    return device, device._arc_port()
-
-
-def _read_specification(path: str) -> _requests.TransmitFlowSpecification:
+def _read_specification(path: str) -> dict:
     try:
         content = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
-        value = json.loads(content)
-        return parse_transmit_flow_specification(value)
-    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exception:
-        _fail_validation(flows.FlowValidationError(f"invalid transmit-flow specification: {exception}"))
+        specification = json.loads(content)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exception:
+        _fail(f"invalid transmit-flow specification: {exception}")
+    if not isinstance(specification, dict):
+        _fail("invalid transmit-flow specification: expected a JSON object")
+    return specification
 
 
-def _require_successful_result(result) -> None:
-    payload = result.to_dict()
-    if result.state.value in {"confirmed", "deleted"}:
-        if structured_output_selected():
-            output_single(payload)
-        else:
-            typer.echo(result.message)
-            acknowledgement = result.request_acknowledgement
-            if acknowledgement is None:
-                acknowledgement_label = "not received"
-            elif acknowledgement.get("accepted") is True:
-                acknowledgement_label = f"accepted (result {acknowledgement.get('result_code')})"
-            elif acknowledgement.get("parseable") is True:
-                acknowledgement_label = f"rejected (result {acknowledgement.get('result_code')})"
-            else:
-                acknowledgement_label = "received but unparseable"
-            typer.echo(f"Request acknowledgement: {acknowledgement_label}")
-            typer.echo("Device confirmation: unavailable from this ARC transport")
-            typer.echo(
-                "Effective-state confirmation: "
-                + ("confirmed" if result.effective_state_confirmation is True else "not confirmed")
-            )
-            typer.echo("Persistence confirmation: not performed")
+def _destination(destination: dict | None) -> str:
+    return f"{destination['address']}:{destination['port']}" if destination else ""
+
+
+def _local_time(value: str | None) -> str:
+    return datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M:%S") if value else ""
+
+
+async def _author(path: str, body: dict) -> None:
+    status, result = await ask_daemon("POST", path, body)
+    if status == 200:
+        output_single(result if structured_output_selected() else result["message"])
         return
-    typer.echo(f"Error: {result.message}", err=True)
-    if result.state.value in {"partial", "pending", "inconsistent"}:
-        typer.echo(json.dumps(payload, sort_keys=True), err=True)
-    raise typer.Exit(code=ExitCode.ERROR)
+    if structured_output_selected():
+        output_single(result)
+    raise DaemonRefusal(status, result)
 
 
-async def run_flow_inspect(application, devices) -> None:
-    device, _ = _selected_device(devices)
-    try:
-        inventory = await inspect_transmit_flows(device)
-    except flows.FlowValidationError as exception:
-        _fail_validation(exception)
-    rows = []
-    for specification in inventory["flows"]:
-        identity = specification["identity"]
-        destination = specification.get("primary_destination")
-        rows.append(
-            [
-                str(identity.get("global_flow_id") or ""),
-                specification["media_mode"],
-                specification["flow_type"],
-                specification.get("name") or "",
-                ", ".join(
-                    f"{entry['slot']}:{entry['transmitter_channel']}" for entry in specification["channel_slots"]
-                ),
-                format_sample_rate_hertz(specification.get("sample_rate_hz")),
-                format_encoding(specification.get("encoding_bits")),
-                (f"{destination['address']}:{destination['port']}" if destination is not None else "device allocated"),
-            ]
-        )
+async def run_flow_inspect(devices) -> None:
+    server_name, _ = _selected(devices)
+    inventory = await call_daemon("GET", f"/transmit-flows/{server_name}")
+    rows = [
+        [
+            str(flow["identity"].get("global_flow_id") or ""),
+            flow["media_mode"],
+            flow["flow_type"],
+            flow.get("name") or "",
+            ", ".join(f"{entry['slot']}:{entry['transmitter_channel']}" for entry in flow["channel_slots"]),
+            format_sample_rate_hertz(flow.get("sample_rate_hz")),
+            format_encoding(flow.get("encoding_bits")),
+            _destination(flow.get("primary_destination")) or "device allocated",
+        ]
+        for flow in inventory["flows"]
+    ]
     output_table(
         ["Flow", "Media", "Type", "Name", "Slot:Channel", "Sample Rate", "Encoding", "Destination"],
         rows,
@@ -160,244 +103,147 @@ async def run_flow_inspect(application, devices) -> None:
 
 @app.command("inspect")
 def flow_inspect():
-    """Read transmitter flows into the canonical, lossless flow schema."""
-    run_command(run_flow_inspect)
+    """List the transmitter flows on a device."""
+    run_with_devices(run_flow_inspect)
 
 
-async def run_flow_plan(application, devices, specification: _requests.TransmitFlowSpecification) -> None:
-    device, _ = _selected_device(devices)
-    output_single(plan_create_transmit_flow(device, specification).to_dict())
+async def run_flow_plan(devices, specification: dict) -> None:
+    server_name, _ = _selected(devices)
+    plan = await call_daemon("POST", "/transmit-flows/plan", {"device": server_name, "specification": specification})
+    output_single(plan if structured_output_selected() else json.dumps(plan, indent=2, sort_keys=True))
 
 
 @app.command("plan")
 def flow_plan(
-    specification_file: str = typer.Argument(..., help="Canonical flow JSON file, or - for standard input."),
+    specification_file: str = typer.Argument(..., help="Flow JSON file, or - for standard input."),
 ):
-    """Validate and plan a canonical transmit-flow request without sending it."""
-    run_command(run_flow_plan, _read_specification(specification_file))
+    """Plan a transmit flow without sending it."""
+    run_with_devices(run_flow_plan, _read_specification(specification_file))
 
 
-async def run_flow_apply(application, devices, specification: _requests.TransmitFlowSpecification) -> None:
-    device, _ = _selected_device(devices)
-    operation = getattr(application, "create_transmit_flow", None)
-    result = (
-        await operation(device, specification)
-        if operation is not None
-        else await create_transmit_flow(device, specification)
+async def run_flow_apply(devices, specification: dict) -> None:
+    server_name, _ = _selected(devices)
+    await _author(
+        "/transmit-flows/create",
+        {"confirmed": True, "device": server_name, "specification": specification},
     )
-    _require_successful_result(result)
 
 
 @app.command("apply")
 def flow_apply(
-    specification_file: str = typer.Argument(..., help="Canonical flow JSON file, or - for standard input."),
+    specification_file: str = typer.Argument(..., help="Flow JSON file, or - for standard input."),
     confirmed: bool = typer.Option(False, "--yes", "-y", help="Confirm transmit-flow creation."),
 ):
-    """Create an evidence-supported canonical transmit flow and verify readback."""
+    """Create a transmit flow and read it back."""
     if not confirmed:
-        _fail_validation(flows.FlowValidationError("--yes is required"))
-    run_command(run_flow_apply, _read_specification(specification_file))
+        _fail("--yes is required")
+    run_with_devices(run_flow_apply, _read_specification(specification_file))
 
 
-async def run_receiver_flow_list(application, devices) -> None:
-    device, _arc_port = _selected_device(devices)
-    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
-    if flow_inventory is None:
-        typer.echo("Error: failed to query receiver flows.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-    receiver_flows = flow_inventory["flows"]
-    headers = [
-        "Slot",
-        "Type",
-        "Receiver Channels",
-        "Status",
-        "Interface Destinations",
-        "Transport",
-        "External Identity",
-        "SDP",
-        "Sample Rate",
-        "Encoding",
-        "Frames/Packet",
-        "Latency",
-    ]
+async def run_flow_delete(devices, flow_slot: int) -> None:
+    server_name, _ = _selected(devices)
+    await _author("/transmit-flows/delete", {"confirmed": True, "device": server_name, "flow_id": flow_slot})
 
-    maximum_receive_flows = getattr(device, "maximum_receive_flows", None)
-    empty_message = (
-        f"No receiver flows configured (0 of at most {maximum_receive_flows})."
-        if isinstance(maximum_receive_flows, int)
-        else "No receiver flows configured."
-    )
 
+@app.command("delete")
+def flow_delete(
+    slot: int = typer.Option(..., "--slot", min=1, max=65534, help="Flow slot number to delete."),
+    confirmed: bool = typer.Option(False, "--yes", "-y", help="Confirm deletion of the multicast flow."),
+):
+    """Delete a transmitter multicast flow."""
+    if not confirmed:
+        _fail("--yes is required")
+    run_with_devices(run_flow_delete, slot)
+
+
+async def run_receiver_flow_list(devices) -> None:
+    _, device = _selected(devices)
+    record = device.record
+    receiver_flows = record.get("receiver_flows")
+    if receiver_flows is None:
+        _fail(record.get("receiver_flow_read_error") or "receiver flows have not been read from this device")
     rows = []
-    for receiver_flow in receiver_flows:
-        channel_lists = receiver_flow.get("receiver_channel_numbers_by_flow_channel")
-        if channel_lists is not None:
-            receiver_channel_mapping = " / ".join(
-                "+".join(str(number) for number in receiver_channel_numbers) or "-"
-                for receiver_channel_numbers in channel_lists
-            )
-        else:
-            receiver_channel_mapping = "unknown"
-        subscription_status_code = receiver_flow.get("subscription_status_code")
-        flow_status_word = receiver_flow.get("flow_status_word")
-        if subscription_status_code is not None:
-            status_display = str(subscription_status(subscription_status_code)["label"])
-        elif isinstance(flow_status_word, int):
-            status_display = f"status word 0x{flow_status_word:04x}"
-        else:
-            status_display = "unknown"
-        flow_type = receiver_flow["flow_type"]
-        if not flow_type or flow_type.startswith("0x"):
-            flow_type = "unknown"
-        endpoints = receiver_flow.get("interface_endpoints")
-        if not isinstance(endpoints, list):
-            port = receiver_flow.get("destination_user_datagram_port")
-            endpoints = (
-                [
-                    {
-                        "ipv4_address": receiver_flow.get("destination_internet_protocol_version_four_address"),
-                        "udp_port": port,
-                    }
-                ]
-                if port is not None
-                else []
-            )
-        endpoint_display = (
-            ", ".join(
-                f"{endpoint.get('ipv4_address') or 'address unavailable'}:{endpoint.get('udp_port', 'port unavailable')}"
-                for endpoint in endpoints
-            )
-            or "unknown"
-        )
-        external_identity = receiver_flow.get("external_identity")
-        external_display = (
-            f"{external_identity.get('source_ipv4') or 'source unavailable'}/"
-            f"{external_identity.get('session_id', 'session unavailable')}"
-            if isinstance(external_identity, dict)
-            else "native"
-        )
-        correlation = receiver_flow.get("sdp_correlation")
-        if isinstance(correlation, dict) and correlation.get("matched") is True:
-            sdp_display = "matched"
-        elif isinstance(external_identity, dict):
-            sdp_display = "not matched"
-        else:
-            sdp_display = "not applicable"
-
+    for flow in receiver_flows:
+        channel_lists = flow.get("receiver_channel_numbers_by_flow_channel") or []
+        channel_numbers = {number for channel_numbers in channel_lists for number in channel_numbers}
+        routes = [
+            route for route in record.get("subscriptions") or [] if route.get("rx_channel_number") in channel_numbers
+        ]
+        external_identity = flow.get("external_identity")
         rows.append(
             [
-                str(receiver_flow["flow_number"]),
-                flow_type,
-                receiver_channel_mapping,
-                status_display,
-                endpoint_display,
-                str(receiver_flow.get("transport", "unknown")),
-                external_display,
-                sdp_display,
-                (
-                    format_sample_rate_hertz(receiver_flow["sample_rate"])
-                    if receiver_flow.get("sample_rate") is not None
-                    else "unknown"
+                str(flow["flow_number"]),
+                flow.get("flow_type") or "",
+                " / ".join("+".join(map(str, channel_numbers)) or "-" for channel_numbers in channel_lists),
+                ", ".join(sorted({route["tx_device"] for route in routes if route.get("tx_device")})),
+                ", ".join(sorted({route["status"]["label"] for route in routes if route.get("status")})),
+                ", ".join(
+                    f"{endpoint.get('ipv4_address')}:{endpoint.get('udp_port')}"
+                    for endpoint in flow.get("interface_endpoints") or []
                 ),
                 (
-                    format_encoding(receiver_flow["encoding"])
-                    if receiver_flow.get("encoding") is not None
-                    else "unknown"
+                    f"{external_identity.get('source_ipv4')}/{external_identity.get('session_id')}"
+                    if external_identity
+                    else ""
                 ),
-                (
-                    str(receiver_flow["frames_per_packet"])
-                    if receiver_flow.get("frames_per_packet") is not None
-                    else "unknown"
-                ),
-                (
-                    format_latency_nanoseconds(receiver_flow["latency_nanoseconds"])
-                    if receiver_flow.get("latency_nanoseconds") is not None
-                    else "unknown"
-                ),
+                format_sample_rate_hertz(flow.get("sample_rate")),
+                format_encoding(flow.get("encoding")),
+                format_latency_nanoseconds(flow.get("latency_nanoseconds")),
             ]
         )
-    output_table(headers, rows, json_data=flow_inventory, empty_message=empty_message)
+    maximum = record.get("maximum_receive_flows")
+    output_table(
+        [
+            "Slot",
+            "Type",
+            "Receiver Channels",
+            "From",
+            "Status",
+            "Destinations",
+            "External Flow",
+            "Sample Rate",
+            "Encoding",
+            "Latency",
+        ],
+        rows,
+        json_data=receiver_flows,
+        omit_empty_columns=True,
+        empty_message=(
+            f"No receiver flows configured (0 of at most {maximum})."
+            if maximum is not None
+            else "No receiver flows configured."
+        ),
+    )
 
 
 @app.command("receiver-list")
 def receiver_flow_list():
     """List receiver flows and their local channel mappings."""
-    run_command(run_receiver_flow_list)
+    run_with_devices(run_receiver_flow_list)
 
 
-async def run_receiver_port_ranges(application, devices) -> None:
-    device, arc_port = _selected_device(devices)
-    port_ranges = await flows.query_receiver_port_ranges(
-        str(device.ipv4),
-        arc_port,
-        **_managed_transport_option(device),
-    )
-    if port_ranges is None:
-        typer.echo("Error: failed to query receiver port ranges.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
+async def run_external_flow_list() -> None:
+    flows = await call_daemon("GET", "/external-flows")
     rows = [
         [
-            "First",
-            str(port_ranges["first_port_range_start"]),
-            str(port_ranges["first_port_range_end"]),
+            flow["source_ipv4"],
+            str(flow["session_id"]),
+            flow.get("flow_name") or "",
+            flow.get("media_title") or "",
+            "yes" if flow.get("routable") else "no",
+            str(flow.get("channel_count") or ""),
+            format_sample_rate_hertz(flow.get("sample_rate")) if flow.get("sample_rate") else "",
+            flow.get("encoding") or "",
+            f"{flow['packet_time_microseconds']} us" if flow.get("packet_time_microseconds") is not None else "",
+            _destination(flow.get("primary_destination")),
+            _destination(flow.get("secondary_destination")),
+            flow.get("announcement_interface") or "",
+            _local_time(flow.get("refreshed_at")),
+            _local_time(flow.get("expires_at")),
+            "; ".join(flow.get("routability_errors") or []),
         ]
+        for flow in flows.values()
     ]
-    if port_ranges.get("second_port_range_available", True):
-        rows.append(
-            [
-                "Second",
-                str(port_ranges["second_port_range_start"]),
-                str(port_ranges["second_port_range_end"]),
-            ]
-        )
-    output_table(["Range", "Start", "End"], rows, json_data=port_ranges)
-
-
-@app.command("receiver-port-ranges")
-def receiver_port_ranges():
-    """Show the receiver port ranges reported by a device."""
-    run_command(run_receiver_port_ranges)
-
-
-async def run_external_flow_list(application, devices, listen_seconds: float) -> None:
-    if listen_seconds:
-        await asyncio.sleep(listen_seconds)
-    discovered = application.external_flows.flows()
-    rows = []
-    for flow in discovered:
-        primary = (
-            f"{flow.primary_destination_address}:{flow.primary_destination_port}"
-            if flow.primary_destination_address and flow.primary_destination_port
-            else ""
-        )
-        secondary = (
-            f"{flow.secondary_destination_address}:{flow.secondary_destination_port}"
-            if flow.secondary_destination_address and flow.secondary_destination_port
-            else ""
-        )
-        rows.append(
-            [
-                flow.source_ipv4,
-                str(flow.session_id),
-                flow.flow_name,
-                flow.media_title or "",
-                "yes" if flow.routable else "no",
-                str(flow.channel_count or ""),
-                format_sample_rate_hertz(flow.sample_rate) if flow.sample_rate else "",
-                (
-                    format_encoding(int(flow.encoding[1:]))
-                    if flow.encoding and flow.encoding.startswith("L")
-                    else flow.encoding or ""
-                ),
-                f"{flow.packet_time_microseconds} us" if flow.packet_time_microseconds is not None else "",
-                primary,
-                secondary,
-                flow.announcement_interface,
-                flow.refreshed_at,
-                flow.expires_at,
-                "; ".join(flow.routability_errors),
-            ]
-        )
     output_table(
         [
             "Source",
@@ -417,64 +263,40 @@ async def run_external_flow_list(application, devices, listen_seconds: float) ->
             "Routability Errors",
         ],
         rows,
-        json_data=application.external_flows.to_dict(),
+        json_data=flows,
+        omit_empty_columns=True,
         empty_message="No advertised AES67 audio streams found.",
     )
 
 
 @app.command("external-list")
-def external_flow_list(
-    listen_seconds: float = typer.Option(
-        2.0,
-        "--listen-seconds",
-        min=0.0,
-        max=60.0,
-        help="Seconds to wait for stream announcements before showing the results.",
-    ),
-):
-    """Discover advertised AES67 audio streams."""
-    run_command(run_external_flow_list, listen_seconds, discover_devices=False)
+def external_flow_list():
+    """List advertised AES67 audio streams."""
+    asyncio.run(run_external_flow_list())
 
 
 async def run_external_flow_subscribe(
-    application,
     devices,
     source_ipv4: str,
     session_id: int,
     receiver_channel_ids: list[int],
     flow_slot_assignments: list[int],
-    receiver_supports_multiple_interfaces: bool,
-    listen_seconds: float,
 ) -> None:
-    device, _ = _selected_device(devices)
-    if listen_seconds:
-        await asyncio.sleep(listen_seconds)
-    try:
-        flow = application.external_flows.get(source_ipv4, session_id)
-    except ValueError as exception:
-        _fail_validation(flows.FlowValidationError(str(exception)))
-    if flow is None:
-        _fail_validation(flows.FlowValidationError("external flow was not discovered", status=404))
-    try:
-        result = await application.subscribe_external_rtp(
-            device,
-            flow,
-            receiver_channel_ids,
-            flow_slot_assignments,
-            receiver_supports_multiple_interfaces=receiver_supports_multiple_interfaces,
-        )
-    except flows.FlowValidationError as exception:
-        _fail_validation(exception)
-    except (NetaudioCoreError, OSError, RuntimeError, TimeoutError, ValueError) as exception:
-        typer.echo(f"Error: external subscription request failed: {exception}", err=True)
-        raise typer.Exit(code=ExitCode.ERROR) from exception
-    if not result["request_acknowledged"]:
-        detail = "device rejected the request" if result["result_code"] is not None else "no device response"
-        typer.echo(f"Error: external subscription was not acknowledged ({detail}).", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
+    server_name, device = _selected(devices)
+    result = await call_daemon(
+        "POST",
+        "/external-flows/subscribe",
+        {
+            "flow_slot_assignments": flow_slot_assignments,
+            "receiver_channel_ids": receiver_channel_ids,
+            "rx_device": server_name,
+            "session_id": session_id,
+            "source_ipv4": source_ipv4,
+        },
+    )
 
-    def confirmation(value, false_label="not confirmed"):
-        return "confirmed" if value is True else false_label if value is False else "not confirmed"
+    def confirmation(key: str, refuted: str = "not confirmed") -> str:
+        return {True: "confirmed", False: refuted}.get(result.get(key), "not confirmed")
 
     output_table(
         [
@@ -482,27 +304,25 @@ async def run_external_flow_subscribe(
             "External Flow",
             "Receiver Channels",
             "Flow Slots",
-            "Request",
-            "ARC effective state",
-            "SDP correlation",
-            "RTP reception",
-            "Clock lock",
+            "Receiver State",
+            "SDP",
+            "RTP Reception",
+            "Clock Lock",
             "Persistence",
-            "Decoded audio",
+            "Decoded Audio",
         ],
         [
             [
-                device.name or device.server_name,
+                device.name or server_name,
                 f"{source_ipv4}/{session_id}",
                 ", ".join(map(str, receiver_channel_ids)),
                 ", ".join(map(str, flow_slot_assignments)),
-                "acknowledged",
-                confirmation(result.get("arc_effective_state_confirmed"), "contradicted"),
-                confirmation(result.get("sdp_correlation_confirmed"), "not matched"),
-                confirmation(result.get("rtp_packet_reception_confirmed")),
-                confirmation(result.get("clock_lock_confirmed")),
-                confirmation(result.get("persistence_confirmed")),
-                confirmation(result.get("decoded_audio_confirmed")),
+                confirmation("arc_effective_state_confirmed", "contradicted"),
+                confirmation("sdp_correlation_confirmed", "not matched"),
+                confirmation("rtp_packet_reception_confirmed"),
+                confirmation("clock_lock_confirmed"),
+                confirmation("persistence_confirmed"),
+                confirmation("decoded_audio_confirmed"),
             ]
         ],
         json_data=result,
@@ -511,136 +331,23 @@ async def run_external_flow_subscribe(
 
 @app.command("subscribe-external")
 def external_flow_subscribe(
-    source_ipv4: str = typer.Option(..., "--source", help="Source IPv4 from the discovered SAP identity."),
-    session_id: int = typer.Option(..., "--session-id", min=0, help="Unsigned SDP session ID."),
+    source_ipv4: str = typer.Option(..., "--source", help="Source IPv4 of the advertised stream."),
+    session_id: int = typer.Option(..., "--session-id", min=0, help="Session ID of the advertised stream."),
     receiver_channels: str = typer.Option(..., "--receiver-channels", help="Comma-separated receiver channel IDs."),
     flow_slots: str = typer.Option(
         ...,
         "--flow-slots",
-        help="Parallel one-based external-flow slots; zero leaves a receiver unassigned in this batch.",
-    ),
-    receiver_multiple_interfaces: bool = typer.Option(
-        False,
-        "--receiver-multiple-interfaces",
-        help="Declare that the selected receiver supports multiple network interfaces.",
-    ),
-    listen_seconds: float = typer.Option(
-        1.0,
-        "--listen-seconds",
-        min=0.0,
-        max=60.0,
-        help="Additional time to listen for the selected SAP announcement.",
+        help="One stream slot per receiver channel, starting at 1; 0 leaves that receiver channel unassigned.",
     ),
     confirmed: bool = typer.Option(False, "--yes", "-y", help="Confirm the receiver subscription request."),
 ):
-    """Subscribe receiver channels to a discovered external RTP/AES67 flow."""
+    """Subscribe receiver channels to an advertised AES67 stream."""
     if not confirmed:
-        _fail_validation(flows.FlowValidationError("--yes is required"))
-    run_command(
+        _fail("--yes is required")
+    run_with_devices(
         run_external_flow_subscribe,
         source_ipv4,
         session_id,
-        _parse_channel_numbers(receiver_channels),
-        _parse_flow_slot_assignments(flow_slots),
-        receiver_multiple_interfaces,
-        listen_seconds,
+        _numbers(receiver_channels, "receiver channels", 1),
+        _numbers(flow_slots, "flow slots", 0),
     )
-
-
-async def run_transmit_channel_capabilities(
-    application, devices, starting_channel_identifier: int, maximum_channel_count: int
-) -> None:
-    device, arc_port = _selected_device(devices)
-    capabilities = await flows.query_transmit_channel_capabilities(
-        str(device.ipv4),
-        arc_port,
-        starting_channel_identifier,
-        maximum_channel_count,
-        **_managed_transport_option(device),
-    )
-    if capabilities is None:
-        typer.echo(
-            "Error: this device does not report transmitter channel capabilities.",
-            err=True,
-        )
-        raise typer.Exit(code=ExitCode.ERROR)
-    rows = [
-        [
-            str(index),
-            str(channel_range["first_transmit_channel"]),
-            str(channel_range["last_transmit_channel"]),
-            f"0x{channel_range['unknown_value']:04X}",
-        ]
-        for index, channel_range in enumerate(capabilities["ranges"], start=1)
-    ]
-    output_table(
-        ["Range", "First TX channel", "Last TX channel", "Unknown value"],
-        rows,
-        json_data=capabilities,
-        empty_message="The device reports no transmitter channel capability ranges.",
-    )
-
-
-@app.command("transmit-channel-capabilities")
-def transmit_channel_capabilities(
-    starting_channel_identifier: int = typer.Option(
-        1,
-        "--starting-channel",
-        min=1,
-        max=65535,
-        help="First transmitter channel identifier to query.",
-    ),
-    maximum_channel_count: int = typer.Option(
-        0,
-        "--maximum-count",
-        min=0,
-        max=65535,
-        help="Maximum channels to return; zero requests all available channels.",
-    ),
-):
-    """Show the transmitter channel capability ranges reported by a device."""
-    run_command(run_transmit_channel_capabilities, starting_channel_identifier, maximum_channel_count)
-
-
-async def run_flow_delete(application, devices, flow_slot: int) -> None:
-    device, arc_port = _selected_device(devices)
-    flow_protocol_id = await _detect_flow_protocol(application, device, arc_port)
-    if flow_protocol_id is None:
-        typer.echo("Error: could not detect flow protocol for this device.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-    try:
-        operation = getattr(application, "delete_transmit_flow", None)
-        result = (
-            await operation(device, flow_slot)
-            if operation is not None
-            else await delete_transmit_flow(device, flow_slot)
-        )
-    except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
-        typer.echo(f"Error: flow deletion failed: {exception}", err=True)
-        raise typer.Exit(code=ExitCode.ERROR) from exception
-    _require_successful_result(result)
-
-
-@app.command("delete")
-def flow_delete(
-    slot: int = typer.Option(..., "--slot", help="Flow slot number to delete."),
-    confirmed: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Confirm deletion of the active multicast flow.",
-    ),
-):
-    """Delete a TX multicast flow."""
-
-    try:
-        flow_slot = flows.validate_flow_identifier(slot)
-    except flows.FlowValidationError as exception:
-        _fail_validation(exception)
-    if not confirmed:
-        typer.echo(
-            f"Error: refusing to delete flow slot {flow_slot} without --yes.",
-            err=True,
-        )
-        raise typer.Exit(code=ExitCode.ERROR)
-    run_command(run_flow_delete, flow_slot)
