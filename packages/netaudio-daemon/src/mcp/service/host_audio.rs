@@ -21,10 +21,11 @@ impl Service {
 
     pub(super) async fn network_overview(&self) -> Result<Value, CallError> {
         let records = self.model.records()?;
+        let inventory = self.inventory().await?;
         let managed = self.managed.status()?;
         let journal = self.journal.overview().await?;
         let mut value = self.overview.read(&records, &managed, Some(&journal), || {
-            let groups = views::issues_view(&journal.issues, &json!({"limit":10}), &records);
+            let groups = views::issues_view(&journal.issues, &json!({"limit":10}), &inventory);
             let mut devices = Vec::new();
             for (key, device) in &records {
                 if device["online"] == false {
