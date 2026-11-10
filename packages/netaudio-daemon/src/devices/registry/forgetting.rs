@@ -200,13 +200,14 @@ impl DeviceRegistry {
         let key = record.key.clone();
         let device = Arc::new(Device {
             state: Mutex::new(DeviceState {
+                associated_at: tokio::time::Instant::now(),
+                association: None,
+                clock_interval: None,
+                diagnostics: Default::default(),
+                field_observed_at: BTreeMap::new(),
                 generation: 1,
                 identity_generation: 1,
-                association: None,
-                associated_at: tokio::time::Instant::now(),
-                field_observed_at: BTreeMap::new(),
                 record,
-                diagnostics: Default::default(),
             }),
             transport: AsyncMutex::new(None),
             refresh: AsyncMutex::new(()),

@@ -59,13 +59,14 @@ pub use metering::{MeteringLease, MeteringTarget};
 use refresh_queue::{RefreshQueue, ScheduledRefresh};
 
 struct DeviceState {
+    associated_at: Instant,
+    association: Option<association::Signature>,
+    clock_interval: Option<Duration>,
+    diagnostics: Diagnostics,
+    field_observed_at: BTreeMap<String, Instant>,
     generation: u64,
     identity_generation: u64,
-    association: Option<association::Signature>,
-    associated_at: Instant,
-    field_observed_at: BTreeMap<String, Instant>,
     record: DeviceRecord,
-    diagnostics: Diagnostics,
 }
 
 struct Device {
@@ -323,13 +324,14 @@ impl DeviceRegistry {
                 let record = DeviceRecord::discovered(&service)?;
                 let device = Arc::new(Device {
                     state: Mutex::new(DeviceState {
+                        associated_at: Instant::now(),
+                        association: None,
+                        clock_interval: None,
+                        diagnostics: Diagnostics::default(),
+                        field_observed_at: BTreeMap::new(),
                         generation: 1,
                         identity_generation: 1,
-                        association: None,
-                        associated_at: Instant::now(),
-                        field_observed_at: BTreeMap::new(),
                         record,
-                        diagnostics: Diagnostics::default(),
                     }),
                     transport: AsyncMutex::new(None),
                     refresh: AsyncMutex::new(()),
@@ -1681,11 +1683,13 @@ impl DeviceRegistry {
                     }
 
                     if field == "clock_status" {
-                        clock_interval = state.field_observed_at.get(field).map(|previous| {
+                        let latest = state.field_observed_at.get(field).map(|previous| {
                             packet
                                 .received_monotonic
                                 .saturating_duration_since(*previous)
                         });
+                        clock_interval = latest.max(state.clock_interval);
+                        state.clock_interval = latest;
                         clock_updated = true;
                     }
                     changed = true;
