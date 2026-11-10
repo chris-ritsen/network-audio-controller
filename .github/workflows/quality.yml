@@ -36,7 +36,7 @@ jobs:
           node-version: "22"
       - run: npm ci
       - run: npm run build:webapp
-      - run: git diff --exit-code -- packages/netaudio/src/netaudio/daemon/http/webapp/app.css packages/netaudio/src/netaudio/daemon/http/webapp/icon-paths.js
+      - run: git diff --exit-code -- packages/netaudio/src/netaudio/daemon/http/webapp/app.css packages/netaudio/src/netaudio/daemon/http/webapp/icon-paths.js packages/netaudio/src/netaudio/daemon/http/webapp/mcp-app/routing.html
       - run: python scripts/check_project.py --scope webapp --report "${{ runner.temp }}/checks/report.json"
       - uses: actions/upload-artifact@v7
         if: always()

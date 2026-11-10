@@ -3687,6 +3687,9 @@
       }
     }
   }
+  .fixed {
+    position: fixed;
+  }
   .static {
     position: static;
   }
@@ -3986,6 +3989,52 @@
     margin-left: auto;
   }
   @layer daisyui.l1.l2.l3 {
+    .\!status {
+      display: inline-block !important;
+      aspect-ratio: 1 / 1 !important;
+      width: calc(0.25rem * 2) !important;
+      height: calc(0.25rem * 2) !important;
+      border-radius: var(--radius-selector) !important;
+      background-color: var(--color-base-content) !important;
+    }
+    @supports (color: color-mix(in lab, red, red)) {
+      .\!status {
+        background-color: color-mix(
+          in oklab,
+          var(--color-base-content) 20%,
+          transparent
+        ) !important;
+      }
+    }
+    .\!status {
+      background-position: center !important;
+      background-repeat: no-repeat !important;
+      vertical-align: middle !important;
+      color: color-mix(in srgb, #000 30%, transparent) !important;
+    }
+    @supports (color: color-mix(in lab, red, red)) {
+      .\!status {
+        color: color-mix(
+          in oklab,
+          var(--color-black) 30%,
+          transparent
+        ) !important;
+      }
+    }
+    .\!status {
+      background-image: radial-gradient(
+        circle at 35% 30%,
+        oklch(1 0 0 / calc(var(--depth) * 0.5)),
+        #0000
+      ) !important;
+      box-shadow: 0 2px 3px -1px currentColor !important;
+    }
+    @supports (color: color-mix(in lab, red, red)) {
+      .\!status {
+        box-shadow: 0 2px 3px -1px
+          color-mix(in oklab, currentColor calc(var(--depth) * 100%), #0000) !important;
+      }
+    }
     .status {
       display: inline-block;
       aspect-ratio: 1 / 1;
@@ -4123,6 +4172,9 @@
   }
   .hidden {
     display: none;
+  }
+  .inline {
+    display: inline;
   }
   .inline-block {
     display: inline-block;
@@ -6431,9 +6483,7 @@ textarea:focus-visible {
   .routing-channel-head,
   .routing-channel-row {
     display: grid;
-    grid-template-columns:
-      32px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)
-      24px 20px;
+    grid-template-columns: 32px repeat(3, minmax(0, 1fr)) 24px 20px;
     align-items: center;
     gap: 12px;
     padding: 8px 12px;

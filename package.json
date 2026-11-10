@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:webapp": "node scripts/webapp/icons.mjs && tailwindcss -i ./scripts/webapp/styles.css -o ./packages/netaudio/src/netaudio/daemon/http/webapp/app.css && prettier --write ./packages/netaudio/src/netaudio/daemon/http/webapp/app.css"
+    "build:webapp": "node scripts/webapp/icons.mjs && tailwindcss -i ./scripts/webapp/styles.css -o ./packages/netaudio/src/netaudio/daemon/http/webapp/app.css && prettier --write ./packages/netaudio/src/netaudio/daemon/http/webapp/app.css && node scripts/webapp/mcp-app.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

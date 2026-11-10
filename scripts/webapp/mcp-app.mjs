@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 const webapp = new URL(
@@ -23,7 +24,7 @@ const vendorModules = {
           /^(preact|preact\/hooks|htm|@preact\/signals|@preact\/signals-core)$/,
       },
       (request) => ({
-        path: new URL(`vendor/${vendor[request.path]}`, webapp).pathname,
+        path: fileURLToPath(new URL(`vendor/${vendor[request.path]}`, webapp)),
       }),
     );
   },
@@ -44,7 +45,7 @@ const stylesheet =
 
 for (const view of views) {
   const result = await build({
-    entryPoints: [new URL(`mcp-app/${view}.js`, webapp).pathname],
+    entryPoints: [fileURLToPath(new URL(`mcp-app/${view}.js`, webapp))],
     bundle: true,
     format: "esm",
     minify: true,
