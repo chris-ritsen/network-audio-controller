@@ -8,8 +8,7 @@ from urllib.parse import quote, urlencode
 
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.daemon import engine
-from netaudio.dante.device import DanteDevice
-from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.device_record import Device
 
 logger = logging.getLogger("netaudio")
 
@@ -140,7 +139,7 @@ def daemon_is_accessible() -> bool:
         return probe.connect_ex((DAEMON_HOST, daemon_port())) == 0
 
 
-async def get_devices_from_daemon(context: str | None = None) -> dict[str, DanteDevice] | None:
+async def get_devices_from_daemon(context: str | None = None) -> dict[str, Device] | None:
     path = f"/devices?context={quote(context, safe='')}" if context is not None else "/devices"
     status, data = await _daemon_request("GET", path)
     if status != 200 or data is None:
@@ -148,9 +147,7 @@ async def get_devices_from_daemon(context: str | None = None) -> dict[str, Dante
 
     devices = {}
     for server_name, record in data.items():
-        device = DanteDeviceSerializer.device_from_json(record)
-        device.record = record
-        devices[server_name] = device
+        devices[server_name] = Device(record)
     logger.info(f"Daemon: {len(devices)} devices")
     return devices
 

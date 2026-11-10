@@ -114,16 +114,13 @@ def _visible_shure_summaries(shure_summaries: dict) -> list[dict]:
 async def gather_status(devices, verbose: bool = False) -> tuple[list[str], list[list[str]], list[list[str]], dict]:
     from netaudio.cli_support.selection import filter_devices
     from netaudio.daemon.client import get_shure_devices_from_daemon
-    from netaudio.dante.device_serializer import DanteDeviceSerializer
 
     visible_dante = {
         server_name: device
         for server_name, device in filter_devices(devices).items()
         if _has_presence(device.online, device.last_seen)
     }
-    json_data: dict = {
-        "dante": {server_name: DanteDeviceSerializer.to_json(device) for server_name, device in visible_dante.items()}
-    }
+    json_data: dict = {"dante": {server_name: device.record for server_name, device in visible_dante.items()}}
     dante_rows = [
         device_list_row(server_name, device, verbose=True) if verbose else _dante_row_from_device(device)
         for server_name, device in sort_devices(visible_dante)

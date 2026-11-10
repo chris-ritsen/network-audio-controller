@@ -4,7 +4,7 @@ from typing import Optional
 
 import typer
 
-from netaudio import DanteDevice
+from netaudio.device_record import Device
 from netaudio.core import canonical_device_mac
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import _get_state
@@ -20,7 +20,7 @@ def selection_is_explicit() -> bool:
     return bool(state.names or state.hosts or state.server_names or state.macs or state.ddm_context)
 
 
-def require_selected_devices(devices: dict[str, DanteDevice]) -> dict[str, DanteDevice]:
+def require_selected_devices(devices: dict[str, Device]) -> dict[str, Device]:
     if selection_is_explicit() and not devices:
         select_device(devices)
     return devices
@@ -31,7 +31,7 @@ def _name_matches(name, server_name, patterns) -> bool:
     return any(fnmatch(candidate, pattern.casefold()) for candidate in candidates for pattern in patterns)
 
 
-def filter_devices(devices: dict[str, DanteDevice], include_names: bool = True) -> dict[str, DanteDevice]:
+def filter_devices(devices: dict[str, Device], include_names: bool = True) -> dict[str, Device]:
     state = _get_state()
 
     if not state.names and not state.hosts and not state.server_names and not state.macs and not state.ddm_context:
@@ -64,7 +64,7 @@ def filter_devices(devices: dict[str, DanteDevice], include_names: bool = True) 
     return filtered
 
 
-def sort_devices(devices: dict[str, DanteDevice]) -> list[tuple[str, DanteDevice]]:
+def sort_devices(devices: dict[str, Device]) -> list[tuple[str, Device]]:
     state = _get_state()
 
     sort_keys = {
@@ -124,7 +124,7 @@ def parse_qualified_channel(value: str, default_direction: Optional[str] = None)
     return parse_channel_reference(channel_text, default_direction), device_identifier.strip()
 
 
-def resolve_channel(device: DanteDevice, reference: ChannelReference):
+def resolve_channel(device: Device, reference: ChannelReference):
     device_label = device.name or device.server_name or str(device.ipv4)
     if reference.direction is not None:
         channel = find_channel(device, reference.identifier, reference.direction)
@@ -160,7 +160,7 @@ def resolve_channel(device: DanteDevice, reference: ChannelReference):
     return matches[0]
 
 
-def match_device_identifier(devices: dict[str, DanteDevice], identifier: str) -> dict[str, DanteDevice]:
+def match_device_identifier(devices: dict[str, Device], identifier: str) -> dict[str, Device]:
     matches = {}
     for server_name, device in devices.items():
         if (
@@ -173,7 +173,7 @@ def match_device_identifier(devices: dict[str, DanteDevice], identifier: str) ->
     return matches
 
 
-def select_device(devices: dict[str, DanteDevice], allow_many: bool = False) -> list[tuple[str, DanteDevice]]:
+def select_device(devices: dict[str, Device], allow_many: bool = False) -> list[tuple[str, Device]]:
     if not devices:
         typer.echo("Error: device not found.", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
@@ -186,7 +186,7 @@ def select_device(devices: dict[str, DanteDevice], allow_many: bool = False) -> 
     return list(devices.items())
 
 
-def find_channel(device: DanteDevice, channel_id: str, channel_type: str):
+def find_channel(device: Device, channel_id: str, channel_type: str):
     channels = device.rx_channels if channel_type == "rx" else device.tx_channels
 
     if channel_id.isdigit():

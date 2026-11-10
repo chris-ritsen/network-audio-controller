@@ -85,10 +85,8 @@ def _gh_authenticated() -> bool:
 
 async def _collect_diagnostics() -> dict:
     from netaudio import __version__
-    from netaudio.common.app_config import settings
-    from netaudio.daemon.client import get_devices_from_daemon
-    from netaudio.dante.application import DanteApplication
-    from netaudio.dante.device_serializer import DanteDeviceSerializer
+    from netaudio.cli_support.execution import daemon_devices
+    from netaudio.cli_support.selection import filter_devices
 
     diagnostics: dict[str, Any] = {
         "version": __version__,
@@ -96,33 +94,11 @@ async def _collect_diagnostics() -> dict:
         "platform": f"{platform.system()} {platform.release()} {platform.machine()}",
     }
 
-    devices = await get_devices_from_daemon()
-    source = "daemon"
+    devices = filter_devices(await daemon_devices())
 
-    if devices is None:
-        source = "direct"
-        application = DanteApplication()
-        await application.startup()
-        try:
-            devices = await application.discover_and_populate(timeout=settings.mdns_timeout)
-        finally:
-            await application.shutdown()
+    diagnostics["device_count"] = len(devices)
 
-    from netaudio.cli_support.selection import filter_devices
-
-    devices = filter_devices(devices or {})
-
-    diagnostics["source"] = source
-    diagnostics["device_count"] = len(devices) if devices else 0
-
-    device_details = []
-    if devices:
-        serializer = DanteDeviceSerializer()
-        for server_name, device in sorted(devices.items()):
-            device_json = serializer.to_json(device)
-            device_details.append(device_json)
-
-    diagnostics["devices"] = device_details
+    diagnostics["devices"] = [device.record for _, device in sorted(devices.items())]
     return diagnostics
 
 

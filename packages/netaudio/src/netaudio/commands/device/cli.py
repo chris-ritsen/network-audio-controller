@@ -15,7 +15,6 @@ from netaudio.commands.device.display import _device_show_rows
 from netaudio.commands.device.network_status import network_status
 from netaudio.commands.status import status as status_command
 from netaudio.daemon.client import call_daemon
-from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.icons import icon
 
 logger = logging.getLogger("netaudio")
@@ -80,9 +79,8 @@ async def run_show(devices) -> None:
     output_table(
         ["Field", "Value"],
         _device_show_rows(device),
-        json_data=DanteDeviceSerializer.to_json(device),
+        json_data=device.record,
         title=device.name or server_name,
-        devices={server_name: device},
     )
 
 

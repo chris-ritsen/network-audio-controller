@@ -7,10 +7,8 @@ from typing import Any, Optional
 
 import typer
 
-from netaudio import DanteDevice
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import _get_state, _iconize_headers
-from netaudio.presets.serialization import format_devices_xml
 
 
 _XML_ELEMENT_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
@@ -165,14 +163,14 @@ def _render_table_text(headers: list[str], rows: list[list[str]], title: Optiona
         typer.echo(_format_text(display_headers, rows))
 
 
-def _render_structured(json_data: Any, devices: Optional[dict[str, DanteDevice]] = None) -> None:
+def _render_structured(json_data: Any) -> None:
     from netaudio.cli import OutputFormat
 
     output_format = _get_state().output_format
     if output_format == OutputFormat.yaml:
         typer.echo(_format_yaml(json_data))
     elif output_format == OutputFormat.xml:
-        typer.echo(format_devices_xml(devices) if devices else _format_xml(json_data))
+        typer.echo(_format_xml(json_data))
     else:
         typer.echo(_format_json(json_data))
 
@@ -182,7 +180,6 @@ def output_table(
     rows: list[list[str]],
     json_data: Any = None,
     title: Optional[str] = None,
-    devices: Optional[dict[str, DanteDevice]] = None,
     omit_empty_columns: bool = False,
     empty_message: Optional[str] = None,
 ) -> None:
@@ -190,7 +187,7 @@ def output_table(
         json_data = [dict(zip(headers, row)) for row in rows]
 
     if _structured_output_selected():
-        _render_structured(json_data, devices)
+        _render_structured(json_data)
         return
 
     if not rows and empty_message is not None:
@@ -206,25 +203,23 @@ def output_table(
 def output_sections(
     sections: list[tuple[str, list[str], list[list[str]]]],
     json_data: Any,
-    devices: Optional[dict[str, DanteDevice]] = None,
 ) -> None:
     if _structured_output_selected():
-        _render_structured(json_data, devices)
+        _render_structured(json_data)
         return
 
     for title, headers, rows in sections:
         _render_table_text(headers, rows, title)
 
 
-def output_single(data: Any, device: Optional[DanteDevice] = None) -> None:
+def output_single(data: Any) -> None:
     from netaudio.cli import OutputFormat
 
     if _get_state().output_format == OutputFormat.csv:
         typer.echo(_format_single_csv(data))
         return
     if _structured_output_selected():
-        devices = {device.server_name or "device": device} if device else None
-        _render_structured(data, devices)
+        _render_structured(data)
         return
     typer.echo(data)
 

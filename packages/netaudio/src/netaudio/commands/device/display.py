@@ -243,7 +243,7 @@ def _format_reference_levels(device) -> str:
     if device.gain_device_type is None or device.gain_levels is None:
         return ""
     return ", ".join(
-        f"{channel_number}: {device.gain_level_label_for_channel(channel_number, 'tx' if device.gain_device_type == 'input' else 'rx')}"
+        f"{channel_number}: {device.gain_level_label_for_channel(channel_number)}"
         for channel_number in range(1, len(device.gain_levels) + 1)
     )
 

@@ -5,10 +5,9 @@ WEB_TESTS ?=
 LINT_FILES ?=
 BOUNDED := python3 scripts/run_bounded_tests.py
 
-.PHONY: help test-browser test-lab lint audit audit-fix release release-status
+.PHONY: help test-browser lint audit audit-fix release release-status
 help:
 	@echo "test-browser WEB_TESTS='path/to/browser.test.mjs'  Explicit browser UI checks"
-	@echo "test-lab LAB=path/to/lab.toml [LAB_REPORT=report.xml]  Regression checks against lab devices"
 	@echo "lint LINT_FILES='path/to/changed.py'             Focused Python lint"
 	@echo "quality                                         Explicit broad checks; not routine"
 	@echo "check-local                                   Shared local/CI checks with a report; five-minute limit"
@@ -61,10 +60,6 @@ deploy: install restart
 dev:
 	@echo "Watching for changes... (restart daemon on *.py save)"
 	@find packages/netaudio/src -name '*.py' | entr -r make restart
-
-test-lab:
-	@test -n "$(strip $(LAB))" || { echo "Set LAB to a lab file naming the devices to test."; exit 2; }
-	NETAUDIO_LAB="$(LAB)" $(PYTHON) -m pytest -q -p no:cacheprovider tests/lab $(if $(LAB_REPORT),--junitxml="$(LAB_REPORT)")
 
 test-browser:
 	@test -n "$(strip $(WEB_TESTS))" || { echo "Set WEB_TESTS to the affected browser test files."; exit 2; }

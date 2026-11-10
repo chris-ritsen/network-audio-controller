@@ -10,7 +10,6 @@ import typer
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.output import output_table
 from netaudio.daemon.client import clear_event_journal_on_daemon, get_event_journal_from_daemon
-from netaudio.monitoring import EventSeverity, MonitoringEventKind
 
 app = typer.Typer(
     help="Inspect the daemon's retained monitoring event journal.",
@@ -43,16 +42,16 @@ def _daemon_error(status: int | None, data: dict | None) -> None:
 def _fetch(
     *,
     device: str | None,
-    kind: MonitoringEventKind | None,
-    severity: EventSeverity | None,
+    kind: str | None,
+    severity: str | None,
     since: str | None,
     limit: int | None,
 ) -> dict:
     status, data = asyncio.run(
         get_event_journal_from_daemon(
             device=device,
-            kind=kind.value if kind is not None else None,
-            severity=severity.value if severity is not None else None,
+            kind=kind,
+            severity=severity,
             since=since,
             limit=limit,
         )
@@ -100,8 +99,8 @@ def _rows(events: list[dict]) -> list[list[str]]:
 @app.command("list")
 def list_events(
     device: Optional[str] = typer.Option(None, "--device", help="Match a device identity, name, or server name."),
-    kind: Optional[MonitoringEventKind] = typer.Option(None, "--kind", help="Filter by event kind."),
-    severity: Optional[EventSeverity] = typer.Option(None, "--severity", help="Filter by severity."),
+    kind: Optional[str] = typer.Option(None, "--kind", help="Filter by event kind."),
+    severity: Optional[str] = typer.Option(None, "--severity", help="Filter by severity."),
     since: Optional[str] = typer.Option(None, "--since", help="Include events at or after this ISO-8601 timestamp."),
     limit: int = typer.Option(100, "--limit", min=1, help="Maximum number of newest events to show."),
 ):
@@ -120,8 +119,8 @@ def list_events(
 def export_events(
     destination: Optional[Path] = typer.Option(None, "--file", help="Write JSON to this file instead of stdout."),
     device: Optional[str] = typer.Option(None, "--device", help="Match a device identity, name, or server name."),
-    kind: Optional[MonitoringEventKind] = typer.Option(None, "--kind", help="Filter by event kind."),
-    severity: Optional[EventSeverity] = typer.Option(None, "--severity", help="Filter by severity."),
+    kind: Optional[str] = typer.Option(None, "--kind", help="Filter by event kind."),
+    severity: Optional[str] = typer.Option(None, "--severity", help="Filter by severity."),
     since: Optional[str] = typer.Option(None, "--since", help="Include events at or after this ISO-8601 timestamp."),
 ):
     """Export retained events as stable JSON with their raw evidence."""

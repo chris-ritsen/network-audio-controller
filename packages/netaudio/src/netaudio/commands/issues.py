@@ -8,7 +8,6 @@ import typer
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.output import output_table
 from netaudio.daemon.client import get_issues_from_daemon
-from netaudio.monitoring import EventSeverity, IssueKind, IssueLifecycleState
 
 app = typer.Typer(
     help="Inspect current and resolved monitoring issues without changing devices.",
@@ -44,23 +43,23 @@ def _rows(issues: list[dict]) -> list[list[str]]:
 
 @app.command("list")
 def list_issues(
-    state: Optional[IssueLifecycleState] = typer.Option(
-        IssueLifecycleState.OPEN,
+    state: str = typer.Option(
+        "open",
         "--state",
         help="Show open issues (current) or resolved issue history.",
     ),
     device: Optional[str] = typer.Option(None, "--device", help="Match a device identity, name, or server name."),
-    kind: Optional[IssueKind] = typer.Option(None, "--kind", help="Filter by issue kind."),
-    severity: Optional[EventSeverity] = typer.Option(None, "--severity", help="Filter by severity."),
+    kind: Optional[str] = typer.Option(None, "--kind", help="Filter by issue kind."),
+    severity: Optional[str] = typer.Option(None, "--severity", help="Filter by severity."),
     limit: int = typer.Option(100, "--limit", min=1, help="Maximum number of newest issues to show."),
 ):
     """List lifecycle-managed issues retained by the daemon."""
     status, payload = asyncio.run(
         get_issues_from_daemon(
-            state=state.value if state is not None else None,
+            state=state,
             device=device,
-            kind=kind.value if kind is not None else None,
-            severity=severity.value if severity is not None else None,
+            kind=kind,
+            severity=severity,
             limit=limit,
         )
     )

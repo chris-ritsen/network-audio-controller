@@ -8,7 +8,7 @@ from typing import Callable
 from rich.cells import cell_len, set_cell_size
 
 from netaudio.commands.device.display import _channel_matches
-from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.device_record import Device
 from netaudio.dante.metering import classify_signal_presence
 
 PASSIVE_SOURCE = "signal_presence"
@@ -284,7 +284,7 @@ class MeterViewModel:
         if previous is None:
             return False
         try:
-            replacement = DanteDeviceSerializer.device_from_json(device_json)
+            replacement = Device(device_json)
         except (TypeError, ValueError):
             return False
 
