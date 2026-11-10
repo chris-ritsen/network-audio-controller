@@ -14,7 +14,14 @@ from netaudio.cli_support.context import _get_state
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.common.app_config import settings
 from netaudio.common.probe_answer_cache import ProbeAnswerCache, default_probe_answer_cache_path
-from netaudio.daemon.client import DaemonUnavailable, append_operation_event_on_daemon, get_devices_from_daemon
+from netaudio._exit_codes import ExitCode
+from netaudio.daemon.client import (
+    DaemonRefusal,
+    DaemonUnavailable,
+    append_operation_event_on_daemon,
+    call_daemon,
+    get_devices_from_daemon,
+)
 from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.state import apply_device_status
 from netaudio.monitoring import MonitoringEventJournal, MutationAuditRecorder, remote_recorder
@@ -290,6 +297,21 @@ def run_with_devices(run: Callable[..., Awaitable[Any]], *arguments, **options) 
         return await run(await daemon_devices(), *arguments, **options)
 
     return asyncio.run(_run())
+
+
+async def change_devices(targets, path: str, change: dict, describe: Callable[[str], str]) -> None:
+    failed = False
+    for server_name, device in targets:
+        label = device.name or server_name
+        try:
+            await call_daemon("POST", path, {"device": server_name, **change})
+        except DaemonRefusal as refusal:
+            failed = True
+            typer.echo(f"Error: {label}: {refusal}", err=True)
+        else:
+            typer.echo(describe(label))
+    if failed:
+        raise typer.Exit(code=ExitCode.ERROR)
 
 
 def _explicit_selection() -> bool:

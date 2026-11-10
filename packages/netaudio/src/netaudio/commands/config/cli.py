@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import asyncio
-import ipaddress
 import json
+import math
 import os
 import subprocess
 import sys
@@ -12,42 +11,18 @@ import typer
 
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
-from netaudio.cli_support.execution import CapabilityProbeTimeout, run_command, selected_device_identifiers
+from netaudio.cli_support.execution import change_devices, run_with_devices
 from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
-from netaudio.commands.config.latency import run_latency
-from netaudio.commands.config.performance import (
-    run_receive_flow_default_slots,
-    run_receive_flow_performance,
-    run_store_current_configuration,
-    run_transmit_flow_performance,
-    run_unicast_performance,
-)
-from netaudio.dante.clock_config import (
-    format_clock_source_code,
-    format_clock_subdomain,
-    parse_clock_source_selection,
-    parse_clock_subdomain_selection,
-)
-from netaudio.dante.sample_rate_pullup import (
-    format_supported_sample_rate_pullup_values,
-    parse_sample_rate_pullup_selection,
-    sample_rate_pullup_label,
-)
-from netaudio.dante.sample_rate_topology import (
-    SampleRateTopologyChangedButUnverifiedError,
-    SampleRateTopologyError,
-    SampleRateTopologyMutationOutcomeUnknownError,
-)
+from netaudio.daemon.client import DaemonRefusal, ask_daemon, call_daemon
+from netaudio.dante.clock_config import format_clock_source_code, format_clock_subdomain
+from netaudio.dante.sample_rate_pullup import format_supported_sample_rate_pullup_values, sample_rate_pullup_label
 
 app = typer.Typer(help="Get or set device configuration.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
 top_app = typer.Typer(
     help="Manage netaudio configuration.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS
 )
-
-VALID_SAMPLE_RATES = [44100, 48000, 88200, 96000, 176400, 192000]
-VALID_ENCODINGS = [16, 24, 32]
 
 
 @top_app.command("edit")
@@ -179,272 +154,118 @@ def config_show():
         typer.echo(f"{key} = {_format_configuration_value(key, value)}")
 
 
-from netaudio.commands.config.readback import (
-    _collect_target_readings,
-    _device_advertises_aes67_multicast_prefix,
-    _read_aes67_configured,
-    _read_aes67_multicast_prefix,
-    _render_cached_reading,
-    _report_reading_failures,
-    _send_requested_change,
-    _send_verified_change,
-    _targets_supporting_value,
-)
-from netaudio.dante.readback import MUTATION_ERRORS, read_audio_capability
+def _targets(devices, all_devices: bool):
+    return select_device(filter_devices(devices), allow_many=all_devices)
 
 
-def _sample_rate_rows(label, result, exception):
-    rows = []
-    if result is not None:
-        preflight = result.preflight
-        if result.changed:
-            rows.append(
-                [
-                    label,
-                    "Verified",
-                    f"{preflight.current_sample_rate_hertz} -> {result.observed_sample_rate_hertz} Hz; "
-                    f"{result.resulting_snapshot['capacity']['transmit_channel_count']} TX / "
-                    f"{result.resulting_snapshot['capacity']['receive_channel_count']} RX",
-                ]
-            )
-        else:
-            rows.append(
-                [
-                    label,
-                    "Unchanged",
-                    f"fresh readback already reports {result.observed_sample_rate_hertz} Hz; no write sent",
-                ]
-            )
-    else:
-        preflight = exception.preflight if isinstance(exception, SampleRateTopologyError) else None
-        if isinstance(exception, SampleRateTopologyChangedButUnverifiedError):
-            outcome = "Changed but unverified"
-        elif isinstance(exception, SampleRateTopologyMutationOutcomeUnknownError):
-            outcome = "Outcome unknown"
-        else:
-            outcome = "Refused"
-        rows.append([label, outcome, str(exception)])
-    if preflight is None:
-        return rows
-    if preflight.target_capacity is not None:
-        rows.append(
-            [
-                label,
-                "Target capacity",
-                f"{preflight.target_capacity['transmit_channel_count']} TX / "
-                f"{preflight.target_capacity['receive_channel_count']} RX at "
-                f"{preflight.target_sample_rate_hertz} Hz",
-            ]
+def _show(targets, all_devices: bool, title: str, key: str, value_of, text_of) -> None:
+    if all_devices:
+        output_table(
+            ["Name", title],
+            [[device.name or server_name, text_of(value_of(device))] for server_name, device in targets],
         )
-    for subscription in preflight.reversible_receiver_clipping:
-        rows.append(
-            [
-                label,
-                "Reversible RX clipping",
-                f"RX {subscription['receiver_channel_number']} {subscription['receiver_channel_name']} <- "
-                f"{subscription['transmitter_channel_name']}@{subscription['transmitter_device_name']}",
-            ]
-        )
-    for membership_loss in preflight.destructive_transmitter_membership_loss:
-        removed = ",".join(str(value) for value in membership_loss["removed_channel_members"])
-        retained = ",".join(str(value) for value in membership_loss["retained_channel_members"])
-        rows.append(
-            [
-                label,
-                "Destructive TX membership loss",
-                f"flow {membership_loss['flow_number']}: remove {removed}; retain {retained}",
-            ]
-        )
-    for uncharacterized_flow in preflight.uncharacterized_transmitter_flows:
-        rows.append(
-            [
-                label,
-                "Uncharacterized TX flow",
-                f"flow {uncharacterized_flow['flow_number']}: {uncharacterized_flow['reason']}",
-            ]
-        )
-    if (
-        preflight.topology_characterized
-        and not preflight.reversible_receiver_clipping
-        and not preflight.destructive_transmitter_membership_loss
-        and not preflight.uncharacterized_transmitter_flows
-    ):
-        rows.append([label, "Topology", "no active subscription or flow member is out of range"])
-    return rows
+        return
+    value = value_of(targets[0][1])
+    output_value(title, key, value, text_of(value))
 
 
-def _sample_rate_error_data(exception) -> dict:
-    error_data = {"success": False, "error": str(exception)}
-    if isinstance(exception, SampleRateTopologyChangedButUnverifiedError):
-        error_data["change_sent"] = True
-        error_data["state_verified"] = False
-        error_data["observed_sample_rate_hertz"] = exception.observed_sample_rate_hertz
-    elif isinstance(exception, SampleRateTopologyMutationOutcomeUnknownError):
-        error_data["mutation_attempted"] = True
-        error_data["state_verified"] = False
-    if isinstance(exception, SampleRateTopologyError) and exception.preflight is not None:
-        error_data["preflight"] = exception.preflight.to_dict()
-    return error_data
+def _switch(value: str) -> bool:
+    if value.lower() not in ("on", "off"):
+        typer.echo("Error: expected 'on' or 'off'.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+    return value.lower() == "on"
 
 
-async def run_sample_rate(application, devices, rate: int | None, all_devices: bool) -> None:
-    targets = select_device(filter_devices(devices), allow_many=all_devices)
+def _state_label(value) -> str:
+    if value is None:
+        return "N/A"
+    return "on" if value else "off"
 
+
+def _number(value) -> str:
+    return "unknown" if value is None else f"{value:g}"
+
+
+async def run_sample_rate(devices, rate: int | None, all_devices: bool) -> None:
+    targets = _targets(devices, all_devices)
     if rate is None:
-        if all_devices:
-            output_table(
-                ["Name", "Sample Rate"],
-                [[device.name or server_name, device.sample_rate or ""] for server_name, device in targets],
-            )
-        else:
-            rate_value = targets[0][1].sample_rate
-            output_value("Sample rate", "sample_rate_hz", rate_value, f"{rate_value} Hz" if rate_value else "N/A")
+        _show(
+            targets,
+            all_devices,
+            "Sample rate",
+            "sample_rate_hz",
+            lambda device: device.sample_rate,
+            lambda value: f"{value} Hz" if value else "N/A",
+        )
         return
 
-    if rate <= 0 or rate > 0xFFFFFFFF:
-        typer.echo("Error: sample rate must be between 1 and 4294967295 Hz.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    async def change_target(server_name, device):
-        try:
-            result = await application.set_sample_rate(device, rate)
-            return server_name, device, result, None
-        except (*MUTATION_ERRORS, SampleRateTopologyError) as exception:
-            return server_name, device, None, exception
-
-    outcomes = await asyncio.gather(*(change_target(server_name, device) for server_name, device in targets))
     rows = []
-    json_data = {}
-    failures = 0
-    for server_name, device, result, exception in outcomes:
+    results = {}
+    failed = False
+    for server_name, device in targets:
         label = device.name or server_name
-        if result is not None:
-            json_data[server_name] = result.to_dict()
+        status, result = await ask_daemon("POST", "/set-sample-rate", {"device": server_name, "sample_rate": rate})
+        results[server_name] = result
+        if status != 200:
+            failed = True
+            rows.append([label, "Failed", str(DaemonRefusal(status, result))])
+        elif result.get("changed"):
+            rows.append([label, "Verified", f"{rate} Hz"])
         else:
-            failures += 1
-            json_data[server_name] = _sample_rate_error_data(exception)
-        rows.extend(_sample_rate_rows(label, result, exception))
-    output_table(["Device", "Result", "Detail"], rows, json_data=json_data)
-    if failures:
+            rows.append([label, "Unchanged", f"already {rate} Hz; no write sent"])
+    output_table(["Device", "Result", "Detail"], rows, json_data=results)
+    if failed:
         raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command("sample-rate")
 def sample_rate(
-    rate: Optional[int] = typer.Argument(None, help=f"Sample rate: {VALID_SAMPLE_RATES}"),
+    rate: Optional[int] = typer.Argument(None, help="Sample rate in hertz."),
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
-    confirm_destructive: bool = typer.Option(
-        False,
-        "--confirm-destructive",
-        hidden=True,
-    ),
 ):
     """Get or set the sample rate."""
-    run_command(run_sample_rate, rate, all_devices)
+    run_with_devices(run_sample_rate, rate, all_devices)
 
 
-def _pullup_cell(exception, value):
-    if exception is None:
-        return value
-    if isinstance(exception, CapabilityProbeTimeout):
-        return "unsupported"
-    return "unavailable"
-
-
-async def _render_sample_rate_pullup(application, targets, all_devices: bool) -> None:
-    readings = await _collect_target_readings(
-        targets,
-        lambda server_name, device: read_audio_capability(application, device, "sample_rate_pullup"),
-    )
-    hard_failures = [
-        reading for reading in readings if reading[2] is not None and not isinstance(reading[2], CapabilityProbeTimeout)
-    ]
-    if hard_failures and len(hard_failures) == len(readings):
-        _report_reading_failures("sample-rate pull-up", hard_failures)
-
-    if all_devices:
-        output_table(
-            ["Name", "Applied", "Requested", "Supported"],
-            [
-                [
-                    device.name or server_name,
-                    _pullup_cell(exception, sample_rate_pullup_label(device.sample_rate_pullup_raw_value)),
-                    _pullup_cell(exception, sample_rate_pullup_label(device.requested_sample_rate_pullup_raw_value)),
-                    _pullup_cell(
-                        exception,
-                        format_supported_sample_rate_pullup_values(device.supported_sample_rate_pullup_raw_values),
-                    ),
-                ]
-                for server_name, device, exception in readings
-            ],
-        )
-        return
-    device = readings[0][1]
-    exception = readings[0][2]
-    if exception is not None:
-        if isinstance(exception, CapabilityProbeTimeout):
-            output_single({"supported": False} if structured_output_selected() else "unsupported")
-            return
-        _report_reading_failures("sample-rate pull-up", readings[:1])
-    if structured_output_selected():
-        output_single(
-            {
-                "applied": sample_rate_pullup_label(device.sample_rate_pullup_raw_value),
-                "applied_raw_value": device.sample_rate_pullup_raw_value,
-                "requested": sample_rate_pullup_label(device.requested_sample_rate_pullup_raw_value),
-                "requested_raw_value": device.requested_sample_rate_pullup_raw_value,
-                "supported": True,
-                "supported_raw_values": device.supported_sample_rate_pullup_raw_values,
-            }
-        )
-        return
-    output_single(sample_rate_pullup_label(device.sample_rate_pullup_raw_value))
-
-
-async def run_sample_rate_pullup(application, devices, selection: str | None, all_devices: bool) -> None:
-    targets = select_device(filter_devices(devices), allow_many=all_devices)
-
+async def run_sample_rate_pullup(devices, selection: str | None, all_devices: bool) -> None:
+    targets = _targets(devices, all_devices)
     if selection is None:
-        await _render_sample_rate_pullup(application, targets, all_devices)
+        if all_devices:
+            output_table(
+                ["Name", "Applied", "Requested", "Supported"],
+                [
+                    [
+                        device.name or server_name,
+                        sample_rate_pullup_label(device.sample_rate_pullup_raw_value),
+                        sample_rate_pullup_label(device.requested_sample_rate_pullup_raw_value),
+                        format_supported_sample_rate_pullup_values(device.supported_sample_rate_pullup_raw_values),
+                    ]
+                    for server_name, device in targets
+                ],
+            )
+            return
+        device = targets[0][1]
+        if structured_output_selected():
+            output_single(
+                {
+                    "applied": sample_rate_pullup_label(device.sample_rate_pullup_raw_value),
+                    "applied_raw_value": device.sample_rate_pullup_raw_value,
+                    "requested": sample_rate_pullup_label(device.requested_sample_rate_pullup_raw_value),
+                    "requested_raw_value": device.requested_sample_rate_pullup_raw_value,
+                    "supported": device.sample_rate_pullup_configuration_supported,
+                    "supported_raw_values": device.supported_sample_rate_pullup_raw_values,
+                }
+            )
+            return
+        output_single(sample_rate_pullup_label(device.sample_rate_pullup_raw_value))
         return
 
-    try:
-        raw_value = parse_sample_rate_pullup_selection(selection)
-    except ValueError as exception:
-        typer.echo(f"Error: {exception}.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    for server_name, device in targets:
-        if device.supported_sample_rate_pullup_raw_values is None:
-            try:
-                await read_audio_capability(application, device, "sample_rate_pullup")
-            except MUTATION_ERRORS as exception:
-                typer.echo(
-                    f"Error: sample-rate pull-up capabilities are unavailable for {device.name or server_name}: "
-                    f"{exception}",
-                    err=True,
-                )
-                raise typer.Exit(code=ExitCode.ERROR)
-
-    supported_targets, capability_failures = _targets_supporting_value(
+    await change_devices(
         targets,
-        raw_value,
-        "supported_sample_rate_pullup_raw_values",
-        (),
-        "sample-rate pull-up",
+        "/set-sample-rate-pullup",
+        {"value": selection},
+        lambda label: f"Set sample-rate pull-up for {label}: {selection}",
     )
-    if not supported_targets:
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    failures = await _send_verified_change(
-        supported_targets,
-        lambda device: application.set_sample_rate_pullup(device, raw_value),
-        raw_value,
-        "sample-rate pull-up change",
-        lambda label: f"Set sample-rate pull-up for {label}: {sample_rate_pullup_label(raw_value)}",
-    )
-    if failures + capability_failures:
-        raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command("sample-rate-pullup")
@@ -456,61 +277,112 @@ def sample_rate_pullup(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set sample-rate pull-up/down."""
-    run_command(run_sample_rate_pullup, selection, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_sample_rate_pullup, selection, all_devices)
 
 
-async def run_encoding(application, devices, bits: int | None, all_devices: bool) -> None:
-    targets = select_device(filter_devices(devices), allow_many=all_devices)
-
+async def run_encoding(devices, bits: int | None, all_devices: bool) -> None:
+    targets = _targets(devices, all_devices)
     if bits is None:
-        if all_devices:
-            output_table(
-                ["Name", "Encoding"],
-                [
-                    [device.name or server_name, device.encoding if device.encoding is not None else "N/A"]
-                    for server_name, device in targets
-                ],
-            )
-        else:
-            encoding_value = targets[0][1].encoding
-            output_value(
-                "Encoding",
-                "encoding_bits",
-                encoding_value,
-                f"{encoding_value}-bit" if encoding_value is not None else "N/A",
-            )
+        _show(
+            targets,
+            all_devices,
+            "Encoding",
+            "encoding_bits",
+            lambda device: device.encoding,
+            lambda value: f"{value}-bit" if value is not None else "N/A",
+        )
         return
-
-    if bits <= 0 or bits > 0xFFFFFFFF:
-        typer.echo("Error: encoding value must be between 1 and 4294967295.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    supported_targets, capability_failures = _targets_supporting_value(
+    await change_devices(
         targets,
-        bits,
-        "supported_encodings",
-        VALID_ENCODINGS,
-        "encoding",
-    )
-
-    failures = await _send_verified_change(
-        supported_targets,
-        lambda device: application.set_encoding(device, bits),
-        bits,
-        "encoding change",
+        "/set-encoding",
+        {"encoding": bits},
         lambda label: f"Set encoding for {label}: {bits}-bit",
     )
-    if failures + capability_failures:
-        raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command()
 def encoding(
-    bits: Optional[int] = typer.Argument(None, help=f"Encoding bit depth: {VALID_ENCODINGS}"),
+    bits: Optional[int] = typer.Argument(None, help="Encoding bit depth."),
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set the encoding bit depth."""
-    run_command(run_encoding, bits, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_encoding, bits, all_devices)
+
+
+def _latency_values(device) -> dict:
+    return {
+        "active_latency_ms": device.active_latency,
+        "configured_latency_ms": device.configured_latency,
+        "default_latency_ms": device.default_latency,
+        "min_latency_ms": device.min_latency,
+        "max_latency_ms": device.max_latency,
+        "latency_options_ms": device.standard_latency_choices,
+    }
+
+
+def _latency_range(values: dict) -> str:
+    if values["min_latency_ms"] is None or values["max_latency_ms"] is None:
+        return "unknown"
+    return f"{values['min_latency_ms']:g}-{values['max_latency_ms']:g}"
+
+
+def _latency_choices(values: dict) -> str:
+    choices = values["latency_options_ms"]
+    if choices is None:
+        return "unknown"
+    return ", ".join(f"{choice:g}" for choice in choices) or "none"
+
+
+async def run_latency(devices, value: float | None, all_devices: bool) -> None:
+    targets = _targets(devices, all_devices)
+    if value is None:
+        readings = {server_name: _latency_values(device) for server_name, device in targets}
+        if all_devices:
+            output_table(
+                ["Name", "Active (ms)", "Configured (ms)", "Default (ms)", "Reported range (ms)", "Choices (ms)"],
+                [
+                    [
+                        device.name or server_name,
+                        _number(readings[server_name]["active_latency_ms"]),
+                        _number(readings[server_name]["configured_latency_ms"]),
+                        _number(readings[server_name]["default_latency_ms"]),
+                        _latency_range(readings[server_name]),
+                        _latency_choices(readings[server_name]),
+                    ]
+                    for server_name, device in targets
+                ],
+                json_data={
+                    server_name: {"name": device.name or server_name, **readings[server_name]}
+                    for server_name, device in targets
+                },
+            )
+            return
+        values = readings[targets[0][0]]
+        if structured_output_selected():
+            output_single(values)
+            return
+        output_single(
+            "\n".join(
+                [
+                    f"Active latency: {_number(values['active_latency_ms'])} ms",
+                    f"Configured latency: {_number(values['configured_latency_ms'])} ms",
+                    f"Default latency: {_number(values['default_latency_ms'])} ms",
+                    f"Reported latency range: {_latency_range(values)} ms",
+                    f"Latency options: {_latency_choices(values)} ms",
+                ]
+            )
+        )
+        return
+
+    if not math.isfinite(value) or value < 0:
+        typer.echo("Error: latency must be a finite, nonnegative number.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+    await change_devices(
+        targets,
+        "/set-latency",
+        {"latency": value},
+        lambda label: f"Set configured latency for {label}: {value:g} ms",
+    )
 
 
 @app.command()
@@ -519,7 +391,27 @@ def latency(
     all_devices: bool = typer.Option(False, "--all", help="Read or apply to all devices."),
 ):
     """Get the complete device latency state or set and verify latency."""
-    run_command(run_latency, value, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_latency, value, all_devices)
+
+
+async def run_performance(devices, path: str, body: dict, all_devices: bool) -> None:
+    rows = []
+    results = {}
+    failed = False
+    for server_name, device in _targets(devices, all_devices):
+        label = device.name or server_name
+        status, result = await ask_daemon("POST", path, {"device": server_name, **body})
+        results[server_name] = result
+        state = (result or {}).get("state")
+        if state is None:
+            failed = True
+            rows.append([label, "Failed", str(DaemonRefusal(status, result))])
+            continue
+        failed = failed or status not in (200, 202)
+        rows.append([label, state.replace("_", " ").capitalize(), result.get("message", "")])
+    output_table(["Device", "Result", "Detail"], rows, json_data=results)
+    if failed:
+        raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command("receive-flow-performance")
@@ -529,12 +421,11 @@ def receive_flow_performance(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
 ):
     """Set and verify receive-flow latency and frames per packet."""
-    run_command(
-        run_receive_flow_performance,
-        latency_microseconds,
-        frames_per_packet,
+    run_with_devices(
+        run_performance,
+        "/set-receive-flow-performance",
+        {"latency_microseconds": latency_microseconds, "frames_per_packet": frames_per_packet},
         all_devices,
-        device_identifiers=selected_device_identifiers(),
     )
 
 
@@ -545,12 +436,11 @@ def transmit_flow_performance(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
 ):
     """Set and verify transmit-flow latency and frames per packet."""
-    run_command(
-        run_transmit_flow_performance,
-        latency_microseconds,
-        frames_per_packet,
+    run_with_devices(
+        run_performance,
+        "/set-transmit-flow-performance",
+        {"latency_microseconds": latency_microseconds, "frames_per_packet": frames_per_packet},
         all_devices,
-        device_identifiers=selected_device_identifiers(),
     )
 
 
@@ -561,12 +451,11 @@ def unicast_performance(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
 ):
     """Set and verify the unicast properties advertised by each device."""
-    run_command(
-        run_unicast_performance,
-        latency_microseconds,
-        frames_per_packet,
+    run_with_devices(
+        run_performance,
+        "/set-unicast-performance",
+        {"latency_microseconds": latency_microseconds, "frames_per_packet": frames_per_packet},
         all_devices,
-        device_identifiers=selected_device_identifiers(),
     )
 
 
@@ -576,7 +465,7 @@ def receive_flow_default_slots(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
 ):
     """Set and verify the default receive-flow slot count."""
-    run_command(run_receive_flow_default_slots, slots, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_performance, "/set-receive-flow-default-slots", {"default_slots": slots}, all_devices)
 
 
 @app.command("store-current-configuration")
@@ -584,91 +473,43 @@ def store_current_configuration(
     all_devices: bool = typer.Option(False, "--all", help="Request storage on all selected devices."),
 ):
     """Request storage without claiming persistence confirmation."""
-    run_command(run_store_current_configuration, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_performance, "/store-current-configuration", {}, all_devices)
 
 
-def _aes67_state_label(value):
-    if value is None:
-        return "N/A"
-    return "on" if value else "off"
-
-
-def _aes67_support_label(value):
-    if value is None:
-        return "unknown"
-    return "yes" if value else "no"
-
-
-def _aes67_reboot_required(device):
-    if device.aes67_current is not None and device.aes67_configured is not None:
-        return device.aes67_current != device.aes67_configured
-    return False
-
-
-async def _set_aes67_multicast_prefix(application, targets, multicast_prefix: str) -> None:
-    try:
-        requested_multicast_prefix = str(ipaddress.IPv4Address(multicast_prefix))
-    except (ipaddress.AddressValueError, ValueError):
-        typer.echo("Error: AES67 multicast prefix must be an IPv4 address.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-    prefix_targets = []
-    capability_failures = 0
-    for server_name, device in targets:
-        if not _device_advertises_aes67_multicast_prefix(device):
-            typer.echo(
-                f"Error: {device.name or server_name} does not advertise an AES67 multicast prefix.",
-                err=True,
-            )
-            capability_failures += 1
-        else:
-            prefix_targets.append((server_name, device))
-    failures = await _send_verified_change(
-        prefix_targets,
-        lambda device: application.set_aes67_multicast_prefix(device, requested_multicast_prefix),
-        requested_multicast_prefix,
-        "AES67 multicast prefix change",
-        lambda label: f"Set AES67 multicast prefix for {label}: {requested_multicast_prefix}",
-        read_for=lambda device: _read_aes67_multicast_prefix(application, device),
+def _aes67_reboot_required(device) -> bool:
+    return (
+        device.aes67_current is not None
+        and device.aes67_configured is not None
+        and device.aes67_current != device.aes67_configured
     )
-    if failures + capability_failures:
-        raise typer.Exit(code=ExitCode.ERROR)
 
 
-async def _render_aes67(application, targets, all_devices: bool) -> None:
+def _show_aes67(targets, all_devices: bool) -> None:
     if all_devices:
-        headers = ["Name", "Supported", "Current", "Configured", "Multicast Prefix", "Reboot Required"]
-        rows = [
+        output_table(
+            ["Name", "Supported", "Current", "Configured", "Multicast Prefix", "Reboot Required"],
             [
-                device.name or server_name,
-                _aes67_support_label(device.aes67_configuration_supported),
-                _aes67_state_label(device.aes67_current),
-                _aes67_state_label(device.aes67_configured),
-                device.aes67_multicast_prefix or "",
-                "yes" if _aes67_reboot_required(device) else "no",
-            ]
-            for server_name, device in targets
-        ]
-        output_table(headers, rows)
+                [
+                    device.name or server_name,
+                    {None: "unknown", True: "yes", False: "no"}[device.aes67_configuration_supported],
+                    _state_label(device.aes67_current),
+                    _state_label(device.aes67_configured),
+                    device.aes67_multicast_prefix or "",
+                    "yes" if _aes67_reboot_required(device) else "no",
+                ]
+                for server_name, device in targets
+            ],
+        )
         return
-    server_name, device = targets[0]
+    device = targets[0][1]
     if device.aes67_configuration_supported is False:
         output_single("unsupported")
         return
-    if device.aes67_multicast_prefix is None:
-        try:
-            await application.get_aes67_configured(device)
-        except MUTATION_ERRORS as exception:
-            typer.echo(
-                f"Warning: could not read AES67 configuration from {device.name or server_name}: {exception}",
-                err=True,
-            )
-    current_label = _aes67_state_label(device.aes67_current)
-    configured_label = _aes67_state_label(device.aes67_configured)
     if structured_output_selected():
         output_single(
             {
-                "configured": configured_label,
-                "current": current_label,
+                "configured": _state_label(device.aes67_configured),
+                "current": _state_label(device.aes67_current),
                 "multicast_prefix": device.aes67_multicast_prefix,
                 "reboot_required": _aes67_reboot_required(device),
                 "configuration_supported": device.aes67_configuration_supported,
@@ -677,67 +518,34 @@ async def _render_aes67(application, targets, all_devices: bool) -> None:
         return
     if device.aes67_multicast_prefix:
         typer.echo(f"multicast prefix: {device.aes67_multicast_prefix}")
-    if device.aes67_current is None and device.aes67_configured is not None:
-        output_single(configured_label)
-    elif device.aes67_current is not None and device.aes67_current == device.aes67_configured:
-        output_single(current_label)
-    elif device.aes67_current is None and device.aes67_configured is None:
-        output_single("N/A")
-    else:
-        typer.echo(f"current: {current_label}", err=False)
-        typer.echo(f"configured: {configured_label}", err=False)
-        if _aes67_reboot_required(device):
-            typer.echo("reboot required", err=True)
-
-
-async def run_aes67(
-    application,
-    devices,
-    enabled: str | None,
-    multicast_prefix: str | None,
-    all_devices: bool,
-) -> None:
-    if enabled is not None:
-        enabled = enabled.lower()
-
-        if enabled not in ("on", "off"):
-            typer.echo("Error: expected 'on' or 'off'.", err=True)
-            raise typer.Exit(code=ExitCode.ERROR)
-
-    targets = select_device(filter_devices(devices), allow_many=all_devices)
-
-    if multicast_prefix is not None:
-        await _set_aes67_multicast_prefix(application, targets, multicast_prefix)
-        if enabled is None:
-            return
-
-    if enabled is None:
-        await _render_aes67(application, targets, all_devices)
+    if _aes67_reboot_required(device):
+        typer.echo(f"current: {_state_label(device.aes67_current)}")
+        typer.echo(f"configured: {_state_label(device.aes67_configured)}")
+        typer.echo("reboot required", err=True)
         return
+    known = device.aes67_configured if device.aes67_current is None else device.aes67_current
+    output_single(_state_label(known))
 
-    is_enabled = enabled == "on"
-    supported_targets = []
-    capability_failures = 0
-    for server_name, device in targets:
-        if device.aes67_configuration_supported is False:
-            typer.echo(
-                f"Error: {device.name or server_name} does not support AES67 configuration.",
-                err=True,
-            )
-            capability_failures += 1
-        else:
-            supported_targets.append((server_name, device))
 
-    failures = await _send_verified_change(
-        supported_targets,
-        lambda device: application.set_aes67_enabled(device, is_enabled),
-        is_enabled,
-        "AES67 configuration change",
-        lambda label: f"Set AES67 configured state for {label}: {enabled}",
-        read_for=lambda device: _read_aes67_configured(application, device),
-    )
-    if failures + capability_failures:
-        raise typer.Exit(code=ExitCode.ERROR)
+async def run_aes67(devices, enabled: str | None, multicast_prefix: str | None, all_devices: bool) -> None:
+    is_enabled = None if enabled is None else _switch(enabled)
+    targets = _targets(devices, all_devices)
+    if multicast_prefix is not None:
+        await change_devices(
+            targets,
+            "/set-aes67-multicast-prefix",
+            {"prefix": multicast_prefix},
+            lambda label: f"Set AES67 multicast prefix for {label}: {multicast_prefix}",
+        )
+    if is_enabled is not None:
+        await change_devices(
+            targets,
+            "/set-aes67",
+            {"enabled": is_enabled},
+            lambda label: f"Set AES67 configured state for {label}: {_state_label(is_enabled)}",
+        )
+    if is_enabled is None and multicast_prefix is None:
+        _show_aes67(targets, all_devices)
 
 
 @app.command()
@@ -751,42 +559,28 @@ def aes67(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set AES67 mode."""
-    run_command(run_aes67, enabled, multicast_prefix, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_aes67, enabled, multicast_prefix, all_devices)
 
 
-def _preferred_leader_label(device) -> str:
-    if device.preferred_leader is None:
-        return "N/A"
-    return "on" if device.preferred_leader else "off"
-
-
-async def run_preferred_leader(application, devices, enabled: str | None, all_devices: bool) -> None:
-    targets = select_device(filter_devices(devices), allow_many=all_devices)
-
+async def run_preferred_leader(devices, enabled: str | None, all_devices: bool) -> None:
+    targets = _targets(devices, all_devices)
     if enabled is None:
-        if all_devices:
-            output_table(
-                ["Name", "Preferred Leader"],
-                [[device.name or server_name, _preferred_leader_label(device)] for server_name, device in targets],
-            )
-        else:
-            preferred = targets[0][1].preferred_leader
-            output_value("Preferred leader", "preferred_leader", preferred, _preferred_leader_label(targets[0][1]))
+        _show(
+            targets,
+            all_devices,
+            "Preferred leader",
+            "preferred_leader",
+            lambda device: device.preferred_leader,
+            _state_label,
+        )
         return
-
-    if enabled.lower() not in ("on", "off"):
-        typer.echo("Error: expected 'on' or 'off'.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    is_preferred = enabled.lower() == "on"
-    failures = await _send_requested_change(
+    preferred = _switch(enabled)
+    await change_devices(
         targets,
-        lambda device: application.set_preferred_leader(device, is_preferred),
-        "preferred leader change",
-        lambda label: f"Preferred leader {enabled.lower()} confirmed for {label}.",
+        "/set-preferred-leader",
+        {"preferred": preferred},
+        lambda label: f"Preferred leader {_state_label(preferred)} confirmed for {label}.",
     )
-    if failures:
-        raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command("preferred-leader")
@@ -795,61 +589,32 @@ def preferred_leader(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set preferred leader mode."""
-    run_command(run_preferred_leader, enabled, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_preferred_leader, enabled, all_devices)
 
 
-async def _read_clock_subdomain(application, device):
-    parsed = await application.probe_clocking_status(device)
-    clock_subdomain = parsed.get("clock_subdomain")
-    if clock_subdomain is None:
-        raise RuntimeError("clock subdomain readback was unavailable")
-    return bytes(clock_subdomain)
-
-
-async def _read_clock_source(application, device):
-    parsed = await application.probe_clocking_status(device)
-    clock_source = parsed.get("clock_source_code")
-    if clock_source is None:
-        raise RuntimeError("clock source readback was unavailable")
-    return clock_source
-
-
-async def run_clock_source(application, devices, selection: str | None, all_devices: bool) -> None:
-    targets = select_device(filter_devices(devices), allow_many=all_devices)
-
+async def run_clock_source(devices, selection: str | None, all_devices: bool) -> None:
+    targets = _targets(devices, all_devices)
     if selection is None:
-
-        async def _read_target(server_name, device):
-            if device.clock_source_code is None:
-                await _read_clock_source(application, device)
-
-        await _render_cached_reading(
+        _show(
             targets,
             all_devices,
-            "clock source",
-            "Clock Source",
-            _read_target,
+            "Clock source",
+            "clock_source",
             lambda device: format_clock_source_code(device.clock_source_code),
-            lambda device: {"clock_source": format_clock_source_code(device.clock_source_code)},
+            str,
         )
         return
-
     try:
-        requested_source = parse_clock_source_selection(selection)
-    except ValueError as exception:
-        typer.echo(f"Error: {exception}.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    failures = await _send_verified_change(
+        source = int(selection, 0)
+    except ValueError:
+        typer.echo("Error: clock source must be a decimal or hexadecimal code.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR) from None
+    await change_devices(
         targets,
-        lambda device: application.set_clock_source(device, requested_source),
-        requested_source,
-        "clock source change",
-        lambda label: f"Set clock source for {label}: {format_clock_source_code(requested_source)}",
-        read_for=lambda device: _read_clock_source(application, device),
+        "/set-clock-source",
+        {"clock_source": source},
+        lambda label: f"Set clock source for {label}: {format_clock_source_code(source)}",
     )
-    if failures:
-        raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command("clock-source")
@@ -858,50 +623,27 @@ def clock_source(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set the device's raw clock-source code."""
-    run_command(run_clock_source, selection, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_clock_source, selection, all_devices)
 
 
-async def run_clock_subdomain(application, devices, selection: str | None, all_devices: bool) -> None:
-    targets = select_device(filter_devices(devices), allow_many=all_devices)
-
+async def run_clock_subdomain(devices, selection: str | None, all_devices: bool) -> None:
+    targets = _targets(devices, all_devices)
     if selection is None:
-
-        async def _read_target(server_name, device):
-            if device.clock_subdomain is None:
-                await _read_clock_subdomain(application, device)
-
-        await _render_cached_reading(
+        _show(
             targets,
             all_devices,
-            "clock subdomain",
-            "Clock Subdomain",
-            _read_target,
-            lambda device: format_clock_subdomain(device.clock_subdomain),
-            lambda device: {
-                "clock_subdomain": (
-                    None if device.clock_subdomain is None else format_clock_subdomain(device.clock_subdomain)
-                ),
-                "clock_subdomain_bytes": None if device.clock_subdomain is None else list(device.clock_subdomain),
-            },
+            "Clock subdomain",
+            "clock_subdomain",
+            lambda device: None if device.clock_subdomain is None else format_clock_subdomain(device.clock_subdomain),
+            lambda value: "N/A" if value is None else value,
         )
         return
-
-    try:
-        requested_subdomain = parse_clock_subdomain_selection(selection)
-    except ValueError as exception:
-        typer.echo(f"Error: {exception}.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    failures = await _send_verified_change(
+    await change_devices(
         targets,
-        lambda device: application.set_clock_subdomain(device, requested_subdomain),
-        requested_subdomain,
-        "clock subdomain change",
-        lambda label: f"Set clock subdomain for {label}: {format_clock_subdomain(requested_subdomain)}",
-        read_for=lambda device: _read_clock_subdomain(application, device),
+        "/set-clock-subdomain",
+        {"subdomain": selection},
+        lambda label: f"Set clock subdomain for {label}: {selection}",
     )
-    if failures:
-        raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command("clock-subdomain")
@@ -913,28 +655,141 @@ def clock_subdomain(
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set the PTP subdomain name."""
-    run_command(run_clock_subdomain, selection, all_devices, device_identifiers=selected_device_identifiers())
+    run_with_devices(run_clock_subdomain, selection, all_devices)
 
 
-from netaudio.commands.config.interface import interface
-from netaudio.commands.config.redundancy import redundancy
-
-app.command("interface")(interface)
-app.command("redundancy")(redundancy)
+INTERFACE_HEADERS = ["Name", "Interface", "State", "Mode", "IP Address", "Netmask", "Gateway", "DNS", "Reboot Required"]
 
 
-async def run_clock_configuration(application, devices, changes, control_profile, preview):
-    from netaudio.monitoring.model import _json_safe
+def _interface_rows(label: str, interfaces: list) -> list[list[str]]:
+    rows = []
+    for entry in interfaces:
+        for state, configuration in (("Active", entry), ("Configured", entry.get("configured"))):
+            if configuration is None:
+                continue
+            rows.append(
+                [
+                    label,
+                    (entry.get("interface") or "unknown").capitalize(),
+                    state,
+                    {"dynamic": "DHCP", "static": "Static"}.get(configuration.get("mode"), "Unknown"),
+                    *[configuration.get(key) or "" for key in ("ip_address", "netmask", "gateway", "dns_server")],
+                    "yes" if entry.get("reboot_required") else "no",
+                ]
+            )
+    return rows
 
-    application.verify_mutations = True
 
-    _, device = select_device(filter_devices(devices))[0]
-    if preview:
-        result = await application.preview_clock_configuration(device, changes, control_profile=control_profile)
-    else:
-        result = await application.set_clock_configuration(device, changes, control_profile=control_profile)
-    output_single(_json_safe(result))
-    if not preview and not result["effective_state_confirmed"]:
+async def run_interface(devices, change: dict | None, all_devices: bool) -> None:
+    rows = []
+    results = {}
+    failed = False
+    for server_name, device in _targets(devices, all_devices or change is None):
+        label = device.name or server_name
+        try:
+            if change is None:
+                result = await call_daemon("GET", f"/interfaces/{server_name}")
+            else:
+                result = await call_daemon("POST", "/interface", {"device": server_name, **change})
+                typer.echo(f"Configured {change['interface']} interface on {label}. No reboot sent.", err=True)
+        except DaemonRefusal as refusal:
+            failed = True
+            typer.echo(f"Error: {label}: {refusal}", err=True)
+            continue
+        results[server_name] = result
+        rows.extend(_interface_rows(label, result.get("interfaces") or []))
+    output_table(INTERFACE_HEADERS, rows, json_data=results)
+    if failed:
+        raise typer.Exit(code=ExitCode.ERROR)
+
+
+@app.command("interface")
+def interface(
+    mode: Optional[str] = typer.Argument(None, help="dhcp or static"),
+    ip_address: Optional[str] = typer.Option(None, "--ip", help="IP address (static only)."),
+    netmask: Optional[str] = typer.Option(None, "--netmask", help="Subnet mask (static only)."),
+    dns_server: Optional[str] = typer.Option(None, "--dns", help="DNS server (static only)."),
+    gateway: Optional[str] = typer.Option(None, "--gateway", help="Gateway (static only)."),
+    all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
+    interface: str = typer.Option("primary", "--interface", help="Target primary or secondary interface."),
+):
+    """Read active/configured network settings or set and verify an interface."""
+    change = None
+    if mode is not None:
+        addresses = {"ip": ip_address, "netmask": netmask, "dns": dns_server, "gateway": gateway}
+        change = {
+            "mode": mode,
+            "interface": interface,
+            **{key: value for key, value in addresses.items() if value is not None},
+        }
+    run_with_devices(run_interface, change, all_devices)
+
+
+def _redundancy_label(mode) -> str:
+    return {"switched": "Switched", "redundant": "Redundant", "split_redundant": "Split/Redundant"}.get(mode, "Unknown")
+
+
+async def run_redundancy(devices, mode: str | None, all_devices: bool) -> None:
+    rows = []
+    results = {}
+    failed = False
+    for server_name, device in _targets(devices, all_devices):
+        label = device.name or server_name
+        try:
+            if mode is None:
+                result = await call_daemon("GET", f"/redundancy/{server_name}")
+            else:
+                result = await call_daemon("POST", "/redundancy", {"device": server_name, "mode": mode})
+                typer.echo(f"Configured Dante redundancy on {label}. No reboot sent.", err=True)
+        except DaemonRefusal as refusal:
+            failed = True
+            results[server_name] = refusal.data
+            typer.echo(f"Error: {label}: {refusal}", err=True)
+            continue
+        results[server_name] = result
+        status = result["redundancy"]
+        availability = status["operation_availability"]
+        rows.append(
+            [
+                label,
+                {True: "supported", False: "unsupported", None: "unknown"}[status.get("advertised_support")],
+                _redundancy_label(status.get("current_mode")),
+                _redundancy_label(status.get("configured_mode")),
+                ", ".join(_redundancy_label(choice.get("mode")) for choice in status.get("available_modes") or []),
+                "yes" if availability["writable"] else ", ".join(availability["reasons"]),
+                "yes" if status["reboot_required"] else "no",
+            ]
+        )
+    output_table(
+        ["Device", "Capability", "Active", "Configured", "Available Modes", "Writable", "Reboot Required"],
+        rows,
+        json_data=results,
+    )
+    if failed:
+        raise typer.Exit(code=ExitCode.ERROR)
+
+
+@app.command("redundancy")
+def redundancy(
+    mode: Optional[str] = typer.Argument(None, help="switched, redundant, or split_redundant"),
+    all_devices: bool = typer.Option(False, "--all", help="Read or apply to all devices."),
+):
+    """Read or set and verify Dante Redundancy. Does not reboot devices."""
+    run_with_devices(run_redundancy, mode, all_devices)
+
+
+CLOCK_CONTROL_PROFILES = {"current": 1850, "legacy": 1844}
+
+
+async def run_clock_configuration(devices, changes: dict, control_profile: int) -> None:
+    [(server_name, _)] = select_device(filter_devices(devices))
+    status, result = await ask_daemon(
+        "POST",
+        "/set-clock-configuration",
+        {"device": server_name, "changes": changes, "control_profile": control_profile},
+    )
+    output_single(result)
+    if status != 200 or not result.get("effective_state_confirmed"):
         raise typer.Exit(code=ExitCode.ERROR)
 
 
@@ -962,14 +817,10 @@ def clock_configuration(
     settings: Optional[str] = typer.Option(
         None, "--settings", help="Typed clock changes as a JSON object, including per-port settings."
     ),
-    preview: bool = typer.Option(False, "--preview", help="Read current state and show changes without writing."),
 ):
     """Apply clock settings together and confirm them with fresh readback."""
-    from netaudio.core._protocols import CLOCK_CONTROL_PROFILES
-
     if profile not in CLOCK_CONTROL_PROFILES:
         raise typer.BadParameter("Profile must be current or legacy.")
-    control_profile = CLOCK_CONTROL_PROFILES[profile]
     changes = {
         key: value
         for key, value in {
@@ -987,11 +838,9 @@ def clock_configuration(
         if value is not None
     }
     if settings is not None:
-        import json
-
         extra = json.loads(settings)
         if not isinstance(extra, dict) or changes.keys() & extra.keys():
             raise typer.BadParameter("Settings must be an object without duplicate command-line fields.")
         changes.update(extra)
 
-    run_command(run_clock_configuration, changes, control_profile, preview)
+    run_with_devices(run_clock_configuration, changes, CLOCK_CONTROL_PROFILES[profile])

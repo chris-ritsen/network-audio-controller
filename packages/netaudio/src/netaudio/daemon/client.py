@@ -44,7 +44,8 @@ class DaemonRefusal(RuntimeError):
     def __init__(self, status: int, data) -> None:
         self.status = status
         self.data = data
-        detail = data.get("error") if isinstance(data, dict) else None
+        details = [data.get(key) for key in ("error", "message", "readback_error")] if isinstance(data, dict) else []
+        detail = next((detail for detail in details if detail), None)
         super().__init__(str(detail) if detail else f"the NetAudio daemon answered with status {status}")
 
 
@@ -134,9 +135,11 @@ async def get_devices_from_daemon(context: str | None = None) -> dict[str, Dante
     if status != 200 or data is None:
         return None
 
-    devices = {
-        server_name: DanteDeviceSerializer.device_from_json(device_json) for server_name, device_json in data.items()
-    }
+    devices = {}
+    for server_name, record in data.items():
+        device = DanteDeviceSerializer.device_from_json(record)
+        device.record = record
+        devices[server_name] = device
     logger.info(f"Daemon: {len(devices)} devices")
     return devices
 
