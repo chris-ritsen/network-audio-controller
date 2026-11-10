@@ -266,8 +266,8 @@ command: `-n` matches names (including quoted patterns such as `'avio-*'`),
 `-s` matches server names, `-m` matches MAC addresses, and `--host` selects an
 IP address.
 
-Commands that change a device send the change and return. Add `--verify`
-before the command to wait until a fresh readback confirms it.
+The CLI uses a running daemon when there is one. Without a daemon, each command
+starts the same engine for as long as the command runs.
 
 ### Channels and routing
 
@@ -378,9 +378,8 @@ Run the shared local/CI checks for the current host, using installed dependencie
 make check-local
 ```
 
-This incrementally builds the Rust core, selects that library for Python tests,
-and checks the native ABI, generated interfaces, formatting, lint, types, Rust
-tests, Python tests, and web unit tests. The run has a five-minute total limit.
+This incrementally builds the Rust core and checks the native ABI, generated
+interfaces, formatting, lint and types. The run has a five-minute total limit.
 Its printed report path contains results, per-check logs, source identity, and
 the tested library digest. Failed checks stop the run; timeouts are incomplete.
 
@@ -388,7 +387,7 @@ Run only source-quality/native checks or select another check group:
 
 ```bash
 make quality
-.venv/bin/python scripts/check_project.py --scope python --offline
+.venv/bin/python scripts/check_project.py --scope native --offline
 .venv/bin/python scripts/check_project.py --scope webapp --offline
 ```
 

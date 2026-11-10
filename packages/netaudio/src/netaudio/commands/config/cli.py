@@ -782,14 +782,22 @@ CLOCK_CONTROL_PROFILES = {"current": 1850, "legacy": 1844}
 
 
 async def run_clock_configuration(devices, changes: dict, control_profile: int) -> None:
-    [(server_name, _)] = select_device(filter_devices(devices))
+    [(server_name, device)] = select_device(filter_devices(devices))
     status, result = await ask_daemon(
         "POST",
         "/set-clock-configuration",
         {"device": server_name, "changes": changes, "control_profile": control_profile},
     )
-    output_single(result)
-    if status != 200 or not result.get("effective_state_confirmed"):
+    result = result if isinstance(result, dict) else {}
+    confirmed = status == 200 and bool(result.get("effective_state_confirmed"))
+    if structured_output_selected():
+        output_single(result)
+    elif confirmed:
+        settings = ", ".join(key.replace("_", " ") for key in sorted(changes))
+        typer.echo(f"Set clock settings for {device.name or server_name}: {settings} (confirmed)")
+    else:
+        typer.echo(f"Error: {result.get('error') or 'the device did not confirm the clock settings'}", err=True)
+    if not confirmed:
         raise typer.Exit(code=ExitCode.ERROR)
 
 
@@ -842,5 +850,7 @@ def clock_configuration(
         if not isinstance(extra, dict) or changes.keys() & extra.keys():
             raise typer.BadParameter("Settings must be an object without duplicate command-line fields.")
         changes.update(extra)
+    if not changes:
+        raise typer.BadParameter("Pass at least one clock setting.")
 
     run_with_devices(run_clock_configuration, changes, CLOCK_CONTROL_PROFILES[profile])

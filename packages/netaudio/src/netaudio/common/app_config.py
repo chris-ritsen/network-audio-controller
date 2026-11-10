@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 
 import ifaddr
 
@@ -10,10 +9,8 @@ from netaudio.dante.const import DEFAULT_MULTICAST_METERING_PORT
 
 logger = logging.getLogger("netaudio")
 
-DEFAULT_MDNS_TIMEOUT = 5
 DEFAULT_DAEMON_PORT = 4780
 DEFAULT_INTERFACE = None
-DEFAULT_STALE_DEVICE_MINUTES = 60
 
 
 def get_available_interfaces():
@@ -39,22 +36,11 @@ def configured_daemon_port() -> int:
 
 class AppSettings:
     def __init__(self):
-        self._mdns_timeout: float = DEFAULT_MDNS_TIMEOUT
-        self.dump_payloads: bool = False
         self.debug: bool = False
         self.no_color: bool = False
         self._interface: str = DEFAULT_INTERFACE
-        self.refresh: bool = False
-        self.sap_groups = tuple(
-            group.strip()
-            for group in os.environ.get("NETAUDIO_SAP_GROUPS", "239.255.255.255,224.0.0.56").split(",")
-            if group.strip()
-        )
         self.metering_port: int = int(os.environ.get("NETAUDIO_METERING_PORT", DEFAULT_MULTICAST_METERING_PORT))
         self._daemon_port: int | None = None
-        self.dbus_enabled: bool = os.environ.get("NETAUDIO_DBUS", "").lower() in ("1", "true", "yes")
-        self.lock_state_timeout: float = float(os.environ.get("NETAUDIO_LOCK_STATE_TIMEOUT", 4))
-        self.stale_device_minutes: float = DEFAULT_STALE_DEVICE_MINUTES
         self._device_lock_key: bytes | None = None
         lock_key_value = os.environ.get("NETAUDIO_DEVICE_LOCK_KEY")
         if lock_key_value:
@@ -77,22 +63,6 @@ class AppSettings:
     @device_lock_key.setter
     def device_lock_key(self, value: bytes | None) -> None:
         self._device_lock_key = value
-
-    @property
-    def mdns_timeout(self) -> float:
-        return self._mdns_timeout
-
-    @mdns_timeout.setter
-    def mdns_timeout(self, value: float) -> None:
-        if value > 0:
-            self._mdns_timeout = value
-        else:
-            print(
-                f"Warning: mDNS timeout must be positive. Received {value}. Using default {DEFAULT_MDNS_TIMEOUT}s instead.",
-                file=sys.stderr,
-            )
-
-            self._mdns_timeout = DEFAULT_MDNS_TIMEOUT
 
     @property
     def interface(self) -> str:

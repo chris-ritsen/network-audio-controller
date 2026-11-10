@@ -7,7 +7,6 @@ from enum import Enum
 from typing import Optional
 
 import typer
-from click.core import ParameterSource
 
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS, NetaudioGroup
@@ -74,10 +73,7 @@ class State:
     sort_field: str = "mac"
     sort_reverse: bool = False
     no_color: bool = False
-    timeout: float = 5.0
-    timeout_explicit: bool = False
     verbose: bool = False
-    verify: bool = False
     capture: bool = False
     dissect: bool = False
     icons: bool = False
@@ -148,21 +144,6 @@ def _global_options(
         envvar="NETAUDIO_SORT",
     ),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output.", envvar="NETAUDIO_NO_COLOR"),
-    timeout: float = typer.Option(
-        5.0, "--timeout", help="mDNS discovery timeout in seconds.", envvar="NETAUDIO_TIMEOUT"
-    ),
-    verify: bool = typer.Option(
-        False,
-        "--verify",
-        help="Wait for each change to be confirmed by a fresh readback instead of sending it and returning.",
-        envvar="NETAUDIO_VERIFY",
-    ),
-    lock_state_timeout: float = typer.Option(
-        4.0,
-        "--lock-state-timeout",
-        help="Lock state collection timeout in seconds.",
-        envvar="NETAUDIO_LOCK_STATE_TIMEOUT",
-    ),
     interface: Optional[str] = typer.Option(
         None,
         "--interface",
@@ -198,10 +179,7 @@ def _global_options(
     state.output_format = OutputFormat.json if json_flag else output_format
     state.sort_field, state.sort_reverse = _parse_sort(sort)
     state.no_color = no_color
-    state.timeout = timeout
-    state.timeout_explicit = ctx.get_parameter_source("timeout") is not ParameterSource.DEFAULT
     state.verbose = verbose
-    state.verify = verify
     state.dissect = dissect
     state.capture = capture
     state.ddm_context = ddm_context
@@ -210,8 +188,6 @@ def _global_options(
         icons = _load_icons_from_config()
     state.icons = icons
 
-    settings.lock_state_timeout = lock_state_timeout
-    settings.mdns_timeout = timeout
     settings.no_color = no_color
 
     if interface:

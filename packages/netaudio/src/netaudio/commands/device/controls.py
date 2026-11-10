@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 import typer
+
 from netaudio.cli_support.execution import run_with_devices
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import filter_devices, select_device
@@ -25,10 +26,10 @@ class Category(str, Enum):
     hdcp = "hdcp"
 
 
-async def _run(devices, action, category=None, value=None, confirm=False):
+async def _run(devices, action: str, category: str = "", value=None, confirm: bool = False):
     [(server_name, _)] = select_device(filter_devices(devices))
-    request = {"device": server_name, "action": action}
-    if category is not None:
+    request: dict[str, Any] = {"device": server_name, "action": action}
+    if category:
         request.update(category=category, requested=value, confirm_clear=confirm)
     status, result = await ask_daemon("POST", "/device-controls", request)
     if action == "inspect":

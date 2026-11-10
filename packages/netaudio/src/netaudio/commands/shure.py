@@ -284,8 +284,9 @@ async def run_associate(shure_selector: str, dante_selector: str) -> None:
     ]
     if len(matches) != 1:
         _fail(f"{dante_selector} did not match exactly one Dante device")
-    _save_correlation(wireless["mac"].lower(), matches[0].mac_address.lower())
-    typer.echo(f"Associated {wireless.get('name') or wireless['mac']} with {matches[0].name}")
+    [dante] = matches
+    _save_correlation(wireless["mac"].lower(), str(dante.mac_address).lower())
+    typer.echo(f"Associated {wireless.get('name') or wireless['mac']} with {dante.name}")
 
 
 @app.command("associate", help="Associate a Shure device with the Dante device that carries its audio.")

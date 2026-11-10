@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+from typing import Any
 from urllib.parse import quote, urlencode
 
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
@@ -56,7 +57,7 @@ async def _connect():
         return None
 
 
-async def _exchange(method: str, path: str, body, timeout: float, *, own_engine: bool = True):
+async def _exchange(method: str, path: str, body, timeout: float, *, own_engine: bool = True) -> tuple[int, Any]:
     connection = await _connect()
     if connection is None and own_engine and engine.port() is None:
         try:
@@ -112,11 +113,11 @@ async def _exchange(method: str, path: str, body, timeout: float, *, own_engine:
             logger.debug(f"Daemon connection close error: {exception}")
 
 
-async def ask_daemon(method: str, path: str, body=None, *, timeout: float = 90.0):
+async def ask_daemon(method: str, path: str, body=None, *, timeout: float = 90.0) -> tuple[int, Any]:
     return await _exchange(method, path, body, timeout)
 
 
-async def call_daemon(method: str, path: str, body=None, *, timeout: float = 90.0):
+async def call_daemon(method: str, path: str, body=None, *, timeout: float = 90.0) -> Any:
     status, data = await _exchange(method, path, body, timeout)
     if status not in (200, 202):
         raise DaemonRefusal(status, data)
