@@ -1,4 +1,4 @@
-use super::{first, problem, subscriptions, text, waiting, Records};
+use super::{first, problem, problem_detail, subscriptions, text, waiting, Records};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -191,8 +191,7 @@ pub fn find_channels(records: &Records, arguments: &Value) -> Value {
                             if let Some(wait) = waiting(&text(&route["tx_device"]), records) {
                                 entry["waiting"] = json!(wait);
                             } else {
-                                entry["problem"] =
-                                    first(&[&route["status"]["detail"], &route["status"]["label"]]);
+                                entry["problem"] = problem_detail(device, route, records);
                             }
                         }
 

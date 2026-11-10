@@ -166,6 +166,54 @@ fn problem(subscription: &Value) -> bool {
     )
 }
 
+fn domain(device: &Value) -> Option<(&Value, String)> {
+    (device["management_state"] == "managed").then(|| {
+        (
+            &device["ddm_domain_id"],
+            text(&first(&[
+                &device["ddm_domain_name"],
+                &device["ddm_domain_id"],
+            ])),
+        )
+    })
+}
+
+fn separation(device: &Value, subscription: &Value, records: &Records) -> Option<String> {
+    if subscription["status"]["status"] != "UNRESOLVED" {
+        return None;
+    }
+    let source = text(&subscription["tx_device"]);
+    let transmitter = resolve(records, &source)
+        .ok()
+        .flatten()
+        .filter(|transmitter| transmitter["online"] != false)?;
+    let receiver = text(&device["name"]);
+    match (domain(transmitter), domain(device)) {
+        (Some((theirs, their_name)), Some((ours, our_name))) if theirs != ours => Some(format!(
+            "{source} is in DDM domain {their_name} and {receiver} is in {our_name}"
+        )),
+        (Some((_, name)), None) => Some(format!(
+            "{source} is in DDM domain {name}, which {receiver} is not in"
+        )),
+        (None, Some((_, name))) => Some(format!(
+            "{receiver} is in DDM domain {name}, which {source} is not in"
+        )),
+        _ => None,
+    }
+}
+
+fn problem_detail(device: &Value, subscription: &Value, records: &Records) -> Value {
+    separation(device, subscription, records).map_or_else(
+        || {
+            first(&[
+                &subscription["status"]["detail"],
+                &subscription["status"]["label"],
+            ])
+        },
+        Value::from,
+    )
+}
+
 fn subscription_problems(device: &Value, records: &Records) -> (Vec<String>, Vec<String>) {
     let mut problems = Vec::new();
     let mut pending = BTreeMap::<String, Vec<Value>>::new();
@@ -200,10 +248,7 @@ fn subscription_problems(device: &Value, records: &Records) -> (Vec<String>, Vec
         problems.push(format!(
             "{receiver} ← {} on {source}: {}",
             text(&subscription["tx_channel"]),
-            text(&first(&[
-                &subscription["status"]["detail"],
-                &subscription["status"]["label"],
-            ])),
+            text(&problem_detail(device, subscription, records)),
         ));
     }
 
@@ -426,7 +471,8 @@ pub fn device_view(
             });
 
             if problem(subscription) && wait.is_none() {
-                view["problem"] = subscription["status"]["detail"].clone();
+                view["problem"] = separation(device, subscription, records)
+                    .map_or_else(|| subscription["status"]["detail"].clone(), Value::from);
             }
 
             view

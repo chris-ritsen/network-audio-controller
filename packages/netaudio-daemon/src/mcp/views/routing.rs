@@ -1,4 +1,6 @@
-use super::{channel_names, compact, last_seen, problem, subscriptions, text, waiting, Records};
+use super::{
+    channel_names, compact, last_seen, problem, separation, subscriptions, text, waiting, Records,
+};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
@@ -62,10 +64,12 @@ pub fn routing_view(records: &Records, arguments: &Value) -> Value {
             } else if problem(subscription) {
                 line.push_str(&format!(": {label}"));
 
-                if let Some(detail) = subscription["status"]["detail"]
-                    .as_str()
-                    .filter(|detail| !detail.is_empty())
-                {
+                if let Some(detail) = separation(device, subscription, records).or_else(|| {
+                    subscription["status"]["detail"]
+                        .as_str()
+                        .filter(|detail| !detail.is_empty())
+                        .map(str::to_owned)
+                }) {
                     line.push_str(&format!(", {detail}"));
                 }
             } else if let Some(kind) = label
