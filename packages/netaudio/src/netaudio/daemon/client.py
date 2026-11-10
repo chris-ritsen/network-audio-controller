@@ -131,14 +131,6 @@ async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.
         return None, None
 
 
-def daemon_is_accessible() -> bool:
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.settimeout(0.5)
-        return probe.connect_ex((DAEMON_HOST, daemon_port())) == 0
-
-
 async def get_devices_from_daemon(context: str | None = None) -> dict[str, Device] | None:
     path = f"/devices?context={quote(context, safe='')}" if context is not None else "/devices"
     status, data = await _daemon_request("GET", path)
@@ -202,11 +194,6 @@ async def clear_event_journal_on_daemon() -> tuple[int | None, dict | None]:
     return status, data if isinstance(data, dict) else None
 
 
-async def append_operation_event_on_daemon(payload: dict) -> tuple[int | None, dict | None]:
-    status, data = await _daemon_request("POST", "/event-journal/operations", payload)
-    return status, data if isinstance(data, dict) else None
-
-
 async def get_issues_from_daemon(
     *,
     device: str | None = None,
@@ -231,49 +218,6 @@ async def get_issues_from_daemon(
     return status, data if isinstance(data, dict) else None
 
 
-async def execute_ddm_graphql_on_daemon(
-    query: str,
-    variables: dict | None = None,
-    operation_name: str | None = None,
-    timeout: float = 30.0,
-    context: str | None = None,
-) -> tuple[int | None, dict | None]:
-    body = {"query": query, "variables": variables or {}}
-    if operation_name is not None:
-        body["operation_name"] = operation_name
-    if context is not None:
-        body["context"] = context
-    status, data = await _daemon_request("POST", "/ddm/graphql", body, timeout=timeout)
-    return status, data if isinstance(data, dict) else None
-
-
-async def get_ddm_devices_from_daemon(context: str | None = None) -> dict | None:
-    path = f"/ddm/devices?context={quote(context, safe='')}" if context is not None else "/ddm/devices"
-    status, data = await _daemon_request("GET", path)
-    return data if status == 200 and isinstance(data, dict) else None
-
-
-async def get_ddm_domains_from_daemon(context: str | None = None) -> list | None:
-    path = f"/ddm/domains?context={quote(context, safe='')}" if context is not None else "/ddm/domains"
-    status, data = await _daemon_request("GET", path)
-    return data if status == 200 and isinstance(data, list) else None
-
-
-async def set_ddm_enrollment_on_daemon(
-    server: str, device_id: str, action: str, domain_id: str | None = None
-) -> tuple[int | None, dict | None]:
-    body = {"server": server, "device_id": device_id, "action": action}
-    if domain_id is not None:
-        body["domain_id"] = domain_id
-    status, data = await _daemon_request("POST", "/ddm/enrollment", body, timeout=60.0)
-    return status, data if isinstance(data, dict) else None
-
-
-async def get_ddm_status_from_daemon() -> dict | None:
-    status, data = await _daemon_request("GET", "/ddm/status")
-    return data if status == 200 and isinstance(data, dict) else None
-
-
 async def get_shure_devices_from_daemon() -> dict | None:
     status, data = await _daemon_request("GET", "/shure/devices")
     if status != 200:
@@ -286,22 +230,9 @@ async def shutdown_daemon() -> bool:
     return status == 200 and bool(data and data.get("success"))
 
 
-async def refresh_clock_on_daemon(device_name: str) -> dict | None:
-    status, data = await _daemon_request("POST", "/refresh-clock", {"device": device_name}, timeout=5.0)
-    if status != 200 or not isinstance(data, dict):
-        return None
-    return data
-
-
 async def refresh_discovery_on_daemon(address: str | None = None) -> tuple[int | None, dict | None]:
     body = {"address": address} if address is not None else {}
     return await _daemon_request("POST", "/discovery/refresh", body)
-
-
-async def refresh_ddm_inventory_on_daemon(context: str | None = None) -> tuple[int | None, dict | None]:
-    body = {"context": context} if context is not None else {}
-    status, data = await _daemon_request("POST", "/ddm/refresh", body, timeout=30.0)
-    return status, data if isinstance(data, dict) else None
 
 
 async def meter_snapshot_from_daemon(server_name: str) -> dict | None:

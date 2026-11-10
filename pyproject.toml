@@ -120,8 +120,6 @@ include = [
     "packages/netaudio/src/netaudio/dante/ptpv1_uuid.py",
     "packages/netaudio/src/netaudio/dante/sample_rate_pullup.py",
     "packages/netaudio/src/netaudio/dante/virtual_device.py",
-    "packages/netaudio/src/netaudio/ddm/controller.py",
-    "packages/netaudio/src/netaudio/ddm/device_transport.py",
     "packages/netaudio/src/netaudio/shure/discovery.py",
 ]
 pythonVersion = "3.10"

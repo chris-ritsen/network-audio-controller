@@ -12,7 +12,7 @@ import typer
 
 from netaudio.commands.ddm.render import is_sensitive_name, render_result
 from netaudio.commands.ddm.transport import execute, fail
-from netaudio.ddm import Field, InputValidationError, InputValue, Schema, TypeReference, command_name
+from netaudio.commands.ddm.schema import Field, InputValidationError, InputValue, Schema, TypeReference, command_name
 
 PYTHON_SCALAR_TYPES = {"Boolean": bool, "Float": float, "ID": str, "Int": int, "String": str}
 SENTENCE_END = re.compile(r"(?<=[.!?])\s|\n")
