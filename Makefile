@@ -67,6 +67,7 @@ restart:
 	fi
 
 deploy: install restart
+	@if [ "$$(uname)" = Darwin ]; then sleep 15; $(MAKE) --no-print-directory restart; fi
 
 dev:
 	@echo "Watching for changes... (restart daemon on *.py save)"
