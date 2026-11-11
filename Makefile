@@ -1,9 +1,12 @@
-.PHONY: core header core-types prune-core quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
+.PHONY: core header core-types prune-core quality wheel-smoke install sign restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
 .DEFAULT_GOAL := help
 PYTHON ?= .venv/bin/python
 WEB_TESTS ?=
 LINT_FILES ?=
 BOUNDED := python3 scripts/run_bounded_tests.py
+CODESIGN_IDENTITY ?= -
+
+-include local.mk
 
 .PHONY: help test-browser lint audit audit-fix release release-status
 help:
@@ -12,6 +15,7 @@ help:
 	@echo "quality                                         Explicit broad checks; not routine"
 	@echo "check-local                                   Shared local/CI checks with a report; five-minute limit"
 	@echo "core / install / deploy                        Explicit build and deployment commands"
+	@echo "sign [CODESIGN_IDENTITY=name]                 macOS: sign the installed programs under fixed identifiers"
 	@echo "audit                                         Known vulnerabilities in uv.lock and the core's Cargo.lock"
 	@echo "audit-fix                                     Upgrade the vulnerable packages in their lockfiles, then audit"
 	@echo "release [VERSION=x.y.z]                       Background release: checks, tag, GitHub release workflow, PyPI"
@@ -47,6 +51,13 @@ core: header
 
 install:
 	uv tool install '.[redis]' --force --reinstall-package netaudio
+	@if [ "$$(uname)" = Darwin ]; then $(MAKE) --no-print-directory sign; fi
+
+sign:
+	@for program in "$$(uv tool dir)"/netaudio/lib/python*/site-packages/netaudio/bin/netaudio-*; do \
+		name="$$(basename "$$program")"; \
+		codesign --force --identifier "com.netaudio.$${name#netaudio-}" --sign "$(CODESIGN_IDENTITY)" "$$program" || exit 1; \
+	done
 
 restart:
 	@if [ "$$(uname)" = Darwin ]; then \

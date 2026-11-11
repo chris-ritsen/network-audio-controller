@@ -8,6 +8,7 @@ playwright-report/
 dist/
 __pycache__
 debug.log
+local.mk
 .hypothesis/
 docs/decisions/
 docs/reference/dante-controller-subscription-status-labels.txt
