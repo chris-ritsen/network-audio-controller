@@ -46,7 +46,13 @@ def _values(previous, current) -> list[str]:
     if not isinstance(previous, dict) and not isinstance(current, dict):
         return [readable(previous), readable(current)]
     sides = [side if isinstance(side, dict) else {} for side in (previous, current)]
-    if any("issue_id" in side or "label" in side for side in sides):
+    if "issue_id" in sides[1]:
+        superseded = sorted(key for key in sides[0] if sides[0][key] != sides[1].get(key))
+        return [
+            ", ".join(_field(key, sides[0][key]) for key in superseded if _shown(key, sides[0][key])),
+            _summary(sides[1]),
+        ]
+    if any("label" in side for side in sides):
         return [_summary(side) for side in sides]
     changed = sorted(key for key in sides[0].keys() | sides[1].keys() if sides[0].get(key) != sides[1].get(key))
     return [", ".join(_field(key, side[key]) for key in changed if _shown(key, side.get(key))) for side in sides]

@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod compaction;
 mod index;
 
 const DATABASE_LAYOUT: &str = "2";
@@ -209,6 +210,7 @@ impl JournalDatabase {
         index::initialize(&transaction)?;
         issues::store::initialize(&transaction)?;
         transaction.commit()?;
+        compaction::initialize(&mut connection)?;
         Ok(Self {
             _ownership: ownership,
             connection,

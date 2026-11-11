@@ -161,7 +161,6 @@ fn identity(event: &Value) -> String {
             event["interface_identity"],
             event["channel_identity"],
             event["current_value"]["issue_id"],
-            event["previous_value"]["issue_id"],
             event["raw"]["category"],
             event["raw"]["counter"],
         ])
@@ -177,11 +176,7 @@ fn hidden_in_compact(event: &Value) -> bool {
             || event["final_operation_state"] == "planned";
     }
 
-    let issue = if event["kind"] == "issue_resolved" {
-        &event["previous_value"]
-    } else {
-        &event["current_value"]
-    };
+    let issue = &event["current_value"];
     issue["kind"] == "subscription_failure"
         && issue["raw_source_fields"]["status"]["status"] == "UNRESOLVED"
 }

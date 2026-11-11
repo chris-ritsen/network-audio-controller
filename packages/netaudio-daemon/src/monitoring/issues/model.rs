@@ -207,6 +207,11 @@ impl Issue {
 
     pub fn event(&self, previous: Option<&Self>, timestamp: &str) -> Result<JournalEvent> {
         let resolved = self.state == Lifecycle::Resolved;
+        let current = serde_json::to_value(self)?;
+        let superseded = previous
+            .map(serde_json::to_value)
+            .transpose()?
+            .map_or(Value::Null, |previous| superseded(previous, &current));
         let mut event = JournalEvent::observed(
             &json!({
                 "device_identity": self.scope.device_identity,
@@ -226,23 +231,10 @@ impl Issue {
             } else {
                 self.severity
             },
-            serde_json::to_value(previous)?,
-            serde_json::to_value(self)?,
+            superseded,
+            current,
             &self.evidence_source,
         )?;
-        event.raw.extend([
-            ("issue_id".to_owned(), json!(self.issue_id)),
-            ("issue_kind".to_owned(), json!(self.kind)),
-            ("evidence_class".to_owned(), json!(self.evidence_class)),
-            (
-                "raw_source_fields".to_owned(),
-                self.raw_source_fields.clone(),
-            ),
-            (
-                "suggested_remediation".to_owned(),
-                json!(self.suggested_remediation),
-            ),
-        ]);
         event.derivation_status = if self.evidence_class == EvidenceClass::DirectObservation {
             Derivation::Observed
         } else {
@@ -256,5 +248,15 @@ impl Issue {
             .clone_from(&self.scope.channel_identity);
         event.flow_identity.clone_from(&self.scope.flow_identity);
         Ok(event)
+    }
+}
+
+pub fn superseded(previous: Value, current: &Value) -> Value {
+    match previous {
+        Value::Object(mut fields) => {
+            fields.retain(|field, value| current.get(field) != Some(&*value));
+            Value::Object(fields)
+        }
+        other => other,
     }
 }
