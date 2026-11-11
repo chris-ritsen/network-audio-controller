@@ -13,11 +13,13 @@ use crate::state::ReadModel;
 use axum::{
     extract::{DefaultBodyLimit, Extension, OriginalUri, RawQuery, State},
     http::{header, HeaderMap, StatusCode, Uri},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
+use base64::Engine;
 use serde_json::{json, Map, Value};
+use sha2::Digest;
 use std::sync::Arc;
 
 struct ManagedState {
@@ -124,7 +126,10 @@ async fn execute(
         }
         operation => operation,
     };
-    let output = state.managed.execute(operation, caller).await?;
+    let output = match state.managed.execute(operation, caller).await {
+        Ok(output) => output,
+        Err(error) => return failure(error),
+    };
     let mut response = json_value(Arc::new(output.value));
     *response.status_mut() = StatusCode::from_u16(output.status).map_err(anyhow::Error::from)?;
     Ok(response)
@@ -151,7 +156,10 @@ async fn session_login(
             state.managed.connections_for(&caller)?,
         )));
     }
-    let (server, login) = state.managed.authenticate(request).await?;
+    let (server, login) = match state.managed.authenticate(request).await {
+        Ok(login) => login,
+        Err(error) => return failure(error),
+    };
     let (session, token) = match caller {
         Caller::Session(session) => (session, None),
         _ => {
@@ -196,6 +204,34 @@ async fn session_logout(
     response
         .headers_mut()
         .append(header::SET_COOKIE, super::caller::cleared_cookie());
+    Ok(response)
+}
+
+fn failure(error: Error) -> Result<Response, ApiError> {
+    let Error::Untrusted {
+        certificate,
+        host,
+        pinned: false,
+    } = &error
+    else {
+        return Err(error.into());
+    };
+    let mut response = (
+        StatusCode::BAD_GATEWAY,
+        axum::Json(json!({
+            "certificate": {
+                "der": base64::engine::general_purpose::STANDARD.encode(certificate),
+                "host": host,
+                "sha256": hex::encode(sha2::Sha256::digest(certificate)),
+            },
+            "error": error.to_string(),
+        })),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
     Ok(response)
 }
 

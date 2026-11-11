@@ -8,7 +8,7 @@ use rustls::crypto::{
 use rustls::pki_types::{CertificateDer, ServerName, SubjectPublicKeyInfoDer, UnixTime};
 use rustls::{CertificateError, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use x509_parser::prelude::{ASN1Time, FromDer, X509Certificate};
 
 #[derive(Debug)]
@@ -16,6 +16,7 @@ pub(super) struct Verifier {
     certificates: Vec<CertificateDer<'static>>,
     pin: Option<[u8; 32]>,
     provider: Arc<CryptoProvider>,
+    rejected: Arc<Mutex<Option<Vec<u8>>>>,
     verifier: Arc<WebPkiServerVerifier>,
 }
 
@@ -23,6 +24,7 @@ impl Verifier {
     pub(super) fn new(
         certificates: Vec<CertificateDer<'static>>,
         pin: Option<[u8; 32]>,
+        rejected: Arc<Mutex<Option<Vec<u8>>>>,
         roots: RootCertStore,
         provider: Arc<CryptoProvider>,
     ) -> Result<Self, Error> {
@@ -34,6 +36,7 @@ impl Verifier {
             certificates,
             pin,
             provider,
+            rejected,
             verifier,
         })
     }
@@ -97,7 +100,7 @@ impl ServerCertVerifier for Verifier {
         if self.pinned(end_entity) {
             return Ok(ServerCertVerified::assertion());
         }
-        match self.verifier.verify_server_cert(
+        let result = match self.verifier.verify_server_cert(
             end_entity,
             intermediates,
             server_name,
@@ -106,7 +109,12 @@ impl ServerCertVerifier for Verifier {
         ) {
             Err(_) if self.trusted(end_entity) => verify_trusted(end_entity, server_name, now),
             result => result,
+        };
+        if result.is_err() {
+            *self.rejected.lock().unwrap_or_else(PoisonError::into_inner) =
+                Some(end_entity.as_ref().to_vec());
         }
+        result
     }
 
     fn verify_tls12_signature(

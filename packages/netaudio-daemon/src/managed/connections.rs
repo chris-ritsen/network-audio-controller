@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct Login {
+    pub controller_certificate_sha256: Option<String>,
     pub server: String,
     pub url: Option<String>,
     #[serde(flatten)]
@@ -65,7 +66,12 @@ impl Registry {
             ));
         }
         let certificate = existing.and_then(|server| server.trust_certificate_file.clone());
-        let pin = existing.and_then(|server| server.controller_certificate_sha256.clone());
+        let saved_pin = existing.and_then(|server| server.controller_certificate_sha256.clone());
+        let offered_pin = match &saved_pin {
+            Some(_) => None,
+            None => offered_pin(request.controller_certificate_sha256.as_deref())?,
+        };
+        let pin = saved_pin.or_else(|| offered_pin.clone());
         let transport = tokio::task::spawn_blocking(move || {
             Transport::new(certificate.as_deref(), pin.as_deref())
         })
@@ -96,6 +102,7 @@ impl Registry {
         self.save_configuration(
             snapshot,
             Change::Login {
+                controller_certificate_sha256: offered_pin,
                 name: request.server.clone(),
                 url,
                 credential: credential.read().await?,
@@ -251,10 +258,11 @@ impl Registry {
                     .ok_or(Error::Invalid("Enter the DDM server URL"))?
                     .to_owned(),
                 None,
-                None,
+                offered_pin(request.controller_certificate_sha256.as_deref())?,
                 false,
             ),
         };
+        let offered_pin = if saved { None } else { pin.clone() };
         super::client::endpoint(&url)?;
         let transport = tokio::task::spawn_blocking(move || {
             Transport::new(certificate.as_deref(), pin.as_deref())
@@ -280,7 +288,7 @@ impl Registry {
         )?;
         let domains = visible_domains(&request.server, &client).await?;
         if !saved {
-            self.add_server(&request.server, &url).await?;
+            self.add_server(&request.server, &url, offered_pin).await?;
         }
         Ok((
             request.server,
@@ -294,7 +302,12 @@ impl Registry {
         ))
     }
 
-    async fn add_server(&self, name: &str, url: &str) -> Result<(), Error> {
+    async fn add_server(
+        &self,
+        name: &str,
+        url: &str,
+        controller_certificate_sha256: Option<String>,
+    ) -> Result<(), Error> {
         let _configuration = self.configuration_change.lock().await;
         let snapshot = self.load_configuration().await?;
         match snapshot.settings.servers.get(name) {
@@ -306,6 +319,7 @@ impl Registry {
                 self.save_configuration(
                     snapshot,
                     Change::Add {
+                        controller_certificate_sha256,
                         name: name.to_owned(),
                         url: url.to_owned(),
                     },
@@ -464,6 +478,10 @@ fn context_name(
             }
             name
         })
+}
+
+fn offered_pin(value: Option<&str>) -> Result<Option<String>, Error> {
+    Ok(super::transport::controller_pin(value.filter(|value| !value.is_empty()))?.map(hex::encode))
 }
 
 pub fn payload<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, Error> {

@@ -3,7 +3,7 @@ use rustls::pki_types::{pem::PemObject, CertificateDer};
 use rustls::{crypto::ring, ClientConfig, RootCertStore};
 use std::fmt;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
@@ -31,6 +31,12 @@ pub enum Error {
     Response(&'static str),
     Status(u16),
     Transport,
+    Unreachable(String),
+    Untrusted {
+        certificate: Vec<u8>,
+        host: String,
+        pinned: bool,
+    },
     Tls(&'static str),
     Deadline,
     TooLarge,
@@ -53,8 +59,22 @@ impl fmt::Display for Error {
             | Self::Tls(message) => formatter.write_str(message),
             Self::Authentication => formatter.write_str("DDM rejected authentication"),
             Self::Status(status) => write!(formatter, "Managed service returned HTTP {status}"),
-            Self::Transport => formatter.write_str("Managed service transport failed"),
-            Self::Deadline => formatter.write_str("Managed service request exceeded its deadline"),
+            Self::Transport => formatter.write_str("The connection to DDM failed"),
+            Self::Unreachable(message) => formatter.write_str(message),
+            Self::Untrusted { host, pinned, .. } => {
+                if *pinned {
+                    write!(
+                        formatter,
+                        "DDM at {host} presented a different certificate from the one this server trusts"
+                    )
+                } else {
+                    write!(
+                        formatter,
+                        "DDM at {host} uses a certificate this server does not trust yet"
+                    )
+                }
+            }
+            Self::Deadline => formatter.write_str("DDM did not answer in time"),
             Self::TooLarge => {
                 formatter.write_str("Managed service response exceeded its size limit")
             }
@@ -102,14 +122,47 @@ impl Limits {
 #[derive(Clone)]
 pub struct Transport {
     client: reqwest::Client,
+    pinned: bool,
+    rejected: Arc<Mutex<Option<Vec<u8>>>>,
     pub(super) tls: Arc<ClientConfig>,
     pub(super) capacity: Arc<Semaphore>,
+}
+
+fn rejected_certificate(error: &(dyn std::error::Error + 'static)) -> bool {
+    if matches!(
+        error.downcast_ref::<rustls::Error>(),
+        Some(rustls::Error::InvalidCertificate(_))
+    ) {
+        return true;
+    }
+    if let Some(inner) = error
+        .downcast_ref::<std::io::Error>()
+        .and_then(std::io::Error::get_ref)
+    {
+        return rejected_certificate(inner);
+    }
+    error.source().is_some_and(rejected_certificate)
+}
+
+fn root_cause(error: &(dyn std::error::Error + 'static)) -> String {
+    if let Some(inner) = error
+        .downcast_ref::<std::io::Error>()
+        .and_then(std::io::Error::get_ref)
+    {
+        return root_cause(inner);
+    }
+    match error.source() {
+        Some(source) => root_cause(source),
+        None => error.to_string(),
+    }
 }
 
 impl Transport {
     pub(super) fn independent_capacity(&self, capacity: std::num::NonZeroUsize) -> Self {
         Self {
             client: self.client.clone(),
+            pinned: self.pinned,
+            rejected: Arc::clone(&self.rejected),
             tls: Arc::clone(&self.tls),
             capacity: Arc::new(Semaphore::new(capacity.get())),
         }
@@ -180,15 +233,13 @@ impl Transport {
         let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
             .with_safe_default_protocol_versions()
             .map_err(|_| Error::Tls("Managed service TLS configuration failed"))?;
-        let configuration = if pin.is_some() || !trusted.is_empty() {
-            let verifier = pinned::Verifier::new(trusted, pin, roots, provider)?;
-            builder
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(verifier))
-                .with_no_client_auth()
-        } else {
-            builder.with_root_certificates(roots).with_no_client_auth()
-        };
+        let pinned = pin.is_some() || !trusted.is_empty();
+        let rejected = Arc::new(Mutex::new(None));
+        let verifier = pinned::Verifier::new(trusted, pin, Arc::clone(&rejected), roots, provider)?;
+        let configuration = builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
+            .with_no_client_auth();
         let client = reqwest::Client::builder()
             .use_preconfigured_tls(configuration.clone())
             .redirect(reqwest::redirect::Policy::none())
@@ -200,9 +251,36 @@ impl Transport {
 
         Ok(Self {
             client,
+            pinned,
+            rejected,
             tls: Arc::new(configuration),
             capacity: Arc::new(Semaphore::new(8)),
         })
+    }
+
+    fn failure(&self, target: &str, host: &str, error: &reqwest::Error) -> Error {
+        if rejected_certificate(error) {
+            let certificate = self
+                .rejected
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            if let Some(certificate) = certificate {
+                tracing::warn!(
+                    target,
+                    pinned = self.pinned,
+                    "DDM presented a certificate this server does not trust"
+                );
+                return Error::Untrusted {
+                    certificate,
+                    host: host.to_owned(),
+                    pinned: self.pinned,
+                };
+            }
+        }
+        let cause = root_cause(error);
+        tracing::warn!(target, cause, "DDM could not be reached");
+        Error::Unreachable(format!("Could not reach DDM at {target}: {cause}"))
     }
 
     pub(super) async fn request(
@@ -220,6 +298,11 @@ impl Transport {
         }
 
         let _permit = self.capacity.try_acquire().map_err(|_| Error::Busy)?;
+        let host = url.host_str().unwrap_or_default().to_owned();
+        let target = match url.port_or_known_default() {
+            Some(port) => format!("{host}:{port}"),
+            None => host.clone(),
+        };
         let request = async {
             let mut response = self
                 .client
@@ -228,7 +311,7 @@ impl Transport {
                 .body(body)
                 .send()
                 .await
-                .map_err(|_| Error::Transport)?;
+                .map_err(|error| self.failure(&target, &host, &error))?;
             let status = response.status();
 
             if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -248,7 +331,11 @@ impl Transport {
 
             let mut output = Vec::new();
 
-            while let Some(chunk) = response.chunk().await.map_err(|_| Error::Transport)? {
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|error| self.failure(&target, &host, &error))?
+            {
                 if chunk.len() > limits.maximum_response_bytes - output.len() {
                     return Err(Error::TooLarge);
                 }
