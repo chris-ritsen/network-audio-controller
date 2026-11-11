@@ -36,6 +36,13 @@ RELEASE_WORKFLOW = "release.yml"
 RUN_DISCOVERY_SECONDS = 300
 STATUS = OUTPUT / "status.json"
 STEPS = ("preflight", "version", "checks", "tag", "publish", "pypi")
+VERSIONED_MANIFESTS = (
+    "packages/netaudio-daemon/Cargo.toml",
+    "packages/netaudio-host-jack/Cargo.toml",
+    "packages/netaudio-host-pulse/Cargo.toml",
+    "packages/netaudio-host-worker/Cargo.toml",
+    "pyproject.toml",
+)
 
 
 class ReleaseError(Exception):
@@ -136,18 +143,20 @@ def prepare_version(requested):
     ):
         raise ReleaseError(f"Tag {tag} already names another commit.")
     if version != current:
-        path = ROOT / "pyproject.toml"
-        path.write_text(
-            re.sub(
-                rf'^version = "{re.escape(current)}"$',
-                f'version = "{version}"',
-                path.read_text(),
-                count=1,
-                flags=re.MULTILINE,
+        for manifest in VERSIONED_MANIFESTS:
+            path = ROOT / manifest
+            path.write_text(
+                re.sub(
+                    rf'^version = "{re.escape(current)}"$',
+                    f'version = "{version}"',
+                    path.read_text(),
+                    count=1,
+                    flags=re.MULTILINE,
+                )
             )
-        )
         run(["uv", "lock", "--offline"])
-        run(["git", "add", "pyproject.toml", "uv.lock"])
+        run(["cargo", "update", "--offline", "--workspace"])
+        run(["git", "add", "Cargo.lock", "uv.lock", *VERSIONED_MANIFESTS])
         run(["git", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", f"NetAudio {version}"])
     report(f"Releasing netaudio {version}.")
     return version
