@@ -515,6 +515,9 @@ pub async fn run(
             }
         }
     };
+    if let Err(error) = &outcome {
+        tracing::error!(error = %format_args!("{error:#}"), "daemon is stopping after a failure");
+    }
     lifetime.cancel();
     notify_stopping();
     let cleanup = tokio::time::timeout(SHUTDOWN_DEADLINE, async {

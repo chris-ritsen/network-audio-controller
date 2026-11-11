@@ -32,6 +32,8 @@ struct Arguments {
 fn main() -> Result<()> {
     let arguments = Arguments::parse();
     initialize_logging()?;
+    #[cfg(unix)]
+    raise_descriptor_limit();
     let mut runtime = tokio::runtime::Builder::new_multi_thread();
     if std::env::var_os("TOKIO_WORKER_THREADS").is_none() {
         let available = std::thread::available_parallelism()
@@ -43,6 +45,29 @@ fn main() -> Result<()> {
         .build()
         .context("initialize async executor")?
         .block_on(run(arguments))
+}
+
+#[cfg(unix)]
+fn raise_descriptor_limit() {
+    use nix::sys::resource::{getrlimit, setrlimit, Resource};
+
+    const PORTABLE_CEILING: u64 = 10_240;
+
+    let (soft, hard) = match getrlimit(Resource::RLIMIT_NOFILE) {
+        Ok(limits) => limits,
+        Err(error) => {
+            tracing::warn!(%error, "could not read the open file limit");
+            return;
+        }
+    };
+
+    for target in [hard, hard.min(PORTABLE_CEILING)] {
+        if target <= soft || setrlimit(Resource::RLIMIT_NOFILE, target, hard).is_ok() {
+            return;
+        }
+    }
+
+    tracing::warn!(soft, hard, "could not raise the open file limit");
 }
 
 async fn run(arguments: Arguments) -> Result<()> {

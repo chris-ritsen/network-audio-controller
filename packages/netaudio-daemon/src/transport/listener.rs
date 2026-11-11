@@ -14,10 +14,11 @@ use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 
-const HEADER_DEADLINE: Duration = Duration::from_secs(5);
-const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(10);
-const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
+const ACCEPT_BACKOFF: Duration = Duration::from_secs(1);
 const DEFAULT_MAXIMUM_CONNECTIONS: usize = 1_024;
+const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(10);
+const HEADER_DEADLINE: Duration = Duration::from_secs(5);
+const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct ListenerOptions {
@@ -32,6 +33,33 @@ impl Default for ListenerOptions {
             maximum_connections: DEFAULT_MAXIMUM_CONNECTIONS,
         }
     }
+}
+
+fn abandoned(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::Interrupted
+    )
+}
+
+#[cfg(unix)]
+fn exhausted(error: &std::io::Error) -> bool {
+    use nix::errno::Errno;
+
+    error.raw_os_error().is_some_and(|code| {
+        matches!(
+            Errno::from_raw(code),
+            Errno::EMFILE | Errno::ENFILE | Errno::ENOBUFS | Errno::ENOMEM
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn exhausted(_error: &std::io::Error) -> bool {
+    false
 }
 
 pub struct Listener {
@@ -86,6 +114,14 @@ impl Listener {
                 accepted = self.socket.accept() => {
                     let (socket, peer) = match accepted {
                         Ok(accepted) => accepted,
+                        Err(error) if abandoned(&error) => continue,
+                        Err(error) if exhausted(&error) => {
+                            tracing::warn!(%error, "HTTP listener cannot accept connections");
+                            tokio::select! {
+                                _ = lifetime.cancelled() => break Ok(()),
+                                () = tokio::time::sleep(ACCEPT_BACKOFF) => continue,
+                            }
+                        }
                         Err(error) => break Err(error).context("accept HTTP connection"),
                     };
                     let permit = match Arc::clone(&connections).try_acquire_owned() {
