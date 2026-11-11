@@ -1,4 +1,5 @@
-use super::{Event, CLIENT_QUEUE_CAPACITY};
+use super::coalescing::{combine, Combined};
+use super::{Event, CLIENT_QUEUE_CAPACITY, CLIENT_QUEUE_LIMIT};
 use futures_core::Stream;
 use futures_util::task::AtomicWaker;
 use std::collections::VecDeque;
@@ -11,6 +12,7 @@ struct Queue {
     events: VecDeque<Event>,
     closed: bool,
     overflowed: bool,
+    uncoalesced: usize,
 }
 
 struct Shared {
@@ -32,6 +34,7 @@ pub fn event_queue() -> (EventSender, EventReceiver) {
             events: VecDeque::new(),
             closed: false,
             overflowed: false,
+            uncoalesced: 0,
         }),
         waker: AtomicWaker::new(),
     });
@@ -65,27 +68,44 @@ impl EventSender {
             return false;
         }
 
-        if let Some(key) = event.meter_key() {
-            for pending in queue.events.iter_mut().rev() {
-                match pending.meter_key() {
-                    Some(pending_key) if pending_key == key => {
-                        *pending = event;
+        if let Some(slot) = &event.slot
+            && let Some(pending) = queue
+                .events
+                .iter_mut()
+                .rev()
+                .find(|pending| pending.slot.as_ref() == Some(slot))
+        {
+            match combine(slot.class, &pending.value, &event.value) {
+                Some(Combined::Incoming) => {
+                    *pending = event;
+                    return true;
+                }
+                Some(Combined::Rebuilt(combined)) => match Event::new(event.sequence, combined) {
+                    Ok(combined) => {
+                        *pending = combined;
                         return true;
                     }
-                    Some(_) => {}
-                    None => break,
-                }
+                    Err(error) => {
+                        tracing::error!(%error, "could not serialize a combined event");
+                    }
+                },
+                None => {}
             }
         }
 
-        if queue.events.len() >= CLIENT_QUEUE_CAPACITY {
+        if queue.uncoalesced >= CLIENT_QUEUE_CAPACITY || queue.events.len() >= CLIENT_QUEUE_LIMIT {
             queue.closed = true;
             queue.overflowed = true;
             queue.events.clear();
+            queue.uncoalesced = 0;
             drop(queue);
             shared.waker.wake();
             tracing::warn!("event subscriber disconnected after its outbound queue filled");
             return false;
+        }
+
+        if event.slot.is_none() {
+            queue.uncoalesced += 1;
         }
 
         queue.events.push_back(event);
@@ -122,6 +142,10 @@ impl Stream for EventReceiver {
         };
 
         if let Some(event) = queue.events.pop_front() {
+            if event.slot.is_none() {
+                queue.uncoalesced -= 1;
+            }
+
             return Poll::Ready(Some(event));
         }
 

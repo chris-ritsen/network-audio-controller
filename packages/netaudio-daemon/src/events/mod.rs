@@ -1,3 +1,4 @@
+mod coalescing;
 mod queue;
 mod view;
 
@@ -7,10 +8,10 @@ pub use view::{substantive_record, DeviceView, EventOptions};
 
 use bytes::Bytes;
 use serde_json::Value;
-use std::borrow::Cow;
 use std::sync::Arc;
 
 pub const CLIENT_QUEUE_CAPACITY: usize = 128;
+pub const CLIENT_QUEUE_LIMIT: usize = 16_384;
 pub const DEVICE_DISCOVERED: &str = "device_discovered";
 pub const DEVICE_PATCH: &str = "device_patch";
 pub const DEVICE_REMOVED: &str = "device_removed";
@@ -31,6 +32,7 @@ pub struct Event {
     pub sequence: u64,
     pub value: Arc<Value>,
     pub encoded: Bytes,
+    slot: Option<coalescing::Slot>,
 }
 
 impl Event {
@@ -43,21 +45,9 @@ impl Event {
 
         Ok(Self {
             sequence,
+            slot: coalescing::slot(&value),
             value: Arc::new(value),
             encoded: Bytes::from(encoded),
         })
-    }
-
-    pub fn meter_key(&self) -> Option<Cow<'_, str>> {
-        match self.value.get("event")?.as_str()? {
-            METER_VALUES => self.value.get("server_name")?.as_str().map(Cow::Borrowed),
-            SHURE_METER_VALUES => Some(Cow::Owned(format!(
-                "shure:{}:{}:{}",
-                self.value.get("mac")?.as_str()?,
-                self.value.get("channel")?,
-                self.value["key"].as_str().unwrap_or("sample")
-            ))),
-            _ => None,
-        }
     }
 }
