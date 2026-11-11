@@ -3,6 +3,11 @@ import { t } from "./i18n.js";
 
 export const ABSENT = "";
 
+const collator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+
 export function text(value) {
   if (value === null || value === undefined || value === "") {
     return ABSENT;
@@ -202,10 +207,7 @@ export function meterFraction(value, source) {
 }
 
 export function compareDevices(first, second) {
-  return deviceLabel(first).localeCompare(deviceLabel(second), undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+  return collator.compare(deviceLabel(first), deviceLabel(second));
 }
 
 export function sortedDevices(devices) {
@@ -261,13 +263,9 @@ export function deviceSummaryLine(device) {
 }
 
 export function compareShureDevices(first, second) {
-  return String(first.name || first.mac).localeCompare(
+  return collator.compare(
+    String(first.name || first.mac),
     String(second.name || second.mac),
-    undefined,
-    {
-      numeric: true,
-      sensitivity: "base",
-    },
   );
 }
 

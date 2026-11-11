@@ -43,26 +43,51 @@ export function held(source, { compare, departed, identity, present }) {
   const stale = signal(false);
   const view = signal({});
   let capture = null;
+  let disturbed = false;
+  let holding = new Set();
   let keys = [];
+  let order = [];
+
+  const settled = (records) =>
+    keys.every(
+      (key, index) =>
+        records[key] &&
+        present(records[key]) &&
+        (index === 0 || compare(records[keys[index - 1]], records[key]) <= 0),
+    );
 
   effect(() => {
     const records = source.value;
     const generation = captures.value;
     revision.value;
     untracked(() => {
-      const current = Object.keys(records)
-        .filter((key) => present(records[key]))
-        .sort((first, second) => compare(records[first], records[second]));
+      let unsettled = disturbed;
+      disturbed = false;
       if (generation !== capture) {
         capture = generation;
-        keys = current;
+        keys = Object.keys(records)
+          .filter((key) => present(records[key]))
+          .sort((first, second) => compare(records[first], records[second]));
+        holding = new Set(keys);
         absent.clear();
         known.clear();
-      } else {
-        const holding = new Set(keys);
-        for (const key of current) {
-          if (holding.has(key)) continue;
-          const moved = identity(records[key]);
+        unsettled = true;
+      }
+      let matched = 0;
+      let unheld = 0;
+      for (const key in records) {
+        const record = records[key];
+        const previous = known.get(key);
+        if (record === previous) {
+          matched += 1;
+          continue;
+        }
+        if (!holding.has(key)) {
+          if (!present(record)) {
+            unheld += 1;
+            continue;
+          }
+          const moved = identity(record);
           const slot = moved
             ? keys.findIndex(
                 (candidate) =>
@@ -74,28 +99,49 @@ export function held(source, { compare, departed, identity, present }) {
             keys.push(key);
           } else {
             absent.delete(keys[slot]);
+            holding.delete(keys[slot]);
             known.delete(keys[slot]);
             keys[slot] = key;
           }
           holding.add(key);
+          unsettled = true;
+        } else if (
+          !previous ||
+          present(previous) !== present(record) ||
+          compare(previous, record) !== 0
+        ) {
+          unsettled = true;
+        }
+        known.set(key, record);
+        matched += 1;
+      }
+      let next = records;
+      if (
+        unsettled ||
+        unheld > 0 ||
+        absent.size > 0 ||
+        matched !== keys.length
+      ) {
+        next = {};
+        for (const key of keys) {
+          const record = records[key];
+          if (record) {
+            if (absent.delete(key)) unsettled = true;
+            next[key] = record;
+          } else {
+            if (!absent.has(key)) {
+              absent.set(key, departed(known.get(key)));
+              unsettled = true;
+            }
+            next[key] = absent.get(key);
+          }
         }
       }
-      const next = {};
-      for (const key of keys) {
-        const record = records[key];
-        if (record) {
-          absent.delete(key);
-          known.set(key, record);
-          next[key] = record;
-        } else {
-          if (!absent.has(key)) absent.set(key, departed(known.get(key)));
-          next[key] = absent.get(key);
-        }
+      if (unsettled) {
+        order = [...keys];
+        stale.value = !settled(records);
       }
-      arrangements.set(next, [...keys]);
-      stale.value =
-        keys.length !== current.length ||
-        keys.some((key, index) => key !== current[index]);
+      arrangements.set(next, order);
       view.value = next;
     });
   });
@@ -104,6 +150,12 @@ export function held(source, { compare, departed, identity, present }) {
     dismiss(dismissed) {
       const remaining = keys.filter((key) => !dismissed.includes(key));
       if (remaining.length === keys.length) return;
+      for (const key of dismissed) {
+        absent.delete(key);
+        known.delete(key);
+      }
+      disturbed = true;
+      holding = new Set(remaining);
       keys = remaining;
       revision.value += 1;
     },
