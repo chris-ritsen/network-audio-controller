@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 pub(super) const SCHEMA_VERSION: u32 = 1;
+const CLOCK_MATERIAL_FIELDS: &[&str] = &["mute_flags", "mute_reasons", "synchronization"];
 const IDENTITY_DIGEST_BYTES: usize = 10;
 
 #[derive(
@@ -188,7 +189,10 @@ impl Issue {
             Kind::ClockSynchronization | Kind::ClockMuted
                 if self.evidence_source == "device_clock_status" =>
             {
-                "clock_observed_at"
+                return CLOCK_MATERIAL_FIELDS.iter().all(|field| {
+                    self.raw_source_fields["clock_status"][field]
+                        == previous.raw_source_fields["clock_status"][field]
+                });
             }
             Kind::BluetoothLinkLost | Kind::VideoSignalFailure => "observed_at_unix",
             _ => return self.raw_source_fields == previous.raw_source_fields,
