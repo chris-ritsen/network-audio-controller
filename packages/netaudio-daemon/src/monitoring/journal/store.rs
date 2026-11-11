@@ -211,6 +211,7 @@ impl JournalDatabase {
         issues::store::initialize(&transaction)?;
         transaction.commit()?;
         compaction::initialize(&mut connection)?;
+        compaction::reclaim(&connection)?;
         Ok(Self {
             _ownership: ownership,
             connection,

@@ -14,6 +14,9 @@ const DUPLICATED_EVIDENCE: &[(&str, &str)] = &[
 ];
 const LAYOUT: &str = "2";
 const LAYOUT_KEY: &str = "issue_event_layout";
+const RECLAIM_ALLOWANCE: Duration = Duration::from_secs(1_800);
+const RECLAIM_FRACTION: u64 = 4;
+const RECLAIM_MINIMUM_BYTES: u64 = 64 * 1024 * 1024;
 const START_ALLOWANCE: Duration = Duration::from_secs(120);
 
 pub fn initialize(connection: &mut Connection) -> Result<()> {
@@ -85,20 +88,43 @@ pub fn initialize(connection: &mut Connection) -> Result<()> {
         transaction.commit()?;
     }
 
-    if rewritten == 0 {
+    if rewritten != 0 {
+        tracing::info!(
+            events = rewritten,
+            bytes = released,
+            "stored issue events rewritten to hold each issue once"
+        );
+    }
+
+    Ok(())
+}
+
+pub fn reclaim(connection: &Connection) -> Result<()> {
+    let measure = |pragma: &str| {
+        connection
+            .query_row(pragma, [], |row| row.get::<_, i64>(0))
+            .map(i64::unsigned_abs)
+    };
+    let free = measure("PRAGMA freelist_count")?;
+    let pages = measure("PRAGMA page_count")?;
+    let size = measure("PRAGMA page_size")?;
+
+    if free.saturating_mul(size) < RECLAIM_MINIMUM_BYTES
+        || free.saturating_mul(RECLAIM_FRACTION) < pages
+    {
         return Ok(());
     }
 
-    tracing::info!(
-        events = rewritten,
-        bytes = released,
-        "stored issue events rewritten to hold each issue once"
-    );
+    crate::runtime::extend_start_deadline(RECLAIM_ALLOWANCE);
 
-    crate::runtime::extend_start_deadline(START_ALLOWANCE);
-
-    if let Err(error) = connection.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);") {
-        tracing::warn!(%error, "event journal space was not returned to the filesystem");
+    match connection.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);") {
+        Ok(()) => tracing::info!(
+            bytes = free.saturating_mul(size),
+            "unused event journal space returned to the filesystem"
+        ),
+        Err(error) => {
+            tracing::warn!(%error, "event journal space was not returned to the filesystem");
+        }
     }
 
     Ok(())
