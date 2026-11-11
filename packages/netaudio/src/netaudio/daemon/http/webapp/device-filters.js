@@ -1,7 +1,8 @@
 import * as format from "./format.js";
 import { sampleRatePullupChoices } from "./core-metadata.js";
 import { aes67Status } from "./aes67.js";
-import { signal } from "./lib/preact.js";
+import { reorderView } from "./held-view.js";
+import { batch, signal } from "./lib/preact.js";
 import { t } from "./i18n.js";
 
 const UNKNOWN = "Not reported";
@@ -184,7 +185,11 @@ export function readRoutingFilters() {
 }
 
 export function saveRoutingFilters(filters) {
-  inventoryFilters.value = filters;
+  const selection = ({ search, values }) => JSON.stringify([search, values]);
+  batch(() => {
+    if (selection(filters) !== selection(inventoryFilters.value)) reorderView();
+    inventoryFilters.value = filters;
+  });
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(filters));
   } catch {}

@@ -44,3 +44,35 @@ export function sortRows(rows, column, direction) {
     })
     .map(({ row }) => row);
 }
+
+export function arrangeRows(
+  hold,
+  arrangement,
+  rows,
+  rowKey,
+  column,
+  direction,
+) {
+  if (!column) {
+    hold.arrangement = null;
+    return rows;
+  }
+  if (hold.arrangement !== arrangement) {
+    const sorted = sortRows(rows, column, direction);
+    hold.arrangement = arrangement;
+    hold.keys = sorted.map(rowKey);
+    return sorted;
+  }
+  const waiting = new Map(rows.map((row) => [rowKey(row), row]));
+  const arranged = [];
+  for (const key of hold.keys) {
+    if (!waiting.has(key)) continue;
+    arranged.push(waiting.get(key));
+    waiting.delete(key);
+  }
+  for (const [key, row] of waiting) {
+    hold.keys.push(key);
+    arranged.push(row);
+  }
+  return arranged;
+}

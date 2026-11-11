@@ -10,9 +10,10 @@ import {
   useState,
 } from "./lib/preact.js";
 import { PanelHeaderControls } from "./components.js";
+import { captures, orderings } from "./held-view.js";
 import { t } from "./i18n.js";
 import { Icon } from "./icons.js";
-import { sortRows } from "./table-sort.js";
+import { arrangeRows } from "./table-sort.js";
 import { navigate } from "./router.js";
 
 const STORAGE_PREFIX = "netaudio.columns.";
@@ -234,8 +235,12 @@ export function ConfigurableTable({
   const [dragTarget, setDragTarget] = useState(null);
   const [sort, setSort] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
-  const sortedRows = sortRows(
+  const order = useRef({ arrangement: null, keys: [] });
+  const sortedRows = arrangeRows(
+    order.current,
+    `${sort?.id}:${sort?.direction}:${captures.value}:${orderings.value}`,
     rows,
+    rowKey,
     columns.find((column) => column.id === sort?.id),
     sort?.direction,
   );

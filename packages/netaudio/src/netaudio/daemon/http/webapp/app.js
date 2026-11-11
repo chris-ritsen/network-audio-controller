@@ -3,6 +3,7 @@ import { t } from "./i18n.js";
 import { Icon } from "./icons.js";
 import "./ui-preferences.js";
 import { inventoryFilters, saveRoutingFilters } from "./device-filters.js";
+import { refreshView, viewStale } from "./held-view.js";
 import { DeviceFilterPanel } from "./filter-panel.js";
 import { ContextSelector } from "./ddm-connections.js";
 import {
@@ -130,6 +131,9 @@ function TopBar({ compact, filtersAvailable, filtersOpen }) {
       ${compact ? html`<${ViewPicker} />` : html`<${ViewSwitcher} />`}
       ${compact ? null : html`<${ContextSelector} />`}
       <div class="topbar-controls">
+        <button type="button" class="header-icon-button" data-pending=${viewStale.value} aria-label=${t("Refresh")} title=${t("Refresh")} onClick=${refreshView}>
+          <${Icon} name="refresh" />
+        </button>
         <button type="button" class="header-icon-button" aria-label=${t("Search")} title=${t("Search")} onClick=${openPalette}>
           <${Icon} name="search" />
         </button>

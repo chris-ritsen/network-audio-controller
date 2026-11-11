@@ -5025,6 +5025,10 @@
     color: var(--text);
     cursor: pointer;
   }
+  .header-icon-button[data-pending="true"] {
+    background: var(--text);
+    color: var(--black);
+  }
   .header-icon-button:focus-visible {
     outline: 2px solid var(--text);
     outline-offset: 2px;
@@ -5234,6 +5238,15 @@ textarea:focus-visible {
   }
   .state-inline .status-dot {
     margin-top: 0;
+  }
+  .state-labels {
+    display: inline-grid;
+  }
+  .state-labels > span {
+    grid-area: 1 / 1;
+  }
+  .state-labels > [aria-hidden="true"] {
+    visibility: hidden;
   }
   .sparkline {
     display: block;

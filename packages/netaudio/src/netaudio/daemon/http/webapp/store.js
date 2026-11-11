@@ -1,8 +1,8 @@
 import { batch, computed, signal } from "./lib/preact.js";
 import { readInventoryCache, writeInventoryCache } from "./inventory-cache.js";
-import { visibleInventory } from "./inventory-visibility.js";
 import { inventoryFilters, matchesDeviceFilters } from "./device-filters.js";
-import { setMeteringScale } from "./format.js";
+import * as format from "./format.js";
+import { dismiss, held, narrowed, refreshView } from "./held-view.js";
 import {
   createShureLevels,
   observeShureMeters,
@@ -40,34 +40,45 @@ function readContext() {
   }
 }
 export const selectedContext = signal(readContext());
-export const visibleDevices = computed(() => visibleInventory(devices.value));
+const departedRecord = (record) => ({
+  ...record,
+  availability_state: "offline",
+  online: false,
+});
+const presentRecord = (record) =>
+  record.online !== false && record.availability_state !== "offline";
+export const visibleDevices = held(devices, {
+  compare: format.compareDevices,
+  departed: departedRecord,
+  identity: (device) => device?.mac_address,
+  present: presentRecord,
+});
 export const contextDevices = computed(() =>
   selectedContext.value === "all"
     ? visibleDevices.value
-    : Object.fromEntries(
-        Object.entries(visibleDevices.value).filter(([, device]) =>
-          selectedContext.value === "local"
-            ? device.management_state !== "managed"
-            : selectedContext.value.startsWith("server:")
-              ? device.ddm_server_profile === selectedContext.value.slice(7)
-              : selectedContext.value.startsWith("domain:")
-                ? JSON.stringify([
-                    device.ddm_server_profile,
-                    device.ddm_domain_id,
-                  ]) === selectedContext.value.slice(7)
-                : device.ddm_context === selectedContext.value,
-        ),
+    : narrowed(visibleDevices.value, (device) =>
+        selectedContext.value === "local"
+          ? device.management_state !== "managed"
+          : selectedContext.value.startsWith("server:")
+            ? device.ddm_server_profile === selectedContext.value.slice(7)
+            : selectedContext.value.startsWith("domain:")
+              ? JSON.stringify([
+                  device.ddm_server_profile,
+                  device.ddm_domain_id,
+                ]) === selectedContext.value.slice(7)
+              : device.ddm_context === selectedContext.value,
       ),
 );
 export const scopedDevices = computed(() =>
-  Object.fromEntries(
-    Object.entries(contextDevices.value).filter(([, device]) =>
-      matchesDeviceFilters(device, inventoryFilters.value),
-    ),
+  narrowed(contextDevices.value, (device) =>
+    matchesDeviceFilters(device, inventoryFilters.value),
   ),
 );
 export function selectContext(context) {
-  selectedContext.value = context;
+  batch(() => {
+    selectedContext.value = context;
+    refreshView();
+  });
   try {
     window.localStorage.setItem("netaudio.context", context);
   } catch {}
@@ -77,11 +88,15 @@ export const events = signal([]);
 export const meterRevision = signal(0);
 export const pendingSubscriptions = signal({});
 export const shureDevices = signal({});
+const heldShureDevices = held(shureDevices, {
+  compare: format.compareShureDevices,
+  departed: departedRecord,
+  identity: () => null,
+  present: presentRecord,
+});
 export const visibleShureDevices = computed(() =>
-  Object.fromEntries(
-    Object.entries(visibleInventory(shureDevices.value)).filter(([, device]) =>
-      matchesDeviceFilters(device, inventoryFilters.value),
-    ),
+  narrowed(heldShureDevices.value, (device) =>
+    matchesDeviceFilters(device, inventoryFilters.value),
   ),
 );
 export const shureMeters = signal({});
@@ -115,7 +130,10 @@ export function removeForgottenDevices(forgotten) {
     delete next[device.server_name];
     meterCache.delete(device.server_name);
   }
-  devices.value = next;
+  batch(() => {
+    dismiss(forgotten.map((device) => device.server_name));
+    devices.value = next;
+  });
   writeInventoryCache(next);
 }
 
@@ -353,7 +371,7 @@ function applyEvent(payload) {
       }
       loadedApiVersion = payload.api_version;
     }
-    setMeteringScale(payload.metering_scale);
+    format.setMeteringScale(payload.metering_scale);
     batch(() => {
       managedState.value = payload.managed ?? null;
       managedDomains.value = payload.managed_domains || [];
@@ -366,6 +384,7 @@ function applyEvent(payload) {
           .map(([mac, device]) => [mac, { ...device, online: false }]),
       );
       shureDevices.value = { ...keptShure, ...incomingShure };
+      if (!inventoryReady.value) refreshView();
       inventoryReady.value = true;
     });
     writeInventoryCache(devices.value);

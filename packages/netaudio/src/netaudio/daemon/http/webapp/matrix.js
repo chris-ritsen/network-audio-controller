@@ -1451,6 +1451,8 @@ function drawGutterRow(context, row, index, y, { gutter, hover, theme }) {
     drawExpansionMark(context, CELL / 2, y + CELL / 2, row.expanded, theme);
     context.font = rowLabelFont(row, theme);
     context.fillText(rowLabelText(row), rowLabelX(row), y + CELL / 2);
+    if (row.device?.online === false)
+      strikeLabel(context, rowLabelText(row), rowLabelX(row), y + CELL / 2);
   } else {
     context.font = rowLabelFont(row, theme);
     const x = CELL + GUTTER_PADDING + (row.grouped ? INDENT * 2 : INDENT);
@@ -1564,5 +1566,11 @@ function drawHeaderColumn(context, column, index, x, { header, hover, theme }) {
       ? `600 13px ${theme.uiFont}`
       : `13px ${theme.uiFont}`;
   context.fillText(columnLabelText(column), 0, 0);
+  if (column.kind === "device" && column.device?.online === false)
+    strikeLabel(context, columnLabelText(column), 0, 0);
   context.restore();
+}
+
+function strikeLabel(context, label, x, y) {
+  context.fillRect(x, Math.round(y), context.measureText(label).width, 2);
 }

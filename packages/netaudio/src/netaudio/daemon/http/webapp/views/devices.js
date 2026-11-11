@@ -10,6 +10,7 @@ import { LockSection } from "../device/security.js";
 import { clockLeaderLabel, StatusSection } from "../device/status.js";
 import { DeviceMeters } from "../device/meters.js";
 import * as format from "../format.js";
+import { reorderView } from "../held-view.js";
 import { t, tn } from "../i18n.js";
 import { html, useLayoutEffect } from "../lib/preact.js";
 import { devicePath, navigate, setQueryParameter } from "../router.js";
@@ -50,7 +51,10 @@ function present(value) {
 function DeviceState({ online }) {
   return html`<span class="state-inline">
     <span class="status-dot${online ? " online" : ""}" aria-hidden="true"></span>
-    ${online ? t("Online") : t("Offline")}
+    <span class="state-labels">
+      <span aria-hidden=${online ? null : "true"}>${t("Online")}</span>
+      <span aria-hidden=${online ? "true" : null}>${t("Offline")}</span>
+    </span>
   </span>`;
 }
 
@@ -413,7 +417,10 @@ function DeviceInfo({ location }) {
                     aria-label=${t("Find device by name, address, model, or domain")}
                     size="18"
                     value=${filter}
-                    onInput=${(event) => setQueryParameter("filter", event.target.value)}
+                    onInput=${(event) => {
+                      reorderView();
+                      setQueryParameter("filter", event.target.value);
+                    }}
                   />
                   <span class="nav-count"
                     >${tn(visible.length, "{count} device · {online} online", "{count} devices · {online} online", { online })}</span

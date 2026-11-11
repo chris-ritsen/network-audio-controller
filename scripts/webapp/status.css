@@ -85,6 +85,18 @@
     margin-top: 0;
   }
 
+  .state-labels {
+    display: inline-grid;
+  }
+
+  .state-labels > span {
+    grid-area: 1 / 1;
+  }
+
+  .state-labels > [aria-hidden="true"] {
+    visibility: hidden;
+  }
+
   .sparkline {
     display: block;
     width: 160px;

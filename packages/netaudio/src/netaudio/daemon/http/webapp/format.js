@@ -1,3 +1,4 @@
+import { arranged } from "./held-view.js";
 import { t } from "./i18n.js";
 
 export const ABSENT = "";
@@ -200,13 +201,15 @@ export function meterFraction(value, source) {
   );
 }
 
+export function compareDevices(first, second) {
+  return deviceLabel(first).localeCompare(deviceLabel(second), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
 export function sortedDevices(devices) {
-  return Object.values(devices).sort((first, second) =>
-    deviceLabel(first).localeCompare(deviceLabel(second), undefined, {
-      numeric: true,
-      sensitivity: "base",
-    }),
-  );
+  return arranged(devices) || Object.values(devices).sort(compareDevices);
 }
 
 export function sortedChannelNumbers(channels) {
@@ -257,16 +260,21 @@ export function deviceSummaryLine(device) {
   return parts.join("  ");
 }
 
+export function compareShureDevices(first, second) {
+  return String(first.name || first.mac).localeCompare(
+    String(second.name || second.mac),
+    undefined,
+    {
+      numeric: true,
+      sensitivity: "base",
+    },
+  );
+}
+
 export function sortedShureDevices(shureDevices) {
-  return Object.values(shureDevices).sort((first, second) =>
-    String(first.name || first.mac).localeCompare(
-      String(second.name || second.mac),
-      undefined,
-      {
-        numeric: true,
-        sensitivity: "base",
-      },
-    ),
+  return (
+    arranged(shureDevices) ||
+    Object.values(shureDevices).sort(compareShureDevices)
   );
 }
 

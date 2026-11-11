@@ -20,6 +20,7 @@ const names = {
   back: "chevron-left",
   unplug: "unplug",
   plug: "plug",
+  refresh: "refresh-cw",
   search: "search",
   menu: "menu",
   "sidebar-open": "panel-left-open",
