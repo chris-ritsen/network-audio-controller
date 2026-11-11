@@ -638,6 +638,18 @@ fn notify_ready() -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn extend_start_deadline(allowance: Duration) {
+    #[cfg(target_os = "linux")]
+    if let Err(error) = sd_notify::notify(&[sd_notify::NotifyState::ExtendTimeoutUsec(
+        u32::try_from(allowance.as_micros()).unwrap_or(u32::MAX),
+    )]) {
+        tracing::warn!(%error, "could not ask the service manager for more start time");
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    let _ = allowance;
+}
+
 fn notify_stopping() {
     #[cfg(target_os = "linux")]
     if let Err(error) = sd_notify::notify(&[sd_notify::NotifyState::Stopping]) {

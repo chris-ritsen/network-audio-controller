@@ -2,6 +2,7 @@ use crate::monitoring::issues::model::superseded;
 use anyhow::{ensure, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
+use std::time::Duration;
 
 const BATCH: i64 = 2_000;
 const DUPLICATED_EVIDENCE: &[(&str, &str)] = &[
@@ -13,6 +14,7 @@ const DUPLICATED_EVIDENCE: &[(&str, &str)] = &[
 ];
 const LAYOUT: &str = "2";
 const LAYOUT_KEY: &str = "issue_event_layout";
+const START_ALLOWANCE: Duration = Duration::from_secs(120);
 
 pub fn initialize(connection: &mut Connection) -> Result<()> {
     let layout: Option<String> = connection
@@ -36,6 +38,7 @@ pub fn initialize(connection: &mut Connection) -> Result<()> {
     let mut released = 0_usize;
 
     loop {
+        crate::runtime::extend_start_deadline(START_ALLOWANCE);
         let transaction = connection.transaction()?;
         let batch = {
             let mut statement = transaction.prepare_cached(
@@ -91,6 +94,8 @@ pub fn initialize(connection: &mut Connection) -> Result<()> {
         bytes = released,
         "stored issue events rewritten to hold each issue once"
     );
+
+    crate::runtime::extend_start_deadline(START_ALLOWANCE);
 
     if let Err(error) = connection.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);") {
         tracing::warn!(%error, "event journal space was not returned to the filesystem");
