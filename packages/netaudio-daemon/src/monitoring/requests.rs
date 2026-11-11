@@ -44,6 +44,7 @@ impl StatusQuery {
             Self::Aes67 => Some("aes67_configuration_supported"),
             Self::Codec => Some("generic_codec_control_supported"),
             Self::Encoding => Some("encoding_configuration_supported"),
+            Self::Lock => Some("device_locking_supported"),
             Self::Pullup => Some("sample_rate_pullup_configuration_supported"),
             Self::SampleRate => Some("sample_rate_configuration_supported"),
             _ => None,

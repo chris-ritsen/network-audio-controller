@@ -654,6 +654,7 @@ impl DeviceRegistry {
             StatusQuery::Pullup,
             StatusQuery::Codec,
             StatusQuery::Aes67,
+            StatusQuery::Lock,
         ] {
             {
                 let state = device
