@@ -88,7 +88,9 @@ impl Selected {
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
         ensure!(
-            state.identity_generation == *identity && state.record.online && !state.record.retired,
+            state.identity_generation == *identity
+                && state.record.online()
+                && !state.record.retired,
             "{}: device identity or availability changed during the preset operation",
             self.target.name
         );

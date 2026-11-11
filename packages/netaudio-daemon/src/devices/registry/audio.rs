@@ -21,7 +21,7 @@ impl DeviceRegistry {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-            if state.identity_generation != identity || !state.record.online {
+            if state.identity_generation != identity || !state.record.online() {
                 bail!("device identity changed before audio configuration observation");
             }
 

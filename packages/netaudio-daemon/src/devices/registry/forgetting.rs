@@ -125,14 +125,14 @@ impl DeviceRegistry {
             let mut rediscovery = Vec::new();
 
             for state in &mut states {
-                if state.record.online && state.record.control_address().is_some() {
+                if state.record.online() && state.record.control_address().is_some() {
                     rediscovery.push(state.record.clone());
                 }
 
                 state.generation += 1;
                 state.identity_generation += 1;
                 state.record.retired = true;
-                state.record.online = false;
+                state.record.presence.withdraw();
                 state.record.services.clear();
             }
 
@@ -147,7 +147,7 @@ impl DeviceRegistry {
             }
 
             drop(states);
-            self.refresh_associations(&devices)?;
+            self.refresh_associations(&devices, &[])?;
             let forgotten = targets
                 .values()
                 .map(|record| forgotten_record(record))
@@ -190,10 +190,11 @@ impl DeviceRegistry {
         };
         let mut services = previous.services.into_values();
         let first = services.next().context("device has no discovery records")?;
-        let mut record = DeviceRecord::discovered(&first)?;
+        let now = tokio::time::Instant::now();
+        let mut record = DeviceRecord::discovered(&first, now)?;
 
         for service in services {
-            record.attach(service)?;
+            record.attach(service, now)?;
         }
 
         record.name = name;
@@ -223,7 +224,7 @@ impl DeviceRegistry {
             }
 
             devices.insert(key.clone(), Arc::clone(&device));
-            self.refresh_associations(&devices)?;
+            self.refresh_associations(&devices, std::slice::from_ref(&key))?;
         }
 
         let generation = device

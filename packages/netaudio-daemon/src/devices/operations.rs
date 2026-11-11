@@ -370,7 +370,7 @@ impl ControlOperation {
     }
 
     pub fn plan(&self, record: &DeviceRecord) -> Result<ControlPlan, ControlError> {
-        if !record.online {
+        if !record.online() {
             return Err(ControlError::Unavailable("device is offline".to_owned()));
         }
 

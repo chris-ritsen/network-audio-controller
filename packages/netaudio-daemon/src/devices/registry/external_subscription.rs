@@ -116,7 +116,7 @@ impl DeviceRegistry {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-            if state.generation != generation || !state.record.online {
+            if state.generation != generation || !state.record.online() {
                 return Err(ControlError::Conflict(
                     "device changed before external subscription request".to_owned(),
                 ));
@@ -200,7 +200,7 @@ impl DeviceRegistry {
                             .lock()
                             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-                        if !state.record.online
+                        if !state.record.online()
                             || state.record.control_address() != Some(transport.address())
                             || state.record.properties.get("mac_address") != Some(&identity)
                         {

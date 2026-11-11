@@ -24,7 +24,7 @@ impl CaptureTarget {
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
         ensure!(
-            state.generation == self.generation && state.record.online && !state.record.retired,
+            state.generation == self.generation && state.record.online() && !state.record.retired,
             "{}: device identity or inventory changed during preset capture",
             self.record.name
         );
@@ -89,7 +89,7 @@ impl DeviceRegistry {
                 .state
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-            if !state.record.online || state.record.retired {
+            if !state.record.online() || state.record.retired {
                 return Err(Error::Invalid(format!(
                     "{}: device is unavailable or offline.",
                     state.record.name

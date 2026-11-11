@@ -130,7 +130,7 @@ impl DeviceRegistry {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-            if state.identity_generation != identity || !state.record.online {
+            if state.identity_generation != identity || !state.record.online() {
                 result["error"] = json!(
                     "clear execution was reported, but device identity changed; no follow-up reboot was sent"
                 );
@@ -155,7 +155,7 @@ impl DeviceRegistry {
                         .lock()
                         .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
                     anyhow::ensure!(
-                        state.identity_generation == identity && state.record.online,
+                        state.identity_generation == identity && state.record.online(),
                         "device changed before follow-up reboot"
                     );
                 }

@@ -31,7 +31,7 @@ impl DeviceRegistry {
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-        if state.generation != generation || !state.record.online || state.record.retired {
+        if state.generation != generation || !state.record.online() || state.record.retired {
             return Err(ControlError::Conflict(
                 "device identity or inventory changed during panel operation".into(),
             ));
@@ -181,7 +181,7 @@ impl DeviceRegistry {
         );
         let state = panels::snapshot(
             &record.properties,
-            record.online,
+            record.online(),
             !record.address.is_unspecified(),
         )?;
         Ok(
@@ -260,7 +260,7 @@ impl DeviceRegistry {
             let record = self.panel_record(device, generation)?;
             let mut snapshot = panels::snapshot(
                 &record.properties,
-                record.online,
+                record.online(),
                 !record.address.is_unspecified(),
             )?;
             let presented = record.presentation()?;
@@ -563,7 +563,7 @@ fn analog_access(record: &DeviceRecord, write: bool) -> Result<Option<&'static s
         "managed": properties.get("requires_managed_control") == Some(&json!(true)),
         "managed_context_available": false,
         "address_available": !record.address.is_unspecified(),
-        "online": record.online,
+        "online": record.online(),
         "supported": properties.get("generic_codec_control_supported"),
         "locked": properties.get("is_locked"),
         "write": write,

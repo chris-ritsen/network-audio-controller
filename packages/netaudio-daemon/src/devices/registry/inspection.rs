@@ -124,7 +124,7 @@ impl DeviceRegistry {
                     .lock()
                     .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-                if state.generation != generation || !state.record.online {
+                if state.generation != generation || !state.record.online() {
                     return Err(ControlError::Conflict(
                         "device changed during network inspection".to_owned(),
                     ));
@@ -202,7 +202,7 @@ impl DeviceRegistry {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-            if state.generation != generation || !state.record.online {
+            if state.generation != generation || !state.record.online() {
                 return Err(ControlError::Conflict(
                     "device changed before status observation".to_owned(),
                 ));
@@ -236,7 +236,7 @@ impl DeviceRegistry {
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-        if state.generation != generation || !state.record.online {
+        if state.generation != generation || !state.record.online() {
             return Err(ControlError::Conflict(
                 "device changed during status observation".to_owned(),
             ));

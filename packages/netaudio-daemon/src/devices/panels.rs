@@ -129,7 +129,7 @@ pub fn facts(
 pub fn record_facts(record: &DeviceRecord) -> PanelProfileRequest {
     facts(
         &record.properties,
-        Some(record.online),
+        Some(record.online()),
         !record.address.is_unspecified(),
     )
 }

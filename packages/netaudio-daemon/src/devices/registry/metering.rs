@@ -90,7 +90,7 @@ impl DeviceRegistry {
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-        ensure!(state.record.online, "device is offline");
+        ensure!(state.record.online(), "device is offline");
         ensure!(
             state
                 .record
@@ -154,21 +154,18 @@ impl DeviceRegistry {
             return Ok(None);
         }
 
-        let identity_changed = state
-            .diagnostics
-            .observe_presence(&identity, packet.received_monotonic);
+        let identity_changed = state.diagnostics.observe_presence(&identity);
         state.record.properties.insert(
             "last_seen".to_owned(),
             json!(packet.received_at.timestamp_micros() as f64 / 1_000_000.0),
         );
-        let previously_online = state.record.online;
-        state.record.online = true;
+        let returned = state.record.presence.heard(packet.received_monotonic, true);
         let previous = state
             .record
             .properties
             .insert("detailed_metering_supported".to_owned(), json!(true));
 
-        if identity_changed || !previously_online || previous != Some(json!(true)) {
+        if identity_changed || returned || previous != Some(json!(true)) {
             self.publish_diagnostics(&mut state, true)?;
         }
 

@@ -33,6 +33,7 @@ impl DeviceRegistry {
     pub(super) fn refresh_associations(
         &self,
         devices: &BTreeMap<String, Arc<Device>>,
+        touched: &[String],
     ) -> Result<()> {
         let mut states = devices
             .values()
@@ -72,7 +73,10 @@ impl DeviceRegistry {
                     .map(|service| (service.ipv4, service.port, service.name.clone()))
                     .collect(),
             };
+            let mut changed = touched.contains(&state.record.key);
+
             if state.association.as_ref() != Some(&signature) {
+                changed = true;
                 let generation = self.association_generation.fetch_add(1, Ordering::Relaxed);
                 state.association = Some(signature);
                 state.associated_at = Instant::now();
@@ -90,12 +94,19 @@ impl DeviceRegistry {
             let Value::Object(fields) = serde_json::to_value(identity)? else {
                 anyhow::bail!("monitoring identity must be an object");
             };
-            state.record.properties.extend(fields);
-            state
-                .record
-                .properties
-                .insert("association_state".into(), json!(association_state));
-            self.publish(&state.record)?;
+            for (field, value) in fields
+                .into_iter()
+                .chain([("association_state".to_owned(), json!(association_state))])
+            {
+                if state.record.properties.get(&field) != Some(&value) {
+                    state.record.properties.insert(field, value);
+                    changed = true;
+                }
+            }
+
+            if changed {
+                self.publish(&state.record)?;
+            }
         }
         Ok(())
     }

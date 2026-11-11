@@ -1,5 +1,5 @@
 use super::{ControlError, Device, DeviceRegistry, DeviceState, ReceivedPacket};
-use crate::monitoring::diagnostics::{self, PRESENCE_LIFETIME};
+use crate::monitoring::diagnostics;
 use anyhow::Result;
 use netaudio_core::heartbeat::parse_heartbeat_device_extended_unique_identifier;
 use netaudio_core::heartbeat_connection_health::Topology;
@@ -116,8 +116,7 @@ impl DeviceRegistry {
         if let Err(error) = self.metering.observe_passive(&state.record.key, packet) {
             tracing::warn!(source = %packet.source, %error, "invalid signal presence observation");
         }
-        let online_changed = !state.record.online;
-        state.record.online = true;
+        let returned = state.record.presence.heard(packet.received_monotonic, true);
         state.record.properties.insert(
             "last_seen".to_owned(),
             json!(packet.received_at.timestamp_micros() as f64 / 1_000_000.0),
@@ -125,7 +124,7 @@ impl DeviceRegistry {
         state
             .field_observed_at
             .insert("last_seen".to_owned(), packet.received_monotonic);
-        self.publish_diagnostics(&mut state, online_changed)?;
+        self.publish_diagnostics(&mut state, returned)?;
         Ok(Some(state.record.key.clone()))
     }
 
@@ -145,15 +144,19 @@ impl DeviceRegistry {
             .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
 
         if let Some(device) = devices.get(key) {
-            let state = device
+            let mut state = device
                 .state
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-
-            if let Some(deadline) = state
+            let now = Instant::now();
+            let deadline = state
                 .diagnostics
-                .next_expiry(self.observation_origin, Instant::now())
-            {
+                .next_expiry(self.observation_origin)
+                .into_iter()
+                .chain(state.record.presence.deadline(now))
+                .min();
+
+            if let Some(deadline) = deadline {
                 leases.insert(
                     key.to_owned(),
                     deadlines.insert_at(key.to_owned(), deadline),
@@ -180,15 +183,9 @@ impl DeviceRegistry {
         state
             .diagnostics
             .refresh(now, self.observation_origin, false, None)?;
-        let offline = state.record.online
-            && state.diagnostics.identity.is_some()
-            && state
-                .diagnostics
-                .last_seen
-                .is_some_and(|observed| now >= observed + PRESENCE_LIFETIME);
+        let offline = state.record.presence.expire(now);
 
         if offline {
-            state.record.online = false;
             self.metering.invalidate_direct(&state.record.key)?;
         }
 

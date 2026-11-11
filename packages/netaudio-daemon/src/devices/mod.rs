@@ -17,6 +17,7 @@ pub mod network;
 pub mod network_configuration;
 pub mod operations;
 pub mod performance;
+pub mod presence;
 pub mod record;
 pub mod redundancy;
 pub mod registry;

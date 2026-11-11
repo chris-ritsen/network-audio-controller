@@ -1,6 +1,7 @@
 use super::discovery::{DiscoveredService, DiscoveryEvent};
 use super::inventory;
 use super::operations::{ControlCompletion, ControlError, ControlOperation, ControlReadback};
+use super::presence::{Lapses, Returned};
 use super::record::DeviceRecord;
 use super::transport::{CommandIntent, DeviceAddress, DeviceTransport, TransportError};
 use crate::monitoring::diagnostics::Diagnostics;
@@ -182,6 +183,7 @@ impl DeviceRegistry {
     pub async fn run(self: Arc<Self>, mut discovery: mpsc::Receiver<DiscoveryEvent>) -> Result<()> {
         let mut workers = JoinSet::new();
         let mut active = BTreeSet::new();
+        let mut lapses = Lapses::default();
         let result = async {
             loop {
                 while workers.len() < MAXIMUM_CONCURRENT_REFRESHES {
@@ -213,11 +215,16 @@ impl DeviceRegistry {
                         let key = completed.context("inventory refresh worker disappeared")??;
                         active.remove(&key);
                     }
+                    name = lapses.withdrawn(), if !lapses.is_empty() => {
+                        if let Some(name) = name {
+                            self.withdraw(&name)?;
+                        }
+                    }
                     event = discovery.recv() => {
                         let Some(event) = event else {
                             bail!("device discovery stopped before registry shutdown");
                         };
-                        self.observe(event).await?;
+                        self.observe(event, &mut lapses).await?;
                     }
                 }
             }
@@ -237,72 +244,121 @@ impl DeviceRegistry {
         Ok(())
     }
 
-    pub async fn observe(self: &Arc<Self>, event: DiscoveryEvent) -> Result<()> {
+    async fn observe(self: &Arc<Self>, event: DiscoveryEvent, lapses: &mut Lapses) -> Result<()> {
+        let now = Instant::now();
+
         match event {
-            DiscoveryEvent::Resolved(service) if service.is_media() => {
-                self.media
-                    .write()
-                    .map_err(|_| anyhow::anyhow!("media inventory lock poisoned"))?
-                    .insert(service.name.clone(), service);
-            }
-            DiscoveryEvent::Resolved(service) => self.attach(service).await?,
-            DiscoveryEvent::Removed { name, .. } => {
-                self.media
-                    .write()
-                    .map_err(|_| anyhow::anyhow!("media inventory lock poisoned"))?
-                    .remove(&name);
-                let devices = self
-                    .devices
-                    .write()
-                    .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
+            DiscoveryEvent::Resolved(service) => {
+                if let Returned::Widened(lifetime) = lapses.returned(&service.name, now) {
+                    tracing::info!(
+                        service = service.name,
+                        lifetime_seconds = lifetime.as_secs(),
+                        "advertisement returned after it was withdrawn; its next lapse is held longer"
+                    );
+                }
 
-                for device in devices.values() {
-                    let mut state = device
-                        .state
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-
-                    if state.record.services.remove(&name).is_some() {
-                        state.generation += 1;
-                        state.identity_generation += 1;
-                        state.record.online = state.record.advertised();
-                        if !state.record.online {
-                            self.metering.invalidate_direct(&state.record.key)?;
+                if service.is_media() {
+                    self.media
+                        .write()
+                        .map_err(|_| anyhow::anyhow!("media inventory lock poisoned"))?
+                        .insert(service.name.clone(), service);
+                } else {
+                    for name in self.attach(service).await? {
+                        if lapses.released(&name) {
+                            self.withdraw(&name)?;
                         }
                     }
                 }
-                self.refresh_associations(&devices)?;
+            }
+            DiscoveryEvent::Removed { name, .. } => {
+                if self.advertisements()?.contains(&name) {
+                    lapses.lapsed(name, now);
+                }
             }
             DiscoveryEvent::NetworkChanged => {
-                self.media
-                    .write()
-                    .map_err(|_| anyhow::anyhow!("media inventory lock poisoned"))?
-                    .clear();
-
-                let devices = self
-                    .devices
-                    .write()
-                    .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
-                for device in devices.values() {
-                    let mut state = device
-                        .state
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-                    state.generation += 1;
-                    state.identity_generation += 1;
-                    state.record.services.clear();
-                    state.record.online = false;
-                    self.metering.invalidate_direct(&state.record.key)?;
+                for name in self.advertisements()? {
+                    lapses.lapsed(name, now);
                 }
-                self.refresh_associations(&devices)?;
             }
         }
 
         Ok(())
     }
 
-    async fn attach(self: &Arc<Self>, service: DiscoveredService) -> Result<()> {
+    fn advertisements(&self) -> Result<BTreeSet<String>> {
+        let mut names: BTreeSet<String> = self
+            .media
+            .read()
+            .map_err(|_| anyhow::anyhow!("media inventory lock poisoned"))?
+            .keys()
+            .cloned()
+            .collect();
+        let devices = self
+            .devices
+            .read()
+            .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
+
+        for device in devices.values() {
+            let state = device
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+            names.extend(state.record.services.keys().cloned());
+        }
+
+        Ok(names)
+    }
+
+    fn withdraw(&self, name: &str) -> Result<()> {
+        self.media
+            .write()
+            .map_err(|_| anyhow::anyhow!("media inventory lock poisoned"))?
+            .remove(name);
+        let devices = self
+            .devices
+            .write()
+            .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
+        let now = Instant::now();
+        let mut withdrawn = Vec::new();
+
+        for device in devices.values() {
+            let mut state = device
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+
+            if state.record.services.remove(name).is_some() {
+                state.generation += 1;
+                state.identity_generation += 1;
+                let advertised = state.record.advertised();
+                state.record.presence.advertised(advertised, false, now);
+
+                if !state.record.online() {
+                    self.metering.invalidate_direct(&state.record.key)?;
+                }
+
+                if state.record.control_address().is_none() {
+                    self.refresh_queue.remove(&state.record.key)?;
+                }
+
+                withdrawn.push(state.record.key.clone());
+            }
+        }
+
+        if !withdrawn.is_empty() {
+            self.refresh_associations(&devices, &withdrawn)?;
+        }
+
+        Ok(())
+    }
+
+    async fn attach(self: &Arc<Self>, service: DiscoveredService) -> Result<Vec<String>> {
         let key = service.device_key()?;
+        let now = Instant::now();
+        let identity = (service.service_type == SERVICE_CMC)
+            .then(|| service.property("id").map(str::to_owned))
+            .flatten();
+        let mut superseded = Vec::new();
         let (device, changed) = {
             let mut devices = self
                 .devices
@@ -316,7 +372,7 @@ impl DeviceRegistry {
                     .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
                 let previous_address = state.record.address;
                 let previous_identity = state.record.properties.get("mac_address").cloned();
-                let changed = state.record.attach(service)?;
+                let changed = state.record.attach(service, now)?;
 
                 if previous_address != state.record.address
                     || previous_identity.as_ref() != state.record.properties.get("mac_address")
@@ -331,7 +387,7 @@ impl DeviceRegistry {
 
                 (Arc::clone(device), changed)
             } else {
-                let record = DeviceRecord::discovered(&service)?;
+                let record = DeviceRecord::discovered(&service, now)?;
                 let device = Arc::new(Device {
                     state: Mutex::new(DeviceState {
                         associated_at: Instant::now(),
@@ -350,7 +406,25 @@ impl DeviceRegistry {
                 devices.insert(key.clone(), Arc::clone(&device));
                 (device, true)
             };
-            self.refresh_associations(&devices)?;
+
+            if let Some(identity) = &identity {
+                for (other, device) in devices.iter().filter(|(other, _)| **other != key) {
+                    let state = device
+                        .state
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+
+                    if state.record.properties.get("mac_address") == Some(&json!(identity)) {
+                        tracing::debug!(device = other, successor = key, "device identity moved");
+                        superseded.extend(state.record.services.keys().cloned());
+                    }
+                }
+            }
+
+            if result.1 {
+                self.refresh_associations(&devices, std::slice::from_ref(&key))?;
+            }
+
             result
         };
 
@@ -362,7 +436,7 @@ impl DeviceRegistry {
                     .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
                 if state.record.control_address().is_none() {
-                    return Ok(());
+                    return Ok(superseded);
                 }
 
                 state.generation
@@ -370,7 +444,7 @@ impl DeviceRegistry {
             self.schedule_refresh(key, device, generation)?;
         }
 
-        Ok(())
+        Ok(superseded)
     }
 
     pub async fn refresh(self: &Arc<Self>, reference: &str) -> Result<RefreshReport> {
@@ -424,11 +498,18 @@ impl DeviceRegistry {
             .cloned();
 
         if let Some(device) = device {
-            let generation = device
-                .state
-                .lock()
-                .map_err(|_| anyhow::anyhow!("device state lock poisoned"))?
-                .generation;
+            let generation = {
+                let state = device
+                    .state
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("device state lock poisoned"))?;
+
+                if state.record.control_address().is_none() {
+                    return Ok(());
+                }
+
+                state.generation
+            };
             self.schedule_refresh(key.to_owned(), device, generation)?;
         }
 
@@ -674,8 +755,7 @@ impl DeviceRegistry {
             }
         }
 
-        record.online = true;
-        state.diagnostics.last_seen = Some(Instant::now());
+        record.presence.heard(Instant::now(), false);
         record.properties.insert(
             "last_seen".to_owned(),
             json!(chrono::Utc::now().timestamp_micros() as f64 / 1_000_000.0),
@@ -1422,7 +1502,7 @@ impl DeviceRegistry {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-            if state.generation != generation || !state.record.online {
+            if state.generation != generation || !state.record.online() {
                 bail!("device identity changed before clock observation");
             }
 
@@ -1643,7 +1723,10 @@ impl DeviceRegistry {
                 return Ok(None);
             }
 
-            state.diagnostics.last_seen = Some(packet.received_monotonic);
+            let returned = state
+                .record
+                .presence
+                .heard(packet.received_monotonic, false);
 
             if envelope.response_kind == Some("panel_status") {
                 let family = super::panels::family_name(
@@ -1750,7 +1833,6 @@ impl DeviceRegistry {
                 }
 
                 if changed {
-                    state.record.online = true;
                     self.publish(&state.record)?;
                     self.status_requests.observe(
                         &state.record.key,
@@ -1762,7 +1844,14 @@ impl DeviceRegistry {
             } else if inventory_changed(envelope.notification_id) {
                 state.generation += 1;
                 device.inventory_changes.send_replace(());
-                refresh = Some((state.record.key.clone(), state.generation));
+
+                if state.record.control_address().is_some() {
+                    refresh = Some((state.record.key.clone(), state.generation));
+                }
+            }
+
+            if returned {
+                self.publish(&state.record)?;
             }
         }
 

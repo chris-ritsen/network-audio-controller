@@ -40,7 +40,7 @@ impl DeviceRegistry {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-            if state.generation != generation || !state.record.online {
+            if state.generation != generation || !state.record.online() {
                 return Err(ControlError::Conflict(
                     "device changed before sample-rate preflight".to_owned(),
                 ));
@@ -84,7 +84,7 @@ impl DeviceRegistry {
 
             if state.identity_generation != identity
                 || state.generation != prepared.generation
-                || !state.record.online
+                || !state.record.online()
             {
                 return Err(ControlError::Conflict(
                     "device changed before sample-rate mutation; no change was sent".to_owned(),
@@ -310,7 +310,7 @@ impl DeviceRegistry {
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-        if state.identity_generation != identity || !state.record.online {
+        if state.identity_generation != identity || !state.record.online() {
             return Err(ControlError::Conflict(
                 "device identity changed during sample-rate observation".to_owned(),
             ));
@@ -393,7 +393,7 @@ impl DeviceRegistry {
 
         if state.identity_generation != identity
             || state.generation != generation
-            || !state.record.online
+            || !state.record.online()
         {
             return Err(ControlError::Conflict(
                 "device topology changed during observation".to_owned(),
@@ -428,7 +428,7 @@ fn sample_rate_record(device: &Device, identity: u64) -> Result<(DeviceRecord, u
         .lock()
         .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-    if state.identity_generation != identity || !state.record.online {
+    if state.identity_generation != identity || !state.record.online() {
         return Err(ControlError::Conflict(
             "device identity changed during sample-rate operation".to_owned(),
         ));

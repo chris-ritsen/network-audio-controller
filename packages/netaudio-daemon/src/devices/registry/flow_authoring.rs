@@ -179,7 +179,7 @@ impl DeviceRegistry {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-            if state.generation != generation || !state.record.online {
+            if state.generation != generation || !state.record.online() {
                 return Err(ControlError::Conflict(
                     "device changed before flow mutation; no request was sent".to_owned(),
                 ));
@@ -401,7 +401,7 @@ impl DeviceRegistry {
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-        if state.identity_generation != identity_generation || !state.record.online {
+        if state.identity_generation != identity_generation || !state.record.online() {
             return Err(ControlError::Conflict(
                 "device identity changed during flow verification".to_owned(),
             ));
@@ -425,7 +425,7 @@ impl DeviceRegistry {
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-        if state.identity_generation != identity_generation || !state.record.online {
+        if state.identity_generation != identity_generation || !state.record.online() {
             return Err(ControlError::Conflict(
                 "device identity changed during flow readback".to_owned(),
             ));
@@ -446,7 +446,7 @@ impl DeviceRegistry {
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-        if state.generation != generation || !state.record.online {
+        if state.generation != generation || !state.record.online() {
             return Err(ControlError::Conflict(
                 "device changed during flow operation".to_owned(),
             ));

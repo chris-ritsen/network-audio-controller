@@ -1,5 +1,6 @@
 use super::discovery::DiscoveredService;
 use super::inventory::ChannelInventory;
+use super::presence::Presence;
 use super::transport::DeviceAddress;
 use anyhow::{bail, Context, Result};
 use netaudio_core::parser::ChannelCount;
@@ -8,6 +9,7 @@ use netaudio_core::responses::{DeviceSettings, PropertyDirectory};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
+use tokio::time::Instant;
 
 const NANOSECONDS_PER_MILLISECOND: f64 = 1_000_000.0;
 
@@ -16,7 +18,7 @@ pub struct DeviceRecord {
     pub key: String,
     pub name: String,
     pub address: Ipv4Addr,
-    pub online: bool,
+    pub presence: Presence,
     pub retired: bool,
     pub services: BTreeMap<String, DiscoveredService>,
     pub receivers: BTreeMap<u16, Value>,
@@ -26,13 +28,13 @@ pub struct DeviceRecord {
 }
 
 impl DeviceRecord {
-    pub fn discovered(service: &DiscoveredService) -> Result<Self> {
+    pub fn discovered(service: &DiscoveredService, now: Instant) -> Result<Self> {
         let key = service.device_key()?;
         let mut record = Self {
             name: key.trim_end_matches(".local.").to_owned(),
             key,
             address: service.ipv4,
-            online: true,
+            presence: Presence::default(),
             retired: false,
             services: BTreeMap::new(),
             receivers: BTreeMap::new(),
@@ -40,11 +42,15 @@ impl DeviceRecord {
             subscriptions: Vec::new(),
             properties: Map::new(),
         };
-        record.attach(service.clone())?;
+        record.attach(service.clone(), now)?;
         Ok(record)
     }
 
-    pub fn attach(&mut self, service: DiscoveredService) -> Result<bool> {
+    pub fn online(&self) -> bool {
+        self.presence.online()
+    }
+
+    pub fn attach(&mut self, service: DiscoveredService, now: Instant) -> Result<bool> {
         let changed = self.services.get(&service.name) != Some(&service);
 
         if service.service_type == SERVICE_ARC {
@@ -97,7 +103,7 @@ impl DeviceRecord {
         }
 
         self.services.insert(service.name.clone(), service);
-        self.online = self.advertised();
+        self.presence.advertised(self.advertised(), changed, now);
         Ok(changed)
     }
 
@@ -444,7 +450,8 @@ impl DeviceRecord {
             ("name".to_owned(), json!(self.name)),
             ("server_name".to_owned(), json!(self.key)),
             ("ipv4".to_owned(), json!(self.address)),
-            ("online".to_owned(), json!(self.online)),
+            ("online".to_owned(), json!(self.online())),
+            ("presence".to_owned(), self.presence.presentation()),
             ("services".to_owned(), json!(self.services)),
             (
                 "channels".to_owned(),
@@ -457,7 +464,7 @@ impl DeviceRecord {
             "device_controls".to_owned(),
             super::panels::snapshot(
                 &self.properties,
-                self.online,
+                self.online(),
                 !self.address.is_unspecified(),
             )?,
         );

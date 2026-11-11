@@ -23,7 +23,7 @@ impl DeviceRegistry {
                 .state
                 .lock()
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-            if state.generation != generation || !state.record.online {
+            if state.generation != generation || !state.record.online() {
                 return Err(ControlError::Conflict(
                     "device changed before device configuration".to_owned(),
                 ));

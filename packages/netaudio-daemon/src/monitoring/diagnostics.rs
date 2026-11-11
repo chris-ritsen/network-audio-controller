@@ -14,7 +14,6 @@ pub mod presentation;
 
 pub const HISTORY_LIMIT: usize = 300;
 pub const FRESHNESS: Duration = Duration::from_secs(5);
-pub const PRESENCE_LIFETIME: Duration = Duration::from_secs(15);
 
 #[derive(Default)]
 pub struct Diagnostics {
@@ -24,11 +23,10 @@ pub struct Diagnostics {
     receiver: Option<ConnectionHealthUpdate>,
     traffic: Option<Value>,
     traffic_observed: Option<Instant>,
-    pub last_seen: Option<Instant>,
 }
 
 impl Diagnostics {
-    pub fn observe_presence(&mut self, identity: &str, observed: Instant) -> bool {
+    pub fn observe_presence(&mut self, identity: &str) -> bool {
         let changed = self
             .identity
             .as_deref()
@@ -39,7 +37,6 @@ impl Diagnostics {
         }
 
         self.identity = Some(identity.to_owned());
-        self.last_seen = Some(observed);
         changed
     }
 
@@ -50,7 +47,7 @@ impl Diagnostics {
         origin: Instant,
         topology: Topology,
     ) -> Result<()> {
-        self.observe_presence(identity, packet.received_monotonic);
+        self.observe_presence(identity);
         let timestamp = packet
             .received_at
             .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
@@ -208,7 +205,7 @@ impl Diagnostics {
         Ok(())
     }
 
-    pub fn next_expiry(&self, origin: Instant, now: Instant) -> Option<Instant> {
+    pub fn next_expiry(&self, origin: Instant) -> Option<Instant> {
         let mut deadlines = Vec::new();
         let series = [&self.clock.heartbeat, &self.clock.conmon]
             .into_iter()
@@ -233,16 +230,6 @@ impl Diagnostics {
                 .is_some_and(|traffic| traffic["fresh"] == true)
         {
             deadlines.push(observed + FRESHNESS);
-        }
-
-        if self.identity.is_some()
-            && let Some(observed) = self.last_seen
-        {
-            let deadline = observed + PRESENCE_LIFETIME;
-
-            if deadline > now {
-                deadlines.push(deadline);
-            }
         }
 
         deadlines.into_iter().min()

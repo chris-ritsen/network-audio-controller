@@ -127,7 +127,7 @@ impl DeviceRegistry {
             .lock()
             .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
-        if state.generation != generation || !state.record.online {
+        if state.generation != generation || !state.record.online() {
             return Err(ControlError::Conflict(
                 "device changed during network configuration".to_owned(),
             ));
