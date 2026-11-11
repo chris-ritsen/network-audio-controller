@@ -65,12 +65,12 @@ impl fmt::Display for Error {
                 if *pinned {
                     write!(
                         formatter,
-                        "DDM at {host} presented a different certificate from the one this server trusts"
+                        "DDM at {host} presented a different certificate from the one trusted for it"
                     )
                 } else {
                     write!(
                         formatter,
-                        "DDM at {host} uses a certificate this server does not trust yet"
+                        "DDM at {host} uses a certificate that has not been trusted yet"
                     )
                 }
             }

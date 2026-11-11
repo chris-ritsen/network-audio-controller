@@ -21,7 +21,6 @@ pub struct Snapshot {
 
 pub enum Change {
     Add {
-        controller_certificate_sha256: Option<String>,
         name: String,
         url: String,
     },
@@ -100,20 +99,13 @@ impl Store {
             let settings = &snapshot.settings;
             let managed = table_mut(document.as_table_mut(), "ddm")?;
             match change {
-                Change::Add {
-                    controller_certificate_sha256,
-                    name,
-                    url,
-                } => {
+                Change::Add { name, url } => {
                     validate_name(&name)?;
                     super::client::endpoint(&url)?;
                     if settings.servers.contains_key(&name) {
                         return Err(Error::Invalid("A profile with that name already exists"));
                     }
                     let server = table_mut(table_mut(managed, "servers")?, &name)?;
-                    if let Some(pin) = controller_certificate_sha256 {
-                        server.insert("controller_certificate_sha256", value(pin));
-                    }
                     server.insert("enabled", value(false));
                     server.insert("url", value(url));
                 }

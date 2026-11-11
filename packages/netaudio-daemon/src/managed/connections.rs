@@ -234,6 +234,7 @@ impl Registry {
     pub async fn authenticate(&self, request: Login) -> Result<(String, SessionLogin), Error> {
         validate_name(&request.server)?;
         let requested = request.url.as_deref().filter(|url| !url.is_empty());
+        let offered = offered_pin(request.controller_certificate_sha256.as_deref())?;
         let (url, certificate, pin, saved) = match self.source(&request.server) {
             Ok(source) => {
                 let configuration = &source.configuration;
@@ -249,7 +250,7 @@ impl Registry {
                 (
                     url,
                     configuration.trust_certificate_file.clone(),
-                    configuration.controller_certificate_sha256.clone(),
+                    offered.or_else(|| configuration.controller_certificate_sha256.clone()),
                     true,
                 )
             }
@@ -258,11 +259,10 @@ impl Registry {
                     .ok_or(Error::Invalid("Enter the DDM server URL"))?
                     .to_owned(),
                 None,
-                offered_pin(request.controller_certificate_sha256.as_deref())?,
+                offered,
                 false,
             ),
         };
-        let offered_pin = if saved { None } else { pin.clone() };
         super::client::endpoint(&url)?;
         let transport = tokio::task::spawn_blocking(move || {
             Transport::new(certificate.as_deref(), pin.as_deref())
@@ -288,7 +288,7 @@ impl Registry {
         )?;
         let domains = visible_domains(&request.server, &client).await?;
         if !saved {
-            self.add_server(&request.server, &url, offered_pin).await?;
+            self.add_server(&request.server, &url).await?;
         }
         Ok((
             request.server,
@@ -302,12 +302,7 @@ impl Registry {
         ))
     }
 
-    async fn add_server(
-        &self,
-        name: &str,
-        url: &str,
-        controller_certificate_sha256: Option<String>,
-    ) -> Result<(), Error> {
+    async fn add_server(&self, name: &str, url: &str) -> Result<(), Error> {
         let _configuration = self.configuration_change.lock().await;
         let snapshot = self.load_configuration().await?;
         match snapshot.settings.servers.get(name) {
@@ -319,7 +314,6 @@ impl Registry {
                 self.save_configuration(
                     snapshot,
                     Change::Add {
-                        controller_certificate_sha256,
                         name: name.to_owned(),
                         url: url.to_owned(),
                     },

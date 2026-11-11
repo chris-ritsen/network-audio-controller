@@ -112,6 +112,7 @@ export function DdmConnections() {
   const [method, setMethod] = useState("saved");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [identity, setIdentity] = useState(null);
   const [creatingDomain, setCreatingDomain] = useState(false);
   const name = useRef(null),
     url = useRef(null),
@@ -151,11 +152,12 @@ export function DdmConnections() {
       setMethod("password");
   }, [config]);
 
-  const login = async (event) => {
+  const login = async (event, certificate) => {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
     setError("");
+    let awaitingTrust = false;
     try {
       const body = {
         server: profile?.name || name.current.value,
@@ -167,15 +169,20 @@ export function DdmConnections() {
         body.password = secret.current.value;
       }
       if (method === "api_key") body.api_key = secret.current.value;
+      if (certificate) body.controller_certificate_sha256 = certificate;
       const result = await api.loginDdm(body);
       connectionProfiles.value = result;
+      setIdentity(null);
       setServer(body.server);
       setMethod("saved");
       reconnect();
     } catch (failure) {
+      const offered = failure.payload?.certificate;
+      awaitingTrust = Boolean(offered?.sha256);
+      setIdentity(awaitingTrust ? offered : null);
       setError(failure.message);
     } finally {
-      if (secret.current) secret.current.value = "";
+      if (secret.current && !awaitingTrust) secret.current.value = "";
       setBusy(false);
     }
   };
@@ -229,6 +236,7 @@ export function DdmConnections() {
               : "password",
           );
           setError("");
+          setIdentity(null);
         }}>${profiles.map((entry) => html`<option value=${entry.name}>${entry.name}</option>`)}<option value="new">${t("Add server")}</option></select>
       </label>
       ${
@@ -262,6 +270,15 @@ export function DdmConnections() {
       </div>
     </form>
     ${error ? html`<div class="alert alert-error mt-3" role="alert">${t(error)}</div>` : null}
+    ${
+      identity
+        ? html`<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 mt-3 w-full max-w-2xl">
+      <dt>${t("Host")}</dt><dd>${identity.host}</dd>
+      <dt>${t("Certificate SHA-256")}</dt><dd class="font-mono break-all">${identity.sha256}</dd>
+    </dl>
+    <button class="btn btn-sm btn-primary mt-3" type="button" disabled=${busy} onClick=${(event) => login(event, identity.sha256)}>${t("Trust and connect")}</button>`
+        : null
+    }
     ${creatingDomain ? html`<${NewDomainDialog} server=${server} onClose=${() => setCreatingDomain(false)} />` : null}
   <//>`;
 }
