@@ -232,6 +232,7 @@ function EventLog({ query }) {
   return html`
     <${Panel} title=${t("Event log")} wide>
       ${error ? html`<${Notice}>${t(error)}<//>` : null}
+      <div class="event-log">
       <div class="table-wrapper event-log-table-wrapper">
         <table class="data event-log-table" aria-label=${t("Event log")}>
           <thead>
@@ -310,6 +311,7 @@ function EventLog({ query }) {
         </div>
       </div>
       ${selected ? html`<${EventDetails} event=${selected} />` : null}
+      </div>
     <//>
   `;
 }

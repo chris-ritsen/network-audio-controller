@@ -6082,24 +6082,32 @@ textarea:focus-visible {
   .shure-slots th {
     white-space: nowrap;
   }
+  .event-log {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
   .event-log-table-wrapper {
     max-height: min(58dvh, 720px);
   }
-  .event-log-table th:first-child,
-  .event-log-table td:first-child {
-    width: 42px;
-    text-align: center;
-  }
   .event-log-table .event-timestamp {
-    width: 190px;
     font-variant-numeric: tabular-nums;
   }
-  .event-log-table .event-device {
-    width: 28%;
-  }
   .event-log-table .event-message {
-    width: auto;
     white-space: normal;
+  }
+  @media (min-width: 901px) {
+    .event-log-table th:first-child,
+    .event-log-table td:first-child {
+      width: 42px;
+      text-align: center;
+    }
+    .event-log-table .event-timestamp {
+      width: 190px;
+    }
+    .event-log-table .event-device {
+      width: 28%;
+    }
   }
   .event-severity-icon {
     display: inline-flex;
@@ -6172,24 +6180,60 @@ textarea:focus-visible {
     .event-log-table-wrapper {
       max-height: none;
     }
-    .event-log-table tbody tr {
-      position: relative;
-      padding-left: 35px;
+    table.data.event-log-table tbody tr {
+      display: grid;
+      grid-template-areas: "severity message message" "severity device timestamp";
+      grid-template-columns: 19px minmax(0, 1fr) auto;
+      column-gap: 10px;
+      row-gap: 3px;
+      align-items: start;
+      padding: 10px 8px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      border-radius: 0;
     }
-    .event-log-table tbody td.event-severity-cell {
-      position: absolute;
-      top: 7px;
-      left: 7px;
+    table.data.event-log-table tbody tr + tr {
+      margin-top: 0;
+    }
+    table.data.event-log-table tbody tr.active {
+      background: var(--raised);
+    }
+    table.data.event-log-table tbody tr > td {
       display: block;
-      width: 24px;
       padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    table.data.event-log-table tbody tr > td::before {
+      display: none;
+    }
+    table.data.event-log-table tbody td.event-severity-cell {
+      grid-area: severity;
+    }
+    table.data.event-log-table tbody td.event-message {
+      grid-area: message;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    table.data.event-log-table tbody td.event-device {
+      grid-area: device;
+    }
+    table.data.event-log-table tbody td.event-timestamp {
+      grid-area: timestamp;
+      overflow-wrap: normal;
+      white-space: nowrap;
     }
     .event-log-controls {
+      order: -1;
       align-items: stretch;
     }
     .event-log-search {
       order: -1;
       width: 100%;
+    }
+    .event-detail-panel {
+      position: sticky;
+      bottom: 0;
     }
   }
   .source-picker .source-picker-box {
