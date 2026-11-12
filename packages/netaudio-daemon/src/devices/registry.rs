@@ -769,6 +769,13 @@ impl DeviceRegistry {
                 "device read unavailable"
             );
         }
+        if report.errors.is_empty() {
+            record.properties.remove("read_errors");
+        } else {
+            record
+                .properties
+                .insert("read_errors".to_owned(), json!(report.errors));
+        }
 
         self.publish(&record)?;
         state.record = record;
