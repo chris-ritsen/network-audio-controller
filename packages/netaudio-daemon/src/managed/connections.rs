@@ -2,7 +2,7 @@ use super::{
     client::Client,
     configuration::validate_name,
     registry::{Output, Registry},
-    sessions::{Caller, Login as SessionLogin, Session},
+    sessions::{Caller, Login as SessionLogin, Secret, Session},
     store::{Change, Snapshot},
     Credential, Error, Limits, Transport,
 };
@@ -231,7 +231,10 @@ impl Registry {
 }
 
 impl Registry {
-    pub async fn authenticate(&self, request: Login) -> Result<(String, SessionLogin), Error> {
+    pub async fn authenticate(
+        &self,
+        request: Login,
+    ) -> Result<(String, SessionLogin, bool), Error> {
         validate_name(&request.server)?;
         let requested = request.url.as_deref().filter(|url| !url.is_empty());
         let offered = offered_pin(request.controller_certificate_sha256.as_deref())?;
@@ -269,13 +272,22 @@ impl Registry {
         })
         .await
         .map_err(|_| Error::Persistence("Managed trust configuration worker failed"))??;
-        let (credential, username) = match request.authentication {
-            Authentication::Password { username, password } => (
-                Client::authenticate(&url, &username, &password, &transport, Limits::default())
-                    .await?,
-                Some(username),
-            ),
-            Authentication::ApiKey { api_key } => (Credential::new(api_key)?, None),
+        let (credential, secret, username) = match request.authentication {
+            Authentication::Password { username, password } => {
+                if let Some(login) = self
+                    .held_login(&request.server, &url, &username, &password)
+                    .await
+                {
+                    return Ok((request.server, login, true));
+                }
+                (
+                    Client::authenticate(&url, &username, &password, &transport, Limits::default())
+                        .await?,
+                    Some(Secret::new(&password)?),
+                    Some(username),
+                )
+            }
+            Authentication::ApiKey { api_key } => (Credential::new(api_key)?, None, None),
             Authentication::Saved => {
                 return Err(Error::Invalid("Enter your DDM email address and password"));
             }
@@ -296,10 +308,31 @@ impl Registry {
                 client,
                 credential,
                 domains,
+                secret,
                 transport,
                 username,
             },
+            false,
         ))
+    }
+
+    async fn held_login(
+        &self,
+        server: &str,
+        url: &str,
+        username: &str,
+        password: &str,
+    ) -> Option<SessionLogin> {
+        let held = self.held_logins(server).ok()?.into_iter().find(|login| {
+            login.username.as_deref() == Some(username)
+                && login.client.serves(Some(url))
+                && login
+                    .secret
+                    .as_ref()
+                    .is_some_and(|secret| secret.matches(password))
+        })?;
+        let domains = visible_domains(server, &held.client).await.ok()?;
+        Some(SessionLogin { domains, ..held })
     }
 
     async fn add_server(&self, name: &str, url: &str) -> Result<(), Error> {

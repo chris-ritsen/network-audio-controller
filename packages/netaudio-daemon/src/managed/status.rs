@@ -3,6 +3,7 @@ use super::{
     device_session::DeviceSession,
     inventory::freshness,
     registry::{Registry, Source},
+    Error,
 };
 use crate::{
     devices::{
@@ -13,7 +14,9 @@ use crate::{
     monitoring::requests::StatusQuery,
 };
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
+
+const RECONNECT_PAUSE: Duration = Duration::from_secs(1);
 
 pub(crate) mod observations;
 use observations::Received;
@@ -204,10 +207,17 @@ impl Registry {
         let query = query.into();
         let result = async {
             let command = query.command(&session.device_id)?;
-            let exchange = session
-                .command(command)
-                .await
-                .map_err(|error| ControlError::ObservationUnavailable(error.to_string()))?;
+            let exchange = match session.command(command.clone()).await {
+                Err(failure) if matches!(failure.error, Error::Transport(_)) => {
+                    tokio::time::sleep(RECONNECT_PAUSE).await;
+                    match session.reconnect(source).await {
+                        Ok(()) => session.command(command).await,
+                        Err(_) => Err(failure),
+                    }
+                }
+                result => result,
+            }
+            .map_err(|error| ControlError::ObservationUnavailable(error.to_string()))?;
             let received =
                 Received::decode(exchange, query.kind(), freshness(&source.configuration))
                     .map_err(|error| ControlError::ObservationUnavailable(error.to_string()))?;

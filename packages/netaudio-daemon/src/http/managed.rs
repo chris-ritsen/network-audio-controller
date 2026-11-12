@@ -161,7 +161,7 @@ async fn session_login(
             state.managed.connections_for(&caller)?,
         )));
     }
-    let (server, login) = match state.managed.authenticate(request).await {
+    let (server, login, held) = match state.managed.authenticate(request).await {
         Ok(login) => login,
         Err(error) => return failure(error),
     };
@@ -173,7 +173,7 @@ async fn session_login(
         }
     };
     session.sign_in(server.clone(), login);
-    if let Err(error) = state.managed.lend(&server, &session).await {
+    if let Err(error) = state.managed.lend(&server, &session, !held).await {
         tracing::error!(%error, server, "a browser's DDM login could not feed the managed inventory");
     }
     let mut response = json_value(Arc::new(

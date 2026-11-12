@@ -56,6 +56,11 @@ impl DeviceSession {
         })
     }
 
+    pub async fn reconnect(&mut self, source: &Source) -> Result<(), ExchangeError> {
+        *self = Self::connect(source, self.device_id.clone(), self.domain.clone()).await?;
+        Ok(())
+    }
+
     pub async fn exchange(
         &mut self,
         operation: ManagedOperation,

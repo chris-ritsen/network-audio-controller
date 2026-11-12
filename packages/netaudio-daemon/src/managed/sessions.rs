@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use subtle::ConstantTimeEq;
 use tokio::sync::watch;
 use tokio::time::Instant;
 
@@ -85,8 +86,41 @@ pub struct Login {
     pub client: Client,
     pub credential: Credential,
     pub domains: BTreeSet<String>,
+    pub secret: Option<Secret>,
     pub transport: Transport,
     pub username: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct Secret {
+    digest: [u8; 32],
+    salt: [u8; 32],
+}
+
+impl Secret {
+    pub fn new(password: &str) -> Result<Self, Error> {
+        let mut salt = [0_u8; 32];
+        rand::rngs::OsRng
+            .try_fill_bytes(&mut salt)
+            .map_err(|_| Error::Persistence("Sign-in identity could not be generated"))?;
+        Ok(Self {
+            digest: Self::digest(&salt, password),
+            salt,
+        })
+    }
+
+    pub fn matches(&self, password: &str) -> bool {
+        self.digest
+            .ct_eq(&Self::digest(&self.salt, password))
+            .into()
+    }
+
+    fn digest(salt: &[u8; 32], password: &str) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(salt);
+        hasher.update(password.as_bytes());
+        hasher.finalize().into()
+    }
 }
 
 pub struct Session {

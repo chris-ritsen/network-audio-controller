@@ -4,17 +4,39 @@ use std::sync::{Arc, Weak};
 use tokio::sync::Semaphore;
 
 impl Registry {
-    pub async fn lend(&self, server: &str, session: &Arc<Session>) -> Result<(), Error> {
+    pub async fn lend(
+        &self,
+        server: &str,
+        session: &Arc<Session>,
+        renewed: bool,
+    ) -> Result<(), Error> {
         let changed = {
             let mut state = self.lock()?;
             let lenders = state.lenders.entry(server.to_owned()).or_default();
             if !lenders.iter().any(|lender| same(lender, session)) {
                 lenders.push(Arc::downgrade(session));
             }
-            self.reassign_locked(&mut state, vec![server.to_owned()], Some(session))?
+            self.reassign_locked(
+                &mut state,
+                vec![server.to_owned()],
+                renewed.then_some(session),
+            )?
         };
         self.refresh_borrowed(changed).await;
         Ok(())
+    }
+
+    pub fn held_logins(&self, server: &str) -> Result<Vec<crate::managed::sessions::Login>, Error> {
+        let state = self.lock()?;
+        Ok(state
+            .lenders
+            .get(server)
+            .into_iter()
+            .flatten()
+            .filter_map(Weak::upgrade)
+            .filter(|session| session.active())
+            .filter_map(|session| session.login(server))
+            .collect())
     }
 
     pub async fn choose_lender(&self, server: &str) -> Result<(), Error> {
