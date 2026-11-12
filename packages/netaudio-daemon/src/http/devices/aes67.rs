@@ -89,9 +89,12 @@ async fn configure_prefix(
         Err(error) => return Ok(control_error(error)),
     };
     let readback_errors = completion.readback_errors;
-    let observation = completion
-        .observation
-        .ok_or_else(|| ApiError::unavailable("multicast prefix readback unavailable"))?;
+    let observation = completion.observation.ok_or_else(|| {
+        ApiError::unavailable(with_cause(
+            "multicast prefix readback unavailable",
+            &readback_errors,
+        ))
+    })?;
     if observation["transport"] == "ddm" {
         let mut result = observation;
         result["success"] = json!(true);

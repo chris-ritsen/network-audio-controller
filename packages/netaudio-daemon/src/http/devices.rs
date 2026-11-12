@@ -149,9 +149,13 @@ async fn performance(
         Ok(completion) => completion,
         Err(error) => return Ok(control_error(error)),
     };
-    let result = completion
-        .observation
-        .ok_or_else(|| ApiError::unavailable("performance completion is unavailable"))?;
+    let readback_errors = completion.readback_errors;
+    let result = completion.observation.ok_or_else(|| {
+        ApiError::unavailable(with_cause(
+            "performance completion is unavailable",
+            &readback_errors,
+        ))
+    })?;
     let status = match result["state"].as_str() {
         Some("confirmed") => StatusCode::OK,
         Some("request_acknowledged") => StatusCode::ACCEPTED,

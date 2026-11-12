@@ -57,9 +57,12 @@ async fn apply(
         Err(error) => return Ok(control_error(error)),
     };
     let readback_errors = completion.readback_errors;
-    let mut observed = completion
-        .observation
-        .ok_or_else(|| ApiError::unavailable("audio configuration completion is unavailable"))?;
+    let mut observed = completion.observation.ok_or_else(|| {
+        ApiError::unavailable(with_cause(
+            "audio configuration completion is unavailable",
+            &readback_errors,
+        ))
+    })?;
 
     if observed["transport"] == "ddm" {
         observed["success"] = json!(true);
