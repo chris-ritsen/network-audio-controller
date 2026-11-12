@@ -428,6 +428,7 @@ pub async fn run(
     tasks.spawn(
         Arc::clone(&managed).monitor_signals(Arc::clone(&devices.metering), lifetime.clone()),
     );
+    tasks.spawn(Arc::clone(&managed).keep_logins(lifetime.clone()));
     tasks.spawn(Arc::clone(&devices.metering).run(lifetime.clone()));
     tasks.spawn(
         Arc::clone(&history_store).run(Arc::clone(&devices.metering.history), lifetime.clone()),

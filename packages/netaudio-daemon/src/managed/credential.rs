@@ -1,11 +1,13 @@
 use super::Error;
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use tokio::io::AsyncReadExt;
 
 #[derive(Clone)]
 pub enum Credential {
-    Value(String),
     File(PathBuf),
+    Renewable(Arc<RwLock<String>>),
+    Value(String),
 }
 
 impl Credential {
@@ -14,8 +16,28 @@ impl Credential {
         Ok(Self::Value(value))
     }
 
+    pub fn renewable(value: String) -> Result<Self, Error> {
+        netaudio_core::managed_api::validate_credential(&value).map_err(Error::Credential)?;
+        Ok(Self::Renewable(Arc::new(RwLock::new(value))))
+    }
+
+    pub fn renew(&self, value: String) -> Result<(), Error> {
+        netaudio_core::managed_api::validate_credential(&value).map_err(Error::Credential)?;
+        let Self::Renewable(held) = self else {
+            return Err(Error::Credential("This DDM login cannot be renewed"));
+        };
+        *held
+            .write()
+            .map_err(|_| Error::Credential("DDM login is unavailable"))? = value;
+        Ok(())
+    }
+
     pub async fn read(&self) -> Result<String, Error> {
         let value = match self {
+            Self::Renewable(held) => held
+                .read()
+                .map_err(|_| Error::Credential("DDM login is unavailable"))?
+                .clone(),
             Self::Value(value) => value.clone(),
             Self::File(path) => {
                 let mut options = tokio::fs::OpenOptions::new();

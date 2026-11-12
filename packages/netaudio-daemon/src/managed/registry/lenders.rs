@@ -1,7 +1,10 @@
 use super::{Registry, Source, State};
 use crate::managed::{inventory::InventoryState, sessions::Session, Error};
+use anyhow::Context;
 use std::sync::{Arc, Weak};
+use std::time::SystemTime;
 use tokio::sync::Semaphore;
+use tokio_util::sync::CancellationToken;
 
 impl Registry {
     pub async fn lend(
@@ -37,6 +40,54 @@ impl Registry {
             .filter(|session| session.active())
             .filter_map(|session| session.login(server))
             .collect())
+    }
+
+    pub async fn keep_logins(self: Arc<Self>, lifetime: CancellationToken) -> anyhow::Result<()> {
+        let mut changes = self.signal_changes.subscribe();
+        loop {
+            let due = self.renew_lenders().await?;
+            let wait = async {
+                match due {
+                    Some(due) => {
+                        tokio::time::sleep(
+                            due.duration_since(SystemTime::now()).unwrap_or_default(),
+                        )
+                        .await
+                    }
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::select! {
+                biased;
+                _ = lifetime.cancelled() => return Ok(()),
+                changed = changes.changed() => changed.context("managed login observer stopped")?,
+                _ = wait => {}
+            }
+        }
+    }
+
+    pub(super) async fn renew_lenders(&self) -> Result<Option<SystemTime>, Error> {
+        let lent: Vec<_> = {
+            let state = self.lock()?;
+            state
+                .servers
+                .iter()
+                .filter_map(|(server, entry)| {
+                    let session = entry.source.lender.as_ref()?.upgrade()?;
+                    Some((server.clone(), session.login(server)?))
+                })
+                .collect()
+        };
+        let mut next = None;
+        for (server, login) in lent {
+            self.renew(&server, &login).await;
+            let due = login.renewal.as_ref().and_then(|renewal| renewal.due());
+            next = match (next, due) {
+                (Some(next), Some(due)) => Some(std::cmp::min(next, due)),
+                (next, due) => next.or(due),
+            };
+        }
+        Ok(next)
     }
 
     pub async fn choose_lender(&self, server: &str) -> Result<(), Error> {

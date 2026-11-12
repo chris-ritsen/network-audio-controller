@@ -57,6 +57,7 @@ tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 x509-parser = "0.18"
+zeroize = "1"
 
 [build-dependencies]
 anyhow = "1"

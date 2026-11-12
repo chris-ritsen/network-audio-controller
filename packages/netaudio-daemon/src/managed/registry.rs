@@ -270,6 +270,7 @@ impl Registry {
         expected: Option<super::planning::Conditions>,
         caller: Caller,
     ) -> Result<Output, Error> {
+        self.renew_caller(&caller).await;
         let owner = caller.is_owner();
         if !owner
             && matches!(

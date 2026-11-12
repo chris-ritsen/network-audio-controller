@@ -2,7 +2,7 @@ use super::{
     client::Client,
     configuration::validate_name,
     registry::{Output, Registry},
-    sessions::{Caller, Login as SessionLogin, Secret, Session},
+    sessions::{Caller, Login as SessionLogin, Renewal, Session},
     store::{Change, Snapshot},
     Credential, Error, Limits, Transport,
 };
@@ -272,7 +272,7 @@ impl Registry {
         })
         .await
         .map_err(|_| Error::Persistence("Managed trust configuration worker failed"))??;
-        let (credential, secret, username) = match request.authentication {
+        let (credential, renewal, username) = match request.authentication {
             Authentication::Password { username, password } => {
                 if let Some(login) = self
                     .held_login(&request.server, &url, &username, &password)
@@ -280,10 +280,12 @@ impl Registry {
                 {
                     return Ok((request.server, login, true));
                 }
-                (
+                let issued =
                     Client::authenticate(&url, &username, &password, &transport, Limits::default())
-                        .await?,
-                    Some(Secret::new(&password)?),
+                        .await?;
+                (
+                    Credential::renewable(issued.read().await?)?,
+                    Some(Arc::new(Renewal::new(&password))),
                     Some(username),
                 )
             }
@@ -308,12 +310,65 @@ impl Registry {
                 client,
                 credential,
                 domains,
-                secret,
+                renewal,
                 transport,
                 username,
             },
             false,
         ))
+    }
+
+    pub(super) async fn renew(&self, server: &str, login: &SessionLogin) {
+        let Some(renewal) = &login.renewal else {
+            return;
+        };
+        let Some(_renewing) = renewal.begin().await else {
+            return;
+        };
+        let outcome = async {
+            let url = self
+                .source(server)?
+                .configuration
+                .url
+                .clone()
+                .ok_or(Error::Invalid("The DDM server has no URL"))?;
+            let username = login.username.as_deref().ok_or(Error::Authentication)?;
+            let issued = Client::authenticate(
+                &url,
+                username,
+                renewal.password(),
+                &login.transport,
+                Limits::default(),
+            )
+            .await?;
+            login.credential.renew(issued.read().await?)
+        }
+        .await;
+        match outcome {
+            Ok(()) => {
+                renewal.renewed();
+                tracing::info!(server, "DDM login renewed");
+            }
+            Err(Error::Authentication) => {
+                renewal.refused();
+                tracing::warn!(server, "DDM refused to renew a login");
+            }
+            Err(error) => {
+                renewal.failed();
+                tracing::warn!(%error, server, "DDM login renewal failed");
+            }
+        }
+    }
+
+    pub(super) async fn renew_caller(&self, caller: &Caller) {
+        let Caller::Session(session) = caller else {
+            return;
+        };
+        for server in session.servers() {
+            if let Some(login) = session.login(&server) {
+                self.renew(&server, &login).await;
+            }
+        }
     }
 
     async fn held_login(
@@ -327,9 +382,9 @@ impl Registry {
             login.username.as_deref() == Some(username)
                 && login.client.serves(Some(url))
                 && login
-                    .secret
+                    .renewal
                     .as_ref()
-                    .is_some_and(|secret| secret.matches(password))
+                    .is_some_and(|renewal| renewal.matches(password))
         })?;
         let domains = visible_domains(server, &held.client).await.ok()?;
         Some(SessionLogin { domains, ..held })

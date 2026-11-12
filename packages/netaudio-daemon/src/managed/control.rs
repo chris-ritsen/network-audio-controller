@@ -286,6 +286,7 @@ impl Registry {
         &self,
         request: DeviceRequest,
     ) -> Result<ControlCompletion, ControlError> {
+        self.renew_caller(&request.caller).await;
         let configuration = self.configuration_change.lock().await;
         let server = request.record["ddm_server_profile"]
             .as_str()

@@ -473,6 +473,7 @@ impl Registry {
         generation: u64,
         ready: &mut Option<Instant>,
     ) -> Result<(), Error> {
+        self.renew_lenders().await?;
         let configuration = &source.configuration;
         let endpoint = super::super::client::endpoint(
             configuration

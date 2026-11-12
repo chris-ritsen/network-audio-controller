@@ -6,14 +6,17 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use subtle::ConstantTimeEq;
 use tokio::sync::watch;
 use tokio::time::Instant;
+use zeroize::Zeroizing;
 
 const ABSOLUTE_LIFETIME: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const IDLE_LIFETIME: Duration = Duration::from_secs(12 * 60 * 60);
 const MAXIMUM_SESSIONS: usize = 256;
+const RENEWAL_AGE: Duration = Duration::from_secs(15 * 60);
+const RENEWAL_RETRY: Duration = Duration::from_secs(30);
 pub const COOKIE: &str = "__Host-netaudio-session";
 
 tokio::task_local! {
@@ -86,40 +89,66 @@ pub struct Login {
     pub client: Client,
     pub credential: Credential,
     pub domains: BTreeSet<String>,
-    pub secret: Option<Secret>,
+    pub renewal: Option<Arc<Renewal>>,
     pub transport: Transport,
     pub username: Option<String>,
 }
 
-#[derive(Clone)]
-pub struct Secret {
-    digest: [u8; 32],
-    salt: [u8; 32],
+pub struct Renewal {
+    due: Mutex<Option<SystemTime>>,
+    gate: tokio::sync::Mutex<()>,
+    password: Zeroizing<String>,
 }
 
-impl Secret {
-    pub fn new(password: &str) -> Result<Self, Error> {
-        let mut salt = [0_u8; 32];
-        rand::rngs::OsRng
-            .try_fill_bytes(&mut salt)
-            .map_err(|_| Error::Persistence("Sign-in identity could not be generated"))?;
-        Ok(Self {
-            digest: Self::digest(&salt, password),
-            salt,
-        })
+impl Renewal {
+    pub fn new(password: &str) -> Self {
+        Self {
+            due: Mutex::new(Some(SystemTime::now() + RENEWAL_AGE)),
+            gate: tokio::sync::Mutex::new(()),
+            password: Zeroizing::new(password.to_owned()),
+        }
+    }
+
+    pub async fn begin(&self) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+        if !self.is_due() {
+            return None;
+        }
+        let gate = self.gate.lock().await;
+        self.is_due().then_some(gate)
+    }
+
+    pub fn due(&self) -> Option<SystemTime> {
+        self.due.lock().ok().and_then(|due| *due)
+    }
+
+    pub fn failed(&self) {
+        self.schedule(Some(SystemTime::now() + RENEWAL_RETRY));
     }
 
     pub fn matches(&self, password: &str) -> bool {
-        self.digest
-            .ct_eq(&Self::digest(&self.salt, password))
-            .into()
+        self.password.as_bytes().ct_eq(password.as_bytes()).into()
     }
 
-    fn digest(salt: &[u8; 32], password: &str) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(salt);
-        hasher.update(password.as_bytes());
-        hasher.finalize().into()
+    pub fn password(&self) -> &str {
+        &self.password
+    }
+
+    pub fn refused(&self) {
+        self.schedule(None);
+    }
+
+    pub fn renewed(&self) {
+        self.schedule(Some(SystemTime::now() + RENEWAL_AGE));
+    }
+
+    fn is_due(&self) -> bool {
+        self.due().is_some_and(|due| due <= SystemTime::now())
+    }
+
+    fn schedule(&self, due: Option<SystemTime>) {
+        if let Ok(mut held) = self.due.lock() {
+            *held = due;
+        }
     }
 }
 
