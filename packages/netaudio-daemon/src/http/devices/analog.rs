@@ -1,4 +1,6 @@
-use super::{control_error, json_value, parameters, text, ApiError, DeviceService, RequestBody};
+use super::{
+    control_error, json_value, parameters, text, with_cause, ApiError, DeviceService, RequestBody,
+};
 use crate::devices::analog::Configuration;
 use crate::devices::operations::{ControlError, ControlOperation};
 use crate::devices::status_configuration;
@@ -43,9 +45,13 @@ async fn configure(
         Ok(completion) => completion,
         Err(error) => return Ok(control_error(error)),
     };
-    let mut observation = completion
-        .observation
-        .ok_or_else(|| ApiError::unavailable("gain readback was unavailable"))?;
+    let readback_errors = completion.readback_errors;
+    let mut observation = completion.observation.ok_or_else(|| {
+        ApiError::unavailable(with_cause(
+            "gain readback was unavailable",
+            &readback_errors,
+        ))
+    })?;
     if observation["transport"] == "ddm" {
         observation["success"] = json!(true);
         return Ok(json_value(Arc::new(observation)));
@@ -62,7 +68,7 @@ async fn configure(
         ),
         None => (
             StatusCode::GATEWAY_TIMEOUT,
-            json!({"error": "gain readback was unavailable"}),
+            json!({"error": with_cause("gain readback was unavailable", &readback_errors)}),
         ),
     };
     let mut response = json_value(Arc::new(result));

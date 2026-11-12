@@ -1,4 +1,6 @@
-use super::{control_error, json_value, parameters, text, ApiError, DeviceService, RequestBody};
+use super::{
+    control_error, json_value, parameters, text, with_cause, ApiError, DeviceService, RequestBody,
+};
 use crate::devices::audio_configuration::{parse_pullup_selection, AudioConfiguration, AudioKind};
 use crate::devices::operations::ControlOperation;
 use axum::extract::{Extension, State};
@@ -54,6 +56,7 @@ async fn apply(
         Ok(completion) => completion,
         Err(error) => return Ok(control_error(error)),
     };
+    let readback_errors = completion.readback_errors;
     let mut observed = completion
         .observation
         .ok_or_else(|| ApiError::unavailable("audio configuration completion is unavailable"))?;
@@ -66,7 +69,10 @@ async fn apply(
     if observed["state"] == "unavailable" {
         return Err(ApiError {
             status: StatusCode::GATEWAY_TIMEOUT,
-            message: format!("{} readback was unavailable", kind.label()),
+            message: with_cause(
+                format!("{} readback was unavailable", kind.label()),
+                &readback_errors,
+            ),
         });
     }
 

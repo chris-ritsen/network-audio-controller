@@ -1,4 +1,6 @@
-use super::{control_error, json_value, parameters, text, ApiError, DeviceService, RequestBody};
+use super::{
+    control_error, json_value, parameters, text, with_cause, ApiError, DeviceService, RequestBody,
+};
 use crate::devices::network::Change;
 use crate::devices::network_configuration::Configuration;
 use crate::devices::operations::{ControlError, ControlOperation};
@@ -60,9 +62,13 @@ async fn configure(
         Ok(completion) => completion,
         Err(error) => return Ok(network_error(error)),
     };
-    let mut observation = completion
-        .observation
-        .ok_or_else(|| ApiError::unavailable("network readback was unavailable"))?;
+    let readback_errors = completion.readback_errors;
+    let mut observation = completion.observation.ok_or_else(|| {
+        ApiError::unavailable(with_cause(
+            "network readback was unavailable",
+            &readback_errors,
+        ))
+    })?;
 
     if observation["transport"] == "ddm" {
         observation["success"] = json!(true);
@@ -92,7 +98,10 @@ async fn configure(
         RequestKind::Redundancy => "Dante redundancy change could not be verified",
     };
     let mut response = json_value(Arc::new(json!({
-        "error": observation["verification_error"].as_str().unwrap_or(unavailable),
+        "error": observation["verification_error"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| with_cause(unavailable, &readback_errors)),
         "mutation": observation,
     })));
     *response.status_mut() = StatusCode::BAD_GATEWAY;

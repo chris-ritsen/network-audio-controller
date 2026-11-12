@@ -1,4 +1,6 @@
-use super::{control_error, json_value, parameters, text, ApiError, DeviceService, RequestBody};
+use super::{
+    control_error, json_value, parameters, text, with_cause, ApiError, DeviceService, RequestBody,
+};
 use crate::devices::clock::{parse_subdomain, ClockOperation, PROFILE_PARAMETER_ERROR};
 use crate::devices::operations::ControlOperation;
 use axum::extract::{Extension, State};
@@ -102,9 +104,13 @@ async fn apply(
         Ok(completion) => completion,
         Err(error) => return Ok(control_error(error)),
     };
-    let mut observed = completion
-        .observation
-        .ok_or_else(|| ApiError::unavailable("clock readback was unavailable"))?;
+    let readback_errors = completion.readback_errors;
+    let mut observed = completion.observation.ok_or_else(|| {
+        ApiError::unavailable(with_cause(
+            "clock readback was unavailable",
+            &readback_errors,
+        ))
+    })?;
     let confirmed = observed["effective_state_confirmed"] == true;
 
     if matches!(endpoint, Endpoint::Configuration) {
@@ -121,7 +127,10 @@ async fn apply(
     let status = match observed["status"].as_object() {
         Some(status) => status,
         None if observed["transport"] == "ddm" => {
-            observed["error"] = json!("Managed clock readback was unavailable");
+            observed["error"] = json!(with_cause(
+                "Managed clock readback was unavailable",
+                &readback_errors
+            ));
             return Ok(control_error(
                 crate::devices::operations::ControlError::Managed {
                     status: 504,
@@ -132,7 +141,7 @@ async fn apply(
         None => {
             return Err(ApiError {
                 status: StatusCode::GATEWAY_TIMEOUT,
-                message: "clock readback was unavailable".to_owned(),
+                message: with_cause("clock readback was unavailable", &readback_errors),
             });
         }
     };
@@ -154,7 +163,10 @@ async fn apply(
         .filter(|value| !value.is_null())
         .ok_or_else(|| ApiError {
             status: StatusCode::GATEWAY_TIMEOUT,
-            message: format!("{label} readback was unavailable"),
+            message: with_cause(
+                format!("{label} readback was unavailable"),
+                &readback_errors,
+            ),
         })?;
     let value = if matches!(endpoint, Endpoint::Subdomain) {
         json!(netaudio_core::clock_configuration::subdomain_presentation(value).label)

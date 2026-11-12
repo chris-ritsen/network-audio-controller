@@ -1,4 +1,6 @@
-use super::{control_error, json_value, parameters, text, ApiError, DeviceService, RequestBody};
+use super::{
+    control_error, json_value, parameters, text, with_cause, ApiError, DeviceService, RequestBody,
+};
 use crate::devices::aes67::Configuration;
 use crate::devices::operations::ControlOperation;
 use axum::extract::State;
@@ -39,9 +41,13 @@ async fn configure(
         Ok(completion) => completion,
         Err(error) => return Ok(control_error(error)),
     };
-    let mut observed = completion
-        .observation
-        .ok_or_else(|| ApiError::unavailable("AES67 readback was unavailable"))?;
+    let readback_errors = completion.readback_errors;
+    let mut observed = completion.observation.ok_or_else(|| {
+        ApiError::unavailable(with_cause(
+            "AES67 readback was unavailable",
+            &readback_errors,
+        ))
+    })?;
     if observed["transport"] == "ddm" {
         observed["success"] = json!(true);
         return Ok(json_value(Arc::new(observed)));
@@ -54,7 +60,7 @@ async fn configure(
         ),
         None => (
             StatusCode::GATEWAY_TIMEOUT,
-            json!({"error": "AES67 readback was unavailable"}),
+            json!({"error": with_cause("AES67 readback was unavailable", &readback_errors)}),
         ),
     };
     let mut response = json_value(Arc::new(body));
@@ -82,6 +88,7 @@ async fn configure_prefix(
         Ok(completion) => completion,
         Err(error) => return Ok(control_error(error)),
     };
+    let readback_errors = completion.readback_errors;
     let observation = completion
         .observation
         .ok_or_else(|| ApiError::unavailable("multicast prefix readback unavailable"))?;
@@ -101,7 +108,7 @@ async fn configure_prefix(
         ),
         None => (
             StatusCode::GATEWAY_TIMEOUT,
-            json!({"error": "AES67 multicast prefix readback was unavailable"}),
+            json!({"error": with_cause("AES67 multicast prefix readback was unavailable", &readback_errors)}),
         ),
     };
     let mut response = json_value(Arc::new(body));

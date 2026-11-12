@@ -111,8 +111,12 @@ async fn transmit_flows(
         .await
     {
         Ok(completion) => {
+            let readback_errors = completion.readback_errors;
             let inventory = completion.observation.ok_or_else(|| {
-                ApiError::unavailable("fresh transmitter flow readback was unavailable")
+                ApiError::unavailable(with_cause(
+                    "fresh transmitter flow readback was unavailable",
+                    &readback_errors,
+                ))
             })?;
             Ok(json_value(Arc::new(inventory)))
         }
@@ -217,8 +221,12 @@ async fn set_latency(
         Ok(completion) => completion,
         Err(error) => return Ok(control_error(error)),
     };
+    let readback_errors = completion.readback_errors;
     let observed = completion.observation.ok_or_else(|| {
-        ApiError::unavailable("latency readback was unavailable; refresh before retrying")
+        ApiError::unavailable(with_cause(
+            "latency readback was unavailable; refresh before retrying",
+            &readback_errors,
+        ))
     })?;
     let body = if observed["effective_state_confirmed"] == true {
         if observed["control_transport"] == "controller" {
@@ -231,7 +239,10 @@ async fn set_latency(
     } else if observed["state"] == "unavailable" {
         return Err(ApiError {
             status: StatusCode::GATEWAY_TIMEOUT,
-            message: "latency readback was unavailable; refresh before retrying".to_owned(),
+            message: with_cause(
+                "latency readback was unavailable; refresh before retrying",
+                &readback_errors,
+            ),
         });
     } else {
         let mut response = json_value(Arc::new(json!({
@@ -492,4 +503,12 @@ pub fn control_error(error: ControlError) -> Response {
     let mut response = json_value(Arc::new(body));
     *response.status_mut() = status;
     response
+}
+
+fn with_cause(message: impl Into<String>, errors: &[String]) -> String {
+    let message = message.into();
+    match errors.first() {
+        Some(cause) => format!("{message}: {cause}"),
+        None => message,
+    }
 }
