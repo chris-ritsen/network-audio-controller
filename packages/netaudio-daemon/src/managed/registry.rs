@@ -423,6 +423,7 @@ impl Registry {
                 name,
                 &state.snapshot.settings.contexts,
                 &entry.discovery,
+                entry.source.lender.is_some(),
             ),
         })
     }
@@ -624,6 +625,7 @@ impl Registry {
                     entry.source.enabled(),
                     contexts,
                     &entry.discovery,
+                    entry.source.lender.is_some(),
                 );
                 status["refreshing"] = json!(entry.source.refresh.available_permits() == 0);
                 status["signal_sessions"] = json!(entry.signals);
@@ -667,10 +669,12 @@ impl Registry {
         let mut observations = Vec::new();
         let mut controller_status = Vec::new();
         for (name, entry) in &mut state.servers {
-            let source_observations =
-                entry
-                    .inventory
-                    .observations(name, contexts, &entry.discovery);
+            let source_observations = entry.inventory.observations(
+                name,
+                contexts,
+                &entry.discovery,
+                entry.source.lender.is_some(),
+            );
             controller_status.extend(entry.controller_status.project(&source_observations, now)?);
             observations.extend(source_observations);
         }
