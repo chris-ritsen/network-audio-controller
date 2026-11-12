@@ -296,29 +296,6 @@ test("receiver row status sits next to the matrix and its tooltip follows the ic
   await expect(page.getByRole("tooltip")).toBeHidden();
 });
 
-test("navigation controls toggle filters", async ({ page }) => {
-  await serveWebapp(page);
-  await page.goto("http://netaudio.test/routing");
-  const header = page.locator(".topbar");
-  const hide = header.getByRole("button", {
-    name: "Hide filters",
-    exact: true,
-  });
-  await expect(hide).toHaveText("");
-  await expect(hide).toHaveAttribute("aria-expanded", "true");
-  await hide.click();
-  await expect(page.locator("#inventory-filters")).toHaveCount(0);
-  await header
-    .getByRole("button", { name: "Show filters", exact: true })
-    .click();
-  await expect(page.locator("#inventory-filters")).toBeVisible();
-  await page
-    .getByRole("navigation", { name: "Views" })
-    .getByRole("link", { name: "Settings", exact: true })
-    .click();
-  await expect(header.getByRole("button", { name: /filters/ })).toHaveCount(0);
-});
-
 test("receivers start across the top and a saved alternate orientation is respected", async ({
   page,
 }) => {

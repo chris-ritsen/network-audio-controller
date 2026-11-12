@@ -81,11 +81,6 @@
       4px 4px;
     background-repeat: no-repeat;
   }
-  .filter-panel-toggle-slot {
-    width: 32px;
-    height: 32px;
-    flex-shrink: 0;
-  }
   .topbar-controls {
     display: flex;
     align-items: center;

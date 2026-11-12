@@ -4771,11 +4771,6 @@
       4px 4px;
     background-repeat: no-repeat;
   }
-  .filter-panel-toggle-slot {
-    width: 32px;
-    height: 32px;
-    flex-shrink: 0;
-  }
   .topbar-controls {
     display: flex;
     align-items: center;
@@ -5050,6 +5045,9 @@
   .header-icon-button[data-pending="true"] {
     background: var(--text);
     color: var(--black);
+  }
+  .header-icon-button:disabled {
+    cursor: not-allowed;
   }
   .header-icon-button:focus-visible {
     outline: 2px solid var(--text);

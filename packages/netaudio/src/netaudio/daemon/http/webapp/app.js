@@ -105,17 +105,14 @@ function TopBar({ compact, filtersAvailable, filtersOpen }) {
   const panel = compact ? "top-panel" : "sidebar";
   return html`
     <header class="topbar">
-      ${
-        filtersAvailable
-          ? html`<button type="button" class="header-icon-button filter-panel-toggle"
+      <button type="button" class="header-icon-button filter-panel-toggle"
+        disabled=${!filtersAvailable}
         aria-label=${filtersOpen ? t("Hide filters") : t("Show filters")}
         title=${filtersOpen ? t("Hide filters") : t("Show filters")}
         aria-expanded=${filtersOpen} aria-controls="inventory-filters"
         onClick=${() => saveRoutingFilters({ ...inventoryFilters.value, panelOpen: !filtersOpen })}>
         <${Icon} name=${`${panel}-${filtersOpen ? "close" : "open"}`} />
-      </button>`
-          : html`<span class="filter-panel-toggle-slot" aria-hidden="true"></span>`
-      }
+      </button>
       <a class="brand" href="/routing" aria-label="netaudio">
         <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
           <rect width="64" height="64" rx="13" fill="#ff2323" />

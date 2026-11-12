@@ -281,6 +281,10 @@
     color: var(--black);
   }
 
+  .header-icon-button:disabled {
+    cursor: not-allowed;
+  }
+
   .header-icon-button:focus-visible {
     outline: 2px solid var(--text);
     outline-offset: 2px;
