@@ -19,8 +19,8 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 const HEALTHY_SESSION: Duration = Duration::from_secs(60);
-const MAXIMUM_ATTEMPTS: u32 = 8;
-const MAXIMUM_BACKOFF: Duration = Duration::from_secs(30);
+const MAXIMUM_BACKOFF: Duration = Duration::from_secs(10);
+const REPORTED_ATTEMPTS: u32 = 8;
 const MAXIMUM_SESSIONS: usize = 8;
 type Key = (String, String);
 
@@ -406,7 +406,7 @@ impl Registry {
                     return Ok(());
                 };
                 self.signal_status(key, source, json!({"state": "connecting", "attempt": attempt,
-                    "maximum_attempts": MAXIMUM_ATTEMPTS, "unavailable_devices": route.borrow().unavailable}))?;
+                    "unavailable_devices": route.borrow().unavailable}))?;
                 let mut ready = None;
                 let result = self
                     .receive_signals(
@@ -418,8 +418,8 @@ impl Registry {
                 })?;
                 invalidate(metering, &route.borrow(), owner)?;
                 failures = match ready {
-                    Some(ready) if ready.elapsed() >= HEALTHY_SESSION => 1,
-                    _ => failures + 1,
+                    Some(ready) if ready.elapsed() >= HEALTHY_SESSION => 0,
+                    _ => failures.saturating_add(1),
                 };
                 let permanent = matches!(
                     result,
@@ -433,19 +433,21 @@ impl Registry {
                     Ok(()) => "Managed signal session ended".to_owned(),
                     Err(error) => error.to_string(),
                 };
-                let exhausted = permanent || failures >= MAXIMUM_ATTEMPTS;
-                tracing::warn!(server = %key.0, domain = %key.1, attempt, %error, "managed signal stream disconnected");
-                self.signal_status(
-                    key,
-                    source,
-                    json!({
-                        "state": if exhausted { "exhausted" } else { "reconnecting" },
-                        "attempt": attempt, "maximum_attempts": MAXIMUM_ATTEMPTS, "error": error,
-                        "recovery": "Refresh managed inventory to retry an exhausted session",
-                        "unavailable_devices": route.borrow().unavailable,
-                    }),
-                )?;
-                if exhausted {
+                if permanent || attempt <= REPORTED_ATTEMPTS {
+                    tracing::warn!(server = %key.0, domain = %key.1, attempt, %error, "managed signal stream disconnected");
+                } else {
+                    tracing::debug!(server = %key.0, domain = %key.1, attempt, %error, "managed signal stream disconnected");
+                }
+                let mut status = json!({
+                    "state": if permanent { "exhausted" } else { "reconnecting" },
+                    "attempt": attempt, "error": error,
+                    "unavailable_devices": route.borrow().unavailable,
+                });
+                if permanent {
+                    status["recovery"] = json!("Sign in to DDM again or correct the saved credential");
+                }
+                self.signal_status(key, source, status)?;
+                if permanent {
                     return Ok(());
                 }
             }
@@ -514,7 +516,7 @@ impl Registry {
                     *ready = Some(Instant::now());
                     self.discovery(key, source, |entry| ((), entry.discovery.observing(&key.1, generation)))?;
                     self.signal_status(key, source, json!({
-                        "state": "ready", "attempt": attempt, "maximum_attempts": MAXIMUM_ATTEMPTS,
+                        "state": "ready", "attempt": attempt,
                         "unavailable_devices": route.borrow().unavailable,
                     })).map_err(|_| Error::Conflict("Managed signal status could not be published"))?
                 }

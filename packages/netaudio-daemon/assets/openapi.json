@@ -14453,10 +14453,6 @@
             "type": "integer",
             "minimum": 1
           },
-          "maximum_attempts": {
-            "type": "integer",
-            "minimum": 1
-          },
           "maximum_sessions": {
             "type": "integer",
             "minimum": 1

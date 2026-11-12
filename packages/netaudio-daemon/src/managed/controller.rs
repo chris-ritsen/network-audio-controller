@@ -17,6 +17,7 @@ use tokio_rustls::{client::TlsStream, TlsConnector};
 mod stream;
 pub use stream::{Lookup, Signal, StreamEvent};
 
+#[derive(Clone)]
 pub struct Controller {
     origin: Url,
     transport: Transport,
@@ -172,12 +173,20 @@ impl Controller {
                     "Controller session requires an IPv4 notification address",
                 ));
             };
-            let name = ServerName::try_from(host)
+            let name = ServerName::try_from(host.clone())
                 .map_err(|_| Error::Invalid("Controller TLS hostname is invalid"))?;
             let stream = TlsConnector::from(Arc::clone(&self.transport.tls))
                 .connect(name, stream)
                 .await
-                .map_err(|_| Error::Tls("Controller TLS authentication failed"))?;
+                .map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::InvalidData {
+                        Error::Tls("Controller TLS authentication failed")
+                    } else {
+                        Error::Transport(format!(
+                            "could not secure the connection to {host}: {error}"
+                        ))
+                    }
+                })?;
             let notification = UdpSocket::bind(SocketAddr::new(local.ip(), 0))
                 .await
                 .map_err(|error| {

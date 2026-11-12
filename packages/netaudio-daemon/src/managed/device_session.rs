@@ -14,15 +14,19 @@ use netaudio_core::{
     managed_session::ManagedOperation,
 };
 use serde_json::{json, Value};
-use std::{net::IpAddr, num::NonZeroU16};
+use std::{net::IpAddr, num::NonZeroU16, time::Duration};
+
+pub(super) const RECONNECT_PAUSES: [Duration; 2] = [Duration::ZERO, Duration::from_secs(1)];
 
 pub(super) struct DeviceSession {
-    session: Session,
+    controller: Controller,
     credential: Credential,
     pub device_id: String,
     domain: String,
     pub host_mac: [u8; 6],
     message_id: u16,
+    service_port: NonZeroU16,
+    session: Session,
 }
 
 impl DeviceSession {
@@ -38,21 +42,27 @@ impl DeviceSession {
         device_id: String,
         domain: String,
     ) -> Result<Self, ExchangeError> {
-        let (session, credential, host_mac) =
-            tokio::time::timeout(Limits::default().timeout, connection(source))
-                .await
-                .unwrap_or(Err(Error::Deadline))
-                .map_err(|error| ExchangeError {
-                    error,
-                    request_sent: Some(false),
-                })?;
+        let mut connected = connection(source).await;
+        for pause in RECONNECT_PAUSES {
+            if !matches!(connected, Err(Error::Transport(_))) {
+                break;
+            }
+            tokio::time::sleep(pause).await;
+            connected = connection(source).await;
+        }
+        let connected = connected.map_err(|error| ExchangeError {
+            error,
+            request_sent: Some(false),
+        })?;
         Ok(Self {
-            session,
-            credential,
+            controller: connected.controller,
+            credential: connected.credential,
             device_id,
             domain,
-            host_mac,
+            host_mac: connected.host_mac,
             message_id: 0,
+            service_port: connected.service_port,
+            session: connected.session,
         })
     }
 
@@ -65,9 +75,38 @@ impl DeviceSession {
         &mut self,
         operation: ManagedOperation,
     ) -> Result<Exchange, ExchangeError> {
-        self.session
-            .exchange_with_receipt(&self.credential, operation, Some(self.domain.clone()))
-            .await
+        let mut result = self
+            .session
+            .exchange_with_receipt(
+                &self.credential,
+                operation.clone(),
+                Some(self.domain.clone()),
+            )
+            .await;
+        for pause in RECONNECT_PAUSES {
+            let unsent = matches!(
+                &result,
+                Err(failure)
+                    if failure.request_sent == Some(false)
+                        && matches!(failure.error, Error::Transport(_))
+            );
+            if !unsent {
+                break;
+            }
+            tokio::time::sleep(pause).await;
+            if let Ok(session) = self.controller.connect(self.service_port).await {
+                self.session = session;
+                result = self
+                    .session
+                    .exchange_with_receipt(
+                        &self.credential,
+                        operation.clone(),
+                        Some(self.domain.clone()),
+                    )
+                    .await;
+            }
+        }
+        result
     }
 
     pub async fn command(&mut self, specification: Value) -> Result<Exchange, ExchangeError> {
@@ -161,7 +200,21 @@ pub(super) fn controller_identity(device: &Device) -> Option<String> {
     })
 }
 
-async fn connection(source: &Source) -> Result<(Session, Credential, [u8; 6]), Error> {
+struct Connected {
+    controller: Controller,
+    credential: Credential,
+    host_mac: [u8; 6],
+    service_port: NonZeroU16,
+    session: Session,
+}
+
+async fn connection(source: &Source) -> Result<Connected, Error> {
+    tokio::time::timeout(Limits::default().timeout, connect(source))
+        .await
+        .unwrap_or(Err(Error::Deadline))
+}
+
+async fn connect(source: &Source) -> Result<Connected, Error> {
     let configuration = &source.configuration;
     let endpoint = super::client::endpoint(
         configuration
@@ -193,5 +246,11 @@ async fn connection(source: &Source) -> Result<(Session, Credential, [u8; 6]), E
         .credential
         .clone()
         .ok_or(Error::Credential("DDM credential is unavailable"))?;
-    Ok((session, credential, host_mac))
+    Ok(Connected {
+        controller,
+        credential,
+        host_mac,
+        service_port: endpoints.service_port,
+        session,
+    })
 }
