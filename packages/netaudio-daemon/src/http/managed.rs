@@ -143,7 +143,12 @@ async fn session_login(
     uri: &Uri,
     request: Login,
 ) -> Result<Response, ApiError> {
-    if connection.request_base_url(headers, uri)?.scheme() != "https" {
+    if connection.request_base_url(headers, uri)?.scheme() != "https"
+        && !connection
+            .client_address(headers)
+            .to_canonical()
+            .is_loopback()
+    {
         return Err(ApiError {
             status: StatusCode::FORBIDDEN,
             message: "Open the daemon over HTTPS to log in to DDM".into(),
