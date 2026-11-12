@@ -143,18 +143,30 @@ impl Controller {
         let connection = async {
             let addresses = tokio::net::lookup_host((host.as_str(), port.get()))
                 .await
-                .map_err(|_| Error::Transport)?;
+                .map_err(|error| Error::Transport(format!("could not resolve {host}: {error}")))?;
             let mut connection = None;
+            let mut failure = None;
 
             for address in addresses.filter(SocketAddr::is_ipv4) {
-                if let Ok(stream) = TcpStream::connect(address).await {
-                    connection = Some(stream);
-                    break;
+                match TcpStream::connect(address).await {
+                    Ok(stream) => {
+                        connection = Some(stream);
+                        break;
+                    }
+                    Err(error) => {
+                        failure = Some(format!("could not connect to {address}: {error}"))
+                    }
                 }
             }
 
-            let stream = connection.ok_or(Error::Transport)?;
-            let local = stream.local_addr().map_err(|_| Error::Transport)?;
+            let stream = connection.ok_or_else(|| {
+                Error::Transport(failure.unwrap_or_else(|| format!("{host} has no IPv4 address")))
+            })?;
+            let local = stream.local_addr().map_err(|error| {
+                Error::Transport(format!(
+                    "could not read the local address of the connection to {host}: {error}"
+                ))
+            })?;
             let IpAddr::V4(address) = local.ip() else {
                 return Err(Error::Invalid(
                     "Controller session requires an IPv4 notification address",
@@ -168,14 +180,25 @@ impl Controller {
                 .map_err(|_| Error::Tls("Controller TLS authentication failed"))?;
             let notification = UdpSocket::bind(SocketAddr::new(local.ip(), 0))
                 .await
-                .map_err(|_| Error::Transport)?;
+                .map_err(|error| {
+                    Error::Transport(format!(
+                        "could not open a notification socket on {}: {error}",
+                        local.ip()
+                    ))
+                })?;
             let notification_port = NonZeroU16::new(
                 notification
                     .local_addr()
-                    .map_err(|_| Error::Transport)?
+                    .map_err(|error| {
+                        Error::Transport(format!(
+                            "could not read the notification socket address: {error}"
+                        ))
+                    })?
                     .port(),
             )
-            .ok_or(Error::Transport)?;
+            .ok_or_else(|| {
+                Error::Transport("the notification socket was not given a port".to_owned())
+            })?;
             Ok(Connection {
                 stream,
                 notification,
@@ -267,8 +290,10 @@ impl Session {
             .get_ref()
             .0
             .peer_addr()
-            .map_err(|_| ExchangeError {
-                error: Error::Transport,
+            .map_err(|error| ExchangeError {
+                error: Error::Transport(format!(
+                    "could not read the remote address of the control connection: {error}"
+                )),
                 request_sent: Some(false),
             })?;
         let mut request_sent = Some(false);
@@ -293,11 +318,9 @@ impl Session {
                 }
 
                 for frame in step.outgoing {
-                    connection
-                        .stream
-                        .write_all(&frame)
-                        .await
-                        .map_err(|_| Error::Transport)?;
+                    connection.stream.write_all(&frame).await.map_err(|error| {
+                        Error::Transport(format!("could not send a request to {peer}: {error}"))
+                    })?;
                 }
 
                 if operation_emitted && request_sent.is_none() {
@@ -332,7 +355,9 @@ impl Session {
                     .stream
                     .read_exact(&mut bytes)
                     .await
-                    .map_err(|_| Error::Transport)?;
+                    .map_err(|error| {
+                        Error::Transport(format!("could not read a reply from {peer}: {error}"))
+                    })?;
                 received = Some((chrono::Utc::now(), tokio::time::Instant::now()));
                 received_bytes += bytes.len();
                 request = ManagedSessionRequest::Receive {
@@ -369,6 +394,10 @@ impl Session {
             .ok_or(Error::Invalid("Controller session is closed"))?
             .notification
             .local_addr()
-            .map_err(|_| Error::Transport)
+            .map_err(|error| {
+                Error::Transport(format!(
+                    "could not read the notification socket address: {error}"
+                ))
+            })
     }
 }

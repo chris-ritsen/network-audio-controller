@@ -30,7 +30,7 @@ pub enum Error {
     Authentication,
     Response(&'static str),
     Status(u16),
-    Transport,
+    Transport(String),
     Unreachable(String),
     Untrusted {
         certificate: Vec<u8>,
@@ -59,7 +59,7 @@ impl fmt::Display for Error {
             | Self::Tls(message) => formatter.write_str(message),
             Self::Authentication => formatter.write_str("DDM rejected authentication"),
             Self::Status(status) => write!(formatter, "Managed service returned HTTP {status}"),
-            Self::Transport => formatter.write_str("The connection to DDM failed"),
+            Self::Transport(cause) => write!(formatter, "The connection to DDM failed: {cause}"),
             Self::Unreachable(message) => formatter.write_str(message),
             Self::Untrusted { host, pinned, .. } => {
                 if *pinned {

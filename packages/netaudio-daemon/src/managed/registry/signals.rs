@@ -484,7 +484,7 @@ impl Registry {
         let transport = source
             .transport
             .as_ref()
-            .ok_or(Error::Transport)?
+            .ok_or_else(|| Error::Transport("no one is signed in to this DDM server".to_owned()))?
             .independent_capacity(NonZeroUsize::new(2).expect("positive capacity"));
         let controller = Controller::new(
             host,

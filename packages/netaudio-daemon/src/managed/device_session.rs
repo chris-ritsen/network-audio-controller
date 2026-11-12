@@ -169,13 +169,19 @@ async fn connection(source: &Source) -> Result<(Session, Credential, [u8; 6]), E
             .host_str()
             .ok_or(Error::Invalid("DDM hostname is missing"))?,
         NonZeroU16::new(netaudio_core::controller_api::AUTH_PORT).expect("nonzero Controller port"),
-        source.transport.clone().ok_or(Error::Transport)?,
+        source
+            .transport
+            .clone()
+            .ok_or_else(|| Error::Transport("no one is signed in to this DDM server".to_owned()))?,
         Limits::default(),
     )?;
     let endpoints = controller.endpoints().await?;
     let session = controller.connect(endpoints.service_port).await?;
-    let IpAddr::V4(address) = session.notification_address()?.ip() else {
-        return Err(Error::Transport);
+    let notification = session.notification_address()?;
+    let IpAddr::V4(address) = notification.ip() else {
+        return Err(Error::Transport(format!(
+            "the notification address {notification} is not an IPv4 address"
+        )));
     };
     let host_mac = netaudio_core::netif::command_host_mac(address);
     let credential = source

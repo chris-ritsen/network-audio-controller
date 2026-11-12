@@ -42,12 +42,11 @@ impl Session {
             .connection
             .take()
             .ok_or(Error::Invalid("Controller session is closed"))?;
-        let source = connection
-            .stream
-            .get_ref()
-            .0
-            .peer_addr()
-            .map_err(|_| Error::Transport)?;
+        let source = connection.stream.get_ref().0.peer_addr().map_err(|error| {
+            Error::Transport(format!(
+                "could not read the remote address of the control connection: {error}"
+            ))
+        })?;
         let startup_deadline = Instant::now() + self.limits.timeout;
         let mut initialized = connection.state.is_some();
         let mut announced = false;
@@ -85,7 +84,11 @@ impl Session {
                 timeout_at(deadline, connection.stream.write_all(&outgoing))
                     .await
                     .map_err(|_| Error::Deadline)?
-                    .map_err(|_| Error::Transport)?;
+                    .map_err(|error| {
+                        Error::Transport(format!(
+                            "could not send a monitoring request to {source}: {error}"
+                        ))
+                    })?;
             }
 
             if initialized && !announced {
@@ -152,13 +155,21 @@ impl Session {
                         .stream
                         .read_exact(&mut bytes[..1])
                         .await
-                        .map_err(|_| Error::Transport)?;
+                        .map_err(|error| {
+                            Error::Transport(format!(
+                                "could not read the next monitoring frame from {source}: {error}"
+                            ))
+                        })?;
                     let deadline = Instant::now() + self.limits.timeout;
                     frame_deadline = Some(deadline);
                     timeout_at(deadline, connection.stream.read_exact(&mut bytes[1..]))
                         .await
                         .map_err(|_| Error::Deadline)?
-                        .map_err(|_| Error::Transport)?;
+                        .map_err(|error| {
+                            Error::Transport(format!(
+                                "could not read the rest of a monitoring frame from {source}: {error}"
+                            ))
+                        })?;
                     None
                 } else {
                     frame_deadline
@@ -171,7 +182,11 @@ impl Session {
                 timeout_at(deadline, connection.stream.read_exact(&mut bytes))
                     .await
                     .map_err(|_| Error::Deadline)?
-                    .map_err(|_| Error::Transport)?;
+                    .map_err(|error| {
+                        Error::Transport(format!(
+                            "could not read monitoring data from {source}: {error}"
+                        ))
+                    })?;
             }
 
             received_at = Utc::now();
