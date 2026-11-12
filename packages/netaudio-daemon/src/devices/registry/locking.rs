@@ -17,7 +17,9 @@ impl DeviceRegistry {
     pub fn lock_key(&self) -> Result<String, ControlError> {
         self.lock_settings
             .get()
-            .ok_or_else(|| ControlError::Unavailable("device_lock_key not configured".to_owned()))?
+            .ok_or_else(|| {
+                ControlError::Unavailable("device locking is still starting".to_owned())
+            })?
             .export()
     }
 
@@ -31,9 +33,12 @@ impl DeviceRegistry {
         audit: Option<&mut Audit>,
     ) -> Result<ControlCompletion, ControlError> {
         let settings = self.lock_settings.get().ok_or_else(|| {
-            ControlError::Unavailable("device_lock_key not configured".to_owned())
+            ControlError::Unavailable("device locking is still starting".to_owned())
         })?;
-        let key = settings.key()?;
+        let key = match operation.key() {
+            Some(key) => key,
+            None => settings.key()?,
+        };
         let device_key = {
             let state = device
                 .state
@@ -117,15 +122,44 @@ impl DeviceRegistry {
                     result["observation_source"] = json!("observed_after_0x1008");
 
                     if result["state_verified"] != true {
-                        result["error"] = json!("lock operation did not reach the requested state");
+                        result["error"] =
+                            json!(match result["operation_result"]["status"].as_u64() {
+                                Some(status) if result["operation_result"]["success"] == false => {
+                                    format!(
+                                        "the device refused the request with status {status:#06x}"
+                                    )
+                                }
+                                _ => "the device still reports its previous lock state".to_owned(),
+                            });
                     }
                 }
             }
             Err(error) => {
-                errors.push(error.to_string());
-                result["error"] = json!("lock status readback was not reported");
-                result["observation_unavailable"] = json!(true);
-                result["is_locked"] = Value::Null;
+                errors.push(format!("{error:#}"));
+                let replied = serde_json::Map::from_iter([
+                    ("is_locked".to_owned(), json!(operation.locking)),
+                    (
+                        "lock_status_observed_at".to_owned(),
+                        json!(
+                            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+                        ),
+                    ),
+                ]);
+
+                if result["operation_result"]["success"] == true
+                    && self.accept_status(device, generation, replied).is_ok()
+                {
+                    result["is_locked"] = json!(operation.locking);
+                    result["state_verified"] = json!(true);
+                    result["observation_source"] = json!("authentication_reply");
+                    result["readback_error"] = json!(format!("{error:#}"));
+                } else {
+                    result["error"] = json!(format!(
+                        "the lock state could not be read after the request: {error:#}"
+                    ));
+                    result["observation_unavailable"] = json!(true);
+                    result["is_locked"] = Value::Null;
+                }
             }
         }
 

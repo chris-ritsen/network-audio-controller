@@ -58,9 +58,12 @@ impl Settings {
     }
 
     pub fn key(&self) -> Result<&[u8; KEY_LENGTH], ControlError> {
-        self.key
-            .as_ref()
-            .ok_or_else(|| ControlError::Unavailable("device_lock_key not configured".to_owned()))
+        self.key.as_ref().ok_or_else(|| {
+            ControlError::Unavailable(
+                "no device lock key was sent with the request and this server has none configured"
+                    .to_owned(),
+            )
+        })
     }
 
     pub fn export(&self) -> Result<String, ControlError> {
@@ -78,6 +81,7 @@ impl Settings {
 
 #[derive(Clone)]
 pub struct Operation {
+    key: Option<[u8; KEY_LENGTH]>,
     pub locking: bool,
     pin: String,
 }
@@ -97,10 +101,28 @@ impl Operation {
             .as_str()
             .ok_or_else(|| ControlError::Invalid("pin must be exactly 4 digits".to_owned()))?;
         lock::validate_pin(pin).map_err(|error| ControlError::Invalid(error.to_string()))?;
+        let key = match parameters.get("key") {
+            None | Some(Value::Null) => None,
+            Some(key) => Some(
+                key.as_str()
+                    .filter(|key| key.is_ascii())
+                    .and_then(|key| key.as_bytes().try_into().ok())
+                    .ok_or_else(|| {
+                        ControlError::Invalid(format!(
+                            "key must contain exactly {KEY_LENGTH} ASCII characters"
+                        ))
+                    })?,
+            ),
+        };
         Ok(Self {
+            key,
             locking,
             pin: pin.to_owned(),
         })
+    }
+
+    pub fn key(&self) -> Option<&[u8; KEY_LENGTH]> {
+        self.key.as_ref()
     }
 
     pub fn name(&self) -> &'static str {
