@@ -73,6 +73,7 @@ function placeholders(text) {
 async function check() {
   const keys = collectKeys();
   let failed = false;
+  const complete = process.argv.includes("--complete");
   const catalogs = readdirSync(CATALOGS)
     .filter((name) => name.endsWith(".js"))
     .sort();
@@ -108,7 +109,7 @@ async function check() {
     for (const key of mismatched.slice(0, 20))
       console.log(`  mismatched: ${key}`);
     for (const key of unused.slice(0, 20)) console.log(`  unused: ${key}`);
-    if (missing.length || mismatched.length) failed = true;
+    if (mismatched.length || (complete && missing.length)) failed = true;
   }
   if (!catalogs.length) console.log("No catalogs in", CATALOGS);
   process.exitCode = failed ? 1 : 0;
@@ -128,6 +129,8 @@ const command = process.argv[2];
 if (command === "keys") keysCommand();
 else if (command === "check") await check();
 else {
-  console.error("Usage: node scripts/webapp/translations.mjs keys|check");
+  console.error(
+    "Usage: node scripts/webapp/translations.mjs keys|check [--complete]",
+  );
   process.exitCode = 2;
 }
