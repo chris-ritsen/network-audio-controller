@@ -5,22 +5,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum NetaudioEngineStatus
-#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
-  : int32_t
-#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
- {
+typedef enum {
   NETAUDIO_ENGINE_STATUS_OK = 0,
   NETAUDIO_ENGINE_STATUS_INVALID_ARGUMENT = 1,
   NETAUDIO_ENGINE_STATUS_FAILED = 2,
-};
-#ifndef __cplusplus
-#if __STDC_VERSION__ >= 202311L
-typedef enum NetaudioEngineStatus NetaudioEngineStatus;
-#else
-typedef int32_t NetaudioEngineStatus;
-#endif // __STDC_VERSION__ >= 202311L
-#endif // __cplusplus
+} NetaudioEngineStatus;
 
 #ifdef __cplusplus
 extern "C" {

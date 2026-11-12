@@ -17,7 +17,7 @@ const WORKER_THREADS: usize = 2;
 static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
 static LOGGING: Once = Once::new();
 
-#[repr(i32)]
+#[repr(C)]
 pub enum NetaudioEngineStatus {
     Ok = 0,
     InvalidArgument = 1,
