@@ -173,7 +173,6 @@ impl InventoryState {
         server: &str,
         contexts: &BTreeMap<String, Context>,
         discovery: &DiscoveryState,
-        signed_in: bool,
     ) -> Vec<Observation> {
         let mut observations = BTreeMap::new();
         for domain in self.domains.values() {
@@ -191,13 +190,13 @@ impl InventoryState {
                         fresh: self.domains_fresh(),
                         server_profile: server.into(),
                         context_name: context.map(|(name, _)| name.clone()),
-                        operation_permissions: context
-                            .and_then(|(_, context)| context.operation_permissions.clone())
-                            .or_else(|| {
-                                signed_in.then(|| {
+                        operation_permissions: Some(
+                            context
+                                .and_then(|(_, context)| context.operation_permissions.clone())
+                                .unwrap_or_else(|| {
                                     PERMISSIONS.iter().map(|name| (*name).to_owned()).collect()
-                                })
-                            }),
+                                }),
+                        ),
                         discovery: native_identity(device)
                             .and_then(|identity| discovery.presence(&domain.id, &identity)),
                     },
@@ -258,9 +257,8 @@ impl InventoryState {
         enabled: bool,
         contexts: &BTreeMap<String, Context>,
         discovery: &DiscoveryState,
-        signed_in: bool,
     ) -> Value {
-        let observations = self.observations(name, contexts, discovery, signed_in);
+        let observations = self.observations(name, contexts, discovery);
         let state = if !enabled {
             "disabled"
         } else if self.last_attempt.is_none() {
@@ -302,8 +300,7 @@ impl InventoryState {
             .collect();
         self.superseded
             .retain(|identity| retained.contains(identity));
-        let observations =
-            self.observations("", &BTreeMap::new(), &DiscoveryState::default(), false);
+        let observations = self.observations("", &BTreeMap::new(), &DiscoveryState::default());
         let mut groups = BTreeMap::<String, Vec<&Observation>>::new();
         for observation in &observations {
             if let Some(address) = primary_mac(&observation.device) {
