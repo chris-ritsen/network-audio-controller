@@ -1,0 +1,18 @@
+[package]
+name = "netaudio-engine"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "netaudio_engine"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+anyhow.workspace = true
+netaudio-daemon = { path = "../netaudio-daemon" }
+tokio.workspace = true
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

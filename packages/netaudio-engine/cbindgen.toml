@@ -1,0 +1,15 @@
+language = "C"
+include_guard = "NETAUDIO_ENGINE_H"
+cpp_compat = true
+sys_includes = ["stdbool.h", "stddef.h", "stdint.h"]
+no_includes = true
+documentation = false
+style = "type"
+
+[enum]
+rename_variants = "ScreamingSnakeCase"
+prefix_with_name = true
+
+[export]
+include = ["NetaudioEngineStatus"]
+item_types = ["enums", "functions"]

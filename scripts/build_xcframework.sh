@@ -2,90 +2,102 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-crate="$root/packages/netaudio-core"
+core="$root/packages/netaudio-core"
+engine="$root/packages/netaudio-engine"
 target_directory="$root/target"
+framework_path="$root/dist/netaudio_engine.xcframework"
+headers="$root/dist/netaudio_engine.headers"
+source_paths=(
+    LICENSE
+    Cargo.toml
+    Cargo.lock
+    packages/netaudio-core
+    packages/netaudio-daemon
+    packages/netaudio-engine
+    packages/netaudio/src/netaudio/daemon/http/webapp
+    scripts/build_xcframework.sh
+)
 
 if ! source_commit="$(git -C "$root" rev-parse --verify HEAD)"; then
     echo "refusing to build XCFramework without a committed source revision" >&2
     exit 1
 fi
 
-repository_changes="$(
-    git -C "$root" status --porcelain=v1 --untracked-files=all -- \
-        LICENSE \
-        Cargo.toml \
-        Cargo.lock \
-        packages/netaudio-core \
-        scripts/build_xcframework.sh
-)"
+repository_changes="$(git -C "$root" status --porcelain=v1 --untracked-files=all -- "${source_paths[@]}")"
 if [[ -n "$repository_changes" ]]; then
     echo "refusing to build XCFramework from a dirty source tree" >&2
     exit 1
 fi
 
+source_tree="$(git -C "$root" ls-tree HEAD -- "${source_paths[@]}" | shasum -a 256 | awk '{print $1}')"
+
 export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-15.0}"
 
-cbindgen --config "$crate/cbindgen.toml" --crate netaudio-core --output "$crate/include/netaudio_core.h" "$crate"
+cbindgen --config "$core/cbindgen.toml" --crate netaudio-core --output "$core/include/netaudio_core.h" "$core"
+cbindgen --config "$engine/cbindgen.toml" --crate netaudio-engine --output "$engine/include/netaudio_engine.h" "$engine"
 
-cat > "$crate/include/module.modulemap" <<'MODULEMAP'
+rm -rf "$headers" "$framework_path" "$root/dist/netaudio_engine.xcframework.zip"
+mkdir -p "$headers"
+cp "$core/include/netaudio_core.h" "$engine/include/netaudio_engine.h" "$headers/"
+cat > "$headers/module.modulemap" <<'MODULEMAP'
 module netaudio_core {
     header "netaudio_core.h"
     export *
 }
+
+module netaudio_engine {
+    header "netaudio_engine.h"
+    export *
+}
 MODULEMAP
 
-cargo build --release --locked --manifest-path "$crate/Cargo.toml" --target-dir "$target_directory" --target aarch64-apple-ios
-cargo build --release --locked --manifest-path "$crate/Cargo.toml" --target-dir "$target_directory" --target aarch64-apple-ios-macabi
-cargo build --release --locked --manifest-path "$crate/Cargo.toml" --target-dir "$target_directory" --target aarch64-apple-ios-sim
+libraries=()
+for target in aarch64-apple-ios aarch64-apple-ios-macabi aarch64-apple-ios-sim; do
+    cargo build --profile framework --locked --package netaudio-engine --target-dir "$target_directory" --target "$target"
+    libraries+=(-library "$target_directory/$target/framework/libnetaudio_engine.a" -headers "$headers")
+done
 
-rm -rf "$root/dist/netaudio_core.xcframework" "$root/dist/netaudio_core.xcframework.zip"
-mkdir -p "$root/dist"
+xcodebuild -create-xcframework "${libraries[@]}" -output "$framework_path"
+rm -rf "$headers"
 
-xcodebuild -create-xcframework \
-    -library "$target_directory/aarch64-apple-ios/release/libnetaudio_core.a" -headers "$crate/include" \
-    -library "$target_directory/aarch64-apple-ios-macabi/release/libnetaudio_core.a" -headers "$crate/include" \
-    -library "$target_directory/aarch64-apple-ios-sim/release/libnetaudio_core.a" -headers "$crate/include" \
-    -output "$root/dist/netaudio_core.xcframework"
-
-framework_path="$root/dist/netaudio_core.xcframework"
-application_binary_interface_version="$(sed -nE 's/^pub const NETAUDIO_ABI_VERSION: u32 = ([0-9]+);$/\1/p' "$crate/src/ffi/mod.rs")"
-crate_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$crate/Cargo.toml" | head -n 1)"
-if [[ -z "$application_binary_interface_version" || -z "$crate_version" ]]; then
-    echo "could not determine the core version and ABI for XCFramework provenance" >&2
+application_binary_interface_version="$(sed -nE 's/^pub const NETAUDIO_ABI_VERSION: u32 = ([0-9]+);$/\1/p' "$core/src/ffi/mod.rs")"
+core_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$core/Cargo.toml" | head -n 1)"
+engine_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$root/packages/netaudio-daemon/Cargo.toml" | head -n 1)"
+if [[ -z "$application_binary_interface_version" || -z "$core_version" || -z "$engine_version" ]]; then
+    echo "could not determine the versions and ABI for XCFramework provenance" >&2
     exit 1
 fi
 
 cp "$root/LICENSE" "$framework_path/LICENSE"
 
-device_library_checksum="$(shasum -a 256 "$framework_path/ios-arm64/libnetaudio_core.a" | awk '{print $1}')"
-mac_catalyst_library_checksum="$(shasum -a 256 "$framework_path/ios-arm64-maccatalyst/libnetaudio_core.a" | awk '{print $1}')"
-simulator_library_checksum="$(shasum -a 256 "$framework_path/ios-arm64-simulator/libnetaudio_core.a" | awk '{print $1}')"
-framework_manifest_checksum="$(shasum -a 256 "$framework_path/Info.plist" | awk '{print $1}')"
-header_checksum="$(shasum -a 256 "$framework_path/ios-arm64/Headers/netaudio_core.h" | awk '{print $1}')"
-module_map_checksum="$(shasum -a 256 "$framework_path/ios-arm64/Headers/module.modulemap" | awk '{print $1}')"
-cargo_lock_checksum="$(shasum -a 256 "$root/Cargo.lock" | awk '{print $1}')"
+checksum() {
+    shasum -a 256 "$framework_path/$1" | awk '{print $1}'
+}
 
 cat > "$framework_path/PROVENANCE.md" <<EOF
-# netaudio-core artifact provenance
+# netaudio-engine artifact provenance
 
 - Source commit: \`$source_commit\`
-- Crate version: \`$crate_version\`
+- Source tree: \`$source_tree\`
+- Core version: \`$core_version\`
+- Engine version: \`$engine_version\`
 - ABI version: \`$application_binary_interface_version\`
 - Build script: \`scripts/build_xcframework.sh\`
-- Cargo.lock SHA-256: \`$cargo_lock_checksum\`
+- Cargo.lock SHA-256: \`$(shasum -a 256 "$root/Cargo.lock" | awk '{print $1}')\`
 
 ## Artifact checksums
 
 | Artifact | SHA-256 |
 | --- | --- |
-| \`ios-arm64/libnetaudio_core.a\` | \`$device_library_checksum\` |
-| \`ios-arm64-maccatalyst/libnetaudio_core.a\` | \`$mac_catalyst_library_checksum\` |
-| \`ios-arm64-simulator/libnetaudio_core.a\` | \`$simulator_library_checksum\` |
-| \`Info.plist\` | \`$framework_manifest_checksum\` |
-| \`netaudio_core.h\` | \`$header_checksum\` |
-| \`module.modulemap\` | \`$module_map_checksum\` |
+| \`ios-arm64/libnetaudio_engine.a\` | \`$(checksum ios-arm64/libnetaudio_engine.a)\` |
+| \`ios-arm64-maccatalyst/libnetaudio_engine.a\` | \`$(checksum ios-arm64-maccatalyst/libnetaudio_engine.a)\` |
+| \`ios-arm64-simulator/libnetaudio_engine.a\` | \`$(checksum ios-arm64-simulator/libnetaudio_engine.a)\` |
+| \`Info.plist\` | \`$(checksum Info.plist)\` |
+| \`netaudio_core.h\` | \`$(checksum ios-arm64/Headers/netaudio_core.h)\` |
+| \`netaudio_engine.h\` | \`$(checksum ios-arm64/Headers/netaudio_engine.h)\` |
+| \`module.modulemap\` | \`$(checksum ios-arm64/Headers/module.modulemap)\` |
 EOF
 
 cd "$root/dist"
-zip -qry netaudio_core.xcframework.zip netaudio_core.xcframework
-shasum -a 256 netaudio_core.xcframework.zip
+zip -qry netaudio_engine.xcframework.zip netaudio_engine.xcframework
+shasum -a 256 netaudio_engine.xcframework.zip

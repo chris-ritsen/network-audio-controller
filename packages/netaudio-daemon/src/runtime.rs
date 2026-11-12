@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -32,10 +32,12 @@ const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 pub struct RuntimeOptions {
-    pub port: Option<u16>,
-    pub interface: Option<String>,
     pub capture: bool,
     pub dissect: bool,
+    pub embedded: bool,
+    pub interface: Option<String>,
+    pub listening: Option<oneshot::Sender<SocketAddr>>,
+    pub port: Option<u16>,
     pub private: bool,
 }
 
@@ -49,6 +51,13 @@ pub async fn run(
     options: RuntimeOptions,
     cancellation: CancellationToken,
 ) -> Result<()> {
+    let announces = options.private && !options.embedded;
+    let listening = options.listening;
+    let options = RuntimeOptions {
+        listening: None,
+        private: options.private || options.embedded,
+        ..options
+    };
     let mcp_enabled = !options.private && configuration.mcp_enabled()?;
     let network = NetworkMonitor::new()?;
     let snapshots = network.subscribe();
@@ -295,7 +304,7 @@ pub async fn run(
         information,
         cancellation: cancellation.clone(),
     });
-    let sessions = Arc::new(crate::managed::sessions::Sessions::default());
+    let sessions = Arc::new(crate::managed::sessions::Sessions::new(!options.embedded));
     let mut router = inventory::router(Arc::clone(&model))
         .merge(crate::http::host_audio::router(host_audio.clone()))
         .merge(crate::http::host_audio::signal_router(signal))
@@ -457,6 +466,10 @@ pub async fn run(
     tracing::info!(%address, "native HTTP listener ready");
     tasks.spawn(plain.serve(router.clone(), lifetime.clone()));
 
+    if let Some(listening) = listening {
+        let _ = listening.send(address);
+    }
+
     if let Some(encrypted) = encrypted {
         tracing::info!(address = %encrypted.local_address()?, "native HTTPS listener ready");
         tasks.spawn(encrypted.serve(router, lifetime.clone()));
@@ -483,7 +496,7 @@ pub async fn run(
     .context("Daemon initialization exceeded its deadline")
     .and_then(|result| result);
     let initialization = match initialization {
-        Ok(()) if options.private => {
+        Ok(()) if announces => {
             tokio::select! {
                 _ = cancellation.cancelled() => Ok(()),
                 _ = settle(devices.refreshing(), managed.startup_finished()) => announce(address),

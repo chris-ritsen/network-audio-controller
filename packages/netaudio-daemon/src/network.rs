@@ -96,6 +96,11 @@ impl NetworkSnapshot {
     }
 }
 
+#[cfg(target_os = "ios")]
+pub fn interfaces_changed() {
+    changes::announce();
+}
+
 pub struct NetworkMonitor {
     changes: changes::Changes,
     snapshots: watch::Sender<NetworkSnapshot>,

@@ -3,6 +3,7 @@ members = [
     "packages/netaudio-core",
     "packages/netaudio-daemon",
     "packages/netaudio-endpoint",
+    "packages/netaudio-engine",
     "packages/netaudio-host-worker",
     "packages/netaudio-host-jack",
     "packages/netaudio-host-pulse",
@@ -21,6 +22,11 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "io-util", "fs", "process"] }
 tracing = "0.1"
+
+[profile.framework]
+inherits = "release"
+lto = false
+opt-level = "s"
 
 [profile.release]
 lto = "thin"

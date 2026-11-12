@@ -195,12 +195,23 @@ impl Session {
     }
 }
 
-#[derive(Default)]
 pub struct Sessions {
     entries: Mutex<BTreeMap<String, Arc<Session>>>,
+    loopback_owner: bool,
 }
 
 impl Sessions {
+    pub fn new(loopback_owner: bool) -> Self {
+        Self {
+            entries: Mutex::default(),
+            loopback_owner,
+        }
+    }
+
+    pub fn loopback_owner(&self) -> bool {
+        self.loopback_owner
+    }
+
     pub fn find(&self, token: &str) -> Option<Arc<Session>> {
         let now = Instant::now();
         let mut entries = self.entries.lock().ok()?;

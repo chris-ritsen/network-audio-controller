@@ -2370,6 +2370,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "netaudio-engine"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "netaudio-daemon",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "netaudio-host-jack"
 version = "0.5.7"
 dependencies = [
@@ -2457,7 +2469,6 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
- "memoffset",
 ]
 
 [[package]]

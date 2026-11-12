@@ -17,10 +17,11 @@ pub async fn identify(
 
 fn caller(sessions: &Sessions, request: &Request) -> Caller {
     let headers = request.headers();
-    if request
-        .extensions()
-        .get::<ConnectionContext>()
-        .is_some_and(|context| context.client_address(headers).to_canonical().is_loopback())
+    if sessions.loopback_owner()
+        && request
+            .extensions()
+            .get::<ConnectionContext>()
+            .is_some_and(|context| context.client_address(headers).to_canonical().is_loopback())
     {
         return Caller::Owner;
     }

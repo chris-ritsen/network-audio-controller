@@ -89,10 +89,12 @@ async fn run(arguments: Arguments) -> Result<()> {
     let daemon = runtime::run(
         configuration,
         RuntimeOptions {
-            port: arguments.port,
-            interface: arguments.interface,
             capture: arguments.capture,
             dissect: arguments.dissect,
+            embedded: false,
+            interface: arguments.interface,
+            listening: None,
+            port: arguments.port,
             private: arguments.private,
         },
         cancellation.clone(),

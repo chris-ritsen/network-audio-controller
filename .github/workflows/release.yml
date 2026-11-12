@@ -269,8 +269,8 @@ jobs:
           tool: cbindgen@0.29.4
       - run: ./scripts/build_xcframework.sh
       - run: |
-          listing="$(unzip -l dist/netaudio_core.xcframework.zip)"
-          for path in Info.plist ios-arm64/libnetaudio_core.a ios-arm64-maccatalyst/libnetaudio_core.a ios-arm64-simulator/libnetaudio_core.a ios-arm64/Headers/netaudio_core.h ios-arm64-maccatalyst/Headers/netaudio_core.h ios-arm64-simulator/Headers/netaudio_core.h; do
+          listing="$(unzip -l dist/netaudio_engine.xcframework.zip)"
+          for path in Info.plist ios-arm64/libnetaudio_engine.a ios-arm64-maccatalyst/libnetaudio_engine.a ios-arm64-simulator/libnetaudio_engine.a ios-arm64/Headers/netaudio_core.h ios-arm64/Headers/netaudio_engine.h ios-arm64-maccatalyst/Headers/netaudio_core.h ios-arm64-maccatalyst/Headers/netaudio_engine.h ios-arm64-simulator/Headers/netaudio_core.h ios-arm64-simulator/Headers/netaudio_engine.h; do
             if ! grep -q "$path" <<< "$listing"; then
               echo "xcframework zip is missing $path" >&2
               echo "$listing" >&2
@@ -280,7 +280,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: xcframework
-          path: dist/netaudio_core.xcframework.zip
+          path: dist/netaudio_engine.xcframework.zip
 
   release:
     needs: [build-wheel, build-image, build-sdist, build-xcframework]
