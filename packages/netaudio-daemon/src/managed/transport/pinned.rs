@@ -17,7 +17,7 @@ pub(super) struct Verifier {
     pin: Option<[u8; 32]>,
     provider: Arc<CryptoProvider>,
     rejected: Arc<Mutex<Option<Vec<u8>>>>,
-    verifier: Arc<WebPkiServerVerifier>,
+    verifier: Option<Arc<WebPkiServerVerifier>>,
 }
 
 impl Verifier {
@@ -28,10 +28,15 @@ impl Verifier {
         roots: RootCertStore,
         provider: Arc<CryptoProvider>,
     ) -> Result<Self, Error> {
-        let verifier =
-            WebPkiServerVerifier::builder_with_provider(Arc::new(roots), Arc::clone(&provider))
-                .build()
-                .map_err(|_| Error::Tls("Managed service TLS configuration failed"))?;
+        let verifier = if roots.is_empty() {
+            None
+        } else {
+            Some(
+                WebPkiServerVerifier::builder_with_provider(Arc::new(roots), Arc::clone(&provider))
+                    .build()
+                    .map_err(|_| Error::Tls("Managed service TLS configuration failed"))?,
+            )
+        };
         Ok(Self {
             certificates,
             pin,
@@ -100,13 +105,19 @@ impl ServerCertVerifier for Verifier {
         if self.pinned(end_entity) {
             return Ok(ServerCertVerified::assertion());
         }
-        let result = match self.verifier.verify_server_cert(
-            end_entity,
-            intermediates,
-            server_name,
-            ocsp_response,
-            now,
-        ) {
+        let chained = match &self.verifier {
+            Some(verifier) => verifier.verify_server_cert(
+                end_entity,
+                intermediates,
+                server_name,
+                ocsp_response,
+                now,
+            ),
+            None => Err(rustls::Error::InvalidCertificate(
+                CertificateError::UnknownIssuer,
+            )),
+        };
+        let result = match chained {
             Err(_) if self.trusted(end_entity) => verify_trusted(end_entity, server_name, now),
             result => result,
         };

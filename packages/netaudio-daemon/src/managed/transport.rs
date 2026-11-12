@@ -223,12 +223,6 @@ impl Transport {
             }
         }
 
-        if roots.is_empty() {
-            return Err(Error::Tls(
-                "No trusted certificates are available for managed services",
-            ));
-        }
-
         let provider = Arc::new(ring::default_provider());
         let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
             .with_safe_default_protocol_versions()
