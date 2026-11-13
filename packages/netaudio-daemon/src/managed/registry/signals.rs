@@ -405,8 +405,12 @@ impl Registry {
                 else {
                     return Ok(());
                 };
-                self.signal_status(key, source, json!({"state": "connecting", "attempt": attempt,
-                    "unavailable_devices": route.borrow().unavailable}))?;
+                self.signal_status(
+                    key,
+                    source,
+                    json!({"state": "connecting", "attempt": attempt,
+                    "unavailable_devices": route.borrow().unavailable}),
+                )?;
                 let mut ready = None;
                 let result = self
                     .receive_signals(
@@ -444,7 +448,8 @@ impl Registry {
                     "unavailable_devices": route.borrow().unavailable,
                 });
                 if permanent {
-                    status["recovery"] = json!("Sign in to DDM again or correct the saved credential");
+                    status["recovery"] =
+                        json!("Sign in to DDM again or correct the saved credential");
                 }
                 self.signal_status(key, source, status)?;
                 if permanent {

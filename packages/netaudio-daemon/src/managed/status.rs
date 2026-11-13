@@ -16,7 +16,6 @@ use crate::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-
 pub(crate) mod observations;
 use observations::Received;
 mod query;
