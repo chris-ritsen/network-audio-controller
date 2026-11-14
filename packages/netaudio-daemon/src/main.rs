@@ -33,8 +33,6 @@ fn main() -> Result<()> {
     let arguments = Arguments::parse();
     initialize_logging()?;
     #[cfg(unix)]
-    forbid_memory_dumps();
-    #[cfg(unix)]
     raise_descriptor_limit();
     let mut runtime = tokio::runtime::Builder::new_multi_thread();
     if std::env::var_os("TOKIO_WORKER_THREADS").is_none() {
@@ -47,20 +45,6 @@ fn main() -> Result<()> {
         .build()
         .context("initialize async executor")?
         .block_on(run(arguments))
-}
-
-#[cfg(unix)]
-fn forbid_memory_dumps() {
-    use nix::sys::resource::{setrlimit, Resource};
-
-    if let Err(error) = setrlimit(Resource::RLIMIT_CORE, 0, 0) {
-        tracing::warn!(%error, "could not forbid core files");
-    }
-
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    if let Err(error) = nix::sys::prctl::set_dumpable(false) {
-        tracing::warn!(%error, "could not mark the process as not dumpable");
-    }
 }
 
 #[cfg(unix)]
