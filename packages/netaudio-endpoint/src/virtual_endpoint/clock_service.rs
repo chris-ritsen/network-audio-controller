@@ -403,9 +403,10 @@ impl Broker {
         let group = version_one::multicast_group(configuration.domain)?;
         let membership = (configuration.interface_index, group);
         if !self.memberships.contains_key(&membership) {
-            self.event.join_on(configuration.interface_index, group)?;
-            if let Err(error) = self.general.join_on(configuration.interface_index, group) {
-                self.event.leave_on(configuration.interface_index, group)?;
+            let interface = (configuration.interface_index, registration.address);
+            self.event.join_on(interface, group)?;
+            if let Err(error) = self.general.join_on(interface, group) {
+                self.event.leave_on(interface, group)?;
                 return Err(error);
             }
         }
@@ -437,8 +438,9 @@ impl Broker {
             .context("clock membership ownership disappeared")?;
         *membership -= 1;
         if *membership == 0 {
-            self.event.leave_on(interface_index, group)?;
-            self.general.leave_on(interface_index, group)?;
+            let interface = (interface_index, consumer.registration.address);
+            self.event.leave_on(interface, group)?;
+            self.general.leave_on(interface, group)?;
             self.memberships.remove(&(interface_index, group));
         }
         eprintln!("clock consumer {identifier} retired; consumers={}", self.consumers.len());

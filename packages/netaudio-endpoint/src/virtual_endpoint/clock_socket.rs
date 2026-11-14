@@ -86,18 +86,12 @@ impl ClockSocket {
         Ok(self.socket.get_ref().join_multicast_v4(&group, &address)?)
     }
 
-    pub fn join_on(&self, interface_index: u32, group: Ipv4Addr) -> Result<()> {
-        Ok(self
-            .socket
-            .get_ref()
-            .join_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))?)
+    pub fn join_on(&self, interface: (u32, Ipv4Addr), group: Ipv4Addr) -> Result<()> {
+        Ok(self.socket.get_ref().join_multicast_v4_n(&group, &interface_selector(interface))?)
     }
 
-    pub fn leave_on(&self, interface_index: u32, group: Ipv4Addr) -> Result<()> {
-        Ok(self
-            .socket
-            .get_ref()
-            .leave_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))?)
+    pub fn leave_on(&self, interface: (u32, Ipv4Addr), group: Ipv4Addr) -> Result<()> {
+        Ok(self.socket.get_ref().leave_multicast_v4_n(&group, &interface_selector(interface))?)
     }
 
     pub fn try_send_on(
@@ -213,6 +207,19 @@ impl ClockSocket {
             }
         }
     }
+}
+
+fn interface_selector((index, address): (u32, Ipv4Addr)) -> InterfaceIndexOrAddress {
+    #[cfg(target_vendor = "apple")]
+    return {
+        let _ = index;
+        InterfaceIndexOrAddress::Address(address)
+    };
+    #[cfg(not(target_vendor = "apple"))]
+    return {
+        let _ = address;
+        InterfaceIndexOrAddress::Index(index)
+    };
 }
 
 fn set_option(socket: &Socket, level: i32, option: i32, value: i32) -> io::Result<()> {

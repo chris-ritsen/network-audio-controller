@@ -1,7 +1,9 @@
 use super::inventory::{Announcement, Inventory, Observation};
 use crate::network::NetworkSnapshot;
 use crate::state::ReadModel;
-use crate::transport::datagram::{DatagramSocket, PacketMetadata, MAXIMUM_DATAGRAM_BYTES};
+use crate::transport::datagram::{
+    DatagramSocket, MulticastInterface, PacketMetadata, MAXIMUM_DATAGRAM_BYTES,
+};
 use anyhow::{ensure, Context, Result};
 use chrono::Utc;
 use serde::Serialize;
@@ -58,6 +60,15 @@ struct Interface {
     address: Ipv4Addr,
     #[serde(skip)]
     index: u32,
+}
+
+impl Interface {
+    fn membership(&self) -> MulticastInterface {
+        MulticastInterface {
+            address: self.address,
+            index: self.index,
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -254,7 +265,7 @@ impl Discovery {
                 .remove(&key)
                 .context("SAP membership disappeared")?;
 
-            if let Err(error) = self.socket.leave(key.1, interface.index) {
+            if let Err(error) = self.socket.leave(key.1, interface.membership()) {
                 tracing::warn!(%error, interface = %interface.name, group = %key.1, "could not leave SAP multicast membership");
             }
         }
@@ -265,7 +276,7 @@ impl Discovery {
                 continue;
             }
 
-            match self.socket.join(key.1, interface.index) {
+            match self.socket.join(key.1, interface.membership()) {
                 Ok(()) => {
                     self.memberships.insert(key, interface);
                 }

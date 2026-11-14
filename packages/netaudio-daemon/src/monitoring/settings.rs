@@ -50,11 +50,11 @@ impl Settings {
         observer: Option<crate::capture::Observer>,
     ) -> Result<(Arc<Self>, Worker)> {
         let (active, default) = ports;
-        let interfaces = network.borrow().ipv4_interface_indices(selected)?;
+        let interfaces = network.borrow().ipv4_multicast_interfaces(selected)?;
         let receiver = MulticastReceiver::bind_exclusive(
             MULTICAST_GROUP_CONTROL_MONITORING.parse()?,
             active,
-            &interfaces.into_iter().collect::<Vec<_>>(),
+            &interfaces,
         )?
         .observe(observer.clone());
         let (commands, requests) = mpsc::channel(REQUEST_CAPACITY);
@@ -117,7 +117,7 @@ impl Worker {
                 _ = cancellation.cancelled() => return Ok(()),
                 changed = self.network.changed() => {
                     changed.context("network monitor stopped")?;
-                    self.receiver.update_interfaces(self.network.borrow_and_update().ipv4_interface_indices(self.selected)?)?;
+                    self.receiver.update_interfaces(self.network.borrow_and_update().ipv4_multicast_interfaces(self.selected)?);
                 }
                 command = self.commands.recv() => {
                     let Some(command) = command else {
@@ -149,11 +149,11 @@ impl Worker {
             let interfaces = self
                 .network
                 .borrow()
-                .ipv4_interface_indices(self.selected)?;
+                .ipv4_multicast_interfaces(self.selected)?;
             let receiver = MulticastReceiver::bind_exclusive(
                 MULTICAST_GROUP_CONTROL_MONITORING.parse()?,
                 port,
-                &interfaces.into_iter().collect::<Vec<_>>(),
+                &interfaces,
             )
             .context(PORT_FAILURE)?
             .observe(self.observer.clone());

@@ -379,10 +379,7 @@ pub async fn run(
         ),
         _ => None,
     };
-    let interfaces = initial_network
-        .ipv4_interface_indices(local_address)?
-        .into_iter()
-        .collect::<Vec<_>>();
+    let interfaces = initial_network.ipv4_multicast_interfaces(local_address)?;
     let monitoring = MulticastReceiver::bind(
         MULTICAST_GROUP_CONTROL_MONITORING.parse()?,
         NetaudioPort::Info as u16,

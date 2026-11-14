@@ -1,8 +1,8 @@
 use crate::network::NetworkSnapshot;
-use crate::transport::datagram::DatagramSocket;
+use crate::transport::datagram::{DatagramSocket, MulticastInterface};
 use anyhow::{ensure, Context, Result};
 use chrono::{DateTime, Utc};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
@@ -23,20 +23,33 @@ pub struct MulticastReceiver {
     socket: DatagramSocket,
     port: u16,
     group: Ipv4Addr,
-    interfaces: BTreeSet<u32>,
+    interfaces: BTreeMap<u32, MulticastInterface>,
     observer: Option<crate::capture::Observer>,
 }
 
 impl MulticastReceiver {
-    pub fn bind(group: Ipv4Addr, port: u16, interfaces: &[u32]) -> Result<Self> {
+    pub fn bind(
+        group: Ipv4Addr,
+        port: u16,
+        interfaces: &BTreeMap<u32, MulticastInterface>,
+    ) -> Result<Self> {
         Self::bind_socket(group, port, interfaces, true)
     }
 
-    pub fn bind_exclusive(group: Ipv4Addr, port: u16, interfaces: &[u32]) -> Result<Self> {
+    pub fn bind_exclusive(
+        group: Ipv4Addr,
+        port: u16,
+        interfaces: &BTreeMap<u32, MulticastInterface>,
+    ) -> Result<Self> {
         Self::bind_socket(group, port, interfaces, false)
     }
 
-    fn bind_socket(group: Ipv4Addr, port: u16, interfaces: &[u32], reuse: bool) -> Result<Self> {
+    fn bind_socket(
+        group: Ipv4Addr,
+        port: u16,
+        interfaces: &BTreeMap<u32, MulticastInterface>,
+        reuse: bool,
+    ) -> Result<Self> {
         ensure!(group.is_multicast(), "monitoring group must be multicast");
         let socket = if reuse {
             DatagramSocket::bind(port)
@@ -45,19 +58,20 @@ impl MulticastReceiver {
         }
         .with_context(|| format!("bind multicast monitoring port {port}"))?;
 
-        for interface in interfaces {
-            socket
-                .join(group, *interface)
-                .with_context(|| format!("join monitoring group {group} on {interface}"))?;
-        }
-
-        Ok(Self {
+        let mut receiver = Self {
             socket,
             port,
             group,
-            interfaces: interfaces.iter().copied().collect(),
+            interfaces: BTreeMap::new(),
             observer: None,
-        })
+        };
+        receiver.update_interfaces(interfaces.clone());
+        ensure!(
+            interfaces.is_empty() || !receiver.interfaces.is_empty(),
+            "could not join monitoring group {group} on any network interface"
+        );
+
+        Ok(receiver)
     }
 
     pub fn observe(mut self, observer: Option<crate::capture::Observer>) -> Self {
@@ -92,7 +106,7 @@ impl MulticastReceiver {
                 _ = cancellation.cancelled() => return Ok(()),
                 changed = network.changed() => {
                     changed.context("network monitor stopped")?;
-                    self.update_interfaces(network.borrow_and_update().ipv4_interface_indices(selected)?)?;
+                    self.update_interfaces(network.borrow_and_update().ipv4_multicast_interfaces(selected)?);
                     continue;
                 }
                 received = self.socket.receive(&mut buffer) => received?,
@@ -126,20 +140,35 @@ impl MulticastReceiver {
         Ok(packet)
     }
 
-    pub(super) fn update_interfaces(&mut self, interfaces: BTreeSet<u32>) -> Result<()> {
-        for interface in self.interfaces.difference(&interfaces) {
-            if let Err(error) = self.socket.leave(self.group, *interface) {
-                tracing::warn!(%interface, %error, "could not leave monitoring group on removed interface");
+    pub(super) fn update_interfaces(&mut self, interfaces: BTreeMap<u32, MulticastInterface>) {
+        let group = self.group;
+        let socket = &self.socket;
+
+        self.interfaces.retain(|index, interface| {
+            if interfaces.contains_key(index) {
+                return true;
+            }
+
+            if let Err(error) = socket.leave(group, *interface) {
+                tracing::warn!(interface = %index, address = %interface.address, %group, %error, "could not leave monitoring group on removed interface");
+            }
+
+            false
+        });
+
+        for (index, interface) in interfaces {
+            if self.interfaces.contains_key(&index) {
+                continue;
+            }
+
+            match self.socket.join(group, interface) {
+                Ok(()) => {
+                    self.interfaces.insert(index, interface);
+                }
+                Err(error) => {
+                    tracing::warn!(interface = %index, address = %interface.address, %group, %error, "could not join monitoring group");
+                }
             }
         }
-
-        for interface in interfaces.difference(&self.interfaces) {
-            self.socket
-                .join(self.group, *interface)
-                .with_context(|| format!("join monitoring group {} on {interface}", self.group))?;
-        }
-
-        self.interfaces = interfaces;
-        Ok(())
     }
 }

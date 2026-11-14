@@ -1,8 +1,9 @@
 mod changes;
 
+use crate::transport::datagram::MulticastInterface;
 use anyhow::{Context, Result};
 use ipnet::IpNet;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -68,24 +69,31 @@ impl NetworkSnapshot {
             .collect()
     }
 
-    pub fn ipv4_interface_indices(&self, selected: Option<Ipv4Addr>) -> Result<BTreeSet<u32>> {
-        self.interfaces
-            .iter()
-            .filter(|interface| match interface.network.addr() {
-                IpAddr::V4(address) => {
-                    !address.is_loopback() && selected.is_none_or(|selected| selected == address)
-                }
-                IpAddr::V6(_) => false,
-            })
-            .map(|interface| {
-                interface
-                    .index
-                    .filter(|index| *index != 0)
-                    .with_context(|| {
-                        format!("network interface {} has no OS index", interface.name)
-                    })
-            })
-            .collect()
+    pub fn ipv4_multicast_interfaces(
+        &self,
+        selected: Option<Ipv4Addr>,
+    ) -> Result<BTreeMap<u32, MulticastInterface>> {
+        let mut interfaces = BTreeMap::new();
+
+        for interface in &self.interfaces {
+            let IpAddr::V4(address) = interface.network.addr() else {
+                continue;
+            };
+
+            if address.is_loopback() || selected.is_some_and(|selected| selected != address) {
+                continue;
+            }
+
+            let index = interface
+                .index
+                .filter(|index| *index != 0)
+                .with_context(|| format!("network interface {} has no OS index", interface.name))?;
+            interfaces
+                .entry(index)
+                .or_insert(MulticastInterface { address, index });
+        }
+
+        Ok(interfaces)
     }
 
     pub fn addresses(&self) -> BTreeSet<IpAddr> {

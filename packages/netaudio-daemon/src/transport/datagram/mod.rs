@@ -16,6 +16,21 @@ use tokio::net::UdpSocket;
 
 pub const MAXIMUM_DATAGRAM_BYTES: usize = u16::MAX as usize;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MulticastInterface {
+    pub address: Ipv4Addr,
+    pub index: u32,
+}
+
+impl MulticastInterface {
+    fn selector(&self) -> InterfaceIndexOrAddress {
+        #[cfg(target_vendor = "apple")]
+        return InterfaceIndexOrAddress::Address(self.address);
+        #[cfg(not(target_vendor = "apple"))]
+        return InterfaceIndexOrAddress::Index(self.index);
+    }
+}
+
 pub struct PacketMetadata {
     pub length: usize,
     pub source: SocketAddrV4,
@@ -56,14 +71,12 @@ impl DatagramSocket {
         self.socket.local_addr()
     }
 
-    pub fn join(&self, group: Ipv4Addr, interface_index: u32) -> io::Result<()> {
-        SockRef::from(&self.socket)
-            .join_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))
+    pub fn join(&self, group: Ipv4Addr, interface: MulticastInterface) -> io::Result<()> {
+        SockRef::from(&self.socket).join_multicast_v4_n(&group, &interface.selector())
     }
 
-    pub fn leave(&self, group: Ipv4Addr, interface_index: u32) -> io::Result<()> {
-        SockRef::from(&self.socket)
-            .leave_multicast_v4_n(&group, &InterfaceIndexOrAddress::Index(interface_index))
+    pub fn leave(&self, group: Ipv4Addr, interface: MulticastInterface) -> io::Result<()> {
+        SockRef::from(&self.socket).leave_multicast_v4_n(&group, &interface.selector())
     }
 
     pub async fn receive(&self, buffer: &mut [u8]) -> io::Result<PacketMetadata> {
