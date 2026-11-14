@@ -10,6 +10,7 @@ export const LANGUAGES = [
   ["ko", "한국어"],
   ["ms", "Bahasa Melayu"],
   ["nl", "Nederlands"],
+  ["pl", "Polski"],
   ["pt-BR", "Português (Brasil)"],
   ["ta", "தமிழ்"],
   ["zh-Hans", "简体中文"],

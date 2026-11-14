@@ -429,7 +429,7 @@ fn translations(language: &str) -> Result<Value, CallError> {
     }
 
     let Some(source) = translations!(
-        "de", "es", "fr", "it", "ja", "ko", "ms", "nl", "pt-BR", "ta", "zh-Hans", "zh-Hant"
+        "de", "es", "fr", "it", "ja", "ko", "ms", "nl", "pl", "pt-BR", "ta", "zh-Hans", "zh-Hant"
     ) else {
         return Ok(app_error(format!("no translations for {language:?}")));
     };
