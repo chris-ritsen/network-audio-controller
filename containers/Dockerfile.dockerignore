@@ -8,6 +8,7 @@
 !packages/netaudio-core
 !packages/netaudio-daemon
 !packages/netaudio-endpoint
+!packages/netaudio-engine
 !packages/netaudio-host-jack
 !packages/netaudio-host-pulse
 !packages/netaudio-host-worker

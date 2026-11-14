@@ -39,6 +39,7 @@ WORKDIR /src
 COPY pyproject.toml README.md LICENSE hatch_build_core.py Cargo.toml Cargo.lock ./
 COPY packages/netaudio-core packages/netaudio-core
 COPY packages/netaudio-endpoint packages/netaudio-endpoint
+COPY packages/netaudio-engine packages/netaudio-engine
 COPY packages/netaudio-daemon packages/netaudio-daemon
 COPY packages/netaudio-host-worker packages/netaudio-host-worker
 COPY packages/netaudio-host-jack packages/netaudio-host-jack
