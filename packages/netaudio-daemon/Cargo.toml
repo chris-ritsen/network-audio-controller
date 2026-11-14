@@ -33,7 +33,7 @@ rand = "0.8"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 redis = { version = "=1.7.1", default-features = false, features = ["tokio-rustls-comp"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-manual-roots"] }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.42.0", features = ["bundled"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 rustls-webpki = { version = "0.103", default-features = false, features = ["alloc"] }
