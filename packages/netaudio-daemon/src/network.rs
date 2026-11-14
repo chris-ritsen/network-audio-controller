@@ -13,6 +13,7 @@ pub struct Interface {
     pub name: String,
     pub index: Option<u32>,
     pub network: IpNet,
+    pub running: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +26,7 @@ impl NetworkSnapshot {
         let mut interfaces = if_addrs::get_if_addrs()?
             .into_iter()
             .map(|interface| {
+                let running = interface.is_oper_up();
                 let network = match interface.addr {
                     if_addrs::IfAddr::V4(address) => {
                         IpNet::new(address.ip.into(), address.prefixlen)?
@@ -37,6 +39,7 @@ impl NetworkSnapshot {
                     name: interface.name,
                     index: interface.index,
                     network,
+                    running,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -51,7 +54,9 @@ impl NetworkSnapshot {
             .iter()
             .filter(|interface| match interface.network.addr() {
                 IpAddr::V4(address) => {
-                    !address.is_loopback() && selected.is_none_or(|selected| selected == address)
+                    interface.running
+                        && !address.is_loopback()
+                        && selected.is_none_or(|selected| selected == address)
                 }
                 IpAddr::V6(_) => false,
             })
