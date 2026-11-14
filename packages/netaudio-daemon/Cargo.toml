@@ -75,7 +75,7 @@ tracing-journald = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 blake2 = "0.10.6"
-nix = { version = "0.30", features = ["resource"] }
+nix = { version = "0.30", features = ["process", "resource"] }
 zbus = { version = "=6.2.1", default-features = false, features = ["object-manager", "tokio"] }
 
 [target.'cfg(windows)'.dependencies]
