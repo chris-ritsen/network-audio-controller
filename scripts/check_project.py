@@ -229,7 +229,7 @@ def project_checks(library, *, offline=False):
             "web-format",
             "webapp",
             [
-                "node_modules/.bin/prettier",
+                "node_modules/.bin/prettier.cmd" if os.name == "nt" else "node_modules/.bin/prettier",
                 "--check",
                 "packages/netaudio/src/netaudio/daemon/http/webapp",
                 "packages/netaudio-daemon/assets/api-documentation.css",
