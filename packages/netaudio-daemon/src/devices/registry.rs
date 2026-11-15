@@ -31,6 +31,8 @@ use tokio_util::time::DelayQueue;
 
 const MAXIMUM_CONCURRENT_REFRESHES: usize = 16;
 const MAXIMUM_PENDING_OPERATIONS: usize = 128;
+const STATUS_ATTEMPTS: u32 = 3;
+const STATUS_RETRY_DELAY: Duration = Duration::from_secs(1);
 const CLOCK_FRESHNESS: Duration = Duration::from_secs(5);
 const CLOCK_FRESHNESS_LIMIT: Duration = Duration::from_secs(30);
 
@@ -644,7 +646,7 @@ impl DeviceRegistry {
             self.publish(&state.record)?;
         }
 
-        for query in [
+        let mut pending = vec![
             StatusQuery::Manufacturer,
             StatusQuery::Platform,
             StatusQuery::Interface,
@@ -655,42 +657,84 @@ impl DeviceRegistry {
             StatusQuery::Codec,
             StatusQuery::Aes67,
             StatusQuery::Lock,
-        ] {
-            {
-                let state = device
-                    .state
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+        ];
+        let mut unavailable = BTreeMap::new();
 
-                if state.generation != generation {
-                    report.superseded = true;
-                    return Ok(());
+        for attempt in 0..STATUS_ATTEMPTS {
+            if attempt > 0 {
+                tokio::time::sleep(STATUS_RETRY_DELAY * attempt).await;
+            }
+
+            let mut unanswered = Vec::new();
+            unavailable.clear();
+
+            for query in pending {
+                {
+                    let state = device
+                        .state
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+
+                    if state.generation != generation {
+                        report.superseded = true;
+                        return Ok(());
+                    }
+
+                    if let Some(capability) = query.required_capability() {
+                        match state
+                            .record
+                            .properties
+                            .get(capability)
+                            .and_then(Value::as_bool)
+                        {
+                            Some(true) => {}
+                            Some(false) => continue,
+                            None => {
+                                unanswered.push(query);
+                                continue;
+                            }
+                        }
+                    }
                 }
 
-                if let Some(capability) = query.required_capability()
-                    && state
-                        .record
-                        .properties
-                        .get(capability)
-                        .and_then(Value::as_bool)
-                        != Some(true)
+                match self
+                    .status_requests
+                    .query(transport, &key, identity.as_deref(), query)
+                    .await
                 {
-                    continue;
+                    Ok(_) => report.observed.push(query.kind().as_str()),
+                    Err(error) => {
+                        tracing::debug!(device = key, status = query.kind().as_str(), attempt, %error, "initial status unavailable");
+                        unavailable.insert(query.kind().as_str(), error.to_string());
+                        unanswered.push(query);
+                    }
                 }
             }
 
-            match self
-                .status_requests
-                .query(transport, &key, identity.as_deref(), query)
-                .await
-            {
-                Ok(_) => report.observed.push(query.kind().as_str()),
-                Err(error) => {
-                    tracing::debug!(device = key, status = query.kind().as_str(), %error, "initial status unavailable");
-                    report
-                        .errors
-                        .insert(query.kind().as_str(), error.to_string());
-                }
+            if unavailable.is_empty() {
+                break;
+            }
+
+            pending = unanswered;
+        }
+
+        if !unavailable.is_empty() {
+            for (status, error) in &unavailable {
+                tracing::warn!(device = key, status, error, "device status unavailable");
+            }
+
+            report.errors.extend(unavailable);
+            let mut state = device
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+
+            if state.generation == generation {
+                state
+                    .record
+                    .properties
+                    .insert("read_errors".to_owned(), json!(report.errors));
+                self.publish(&state.record)?;
             }
         }
 
