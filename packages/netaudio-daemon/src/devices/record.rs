@@ -152,7 +152,9 @@ impl DeviceRecord {
         fields.retain(|_, value| !value.is_null());
         fields.insert("tx_count_raw".to_owned(), json!(counts.tx_count));
         fields.insert("rx_count_raw".to_owned(), json!(counts.rx_count));
-        fields.insert("is_locked".to_owned(), json!(counts.locked));
+        if let Some(locked) = counts.locked {
+            fields.insert("is_locked".to_owned(), json!(locked));
+        }
         let capabilities = netaudio_core::parser::flow_authoring_capabilities(
             counts.transmit_flow_authoring_capability_word,
         );
