@@ -54,6 +54,7 @@ async function request(method, path, body) {
       "/ddm/context",
       "/ddm/domains",
       "/settings/monitoring",
+      "/settings/network",
       "/event-journal",
     ].includes(path) &&
     !inventoryReady.value
@@ -136,6 +137,7 @@ export const api = {
   getManagedStatus: () => get("/ddm/status"),
   getConnections: () => get("/ddm/connections"),
   getSettings: () => get("/settings"),
+  setDanteInterfaces: (interfaces) => post("/settings/network", { interfaces }),
   setMonitoringPort: (port) => post("/settings/monitoring", { port }),
   loginDdm: (body) => post("/ddm/login", body),
   logoutDdm: (server) => post("/ddm/logout", { server }),

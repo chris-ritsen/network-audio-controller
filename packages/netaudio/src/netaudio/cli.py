@@ -147,7 +147,7 @@ def _global_options(
     interface: Optional[str] = typer.Option(
         None,
         "--interface",
-        help="Use only this network interface for discovery and device control.",
+        help="Use only these network interfaces for Dante: names or IPv4 addresses, separated by commas.",
         envvar="NETAUDIO_INTERFACE",
     ),
     ddm_context: Optional[str] = typer.Option(

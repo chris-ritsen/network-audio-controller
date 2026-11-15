@@ -97,7 +97,6 @@ impl Discovery {
         settings: Settings,
         model: Arc<ReadModel>,
         network: &NetworkSnapshot,
-        selected: Option<Ipv4Addr>,
     ) -> Result<Self> {
         ensure!(
             !settings.groups.is_empty() && settings.groups.iter().all(Ipv4Addr::is_multicast),
@@ -120,7 +119,7 @@ impl Discovery {
                 source_count: 0,
             })),
         };
-        discovery.update_interfaces(network, selected)?;
+        discovery.update_interfaces(network)?;
         Ok(discovery)
     }
 
@@ -131,7 +130,6 @@ impl Discovery {
     pub async fn run(
         mut self,
         mut network: watch::Receiver<NetworkSnapshot>,
-        selected: Option<Ipv4Addr>,
         cancellation: CancellationToken,
     ) -> Result<()> {
         let mut buffer = vec![0; MAXIMUM_DATAGRAM_BYTES];
@@ -141,7 +139,7 @@ impl Discovery {
                 _ = cancellation.cancelled() => return Ok(()),
                 changed = network.changed() => {
                     changed.context("network monitor stopped")?;
-                    self.update_interfaces(&network.borrow_and_update(), selected)?;
+                    self.update_interfaces(&network.borrow_and_update())?;
                 }
                 change = self.inventory.expired(), if !self.inventory.is_empty() => {
                     let change = change?;
@@ -215,11 +213,7 @@ impl Discovery {
         Ok(())
     }
 
-    fn update_interfaces(
-        &mut self,
-        network: &NetworkSnapshot,
-        selected: Option<Ipv4Addr>,
-    ) -> Result<()> {
+    fn update_interfaces(&mut self, network: &NetworkSnapshot) -> Result<()> {
         let mut desired = BTreeMap::new();
         let mut errors = BTreeMap::new();
 
@@ -228,7 +222,7 @@ impl Discovery {
                 continue;
             };
 
-            if address.is_loopback() || selected.is_some_and(|selected| selected != address) {
+            if address.is_loopback() {
                 continue;
             }
 

@@ -2,7 +2,7 @@ use crate::network::NetworkSnapshot;
 use crate::transport::datagram::{DatagramSocket, MulticastInterface};
 use anyhow::{ensure, Context, Result};
 use chrono::{DateTime, Utc};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
@@ -24,6 +24,7 @@ pub struct MulticastReceiver {
     port: u16,
     group: Ipv4Addr,
     interfaces: BTreeMap<u32, MulticastInterface>,
+    wanted: BTreeSet<u32>,
     observer: Option<crate::capture::Observer>,
 }
 
@@ -63,13 +64,10 @@ impl MulticastReceiver {
             port,
             group,
             interfaces: BTreeMap::new(),
+            wanted: BTreeSet::new(),
             observer: None,
         };
         receiver.update_interfaces(interfaces.clone());
-        ensure!(
-            interfaces.is_empty() || !receiver.interfaces.is_empty(),
-            "could not join monitoring group {group} on any network interface"
-        );
 
         Ok(receiver)
     }
@@ -97,7 +95,6 @@ impl MulticastReceiver {
         sender: mpsc::Sender<ReceivedPacket>,
         cancellation: CancellationToken,
         mut network: watch::Receiver<NetworkSnapshot>,
-        selected: Option<Ipv4Addr>,
     ) -> Result<()> {
         let mut buffer = vec![0; MAXIMUM_DATAGRAM_BYTES];
 
@@ -106,11 +103,16 @@ impl MulticastReceiver {
                 _ = cancellation.cancelled() => return Ok(()),
                 changed = network.changed() => {
                     changed.context("network monitor stopped")?;
-                    self.update_interfaces(network.borrow_and_update().ipv4_multicast_interfaces(selected)?);
+                    self.update_interfaces(network.borrow_and_update().ipv4_multicast_interfaces());
                     continue;
                 }
                 received = self.socket.receive(&mut buffer) => received?,
             };
+
+            if !self.wants(metadata.interface_index) {
+                continue;
+            }
+
             let packet = ReceivedPacket {
                 source: SocketAddr::V4(metadata.source),
                 destination: SocketAddr::from((metadata.destination, self.port)),
@@ -128,7 +130,13 @@ impl MulticastReceiver {
     }
 
     pub(super) async fn receive(&self, buffer: &mut [u8]) -> Result<ReceivedPacket> {
-        let metadata = self.socket.receive(buffer).await?;
+        let metadata = loop {
+            let metadata = self.socket.receive(buffer).await?;
+
+            if self.wants(metadata.interface_index) {
+                break metadata;
+            }
+        };
         let packet = ReceivedPacket {
             source: SocketAddr::V4(metadata.source),
             destination: SocketAddr::from((metadata.destination, self.port)),
@@ -140,7 +148,12 @@ impl MulticastReceiver {
         Ok(packet)
     }
 
+    fn wants(&self, interface_index: u32) -> bool {
+        interface_index == 0 || self.wanted.contains(&interface_index)
+    }
+
     pub(super) fn update_interfaces(&mut self, interfaces: BTreeMap<u32, MulticastInterface>) {
+        self.wanted = interfaces.keys().copied().collect();
         let group = self.group;
         let socket = &self.socket;
 

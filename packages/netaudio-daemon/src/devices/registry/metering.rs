@@ -122,7 +122,10 @@ impl DeviceRegistry {
                 .record
                 .control_address()
                 .context("device has no monitoring service")?,
-            local_address: self.local_address,
+            local_address: state
+                .record
+                .control_address()
+                .and_then(|address| self.local_address(address.address)),
         })
     }
 

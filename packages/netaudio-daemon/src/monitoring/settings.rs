@@ -6,7 +6,6 @@ use crate::state::ReadModel;
 use anyhow::{ensure, Context, Result};
 use netaudio_core::protocol::MULTICAST_GROUP_CONTROL_MONITORING;
 use serde_json::{json, Value};
-use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -33,7 +32,6 @@ pub struct Worker {
     streams: Arc<MeteringStreams>,
     model: Arc<ReadModel>,
     network: watch::Receiver<NetworkSnapshot>,
-    selected: Option<Ipv4Addr>,
     receiver: MulticastReceiver,
     commands: mpsc::Receiver<Change>,
     observer: Option<crate::capture::Observer>,
@@ -46,11 +44,10 @@ impl Settings {
         streams: Arc<MeteringStreams>,
         model: Arc<ReadModel>,
         network: watch::Receiver<NetworkSnapshot>,
-        selected: Option<Ipv4Addr>,
         observer: Option<crate::capture::Observer>,
     ) -> Result<(Arc<Self>, Worker)> {
         let (active, default) = ports;
-        let interfaces = network.borrow().ipv4_multicast_interfaces(selected)?;
+        let interfaces = network.borrow().ipv4_multicast_interfaces();
         let receiver = MulticastReceiver::bind_exclusive(
             MULTICAST_GROUP_CONTROL_MONITORING.parse()?,
             active,
@@ -69,7 +66,6 @@ impl Settings {
             streams,
             model,
             network,
-            selected,
             receiver,
             commands: requests,
             observer,
@@ -117,7 +113,7 @@ impl Worker {
                 _ = cancellation.cancelled() => return Ok(()),
                 changed = self.network.changed() => {
                     changed.context("network monitor stopped")?;
-                    self.receiver.update_interfaces(self.network.borrow_and_update().ipv4_multicast_interfaces(self.selected)?);
+                    self.receiver.update_interfaces(self.network.borrow_and_update().ipv4_multicast_interfaces());
                 }
                 command = self.commands.recv() => {
                     let Some(command) = command else {
@@ -146,10 +142,7 @@ impl Worker {
     async fn configure(&mut self, port: u16) -> Result<Value> {
         let previous = self.settings.active_port.load(Ordering::Acquire);
         let replacement = if previous != port {
-            let interfaces = self
-                .network
-                .borrow()
-                .ipv4_multicast_interfaces(self.selected)?;
+            let interfaces = self.network.borrow().ipv4_multicast_interfaces();
             let receiver = MulticastReceiver::bind_exclusive(
                 MULTICAST_GROUP_CONTROL_MONITORING.parse()?,
                 port,

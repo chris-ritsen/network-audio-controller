@@ -190,7 +190,7 @@ impl DeviceRegistry {
             .is_none_or(|transport| transport.address() != address)
         {
             *owned_transport = Some(
-                DeviceTransport::connect(address, self.local_address)
+                DeviceTransport::connect(address, self.local_address(address.address))
                     .await?
                     .with_observer(self.wire_observer()),
             );

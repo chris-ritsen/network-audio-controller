@@ -1,11 +1,12 @@
 mod changes;
+pub mod selection;
 
 use crate::transport::datagram::MulticastInterface;
 use anyhow::{Context, Result};
 use ipnet::IpNet;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
-use tokio::sync::watch;
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,7 +17,7 @@ pub struct Interface {
     pub running: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NetworkSnapshot {
     pub interfaces: Vec<Interface>,
 }
@@ -49,35 +50,60 @@ impl NetworkSnapshot {
         Ok(Self { interfaces })
     }
 
-    pub fn networks(&self, selected: Option<Ipv4Addr>) -> Vec<IpNet> {
+    pub fn selected(&self, selection: &BTreeSet<String>) -> Self {
+        if selection.is_empty() {
+            return self.clone();
+        }
+
+        Self {
+            interfaces: self
+                .interfaces
+                .iter()
+                .filter(|interface| {
+                    selection.contains(&interface.name)
+                        || selection.contains(&interface.network.addr().to_string())
+                })
+                .cloned()
+                .collect(),
+        }
+    }
+
+    pub fn networks(&self) -> Vec<IpNet> {
         self.interfaces
             .iter()
             .filter(|interface| match interface.network.addr() {
-                IpAddr::V4(address) => {
-                    interface.running
-                        && !address.is_loopback()
-                        && selected.is_none_or(|selected| selected == address)
-                }
+                IpAddr::V4(address) => interface.running && !address.is_loopback(),
                 IpAddr::V6(_) => false,
             })
             .map(|interface| interface.network)
             .collect()
     }
 
-    pub fn ipv4_addresses(&self, selected: Option<Ipv4Addr>) -> BTreeSet<Ipv4Addr> {
-        self.networks(selected)
-            .into_iter()
-            .filter_map(|network| match network.addr() {
-                IpAddr::V4(address) => Some(address),
-                IpAddr::V6(_) => None,
-            })
-            .collect()
+    pub fn ipv4_query_addresses(&self) -> (Vec<Ipv4Addr>, Vec<Ipv4Addr>) {
+        let mut first = BTreeSet::new();
+        let mut shared = Vec::new();
+        let mut alone = Vec::new();
+
+        for interface in &self.interfaces {
+            let IpAddr::V4(address) = interface.network.addr() else {
+                continue;
+            };
+
+            if !interface.running || address.is_loopback() {
+                continue;
+            }
+
+            if first.insert(&interface.name) {
+                shared.push(address);
+            } else {
+                alone.push(address);
+            }
+        }
+
+        (shared, alone)
     }
 
-    pub fn ipv4_multicast_interfaces(
-        &self,
-        selected: Option<Ipv4Addr>,
-    ) -> Result<BTreeMap<u32, MulticastInterface>> {
+    pub fn ipv4_multicast_interfaces(&self) -> BTreeMap<u32, MulticastInterface> {
         let mut interfaces = BTreeMap::new();
 
         for interface in &self.interfaces {
@@ -85,20 +111,31 @@ impl NetworkSnapshot {
                 continue;
             };
 
-            if address.is_loopback() || selected.is_some_and(|selected| selected != address) {
+            if address.is_loopback() {
                 continue;
             }
 
-            let index = interface
-                .index
-                .filter(|index| *index != 0)
-                .with_context(|| format!("network interface {} has no OS index", interface.name))?;
+            let Some(index) = interface.index.filter(|index| *index != 0) else {
+                continue;
+            };
             interfaces
                 .entry(index)
                 .or_insert(MulticastInterface { address, index });
         }
 
-        Ok(interfaces)
+        interfaces
+    }
+
+    pub fn local_address(&self, destination: Ipv4Addr) -> Option<Ipv4Addr> {
+        self.interfaces
+            .iter()
+            .filter(|interface| {
+                interface.running && interface.network.contains(&IpAddr::V4(destination))
+            })
+            .find_map(|interface| match interface.network.addr() {
+                IpAddr::V4(address) if !address.is_loopback() => Some(address),
+                _ => None,
+            })
     }
 
     pub fn addresses(&self) -> BTreeSet<IpAddr> {
@@ -116,18 +153,14 @@ pub fn interfaces_changed() {
 
 pub struct NetworkMonitor {
     changes: changes::Changes,
-    snapshots: watch::Sender<NetworkSnapshot>,
+    selection: Arc<selection::Selection>,
 }
 
 impl NetworkMonitor {
-    pub fn new() -> Result<Self> {
+    pub fn new(selection: Arc<selection::Selection>) -> Result<Self> {
         let changes = changes::Changes::new().context("watch network interface changes")?;
-        let (snapshots, _) = watch::channel(NetworkSnapshot::read()?);
-        Ok(Self { changes, snapshots })
-    }
-
-    pub fn subscribe(&self) -> watch::Receiver<NetworkSnapshot> {
-        self.snapshots.subscribe()
+        selection.observe(NetworkSnapshot::read()?)?;
+        Ok(Self { changes, selection })
     }
 
     pub async fn run(mut self, cancellation: CancellationToken) -> Result<()> {
@@ -136,15 +169,7 @@ impl NetworkMonitor {
                 _ = cancellation.cancelled() => return Ok(()),
                 changed = self.changes.next() => {
                     changed.context("network interface watcher stopped")?;
-                    let snapshot = NetworkSnapshot::read()?;
-                    self.snapshots.send_if_modified(|previous| {
-                        if *previous == snapshot {
-                            return false;
-                        }
-
-                        *previous = snapshot;
-                        true
-                    });
+                    self.selection.observe(NetworkSnapshot::read()?)?;
                 }
             }
         }

@@ -79,7 +79,90 @@ function SettingsView() {
         <button class="btn btn-sm btn-primary" type="submit" disabled=${busy || !changed}><${Icon} name="check" />${busy ? t("Saving…") : t("Save")}</button>
       </form>
       ${error ? html`<div class="alert alert-error mt-3" role="alert">${t(error)}</div>` : null}
-    <//></div>`;
+    <//>
+    <${DanteNetwork} settings=${settings} />
+  </div>`;
+}
+
+function DanteNetwork({ settings }) {
+  const [edited, setEdited] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const saved = settings?.dante_interfaces ?? [];
+  const present = settings?.network_interfaces ?? [];
+  const known = new Set(
+    present.flatMap((entry) => [entry.name, ...entry.addresses]),
+  );
+  const rows = [
+    ...present.map((entry) => ({
+      addresses: entry.addresses,
+      name: entry.name,
+      saved:
+        saved.includes(entry.name) ||
+        entry.addresses.some((address) => saved.includes(address)),
+    })),
+    ...saved
+      .filter((name) => !known.has(name))
+      .map((name) => ({ addresses: [], name, saved: true })),
+  ];
+  const savedNames = rows.filter((row) => row.saved).map((row) => row.name);
+  const chosen = edited ?? savedNames;
+  const every = chosen.length === 0;
+  const changed =
+    settings &&
+    (chosen.length !== savedNames.length ||
+      chosen.some((name) => !savedNames.includes(name)));
+  return html`<${Panel} title=${t("Dante network")}>
+    <form
+      class="flex flex-col items-start gap-4"
+      onSubmit=${async (event) => {
+        event.preventDefault();
+        if (busy || !changed) return;
+        setBusy(true);
+        setError("");
+        try {
+          backendSettings.value = await api.setDanteInterfaces(chosen);
+          setEdited(null);
+        } catch (failure) {
+          setError(failure.message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <fieldset class="flex flex-col gap-2">
+        <label class="flex items-center gap-2"
+          ><input
+            type="checkbox"
+            checked=${every}
+            disabled=${busy || !settings}
+            onChange=${(event) =>
+              setEdited(
+                event.target.checked ? [] : rows.map((row) => row.name),
+              )}
+          />${t("All interfaces")}</label
+        >
+        ${rows.map(
+          (row) =>
+            html`<label key=${row.name} class="flex items-center gap-2"
+              ><input
+                type="checkbox"
+                checked=${every || chosen.includes(row.name)}
+                disabled=${busy || every}
+                onChange=${(event) =>
+                  setEdited(
+                    event.target.checked
+                      ? [...chosen, row.name]
+                      : chosen.filter((name) => name !== row.name),
+                  )}
+              />${[row.name, ...row.addresses].join(" ")}</label
+            >`,
+        )}
+      </fieldset>
+      <button class="btn btn-sm btn-primary" type="submit" disabled=${busy || !changed}><${Icon} name="check" />${busy ? t("Saving…") : t("Save")}</button>
+    </form>
+    ${error ? html`<div class="alert alert-error mt-3" role="alert">${t(error)}</div>` : null}
+  <//>`;
 }
 
 export const settingsView = {

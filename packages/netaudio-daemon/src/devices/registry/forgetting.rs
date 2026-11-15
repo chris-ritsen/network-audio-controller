@@ -184,7 +184,7 @@ impl DeviceRegistry {
         let name = tokio::select! {
             _ = self.cancellation.cancelled() => return Ok(()),
             result = tokio::time::timeout(REDISCOVERY_DEADLINE, async {
-                let mut transport = DeviceTransport::connect(address, self.local_address).await?.with_observer(self.wire_observer());
+                let mut transport = DeviceTransport::connect(address, self.local_address(address.address)).await?.with_observer(self.wire_observer());
                 inventory::device_name(&mut transport).await
             }) => result.context("forgotten device probe timed out")??,
         };

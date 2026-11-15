@@ -14,7 +14,7 @@ logger = logging.getLogger("netaudio")
 import typer
 
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
-from netaudio.cli_support.output import output_single, structured_output_selected
+from netaudio.cli_support.output import output_single, output_table, structured_output_selected
 from netaudio.daemon import service_install
 from netaudio.daemon import engine
 from netaudio.daemon.client import forget_devices_on_daemon, get_device_summaries_from_daemon, shutdown_daemon
@@ -323,6 +323,81 @@ def forget(
             "online" if entry.get("online") else "offline",
         ]
         typer.echo(f"Forgot {label} ({', '.join(str(detail) for detail in details if detail)})")
+
+
+@app.command()
+def interfaces(
+    names: Optional[list[str]] = typer.Argument(
+        None, help="Interface names or IPv4 addresses to use for Dante. Give none to show the current choice."
+    ),
+    every: bool = typer.Option(False, "--all", help="Use every network interface for Dante."),
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
+    ),
+):
+    """Show or choose the network interfaces used for Dante. The choice is saved and applies without a restart."""
+    from netaudio.common.preferences import read_preferences, save_preference
+    from netaudio.daemon.client import DaemonRefusal, call_daemon
+
+    chosen = sorted({name.strip() for name in names or [] if name.strip()})
+    if every and chosen:
+        typer.echo("Error: give either interface names or --all, not both.", err=True)
+        raise typer.Exit(code=1)
+    changing = every or bool(chosen)
+
+    effective_port = _effective_daemon_port(daemon_port)
+    _pin_client_port(effective_port)
+    if not _port_in_use(effective_port):
+        if changing:
+            save_preference("dante_interfaces", chosen)
+        saved = read_preferences().get("dante_interfaces") or []
+        if structured_output_selected():
+            output_single({"dante_interfaces": saved})
+        else:
+            typer.echo(f"Dante interfaces: {', '.join(saved) if saved else 'all'}")
+        return
+
+    try:
+        if changing:
+            settings = asyncio.run(call_daemon("POST", "/settings/network", {"interfaces": chosen}))
+        else:
+            settings = asyncio.run(call_daemon("GET", "/settings"))
+    except DaemonRefusal as refusal:
+        typer.echo(f"Error: {refusal}", err=True)
+        raise typer.Exit(code=1)
+
+    selected = settings.get("dante_interfaces") or []
+    present = settings.get("network_interfaces") or []
+    rows = []
+    for interface in present:
+        addresses = interface.get("addresses") or []
+        used = not selected or interface.get("name") in selected or any(address in selected for address in addresses)
+        rows.append(
+            {
+                "addresses": addresses,
+                "connected": bool(interface.get("running")),
+                "name": interface.get("name"),
+                "used_for_dante": used,
+            }
+        )
+    known = {row["name"] for row in rows} | {address for row in rows for address in row["addresses"]}
+    for name in selected:
+        if name not in known:
+            rows.append({"addresses": [], "connected": False, "name": name, "used_for_dante": True})
+
+    output_table(
+        ["Interface", "Addresses", "Connected", "Dante"],
+        [
+            [
+                row["name"],
+                ", ".join(row["addresses"]),
+                "yes" if row["connected"] else "no",
+                "yes" if row["used_for_dante"] else "no",
+            ]
+            for row in rows
+        ],
+        json_data={"dante_interfaces": selected, "interfaces": rows},
+    )
 
 
 @app.command()

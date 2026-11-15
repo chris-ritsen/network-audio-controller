@@ -6549,6 +6549,71 @@
         }
       }
     },
+    "/settings/network": {
+      "post": {
+        "operationId": "setDanteInterfaces",
+        "summary": "Choose the network interfaces used for Dante",
+        "description": "Saves the choice and applies it without a restart. An empty list uses every interface. A name that is not present yet is kept and used when that interface appears. Returns a conflict when the interfaces were chosen when the server was started.",
+        "tags": [
+          "Monitoring"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Operation result; consult documented observation and confirmation fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "408": {
+            "$ref": "#/components/responses/Error408"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error413"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "interfaces": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Interface names or IPv4 addresses."
+                  }
+                },
+                "required": [
+                  "interfaces"
+                ]
+              },
+              "example": {
+                "interfaces": [
+                  "eth1"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/shutdown": {
       "post": {
         "operationId": "shutdownDaemon",
@@ -12282,6 +12347,38 @@
             "minimum": 1024,
             "maximum": 65535,
             "description": "Currently bound UDP monitoring port."
+          },
+          "dante_interfaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Interface names or IPv4 addresses used for Dante; empty uses every interface."
+          },
+          "dante_interfaces_fixed": {
+            "type": "boolean",
+            "description": "True when the interfaces were chosen when the server was started and cannot be changed here."
+          },
+          "network_interfaces": {
+            "type": "array",
+            "description": "Network interfaces with an IPv4 address on this machine.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "addresses": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "name": {
+                  "type": "string"
+                },
+                "running": {
+                  "type": "boolean"
+                }
+              }
+            }
           }
         },
         "required": [

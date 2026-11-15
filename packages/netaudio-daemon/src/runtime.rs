@@ -3,11 +3,12 @@ use crate::configuration::{http_address, Configuration, DEFAULT_HTTP_PORT};
 use crate::devices::{discovery, registry::DeviceRegistry};
 use crate::http::{inventory, ApiError, AuthorizationService, ConnectionContext};
 use crate::monitoring::multicast::MulticastReceiver;
-use crate::network::{NetworkMonitor, NetworkSnapshot};
+use crate::network::selection::Selection;
+use crate::network::NetworkMonitor;
 use crate::preferences::Preferences;
 use crate::state::ReadModel;
 use crate::transport::{generated, Listener, ListenerOptions, TlsIdentity};
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{ensure, Context, Result};
 use axum::extract::{Extension, State};
 use axum::middleware;
 use axum::routing::{get, post};
@@ -59,10 +60,12 @@ pub async fn run(
         ..options
     };
     let mcp_enabled = !options.private && configuration.mcp_enabled()?;
-    let network = NetworkMonitor::new()?;
-    let snapshots = network.subscribe();
+    let preferences = Arc::new(Preferences::open(configuration.preferences_path()?)?);
+    let selection = Selection::open(Arc::clone(&preferences), options.interface.as_deref())?;
+    let network = NetworkMonitor::new(Arc::clone(&selection))?;
+    let every = selection.every();
+    let snapshots = selection.dante();
     let initial_network = snapshots.borrow().clone();
-    let local_address = interface_address(&initial_network, options.interface.as_deref())?;
     let port = options.port.map(Ok).unwrap_or_else(|| {
         if options.private {
             return Ok(0);
@@ -91,7 +94,7 @@ pub async fn run(
         );
 
         if settings.generated {
-            generated::ensure(&settings.primary.certificate, &initial_network)?;
+            generated::ensure(&settings.primary.certificate, &every.borrow())?;
         }
 
         Some(TlsIdentity::open(
@@ -101,7 +104,6 @@ pub async fn run(
     } else {
         None
     };
-    let preferences = Arc::new(Preferences::open(configuration.preferences_path()?)?);
     let configured_metering_port = std::env::var("NETAUDIO_METERING_PORT")
         .ok()
         .map(|port| port.parse::<u16>())
@@ -152,7 +154,6 @@ pub async fn run(
         crate::sap::Settings::from_environment()?,
         Arc::clone(&model),
         &initial_network,
-        local_address,
     )?;
     let journal_limit = configuration
         .daemon
@@ -178,7 +179,7 @@ pub async fn run(
         },
     )
     .await?;
-    let devices = DeviceRegistry::new(Arc::clone(&model), local_address, Arc::clone(&journal));
+    let devices = DeviceRegistry::new(Arc::clone(&model), snapshots.clone(), Arc::clone(&journal));
     if let Some(observer) = &wire_observer {
         devices.configure_capture(observer.clone())?;
     }
@@ -261,7 +262,6 @@ pub async fn run(
         Arc::clone(&meter_streams),
         Arc::clone(&model),
         snapshots.clone(),
-        local_address,
         wire_observer.clone(),
     )?;
     let presets = Arc::new(crate::presets::Service::new(
@@ -320,7 +320,10 @@ pub async fn run(
             Arc::clone(&model),
             Arc::clone(&devices),
         ))
-        .merge(crate::http::settings::router(monitoring_settings))
+        .merge(crate::http::settings::router(
+            monitoring_settings,
+            Arc::clone(&selection),
+        ))
         .merge(crate::http::external_flows::router(
             Arc::clone(&model),
             sap.diagnostics(),
@@ -379,7 +382,7 @@ pub async fn run(
         ),
         _ => None,
     };
-    let interfaces = initial_network.ipv4_multicast_interfaces(local_address)?;
+    let interfaces = initial_network.ipv4_multicast_interfaces();
     let monitoring = MulticastReceiver::bind(
         MULTICAST_GROUP_CONTROL_MONITORING.parse()?,
         NetaudioPort::Info as u16,
@@ -417,7 +420,7 @@ pub async fn run(
             lifetime.clone(),
         ));
         #[cfg(not(unix))]
-        bail!("D-Bus publication is unavailable on this platform");
+        anyhow::bail!("D-Bus publication is unavailable on this platform");
     }
     if let Some(worker) = host_audio_worker {
         tasks.spawn(worker.run(lifetime.clone()));
@@ -437,9 +440,8 @@ pub async fn run(
     tasks.spawn(network.run(lifetime.clone()));
     let (shure_initialized, shure_ready) = tokio::sync::oneshot::channel();
     tasks.spawn(shure.run(lifetime.clone(), shure_initialized));
-    tasks.spawn(sap.run(snapshots.clone(), local_address, lifetime.clone()));
+    tasks.spawn(sap.run(snapshots.clone(), lifetime.clone()));
     tasks.spawn(discovery::run(
-        local_address,
         discovered,
         lifetime.clone(),
         snapshots.clone(),
@@ -453,13 +455,8 @@ pub async fn run(
         meter_observations,
     ));
     tasks.spawn(monitoring_worker.run(meter_packets, lifetime.clone()));
-    tasks.spawn(monitoring.run(packets, lifetime.clone(), snapshots.clone(), local_address));
-    tasks.spawn(heartbeats.run(
-        heartbeat_packets,
-        lifetime.clone(),
-        snapshots.clone(),
-        local_address,
-    ));
+    tasks.spawn(monitoring.run(packets, lifetime.clone(), snapshots.clone()));
+    tasks.spawn(heartbeats.run(heartbeat_packets, lifetime.clone(), snapshots.clone()));
     let address = plain.local_address()?;
     tracing::info!(%address, "native HTTP listener ready");
     tasks.spawn(plain.serve(router.clone(), lifetime.clone()));
@@ -478,7 +475,7 @@ pub async fn run(
     {
         tasks.spawn(generated::maintain(
             settings.primary.certificate,
-            snapshots,
+            every,
             lifetime.clone(),
         ));
     }
@@ -556,32 +553,6 @@ pub async fn run(
     drop(identity);
     cleanup.context("daemon shutdown exceeded its deadline")??;
     outcome
-}
-
-fn interface_address(
-    network: &NetworkSnapshot,
-    selected: Option<&str>,
-) -> Result<Option<Ipv4Addr>> {
-    let Some(selected) = selected else {
-        return Ok(None);
-    };
-    let matches = network
-        .interfaces
-        .iter()
-        .filter(|interface| {
-            interface.name == selected || interface.network.addr().to_string() == selected
-        })
-        .filter_map(|interface| match interface.network.addr() {
-            IpAddr::V4(address) => Some(address),
-            IpAddr::V6(_) => None,
-        })
-        .collect::<std::collections::BTreeSet<_>>();
-
-    match matches.len() {
-        0 => bail!("interface {selected} has no IPv4 address"),
-        1 => Ok(matches.first().copied()),
-        _ => bail!("interface {selected} has several IPv4 addresses; select an address explicitly"),
-    }
 }
 
 async fn server_info(State(state): State<Arc<ServerState>>) -> axum::response::Response {

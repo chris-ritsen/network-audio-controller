@@ -9,6 +9,7 @@ use crate::monitoring::journal::service::Journal;
 use crate::monitoring::metering::Metering;
 use crate::monitoring::requests::{self, StatusQuery, StatusRequests};
 use crate::monitoring::{multicast::ReceivedPacket, status};
+use crate::network::NetworkSnapshot;
 use crate::state::ReadModel;
 use anyhow::{bail, Context, Result};
 use futures_util::StreamExt;
@@ -118,7 +119,7 @@ pub struct DeviceRegistry {
     devices: RwLock<BTreeMap<String, Arc<Device>>>,
     association_generation: std::sync::atomic::AtomicU64,
     media: RwLock<BTreeMap<String, DiscoveredService>>,
-    local_address: Option<Ipv4Addr>,
+    network: watch::Receiver<NetworkSnapshot>,
     refreshes: Arc<Semaphore>,
     refresh_queue: RefreshQueue,
     refresh_ready: Notify,
@@ -137,9 +138,13 @@ pub struct DeviceRegistry {
 }
 
 impl DeviceRegistry {
+    fn local_address(&self, destination: Ipv4Addr) -> Option<Ipv4Addr> {
+        self.network.borrow().local_address(destination)
+    }
+
     pub fn new(
         model: Arc<ReadModel>,
-        local_address: Option<Ipv4Addr>,
+        network: watch::Receiver<NetworkSnapshot>,
         journal: Arc<Journal>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -149,7 +154,7 @@ impl DeviceRegistry {
             devices: RwLock::new(BTreeMap::new()),
             association_generation: std::sync::atomic::AtomicU64::new(1),
             media: RwLock::new(BTreeMap::new()),
-            local_address,
+            network,
             refreshes: Arc::new(Semaphore::new(MAXIMUM_CONCURRENT_REFRESHES)),
             refresh_queue: RefreshQueue::default(),
             refresh_ready: Notify::new(),
@@ -562,7 +567,7 @@ impl DeviceRegistry {
             .is_none_or(|transport| transport.address() != address)
         {
             *owned_transport = Some(
-                DeviceTransport::connect(address, self.local_address)
+                DeviceTransport::connect(address, self.local_address(address.address))
                     .await?
                     .with_observer(self.wire_observer()),
             );
@@ -1097,7 +1102,7 @@ impl DeviceRegistry {
             .is_none_or(|transport| transport.address() != address)
         {
             *owned_transport = Some(
-                DeviceTransport::connect(address, self.local_address)
+                DeviceTransport::connect(address, self.local_address(address.address))
                     .await
                     .map_err(|error| ControlError::Transport {
                         error,

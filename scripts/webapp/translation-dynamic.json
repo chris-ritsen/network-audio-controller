@@ -275,6 +275,7 @@
   "Template-based subscription failed: the unicast template is full",
   "That port could not be opened or saved. Check whether another application is using it.",
   "That profile belongs to a different server; choose a new profile name",
+  "The Dante interfaces were chosen when the server was started.",
   "The available observations do not establish a classification for this value and receiver context.",
   "The current Bluetooth naming mode is unsupported.",
   "The device has not reported a supported discoverability state.",

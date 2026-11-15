@@ -222,7 +222,7 @@ Container options, as environment variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `NETAUDIO_INTERFACE` | Network interface for Dante traffic on hosts with more than one |
+| `NETAUDIO_INTERFACE` | Network interfaces for Dante traffic, as names or IPv4 addresses separated by commas. Leave it unset to choose them in the web interface |
 | `NETAUDIO_DAEMON_PORT` | Plain HTTP port, loopback only while HTTPS is on (default 4780) |
 | `NETAUDIO_TLS_PORT` | HTTPS port for the web interface, apps and MCP (default 4781) |
 | `NETAUDIO_TLS_CERTIFICATE`, `NETAUDIO_TLS_KEY` | Your own certificate and key, mounted into the container and readable by user 10001 |
@@ -301,6 +301,22 @@ or supply an explicit `.xml` path. Saving over an existing file requires
 `--force`.
 
 ### Configuration and troubleshooting
+
+On a machine with more than one network, NetAudio uses every network
+interface for Dante until you choose. Choose the interfaces under Settings
+in the web interface, or from the command line:
+
+```bash
+netaudio daemon interfaces              # show the interfaces and which are used
+netaudio daemon interfaces eth1         # use only eth1
+netaudio daemon interfaces eth1 eth2    # use two Dante networks
+netaudio daemon interfaces --all        # use every interface again
+```
+
+The choice is saved and takes effect without a restart. The web interface
+stays reachable on every network whichever interfaces carry Dante. An
+interface that is not connected yet can be chosen by name; NetAudio starts
+using it when it appears.
 
 The daemon serves HTTPS on port 4781 with a self-signed certificate that it
 creates and renews automatically. Plain HTTP on port 4780 stays available on

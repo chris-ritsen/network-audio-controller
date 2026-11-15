@@ -6,7 +6,7 @@ use futures_util::{stream, StreamExt};
 use mdns_sd::{DaemonEvent, DaemonStatus, IfKind, ResolvedService, ServiceDaemon, ServiceEvent};
 use netaudio_core::protocol::{SERVICE_ARC, SERVICE_CHAN, SERVICE_CMC, SERVICE_DBC, SERVICE_VIDEO};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -114,61 +114,102 @@ pub enum DiscoveryEvent {
 }
 
 struct Browser {
-    daemon: ServiceDaemon,
-    streams: SelectAll<BoxStream<'static, Result<(&'static str, ServiceEvent)>>>,
+    daemons: Vec<ServiceDaemon>,
+    monitors: SelectAll<BoxStream<'static, Result<DaemonEvent>>>,
+    resolved: BTreeMap<(String, String), BTreeSet<usize>>,
+    streams: SelectAll<BoxStream<'static, Result<(usize, &'static str, ServiceEvent)>>>,
 }
 
 impl Browser {
-    fn start(address: Option<Ipv4Addr>, peers: bool) -> Result<Self> {
-        let daemon = ServiceDaemon::new().context("start multicast discovery")?;
-        let configured = (|| -> Result<_> {
-            daemon.set_ip_check_interval(0)?;
+    fn start(network: &NetworkSnapshot, peers: bool) -> Result<Self> {
+        let (shared, alone) = network.ipv4_query_addresses();
+        let mut browser = Self {
+            daemons: Vec::new(),
+            monitors: SelectAll::new(),
+            resolved: BTreeMap::new(),
+            streams: SelectAll::new(),
+        };
 
-            if let Some(address) = address {
-                daemon.disable_interface(IfKind::All)?;
-                daemon.enable_interface(IfKind::Addr(IpAddr::V4(address)))?;
-            } else {
-                daemon.disable_interface(IfKind::IPv6)?;
-            }
-
-            let mut streams = SelectAll::new();
-
-            for service_type in SERVICE_TYPES
-                .into_iter()
-                .chain(peers.then_some(crate::relay::SERVICE_TYPE))
-            {
-                let receiver = daemon.browse(service_type)?;
-                let events = stream::unfold(receiver, move |receiver| async move {
-                    let event = receiver
-                        .recv_async()
-                        .await
-                        .map(|event| (service_type, event))
-                        .context("multicast discovery stream closed");
-                    Some((event, receiver))
-                });
-                streams.push(events.boxed());
-            }
-
-            Ok(streams)
-        })();
-
-        match configured {
-            Ok(streams) => Ok(Self { daemon, streams }),
-            Err(error) => {
-                let _ = daemon.shutdown();
-                Err(error)
-            }
+        for addresses in
+            std::iter::once(shared).chain(alone.into_iter().map(|address| vec![address]))
+        {
+            browser.listen(&addresses, peers)?;
         }
+
+        Ok(browser)
+    }
+
+    fn listen(&mut self, addresses: &[Ipv4Addr], peers: bool) -> Result<()> {
+        let daemon = ServiceDaemon::new().context("start multicast discovery")?;
+        let index = self.daemons.len();
+        self.daemons.push(daemon);
+        let daemon = &self.daemons[index];
+        daemon.set_ip_check_interval(0)?;
+        daemon.disable_interface(IfKind::All)?;
+
+        for address in addresses {
+            daemon.enable_interface(IfKind::Addr(IpAddr::V4(*address)))?;
+        }
+
+        for service_type in SERVICE_TYPES
+            .into_iter()
+            .chain(peers.then_some(crate::relay::SERVICE_TYPE))
+        {
+            let receiver = daemon.browse(service_type)?;
+            let events = stream::unfold(receiver, move |receiver| async move {
+                let event = receiver
+                    .recv_async()
+                    .await
+                    .map(|event| (index, service_type, event))
+                    .context("multicast discovery stream closed");
+                Some((event, receiver))
+            });
+            self.streams.push(events.boxed());
+        }
+
+        let monitor = daemon.monitor()?;
+        let events = stream::unfold(monitor, |monitor| async move {
+            let event = monitor
+                .recv_async()
+                .await
+                .context("multicast discovery monitor stopped");
+            Some((event, monitor))
+        });
+        self.monitors.push(events.boxed());
+        Ok(())
+    }
+
+    fn observed(&mut self, index: usize, service_type: &str, name: &str) {
+        self.resolved
+            .entry((service_type.to_owned(), name.to_owned()))
+            .or_default()
+            .insert(index);
+    }
+
+    fn lost(&mut self, index: usize, service_type: &str, name: &str) -> bool {
+        let key = (service_type.to_owned(), name.to_owned());
+        let Some(observers) = self.resolved.get_mut(&key) else {
+            return false;
+        };
+
+        if !observers.remove(&index) || !observers.is_empty() {
+            return false;
+        }
+
+        self.resolved.remove(&key);
+        true
     }
 
     async fn stop(&mut self) -> Result<()> {
-        let stopped = self.daemon.shutdown()?;
-        let status = tokio::time::timeout(SHUTDOWN_DEADLINE, stopped.recv_async())
-            .await
-            .context("multicast discovery shutdown timed out")??;
+        for daemon in self.daemons.drain(..) {
+            let stopped = daemon.shutdown()?;
+            let status = tokio::time::timeout(SHUTDOWN_DEADLINE, stopped.recv_async())
+                .await
+                .context("multicast discovery shutdown timed out")??;
 
-        if status != DaemonStatus::Shutdown {
-            bail!("multicast discovery did not shut down");
+            if status != DaemonStatus::Shutdown {
+                bail!("multicast discovery did not shut down");
+            }
         }
 
         Ok(())
@@ -177,31 +218,31 @@ impl Browser {
 
 impl Drop for Browser {
     fn drop(&mut self) {
-        if let Err(error) = self.daemon.shutdown() {
-            tracing::debug!(%error, "multicast discovery already stopped");
+        for daemon in &self.daemons {
+            if let Err(error) = daemon.shutdown() {
+                tracing::debug!(%error, "multicast discovery already stopped");
+            }
         }
     }
 }
 
 pub async fn run(
-    address: Option<Ipv4Addr>,
     sender: mpsc::Sender<DiscoveryEvent>,
     cancellation: CancellationToken,
     mut network: watch::Receiver<NetworkSnapshot>,
     mut relay: Option<Advertisement>,
     peers: Option<Arc<crate::host_audio::peers::Peers>>,
 ) -> Result<()> {
-    let mut networks = network.borrow_and_update().networks(address);
-    let mut browser = Browser::start(address, peers.is_some())?;
-    let mut monitor = browser.daemon.monitor()?;
-    publish_relay(&browser, &mut relay, &network, address)?;
+    let mut networks = network.borrow_and_update().networks();
+    let mut browser = Browser::start(&network.borrow(), peers.is_some())?;
+    publish_relay(&browser, &mut relay, &network)?;
     let result = loop {
         tokio::select! {
             biased;
             _ = cancellation.cancelled() => break Ok(()),
             changed = network.changed() => {
                 changed.context("network monitor stopped")?;
-                let updated = network.borrow_and_update().networks(address);
+                let updated = network.borrow_and_update().networks();
 
                 if updated != networks {
                     networks = updated;
@@ -209,17 +250,16 @@ pub async fn run(
                     sender.send(DiscoveryEvent::NetworkChanged).await
                         .context("device registry stopped")?;
                     if let Some(peers) = &peers { peers.clear(); }
-                    browser = Browser::start(address, peers.is_some())?;
-                    monitor = browser.daemon.monitor()?;
-                    publish_relay(&browser, &mut relay, &network, address)?;
+                    browser = Browser::start(&network.borrow(), peers.is_some())?;
+                    publish_relay(&browser, &mut relay, &network)?;
                 }
             }
             changed = relay_changed(&mut relay) => {
                 changed?;
-                publish_relay(&browser, &mut relay, &network, address)?;
+                publish_relay(&browser, &mut relay, &network)?;
             }
-            event = monitor.recv_async() => {
-                match event.context("multicast discovery monitor stopped")? {
+            event = browser.monitors.next() => {
+                match event.context("multicast discovery monitors stopped")?? {
                     DaemonEvent::Error(error) => break Err(error.into()),
                     DaemonEvent::NameChange(change) => {
                         tracing::info!(
@@ -233,23 +273,34 @@ pub async fn run(
                 }
             }
             event = browser.streams.next() => {
-                let (service_type, event) = event.context("multicast browsers stopped")??;
+                let (index, service_type, event) = event.context("multicast browsers stopped")??;
                 let event = match event {
                     ServiceEvent::ServiceResolved(service) => {
                         match DiscoveredService::resolved(service_type, &service, &networks) {
-                            Ok(service) if service_type == crate::relay::SERVICE_TYPE => {
-                                if let Some(peers) = &peers { peers.observe(service); }
-                                None
-                            },
-                            Ok(service) => Some(DiscoveryEvent::Resolved(service)),
-                            Err(error) => {
+                            Ok(discovered) => {
+                                browser.observed(index, service_type, service.get_fullname());
+
+                                if service_type == crate::relay::SERVICE_TYPE {
+                                    if let Some(peers) = &peers { peers.observe(discovered); }
+                                    None
+                                } else {
+                                    Some(DiscoveryEvent::Resolved(discovered))
+                                }
+                            }
+                            Err(error) if index == 0 => {
                                 tracing::warn!(name = service.get_fullname(), %error, "invalid discovered service");
+                                None
+                            }
+                            Err(error) => {
+                                tracing::debug!(name = service.get_fullname(), %error, "invalid discovered service");
                                 None
                             }
                         }
                     }
                     ServiceEvent::ServiceRemoved(service_type, name) => {
-                        if service_type == crate::relay::SERVICE_TYPE {
+                        if !browser.lost(index, &service_type, &name) {
+                            None
+                        } else if service_type == crate::relay::SERVICE_TYPE {
                             if let Some(peers) = &peers { peers.remove(&name); }
                             None
                         } else {
@@ -279,17 +330,12 @@ fn publish_relay(
     browser: &Browser,
     advertisement: &mut Option<Advertisement>,
     network: &watch::Receiver<NetworkSnapshot>,
-    selected: Option<Ipv4Addr>,
 ) -> Result<()> {
-    if let Some(advertisement) = advertisement {
-        let addresses: Vec<_> = network
-            .borrow()
-            .ipv4_addresses(selected)
-            .into_iter()
-            .collect();
+    if let (Some(advertisement), Some(daemon)) = (advertisement, browser.daemons.first()) {
+        let (addresses, _) = network.borrow().ipv4_query_addresses();
 
         if let Some(service) = advertisement.service(&addresses)? {
-            browser.daemon.register(service)?;
+            daemon.register(service)?;
         }
     }
 
