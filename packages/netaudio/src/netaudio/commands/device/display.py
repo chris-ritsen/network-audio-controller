@@ -165,18 +165,6 @@ def unknown_or_blank(device, query_name: str) -> str:
     return ""
 
 
-_format_clock_frequency_offset = format_clock_frequency_offset_parts_per_billion
-_format_encoding = format_encoding
-_format_last_seen = format_last_seen
-_format_latency = format_latency_milliseconds
-_format_latency_range = format_latency_range_milliseconds
-_format_link_speed = format_link_speed_megabits_per_second
-_format_mac = format_mac_address
-_format_sample_rate = format_sample_rate_hertz
-_format_supported_encodings = format_encodings
-_format_supported_sample_rates = format_sample_rates_hertz
-
-
 def _device_active_latency(device) -> float | None:
     return device.active_latency if device.active_latency is not None else device.latency
 

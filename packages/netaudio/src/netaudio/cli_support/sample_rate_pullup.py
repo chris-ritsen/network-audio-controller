@@ -2,10 +2,6 @@ from netaudio.core._audio_choices import SAMPLE_RATE_PULLUP_CHOICES
 
 SAMPLE_RATE_PULLUP_RATIO_LABELS = {choice["value"]: choice["label"] for choice in SAMPLE_RATE_PULLUP_CHOICES}
 
-_SAMPLE_RATE_PULLUP_SELECTION_ALIASES = {
-    alias: choice["value"] for choice in SAMPLE_RATE_PULLUP_CHOICES for alias in choice["aliases"]
-}
-
 
 def sample_rate_pullup_label(raw_value) -> str:
     if raw_value is None:

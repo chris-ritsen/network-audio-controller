@@ -6,8 +6,6 @@ from pathlib import Path
 
 logger = logging.getLogger("netaudio")
 
-LOG_SIZE_LIMIT_BYTES = 8 * 1024 * 1024
-
 
 def daemon_log_path() -> Path:
     return Path(tempfile.gettempdir()) / "netaudio" / "daemon.log"

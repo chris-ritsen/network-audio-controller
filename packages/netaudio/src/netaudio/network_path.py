@@ -15,9 +15,6 @@ import ifaddr
 
 DANTE_SECONDARY_NETWORK = ipaddress.IPv4Network("172.31.0.0/16")
 SERVICE_ORDER_REFRESH_SECONDS = 5.0
-INTERFACE_FLAG_REQUESTS = {"linux": (0x8913, 0x1000), "darwin": (0xC0206911, 0x8000)}
-INTERFACE_REQUEST_SIZE = 40
-INTERFACE_FLAGS_OFFSET = 16
 _service_order_cache: tuple[float, dict[str, int]] = (0.0, {})
 _service_order_lock = threading.Lock()
 
@@ -84,13 +81,6 @@ def _macos_service_order() -> dict[str, int]:
     with _service_order_lock:
         _service_order_cache = (now + SERVICE_ORDER_REFRESH_SECONDS, service_order)
     return service_order
-
-
-def invalidate_platform_preferences() -> None:
-    global _service_order_cache
-
-    with _service_order_lock:
-        _service_order_cache = (0.0, {})
 
 
 def active_ipv4_interfaces(
@@ -233,17 +223,11 @@ class NetworkPathManager:
 path_manager = NetworkPathManager()
 
 
-def source_address_for(destination: str, selected_interface: str | None = None) -> str:
-    return path_manager.resolve(destination, selected_interface).source_address
-
-
 __all__ = [
     "IPv4Interface",
     "NetworkPath",
     "NetworkPathError",
     "NetworkPathManager",
     "active_ipv4_interfaces",
-    "invalidate_platform_preferences",
     "path_manager",
-    "source_address_for",
 ]

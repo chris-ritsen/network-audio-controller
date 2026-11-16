@@ -34,27 +34,6 @@ class CoreTransport:
         self._observer = observer
         self._network_paths = network_paths
 
-    @property
-    def observer(self) -> WireObserver | None:
-        return self._observer
-
-    @observer.setter
-    def observer(self, value: WireObserver | None) -> None:
-        self._observer = value
-
-    def client(
-        self,
-        device_ip_address,
-        arc_port: int = DEVICE_ARC_PORT,
-        timeout_milliseconds: int = DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
-        attempts: int = DEFAULT_REQUEST_ATTEMPTS,
-        *,
-        control_port: int = DEVICE_CONTROL_PORT,
-        settings_port: int = DEVICE_SETTINGS_PORT,
-    ) -> core.CoreClient:
-        key = self._client_key(device_ip_address, arc_port, timeout_milliseconds, attempts, control_port, settings_port)
-        return self._client_for_key(key)
-
     def path(self, device_ip_address) -> NetworkPath:
         return self._network_paths.resolve(str(device_ip_address), app_settings.interface)
 
@@ -136,27 +115,6 @@ class CoreTransport:
         key = self._client_key(device_ip_address, arc_port, timeout_milliseconds, attempts, control_port, settings_port)
         client = self._client_for_key(key)
         return await asyncio.to_thread(self._call_and_observe, client, self._client_locks[key], operation)
-
-    async def execute(
-        self,
-        device_ip_address,
-        specification: dict,
-        *,
-        arc_port: int = DEVICE_ARC_PORT,
-        timeout_milliseconds: int = DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
-        attempts: int = DEFAULT_REQUEST_ATTEMPTS,
-        control_port: int = DEVICE_CONTROL_PORT,
-        settings_port: int = DEVICE_SETTINGS_PORT,
-    ) -> bytes | None:
-        return await self.call(
-            device_ip_address,
-            lambda client: client.execute(specification),
-            arc_port=arc_port,
-            timeout_milliseconds=timeout_milliseconds,
-            attempts=attempts,
-            control_port=control_port,
-            settings_port=settings_port,
-        )
 
     def _call_and_observe(self, client, client_lock, operation):
         observer = self._observer

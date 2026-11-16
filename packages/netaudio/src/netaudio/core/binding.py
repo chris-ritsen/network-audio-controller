@@ -266,26 +266,6 @@ def parse_page(kind: str, data: bytes, starting_channel: int):
     return _decode_json_output(out, f"parse {kind}")
 
 
-def validate_lock_pin(pin: str) -> None:
-    status = require().netaudio_validate_lock_pin(_encode_command_spec(pin))
-
-    if status != STATUS_OK:
-        raise NetaudioCoreError(status, "validate_lock_pin")
-
-
-def host_mac() -> bytes | None:
-    lib = _load()
-    if lib is None:
-        return None
-    out = (ctypes.c_uint8 * 6)()
-    if lib.netaudio_host_mac(out) == STATUS_OK:
-        return bytes(out)
-    return None
-
-
-FALLBACK_HOST_MAC = bytes.fromhex("02005e000001")
-
-
 def _as_buffer(data: bytes):
     return (ctypes.c_uint8 * len(data)).from_buffer_copy(data) if data else (ctypes.c_uint8 * 0)()
 
@@ -380,16 +360,6 @@ class CoreClient:
         if status != STATUS_OK:
             raise NetaudioCoreError(status, "set_service_ports")
 
-    def set_host_mac(self, mac: bytes):
-        if len(mac) != 6:
-            raise ValueError("mac must be exactly 6 bytes")
-        buffer = (ctypes.c_uint8 * 6).from_buffer_copy(mac)
-        library = self._require_library()
-        with self._native_lock:
-            status = library.netaudio_client_set_host_mac(self._handle, buffer)
-        if status != STATUS_OK:
-            raise NetaudioCoreError(status, "set_host_mac")
-
     def request(
         self, packet: bytes, target_port: int, expect_response: bool = True, repeat: int = 1, interval_ms: int = 0
     ):
@@ -414,74 +384,6 @@ class CoreClient:
             raise NetaudioCoreError(status, "client_request")
         response = data if expect_response else None
         return response
-
-    def execute(self, spec: dict):
-        out = (ctypes.c_uint8 * 65536)()
-        length = ctypes.c_size_t(0)
-        library = self._require_library()
-        with self._native_lock:
-            status = library.netaudio_client_execute(
-                self._handle, _encode_command_spec(spec), out, 65536, ctypes.byref(length)
-            )
-            data = bytes(out[: length.value])
-        if status != STATUS_OK:
-            raise NetaudioCoreError(status, f"execute {spec.get('command')}")
-        return data if data else None
-
-    def get_channel_count(self):
-        tx = ctypes.c_uint16(0)
-        rx = ctypes.c_uint16(0)
-        transmit_flow_authoring_capability_word = ctypes.c_uint16(0)
-        locked = ctypes.c_int32(-2)
-        library = self._require_library()
-        with self._native_lock:
-            status = library.netaudio_client_get_channel_count(
-                self._handle,
-                ctypes.byref(tx),
-                ctypes.byref(rx),
-                ctypes.byref(transmit_flow_authoring_capability_word),
-                ctypes.byref(locked),
-            )
-        if status != STATUS_OK:
-            raise NetaudioCoreError(status, "get_channel_count")
-        lock_state = None if locked.value < 0 else bool(locked.value)
-        return tx.value, rx.value, lock_state, transmit_flow_authoring_capability_word.value
-
-    def get_aes67_configured(self):
-        state = ctypes.c_int32(-2)
-        library = self._require_library()
-        with self._native_lock:
-            status = library.netaudio_client_get_aes67_configured(self._handle, ctypes.byref(state))
-        if status != STATUS_OK:
-            raise NetaudioCoreError(status, "get_aes67_configured")
-        return None if state.value < 0 else bool(state.value)
-
-    def lock(self, pin: str, key: bytes):
-        return self._lock_op("netaudio_client_lock", pin, key)
-
-    def unlock(self, pin: str, key: bytes):
-        return self._lock_op("netaudio_client_unlock", pin, key)
-
-    def _lock_op(self, name, pin, key):
-        validate_lock_pin(pin)
-        key_buffer = (ctypes.c_uint8 * len(key)).from_buffer_copy(key)
-        out = (ctypes.c_uint8 * 4096)()
-        length = ctypes.c_size_t(0)
-        library = self._require_library()
-        with self._native_lock:
-            status = getattr(library, name)(
-                self._handle,
-                pin.encode("ascii"),
-                key_buffer,
-                len(key),
-                out,
-                4096,
-                ctypes.byref(length),
-            )
-            data = bytes(out[: length.value])
-        if status != STATUS_OK:
-            raise NetaudioCoreError(status, name)
-        return _decode_json_output(data, "Rust API response")
 
 
 def clock_subdomain_presentation(value) -> _types.ClockSubdomainPresentation:

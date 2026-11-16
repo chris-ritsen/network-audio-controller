@@ -9,7 +9,6 @@ from pathlib import Path
 
 from netaudio.common.config_loader import load_capture_profile, resolve_db_from_config
 from netaudio.common.manifest import manifest_bytes, write_manifest
-from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
 from netaudio.dante.core_transport import CoreTransport
 from netaudio.dante.dissection.header import parse_packet_header
 from netaudio.dante.packet_store import PacketQuery, PacketRecord, PacketStore
@@ -17,10 +16,6 @@ from netaudio.dante.packet_store.payloads import extract_evidence_packet_ids
 from netaudio.dante.packet_store.payloads import safe_name as _safe_name
 
 logger = logging.getLogger("netaudio")
-
-SERVICE_PORT_MAP = {
-    SERVICE_ARC: DEVICE_ARC_PORT,
-}
 
 
 def _sha256(data: bytes) -> str:
@@ -238,18 +233,6 @@ class ProtocolVerifier:
         self._source_host: str | None = None
         self._evidence_packet_ids: set[int] = set()
 
-    @property
-    def session_id(self) -> int | None:
-        return self._session_id
-
-    @property
-    def packet_store(self) -> PacketStore | None:
-        return self._packet_store
-
-    @property
-    def transport(self) -> CoreTransport | None:
-        return self._transport
-
     async def __aenter__(self):
         self._source_host = socket.gethostname()
 
@@ -313,9 +296,6 @@ class ProtocolVerifier:
             source_host=self._source_host,
             data=data,
         )
-
-    def hypothesis(self, label: str, note: str | None = None, data: dict | None = None) -> int | None:
-        return self.marker(label, marker_type="hypothesis", note=note, data=data)
 
     def observation(self, label: str, note: str | None = None, data: dict | None = None) -> int | None:
         return self.marker(label, marker_type="observation", note=note, data=data)

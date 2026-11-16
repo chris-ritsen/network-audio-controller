@@ -57,9 +57,6 @@ DISSECT_SECTION_ICONS = {
 _RESET = "\033[0m"
 
 
-_BOLD = "\033[1m"
-
-
 _COLOR_HEADER = "\033[1;97m"
 
 
@@ -114,14 +111,6 @@ _FIELD_PALETTE = [
     "\033[38;5;174m",
     "\033[38;5;110m",
 ]
-
-
-DIRECTION_COLORS = {
-    "request": _COLOR_DIRECTION_REQUEST,
-    "response": _COLOR_DIRECTION_RESPONSE,
-    "send": _COLOR_DIRECTION_SEND,
-    "multicast": _COLOR_DIRECTION_MULTICAST,
-}
 
 
 _VALUE_WIDTH = 20
