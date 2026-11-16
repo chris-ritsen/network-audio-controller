@@ -389,7 +389,9 @@ impl Device {
             manufacturer: options.manufacturer.clone(),
             metering: BTreeMap::new(),
             metering_sequence: 0,
-            metering_socket: metering_socket(address)?,
+            metering_socket: metering_socket(address).with_context(|| {
+                format!("send from {address}; it is not an address of this computer")
+            })?,
             model: options.model.clone(),
             multicast,
             name,
