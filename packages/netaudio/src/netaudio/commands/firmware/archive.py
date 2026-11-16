@@ -70,14 +70,14 @@ def firmware_info(
             typer.echo(f"\n  ERROR: {path}: {exception}", err=True)
 
     if progress_visible():
-        msg = f"\n{processed} extracted"
+        message = f"\n{processed} extracted"
         if errors:
-            msg += f", {errors} errors"
-        typer.echo(msg, err=True)
+            message += f", {errors} errors"
+        typer.echo(message, err=True)
 
     if save:
-        with open(save, "w") as f:
-            json.dump(results, f, indent=2)
+        with open(save, "w") as file_handle:
+            json.dump(results, file_handle, indent=2)
         typer.echo(f"Saved to {save}", err=True)
 
     headers = ["dev_id", "fw_ver", "mfg", "product", "model_id", "tx", "rx"]
@@ -126,17 +126,17 @@ def firmware_sections(
             typer.echo(_dissect_header(data))
             continue
 
-        hdr_len = struct.unpack(">I", data[4:8])[0]
-        dev_type_id = struct.unpack(">I", data[16:20])[0]
+        header_length = struct.unpack(">I", data[4:8])[0]
+        device_type_id = struct.unpack(">I", data[16:20])[0]
         firmware_version = data[20:24]
 
         typer.echo(f"File: {file_path} ({len(data):,} bytes)", err=True)
         typer.echo(
-            f"Device type: {dev_type_id}  Firmware: {firmware_version[0]}.{firmware_version[1]}.{firmware_version[2]}.{firmware_version[3]}  Manufacturer: {_read_str(data, 0x1C, 8)}",
+            f"Device type: {device_type_id}  Firmware: {firmware_version[0]}.{firmware_version[1]}.{firmware_version[2]}.{firmware_version[3]}  Manufacturer: {_read_str(data, 0x1C, 8)}",
             err=True,
         )
 
-        sections = _parse_sections(data, hdr_len)
+        sections = _parse_sections(data, header_length)
 
         headers = [
             "index",
@@ -174,8 +174,8 @@ def firmware_sections(
                 if embedded:
                     section_json["embedded"] = embedded
                     for entry in embedded:
-                        size_str = f"{entry['size']:,}" if "size" in entry else ""
-                        detail = entry.get("text", f"{entry['type']} ({size_str} bytes)")
+                        size_text = f"{entry['size']:,}" if "size" in entry else ""
+                        detail = entry.get("text", f"{entry['type']} ({size_text} bytes)")
                         rows.append(
                             [
                                 "",
@@ -184,7 +184,7 @@ def firmware_sections(
                                 "",
                                 "",
                                 f"  0x{entry['file_offset']:X}",
-                                size_str,
+                                size_text,
                                 detail,
                             ]
                         )
@@ -203,26 +203,26 @@ def firmware_extract(
     output: Path = typer.Option(None, "-o", "--output", help="Output file (default: stdout)."),
 ):
     """Extract a raw section from a .dnt file."""
-    with open(path, "rb") as f:
-        data = f.read()
+    with open(path, "rb") as file_handle:
+        data = file_handle.read()
 
     if len(data) < 0x50 or data[:4] != b"AUDI":
         typer.echo(f"Not a .dnt file: {path}", err=True)
         raise typer.Exit(code=1)
 
-    hdr_len = struct.unpack(">I", data[4:8])[0]
-    sections = _parse_sections(data, hdr_len)
+    header_length = struct.unpack(">I", data[4:8])[0]
+    sections = _parse_sections(data, header_length)
 
     if section < 0 or section >= len(sections):
         typer.echo(f"Section {section} out of range (0-{len(sections) - 1}).", err=True)
         raise typer.Exit(code=1)
 
-    sec = sections[section]
-    blob = data[sec["file_offset"] : sec["file_offset"] + sec["size"]]
+    selected_section = sections[section]
+    blob = data[selected_section["file_offset"] : selected_section["file_offset"] + selected_section["size"]]
 
     if output:
-        with open(output, "wb") as f:
-            f.write(blob)
+        with open(output, "wb") as file_handle:
+            file_handle.write(blob)
         typer.echo(f"Wrote {len(blob):,} bytes to {output}", err=True)
     else:
         sys.stdout.buffer.write(blob)

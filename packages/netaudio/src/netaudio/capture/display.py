@@ -52,7 +52,7 @@ def _print_wrapped(text: str, indent: str = "  "):
 
 def _print_marker_row(
     marker: dict,
-    next_ts: int | None,
+    next_timestamp: int | None,
     session_id: int,
     store: PacketStore,
     use_dissect: bool = False,
@@ -65,12 +65,12 @@ def _print_marker_row(
     marker_time = int(marker["timestamp_ns"])
     window_packets = None
     if show_window_packets:
-        window_packets = store.get_session_packet_count(session_id, start_ns=marker_time, end_ns=next_ts)
+        window_packets = store.get_session_packet_count(session_id, start_ns=marker_time, end_ns=next_timestamp)
 
     summary_text = marker.get("summary") or ""
     label_text = marker.get("label") or ""
     note_text = marker.get("note") or ""
-    marker_type_str = normalize_marker_type(str(marker.get("marker_type") or "observation"), strict=False)
+    marker_type = normalize_marker_type(str(marker.get("marker_type") or "observation"), strict=False)
 
     _MARKER_TYPE_ICONS = {
         "hypothesis": "info",
@@ -80,16 +80,16 @@ def _print_marker_row(
         "action": "success",
         "system": "server",
     }
-    marker_type_icon = icon(_MARKER_TYPE_ICONS.get(marker_type_str, "marker"))
-    time_str = _format_marker_time(marker.get("timestamp_iso"))
+    marker_type_icon = icon(_MARKER_TYPE_ICONS.get(marker_type, "marker"))
+    time_text = _format_marker_time(marker.get("timestamp_iso"))
 
     if brief:
         display_text = summary_text if summary_text else label_text
-        print(f"  {time_str}  {marker_type_icon}{marker_type_str:12s}  {display_text}")
+        print(f"  {time_text}  {marker_type_icon}{marker_type:12s}  {display_text}")
         return
 
     print()
-    header = f"{ansi('1', f'{marker_type_icon}{marker_type_str}')}  {label_text}"
+    header = f"{ansi('1', f'{marker_type_icon}{marker_type}')}  {label_text}"
     if window_packets is not None:
         header += f"  ({window_packets} packets)"
 
@@ -102,7 +102,7 @@ def _print_marker_row(
 
     header += _evidence_size_summary(store, evidence_packet_ids)
 
-    print(f"  {time_str}  {header}  {ansi('90', f'#{marker_id}')}")
+    print(f"  {time_text}  {header}  {ansi('90', f'#{marker_id}')}")
 
     if summary_text and show_notes:
         _print_wrapped(summary_text)
@@ -121,11 +121,11 @@ def _print_marker_row(
 
 def _evidence_size_summary(store: PacketStore, evidence_packet_ids: list[int]) -> str:
     evidence_sizes = []
-    for pid in evidence_packet_ids[:20]:
-        pkt = store.get_packet(pid)
-        if pkt:
-            payload = pkt.get("payload", b"")
-            evidence_sizes.append(f"#{pid} {len(payload)}B")
+    for packet_id in evidence_packet_ids[:20]:
+        packet = store.get_packet(packet_id)
+        if packet:
+            payload = packet.get("payload", b"")
+            evidence_sizes.append(f"#{packet_id} {len(payload)}B")
     if not evidence_sizes:
         return ""
     return f"  {ansi('90', f'[{chr(44).join(evidence_sizes)}]')}"
@@ -133,26 +133,30 @@ def _evidence_size_summary(store: PacketStore, evidence_packet_ids: list[int]) -
 
 def _print_evidence_packets(store: PacketStore, packet_ids: list[int], filters: dict, use_dissect: bool) -> None:
     if filters:
-        filter_parts = [f"{k}={v}" for k, v in filters.items()]
+        filter_parts = [f"{key}={value}" for key, value in filters.items()]
         print(f"    filters: {', '.join(filter_parts)}")
 
     evidence_indent = "      "
-    for pid in packet_ids[:20]:
-        pkt = store.get_packet(pid)
-        if not pkt:
+    for packet_id in packet_ids[:20]:
+        packet = store.get_packet(packet_id)
+        if not packet:
             continue
 
-        payload = pkt.get("payload", b"")
+        payload = packet.get("payload", b"")
         opcode_hex = ""
 
         if len(payload) >= 8:
             opcode_hex = f"0x{int.from_bytes(payload[6:8], 'big'):04X} "
 
-        pkt_dir = pkt.get("direction") or "multicast"
-        pkt_dir_icon = icon("tx") if pkt_dir == "request" else icon("rx") if pkt_dir == "response" else icon("packet")
-        src = f"{pkt.get('src_ip', '?')}:{pkt.get('src_port', '?')}"
-        dst = f"{pkt.get('dst_ip', '?')}:{pkt.get('dst_port', '?')}"
-        print(f"{evidence_indent}{pkt_dir_icon}#{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
+        direction = packet.get("direction") or "multicast"
+        direction_icon = (
+            icon("tx") if direction == "request" else icon("rx") if direction == "response" else icon("packet")
+        )
+        source = f"{packet.get('src_ip', '?')}:{packet.get('src_port', '?')}"
+        destination = f"{packet.get('dst_ip', '?')}:{packet.get('dst_port', '?')}"
+        print(
+            f"{evidence_indent}{direction_icon}#{packet_id} {direction:8s} {opcode_hex}{source} -> {destination} {len(payload)}B"
+        )
 
         if use_dissect:
             from netaudio.dante.dissection.rendering import dissect_and_render
@@ -186,7 +190,7 @@ def _follow_session_timeline(
 
             session_row = store.get_session(session_id)
             markers = store.get_markers(session_id)
-            new_markers = [m for m in markers if int(m["id"]) > seen_id]
+            new_markers = [marker for marker in markers if int(marker["id"]) > seen_id]
 
             if not new_markers:
                 if session_row and session_row.get("ended_ns"):
@@ -195,15 +199,15 @@ def _follow_session_timeline(
                     break
                 continue
 
-            for i, marker in enumerate(new_markers):
-                if i + 1 < len(new_markers):
-                    next_ts = int(new_markers[i + 1]["timestamp_ns"])
+            for marker_index, marker in enumerate(new_markers):
+                if marker_index + 1 < len(new_markers):
+                    next_timestamp = int(new_markers[marker_index + 1]["timestamp_ns"])
                 else:
-                    next_ts = None
+                    next_timestamp = None
 
                 _print_marker_row(
                     marker,
-                    next_ts,
+                    next_timestamp,
                     session_id,
                     store,
                     use_dissect=use_dissect,
@@ -287,8 +291,8 @@ def _print_session_evidence(store: PacketStore, sessions: list, has_evidence: bo
 
 def _print_diff_compact(packets, differing_offsets, max_length):
     header_parts = ["  offset"]
-    for pid, _, _ in packets:
-        header_parts.append(f"  #{pid:<8d}")
+    for packet_id, _, _ in packets:
+        header_parts.append(f"  #{packet_id:<8d}")
     header_parts.append("  ascii")
     print("".join(header_parts))
     print("  " + _hrule(8 + 12 * len(packets) + 8))
@@ -298,9 +302,9 @@ def _print_diff_compact(packets, differing_offsets, max_length):
         ascii_parts = []
         for _, _, payload in packets:
             if offset < len(payload):
-                byte_val = payload[offset]
-                parts.append(f"  0x{byte_val:02x}      ")
-                ascii_parts.append(chr(byte_val) if 32 <= byte_val < 127 else ".")
+                byte_value = payload[offset]
+                parts.append(f"  0x{byte_value:02x}      ")
+                ascii_parts.append(chr(byte_value) if 32 <= byte_value < 127 else ".")
             else:
                 parts.append("  --        ")
                 ascii_parts.append(" ")
@@ -310,54 +314,56 @@ def _print_diff_compact(packets, differing_offsets, max_length):
 
 def _print_diff_full(packets, differing_offsets, max_length):
     reference_payload = packets[0][2]
-    reference_pid = packets[0][0]
+    reference_packet_id = packets[0][0]
 
-    for compare_pid, _, compare_payload in packets[1:]:
-        print(f"\n  #{reference_pid} vs #{compare_pid}")
+    for compare_packet_id, _, compare_payload in packets[1:]:
+        print(f"\n  #{reference_packet_id} vs #{compare_packet_id}")
         print("  " + _hrule(80))
 
         for row_offset in range(0, max_length, 16):
-            ref_chunk = reference_payload[row_offset : row_offset + 16] if row_offset < len(reference_payload) else b""
-            cmp_chunk = compare_payload[row_offset : row_offset + 16] if row_offset < len(compare_payload) else b""
+            reference_chunk = (
+                reference_payload[row_offset : row_offset + 16] if row_offset < len(reference_payload) else b""
+            )
+            compare_chunk = compare_payload[row_offset : row_offset + 16] if row_offset < len(compare_payload) else b""
 
-            row_has_diff = any(
+            row_has_difference = any(
                 offset in differing_offsets for offset in range(row_offset, min(row_offset + 16, max_length))
             )
-            if not row_has_diff:
+            if not row_has_difference:
                 continue
 
-            ref_hex_parts = []
-            cmp_hex_parts = []
+            reference_hex_parts = []
+            compare_hex_parts = []
             for byte_index in range(16):
                 absolute_offset = row_offset + byte_index
-                ref_byte = ref_chunk[byte_index] if byte_index < len(ref_chunk) else None
-                cmp_byte = cmp_chunk[byte_index] if byte_index < len(cmp_chunk) else None
-                is_diff = absolute_offset in differing_offsets
+                reference_byte = reference_chunk[byte_index] if byte_index < len(reference_chunk) else None
+                compare_byte = compare_chunk[byte_index] if byte_index < len(compare_chunk) else None
+                is_different = absolute_offset in differing_offsets
 
-                if ref_byte is not None:
-                    ref_str = f"{ref_byte:02x}"
+                if reference_byte is not None:
+                    reference_text = f"{reference_byte:02x}"
                 else:
-                    ref_str = "--"
-                if cmp_byte is not None:
-                    cmp_str = f"{cmp_byte:02x}"
+                    reference_text = "--"
+                if compare_byte is not None:
+                    compare_text = f"{compare_byte:02x}"
                 else:
-                    cmp_str = "--"
+                    compare_text = "--"
 
-                if is_diff:
-                    ref_hex_parts.append(ansi("91", ref_str))
-                    cmp_hex_parts.append(ansi("92", cmp_str))
+                if is_different:
+                    reference_hex_parts.append(ansi("91", reference_text))
+                    compare_hex_parts.append(ansi("92", compare_text))
                 else:
-                    ref_hex_parts.append(ref_str)
-                    cmp_hex_parts.append(cmp_str)
+                    reference_hex_parts.append(reference_text)
+                    compare_hex_parts.append(compare_text)
 
-            ref_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in ref_chunk).ljust(16)
-            cmp_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in cmp_chunk).ljust(16)
+            reference_ascii = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in reference_chunk).ljust(16)
+            compare_ascii = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in compare_chunk).ljust(16)
 
-            ref_hex = " ".join(ref_hex_parts[:8]) + "  " + " ".join(ref_hex_parts[8:])
-            cmp_hex = " ".join(cmp_hex_parts[:8]) + "  " + " ".join(cmp_hex_parts[8:])
+            reference_hex = " ".join(reference_hex_parts[:8]) + "  " + " ".join(reference_hex_parts[8:])
+            compare_hex = " ".join(compare_hex_parts[:8]) + "  " + " ".join(compare_hex_parts[8:])
 
-            print(f"  {row_offset:04x}  {ref_hex}  |{ref_ascii}|")
-            print(f"  {row_offset:04x}  {cmp_hex}  |{cmp_ascii}|")
+            print(f"  {row_offset:04x}  {reference_hex}  |{reference_ascii}|")
+            print(f"  {row_offset:04x}  {compare_hex}  |{compare_ascii}|")
             print()
 
 
@@ -375,7 +381,7 @@ def _state_diff_print_opcode_diff(
     after_representative_id, after_representative = after_payloads[-1]
 
     max_length = max(len(before_representative), len(after_representative))
-    stable_diff_offsets = set()
+    stable_difference_offsets = set()
 
     for offset in range(max_length):
         if offset in ignored_offsets:
@@ -383,9 +389,9 @@ def _state_diff_print_opcode_diff(
         before_byte = before_representative[offset] if offset < len(before_representative) else None
         after_byte = after_representative[offset] if offset < len(after_representative) else None
         if before_byte != after_byte:
-            stable_diff_offsets.add(offset)
+            stable_difference_offsets.add(offset)
 
-    if not stable_diff_offsets:
+    if not stable_difference_offsets:
         return False
 
     fact_labels = _load_fact_labels()
@@ -401,7 +407,7 @@ def _state_diff_print_opcode_diff(
         )
     elif volatile_offsets:
         print(f"  {ansi('90', f'({len(volatile_offsets)} volatile header bytes excluded)')}")
-    print(f"  {len(stable_diff_offsets)} stable bytes differ")
+    print(f"  {len(stable_difference_offsets)} stable bytes differ")
 
     if full:
         for row_offset in range(0, max_length, 16):
@@ -412,10 +418,10 @@ def _state_diff_print_opcode_diff(
                 after_representative[row_offset : row_offset + 16] if row_offset < len(after_representative) else b""
             )
 
-            row_has_diff = any(
-                offset in stable_diff_offsets for offset in range(row_offset, min(row_offset + 16, max_length))
+            row_has_difference = any(
+                offset in stable_difference_offsets for offset in range(row_offset, min(row_offset + 16, max_length))
             )
-            if not row_has_diff:
+            if not row_has_difference:
                 continue
 
             before_hex_parts = []
@@ -424,21 +430,21 @@ def _state_diff_print_opcode_diff(
                 absolute_offset = row_offset + byte_index
                 before_byte = before_chunk[byte_index] if byte_index < len(before_chunk) else None
                 after_byte = after_chunk[byte_index] if byte_index < len(after_chunk) else None
-                is_diff = absolute_offset in stable_diff_offsets
+                is_different = absolute_offset in stable_difference_offsets
                 is_jitter = absolute_offset in ignored_offsets
 
-                before_str = f"{before_byte:02x}" if before_byte is not None else "--"
-                after_str = f"{after_byte:02x}" if after_byte is not None else "--"
+                before_text = f"{before_byte:02x}" if before_byte is not None else "--"
+                after_text = f"{after_byte:02x}" if after_byte is not None else "--"
 
                 if is_jitter:
-                    before_hex_parts.append(ansi("90", before_str))
-                    after_hex_parts.append(ansi("90", after_str))
-                elif is_diff:
-                    before_hex_parts.append(ansi("91", before_str))
-                    after_hex_parts.append(ansi("92", after_str))
+                    before_hex_parts.append(ansi("90", before_text))
+                    after_hex_parts.append(ansi("90", after_text))
+                elif is_different:
+                    before_hex_parts.append(ansi("91", before_text))
+                    after_hex_parts.append(ansi("92", after_text))
                 else:
-                    before_hex_parts.append(before_str)
-                    after_hex_parts.append(after_str)
+                    before_hex_parts.append(before_text)
+                    after_hex_parts.append(after_text)
 
             before_hex = " ".join(before_hex_parts[:8]) + "  " + " ".join(before_hex_parts[8:])
             after_hex = " ".join(after_hex_parts[:8]) + "  " + " ".join(after_hex_parts[8:])
@@ -453,13 +459,15 @@ def _state_diff_print_opcode_diff(
         header_parts = ["  offset", "  before   ", "  after    ", "  ascii"]
         print("".join(header_parts))
         print("  " + _hrule(50))
-        for offset in sorted(stable_diff_offsets):
+        for offset in sorted(stable_difference_offsets):
             before_byte = before_representative[offset] if offset < len(before_representative) else None
             after_byte = after_representative[offset] if offset < len(after_representative) else None
-            before_str = f"0x{before_byte:02x}" if before_byte is not None else "--  "
-            after_str = f"0x{after_byte:02x}" if after_byte is not None else "--  "
-            before_char = chr(before_byte) if before_byte is not None and 32 <= before_byte < 127 else "."
-            after_char = chr(after_byte) if after_byte is not None and 32 <= after_byte < 127 else "."
-            print(f"  {offset:04x}    {before_str}       {after_str}       {before_char} {_rarrow()} {after_char}")
+            before_text = f"0x{before_byte:02x}" if before_byte is not None else "--  "
+            after_text = f"0x{after_byte:02x}" if after_byte is not None else "--  "
+            before_character = chr(before_byte) if before_byte is not None and 32 <= before_byte < 127 else "."
+            after_character = chr(after_byte) if after_byte is not None and 32 <= after_byte < 127 else "."
+            print(
+                f"  {offset:04x}    {before_text}       {after_text}       {before_character} {_rarrow()} {after_character}"
+            )
 
     return True

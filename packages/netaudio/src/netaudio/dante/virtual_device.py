@@ -104,7 +104,7 @@ class VirtualDevice(VirtualDeviceRequestHandler):
             random.randint(0, 255),
             random.randint(0, 255),
         ]
-        return ":".join(f"{b:02x}" for b in octets)
+        return ":".join(f"{octet:02x}" for octet in octets)
 
     def _advertised_device_id(self) -> str:
         address = socket.inet_aton(self._local_ip or "0.0.0.0")
@@ -127,14 +127,14 @@ class VirtualDevice(VirtualDeviceRequestHandler):
     def _detect_local_ip(self) -> str:
         if self._config.interface_ip:
             return self._config.interface_ip
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            sock.connect((MULTICAST_GROUP_HEARTBEAT, 1))
-            return sock.getsockname()[0]
+            probe_socket.connect((MULTICAST_GROUP_HEARTBEAT, 1))
+            return probe_socket.getsockname()[0]
         except OSError:
             return "0.0.0.0"
         finally:
-            sock.close()
+            probe_socket.close()
 
     async def start(self) -> None:
         self._local_ip = self._detect_local_ip()
@@ -151,7 +151,7 @@ class VirtualDevice(VirtualDeviceRequestHandler):
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         self._running = True
 
-        ports = [t.get_extra_info("sockname")[1] for t in self._transports]
+        ports = [transport.get_extra_info("sockname")[1] for transport in self._transports]
         logger.info(
             f"Virtual device '{self._config.name}' running "
             f"(MAC={self._mac}, ports={ports}, "
@@ -188,11 +188,11 @@ class VirtualDevice(VirtualDeviceRequestHandler):
             self._build_publication(publication), MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT
         )
 
-    def _send_publication_packet(self, packet: bytes, dest_ip: str, dest_port: int) -> None:
+    def _send_publication_packet(self, packet: bytes, destination_ip: str, destination_port: int) -> None:
         if self._mcast_transport:
-            self._mcast_transport.sendto(packet, (dest_ip, dest_port))
+            self._mcast_transport.sendto(packet, (destination_ip, destination_port))
         elif self._mcast_sock:
-            self._mcast_sock.sendto(packet, (dest_ip, dest_port))
+            self._mcast_sock.sendto(packet, (destination_ip, destination_port))
         else:
             logger.warning("no mcast socket available")
 
@@ -267,49 +267,51 @@ class VirtualDevice(VirtualDeviceRequestHandler):
 
     async def _start_mcast_server(self) -> None:
         loop = asyncio.get_running_loop()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        multicast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        multicast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if hasattr(socket, "SO_REUSEPORT"):
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+            multicast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
         if self._local_ip and self._local_ip != "0.0.0.0":
-            sock.setsockopt(
+            multicast_socket.setsockopt(
                 socket.IPPROTO_IP,
                 socket.IP_MULTICAST_IF,
                 socket.inet_aton(self._local_ip),
             )
 
         try:
-            sock.bind(("", self._config.settings_port))
+            multicast_socket.bind(("", self._config.settings_port))
         except OSError as error:
             logger.warning(f"Could not bind mcast server on :{self._config.settings_port}: {error}")
-            sock.close()
+            multicast_socket.close()
             return
 
-        mreq = struct.pack(
+        membership_request = struct.pack(
             "4s4s",
             socket.inet_aton(MULTICAST_GROUP_CONTROL_MONITORING),
             socket.inet_aton(self._local_ip if self._local_ip else "0.0.0.0"),
         )
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-        sock.setblocking(False)
+        multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership_request)
+        multicast_socket.setblocking(False)
 
         transport, _ = await loop.create_datagram_endpoint(
             lambda: _McastInfoProtocol(self),
-            sock=sock,
+            sock=multicast_socket,
         )
         self._transports.append(transport)
         self._mcast_transport = transport
         logger.info(f"Multicast server on :{self._config.settings_port} (group {MULTICAST_GROUP_CONTROL_MONITORING})")
 
     async def _start_metering_transport(self) -> None:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+        metering_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        metering_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
         if self._local_ip and self._local_ip != "0.0.0.0":
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(self._local_ip))
-        sock.bind(("", 0))
-        sock.setblocking(False)
-        transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(asyncio.DatagramProtocol, sock=sock)
+            metering_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(self._local_ip))
+        metering_socket.bind(("", 0))
+        metering_socket.setblocking(False)
+        transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
+            asyncio.DatagramProtocol, sock=metering_socket
+        )
         self._transports.append(transport)
         self._metering_transport = transport
 
@@ -429,14 +431,16 @@ class VirtualDevice(VirtualDeviceRequestHandler):
             ip_version=IPVersion.V4Only,
         )
 
-        await asyncio.gather(*(self._zeroconf.async_register_service(info) for info in self._service_infos))
+        await asyncio.gather(
+            *(self._zeroconf.async_register_service(service_info) for service_info in self._service_infos)
+        )
 
         logger.info(f"mDNS services registered for '{self._config.name}' ({len(self._service_infos)} services)")
 
     async def _unregister_mdns(self) -> None:
         if self._zeroconf:
-            for info in self._service_infos:
-                await self._zeroconf.async_unregister_service(info)
+            for service_info in self._service_infos:
+                await self._zeroconf.async_unregister_service(service_info)
             await self._zeroconf.async_close()
             self._zeroconf = None
 

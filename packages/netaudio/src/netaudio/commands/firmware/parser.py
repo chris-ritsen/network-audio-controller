@@ -86,35 +86,35 @@ def _scan_for_embedded(data, section_file_offset, section_size):
         (CRAMFS_MAGIC_LE, "cramfs", "<"),
         (CRAMFS_MAGIC_BE, "cramfs", ">"),
     ]:
-        idx = 0
+        search_start = 0
         while True:
-            pos = blob.find(magic, idx)
-            if pos == -1:
+            match_offset = blob.find(magic, search_start)
+            if match_offset == -1:
                 break
-            file_offset = section_file_offset + pos
+            file_offset = section_file_offset + match_offset
             filesystem_size = 0
-            if pos + 8 <= len(blob):
-                filesystem_size = struct.unpack(f"{endian}I", blob[pos + 4 : pos + 8])[0]
+            if match_offset + 8 <= len(blob):
+                filesystem_size = struct.unpack(f"{endian}I", blob[match_offset + 4 : match_offset + 8])[0]
             found.append(
                 {
                     "type": label,
                     "file_offset": file_offset,
-                    "section_offset": pos,
+                    "section_offset": match_offset,
                     "size": filesystem_size,
                     "endian": "big" if endian == ">" else "little",
                 }
             )
-            idx = pos + 1
+            search_start = match_offset + 1
 
     for needle, label in [(b"Linux version ", "linux-banner")]:
-        pos = blob.find(needle)
-        if pos != -1:
-            banner = _read_str(blob, pos, 200)
+        banner_offset = blob.find(needle)
+        if banner_offset != -1:
+            banner = _read_str(blob, banner_offset, 200)
             found.append(
                 {
                     "type": label,
-                    "file_offset": section_file_offset + pos,
-                    "section_offset": pos,
+                    "file_offset": section_file_offset + banner_offset,
+                    "section_offset": banner_offset,
                     "text": banner,
                 }
             )
@@ -125,44 +125,44 @@ def _parse_dnt_bytes(data, source):
     if len(data) < 0x50 or data[:4] != b"AUDI":
         return None
 
-    hdr_len = struct.unpack(">I", data[4:8])[0]
-    if not 0x40 <= hdr_len <= len(data):
-        raise ValueError(f"Invalid DNT header length: {hdr_len}")
-    _validate_dnt_checksums(data, hdr_len)
-    dev_type_id = struct.unpack(">I", data[16:20])[0]
-    fw = data[20:24]
+    header_length = struct.unpack(">I", data[4:8])[0]
+    if not 0x40 <= header_length <= len(data):
+        raise ValueError(f"Invalid DNT header length: {header_length}")
+    _validate_dnt_checksums(data, header_length)
+    device_type_id = struct.unpack(">I", data[16:20])[0]
+    firmware_version_bytes = data[20:24]
 
     result = {
         "dnt_parser_version": DNT_PARSER_VERSION,
         "file": str(source),
         "file_size": len(data),
-        "header_length": hdr_len,
-        "device_type_id": dev_type_id,
-        "firmware_version": f"{fw[0]}.{fw[1]}.{fw[2]}.{fw[3]}",
+        "header_length": header_length,
+        "device_type_id": device_type_id,
+        "firmware_version": f"{firmware_version_bytes[0]}.{firmware_version_bytes[1]}.{firmware_version_bytes[2]}.{firmware_version_bytes[3]}",
         "manufacturer_header": _read_str(data, 0x1C, 8),
         "crc32": f"{struct.unpack_from('>I', data, 0x18)[0]:08x}",
         "header_crc32": f"{struct.unpack_from('>I', data, 0x3C)[0]:08x}",
     }
 
-    sections = _parse_sections(data, hdr_len)
+    sections = _parse_sections(data, header_length)
     result["sections"] = sections
 
-    for sec in sections:
-        cfg = data[sec["file_offset"] : sec["file_offset"] + sec["size"]]
-        if sec["partition_id"] == 9:
-            result.update(_extract_capability_9(cfg, data[0x1C:0x24]))
+    for section in sections:
+        payload = data[section["file_offset"] : section["file_offset"] + section["size"]]
+        if section["partition_id"] == 9:
+            result.update(_extract_capability_9(payload, data[0x1C:0x24]))
             result["capability_partition_id"] = 9
             break
-        elif sec["partition_id"] == 14:
-            result.update(_extract_capability_14(cfg, result["manufacturer_header"]))
+        elif section["partition_id"] == 14:
+            result.update(_extract_capability_14(payload, result["manufacturer_header"]))
             result["capability_partition_id"] = 14
             break
 
     if not result.get("product_name"):
         for needle in [b"Audinate Dante ", b"AVIO-"]:
-            idx = data.find(needle)
-            if idx != -1:
-                result["product_name"] = _read_str(data, idx, 64)
+            needle_offset = data.find(needle)
+            if needle_offset != -1:
+                result["product_name"] = _read_str(data, needle_offset, 64)
                 break
 
     return result

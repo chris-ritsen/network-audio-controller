@@ -90,17 +90,17 @@ def _hexdump(data: bytes, indent: str = "         "):
     lines = []
     for offset in range(0, len(data), 16):
         chunk = data[offset : offset + 16]
-        left = " ".join(f"{b:02x}" for b in chunk[:8])
-        right = " ".join(f"{b:02x}" for b in chunk[8:])
-        ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+        left = " ".join(f"{byte:02x}" for byte in chunk[:8])
+        right = " ".join(f"{byte:02x}" for byte in chunk[8:])
+        ascii_part = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in chunk)
         lines.append(f"{indent}{offset:04x}  {left:<23s}  {right:<23s}  |{ascii_part}|")
     return "\n".join(lines)
 
 
 def _hexdump_line(data: bytes, offset: int, length: int = 16) -> str:
     chunk = data[offset : offset + length]
-    hex_part = " ".join(f"{b:02x}" for b in chunk)
-    ascii_part = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in chunk)
+    hex_part = " ".join(f"{byte:02x}" for byte in chunk)
+    ascii_part = "".join(chr(byte) if 0x20 <= byte < 0x7F else "." for byte in chunk)
     return f"  {offset:04x}  {hex_part:<48s}  |{ascii_part}|"
 
 

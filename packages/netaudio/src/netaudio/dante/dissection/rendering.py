@@ -140,8 +140,8 @@ def _format_value_with_detail(span: Span, field_color: str = "") -> str:
 
 def _render_span_line(span: Span, indent: str, field_color: str = "", icons: bool = False) -> list[str]:
     lines = []
-    hex_str = " ".join(f"{b:02x}" for b in span.raw)
-    offset_str = f"{span.offset:04x}"
+    hex_text = " ".join(f"{byte:02x}" for byte in span.raw)
+    offset_text = f"{span.offset:04x}"
 
     value_display = _format_value_with_detail(span, field_color)
 
@@ -158,15 +158,15 @@ def _render_span_line(span: Span, indent: str, field_color: str = "", icons: boo
     if field_color:
         if span.length <= 8:
             lines.append(
-                f"{indent}  {_COLOR_OFFSET}{offset_str}{_RESET}  "
-                f"{field_color}{hex_str:<24s}{_RESET} "
+                f"{indent}  {_COLOR_OFFSET}{offset_text}{_RESET}  "
+                f"{field_color}{hex_text:<24s}{_RESET} "
                 f"{_COLOR_FIELD_NAME}{name_display:<24s}{_RESET} = "
                 f"{value_display}"
             )
         else:
             size_label = f"({span.length}B)"
             lines.append(
-                f"{indent}  {_COLOR_OFFSET}{offset_str}{_RESET}  "
+                f"{indent}  {_COLOR_OFFSET}{offset_text}{_RESET}  "
                 f"{field_color}{size_label:<24s}{_RESET} "
                 f"{_COLOR_FIELD_NAME}{name_display:<24s}{_RESET} = "
                 f"{value_display}"
@@ -174,28 +174,28 @@ def _render_span_line(span: Span, indent: str, field_color: str = "", icons: boo
             if not skip_hexdump:
                 for chunk_offset in range(0, span.length, 16):
                     chunk = span.raw[chunk_offset : chunk_offset + 16]
-                    left = " ".join(f"{b:02x}" for b in chunk[:8])
-                    right = " ".join(f"{b:02x}" for b in chunk[8:])
-                    ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-                    abs_offset = span.offset + chunk_offset
+                    left = " ".join(f"{byte:02x}" for byte in chunk[:8])
+                    right = " ".join(f"{byte:02x}" for byte in chunk[8:])
+                    ascii_part = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in chunk)
+                    absolute_offset = span.offset + chunk_offset
                     lines.append(
-                        f"{indent}        {_COLOR_OFFSET}{abs_offset:04x}{_RESET}  "
+                        f"{indent}        {_COLOR_OFFSET}{absolute_offset:04x}{_RESET}  "
                         f"{field_color}{left:<23s}  {right:<23s}{_RESET}  "
                         f"{_COLOR_ASCII}|{ascii_part}|{_RESET}"
                     )
     else:
         if span.length <= 8:
-            lines.append(f"{indent}  {offset_str}  {hex_str:<24s} {name_display:<24s} = {value_display}")
+            lines.append(f"{indent}  {offset_text}  {hex_text:<24s} {name_display:<24s} = {value_display}")
         else:
-            lines.append(f"{indent}  {offset_str}  ({span.length}B){' ':18s} {name_display:<24s} = {value_display}")
+            lines.append(f"{indent}  {offset_text}  ({span.length}B){' ':18s} {name_display:<24s} = {value_display}")
             if not skip_hexdump:
                 for chunk_offset in range(0, span.length, 16):
                     chunk = span.raw[chunk_offset : chunk_offset + 16]
-                    left = " ".join(f"{b:02x}" for b in chunk[:8])
-                    right = " ".join(f"{b:02x}" for b in chunk[8:])
-                    ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-                    abs_offset = span.offset + chunk_offset
-                    lines.append(f"{indent}        {abs_offset:04x}  {left:<23s}  {right:<23s}  |{ascii_part}|")
+                    left = " ".join(f"{byte:02x}" for byte in chunk[:8])
+                    right = " ".join(f"{byte:02x}" for byte in chunk[8:])
+                    ascii_part = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in chunk)
+                    absolute_offset = span.offset + chunk_offset
+                    lines.append(f"{indent}        {absolute_offset:04x}  {left:<23s}  {right:<23s}  |{ascii_part}|")
 
     return lines
 
@@ -204,48 +204,50 @@ def _render_hexdump_region(raw: bytes, start_offset: int, indent: str, color: bo
     lines = []
     for chunk_offset in range(0, len(raw), 16):
         chunk = raw[chunk_offset : chunk_offset + 16]
-        left = " ".join(f"{b:02x}" for b in chunk[:8])
-        right = " ".join(f"{b:02x}" for b in chunk[8:])
-        ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-        abs_offset = start_offset + chunk_offset
+        left = " ".join(f"{byte:02x}" for byte in chunk[:8])
+        right = " ".join(f"{byte:02x}" for byte in chunk[8:])
+        ascii_part = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in chunk)
+        absolute_offset = start_offset + chunk_offset
         if color:
             lines.append(
-                f"{indent}  {_COLOR_OFFSET}{abs_offset:04x}{_RESET}  {left:<23s}  {right:<23s}  |{ascii_part}|{_RESET}"
+                f"{indent}  {_COLOR_OFFSET}{absolute_offset:04x}{_RESET}  {left:<23s}  {right:<23s}  |{ascii_part}|{_RESET}"
             )
         else:
-            lines.append(f"{indent}  {abs_offset:04x}  {left:<23s}  {right:<23s}  |{ascii_part}|")
+            lines.append(f"{indent}  {absolute_offset:04x}  {left:<23s}  {right:<23s}  |{ascii_part}|")
     return lines
 
 
-def _colored_hex_half(chunk: bytes, start_abs_offset: int, byte_color_map: dict[int, str], default_color: str) -> str:
+def _colored_hex_half(
+    chunk: bytes, start_absolute_offset: int, byte_color_map: dict[int, str], default_color: str
+) -> str:
     if not chunk:
         return ""
     parts = []
     current_color = None
     current_hex = []
-    for byte_index, byte_val in enumerate(chunk):
-        color = byte_color_map.get(start_abs_offset + byte_index, default_color)
+    for byte_index, byte_value in enumerate(chunk):
+        color = byte_color_map.get(start_absolute_offset + byte_index, default_color)
         if color != current_color:
             if current_hex:
                 parts.append(f"{current_color}{' '.join(current_hex)}{_RESET}")
             current_color = color
-            current_hex = [f"{byte_val:02x}"]
+            current_hex = [f"{byte_value:02x}"]
         else:
-            current_hex.append(f"{byte_val:02x}")
+            current_hex.append(f"{byte_value:02x}")
     if current_hex:
         parts.append(f"{current_color}{' '.join(current_hex)}{_RESET}")
     return " ".join(parts)
 
 
-def _colored_ascii(chunk: bytes, start_abs_offset: int, byte_color_map: dict[int, str], default_color: str) -> str:
+def _colored_ascii(chunk: bytes, start_absolute_offset: int, byte_color_map: dict[int, str], default_color: str) -> str:
     if not chunk:
         return ""
     parts = []
     current_color = None
     current_chars = []
-    for byte_index, byte_val in enumerate(chunk):
-        color = byte_color_map.get(start_abs_offset + byte_index, default_color)
-        char = chr(byte_val) if 32 <= byte_val < 127 else "."
+    for byte_index, byte_value in enumerate(chunk):
+        color = byte_color_map.get(start_absolute_offset + byte_index, default_color)
+        char = chr(byte_value) if 32 <= byte_value < 127 else "."
         if color != current_color:
             if current_chars:
                 parts.append(f"{current_color}{''.join(current_chars)}{_RESET}")
@@ -268,18 +270,18 @@ def _render_full_colored_hexdump(payload: bytes, byte_color_map: dict[int, str],
 
         left_hex = _colored_hex_half(left_chunk, line_offset, byte_color_map, default_color)
         right_hex = _colored_hex_half(right_chunk, line_offset + 8, byte_color_map, default_color)
-        ascii_str = _colored_ascii(chunk, line_offset, byte_color_map, default_color)
+        ascii_text = _colored_ascii(chunk, line_offset, byte_color_map, default_color)
 
-        left_visible_len = len(left_chunk) * 3 - (1 if left_chunk else 0)
-        right_visible_len = len(right_chunk) * 3 - (1 if right_chunk else 0)
-        left_pad = " " * (23 - left_visible_len)
-        right_pad = " " * (23 - right_visible_len)
+        left_visible_length = len(left_chunk) * 3 - (1 if left_chunk else 0)
+        right_visible_length = len(right_chunk) * 3 - (1 if right_chunk else 0)
+        left_padding = " " * (23 - left_visible_length)
+        right_padding = " " * (23 - right_visible_length)
 
         lines.append(
             f"{indent}  {_COLOR_OFFSET}{line_offset:04x}{_RESET}  "
-            f"{left_hex}{left_pad}  "
-            f"{right_hex}{right_pad}  "
-            f"{_COLOR_OFFSET}|{_RESET}{ascii_str}{_COLOR_OFFSET}|{_RESET}"
+            f"{left_hex}{left_padding}  "
+            f"{right_hex}{right_padding}  "
+            f"{_COLOR_OFFSET}|{_RESET}{ascii_text}{_COLOR_OFFSET}|{_RESET}"
         )
     return lines
 
@@ -351,51 +353,51 @@ def render_dissection(
 
     known_spans = sorted(
         [known_span for known_span in dissected.spans if known_span.section != "unknown"],
-        key=lambda s: s.offset,
+        key=lambda known_span: known_span.offset,
     )
     unknown_spans = sorted(
         [unknown_span for unknown_span in dissected.spans if unknown_span.section == "unknown"],
-        key=lambda s: s.offset,
+        key=lambda unknown_span: unknown_span.offset,
     )
 
     section_labels = {}
-    for ref, label in dissected.sections:
-        section_labels[ref] = label
+    for section_reference, label in dissected.sections:
+        section_labels[section_reference] = label
 
     section_span_groups = []
     if known_spans:
-        current_ref = known_spans[0].fact_ref
+        current_reference = known_spans[0].fact_ref
         current_group = []
 
         for span in known_spans:
-            if span.fact_ref != current_ref:
+            if span.fact_ref != current_reference:
                 if current_group:
-                    section_span_groups.append((current_ref, current_group))
-                current_ref = span.fact_ref
+                    section_span_groups.append((current_reference, current_group))
+                current_reference = span.fact_ref
                 current_group = [span]
             else:
                 current_group.append(span)
 
         if current_group:
-            section_span_groups.append((current_ref, current_group))
+            section_span_groups.append((current_reference, current_group))
 
     emitted_sections = set()
 
-    for fact_ref, spans in section_span_groups:
-        label = section_labels.get(fact_ref, fact_ref)
+    for fact_reference, spans in section_span_groups:
+        label = section_labels.get(fact_reference, fact_reference)
         section_icon = ""
         if icons:
-            glyph = DISSECT_SECTION_ICONS.get(fact_ref, "")
+            glyph = DISSECT_SECTION_ICONS.get(fact_reference, "")
             if glyph:
                 section_icon = f"{glyph} "
-        if fact_ref not in emitted_sections:
+        if fact_reference not in emitted_sections:
             if color:
                 lines.append(f"{indent}{_COLOR_SECTION}{section_icon}{label}{_RESET}")
                 lines.append(f"{indent}{_COLOR_SEPARATOR}{'─' * 72}{_RESET}")
             else:
                 lines.append(f"{indent}{section_icon}{label}")
                 lines.append(f"{indent}{'─' * 72}")
-            emitted_sections.add(fact_ref)
+            emitted_sections.add(fact_reference)
 
         for span in spans:
             if color:
@@ -489,9 +491,9 @@ def _plain_hexdump(data: bytes, indent: str = "         ", color: bool = False) 
     lines = []
     for offset in range(0, len(data), 16):
         chunk = data[offset : offset + 16]
-        left = " ".join(f"{b:02x}" for b in chunk[:8])
-        right = " ".join(f"{b:02x}" for b in chunk[8:])
-        ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+        left = " ".join(f"{byte:02x}" for byte in chunk[:8])
+        right = " ".join(f"{byte:02x}" for byte in chunk[8:])
+        ascii_part = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in chunk)
         if color:
             lines.append(
                 f"{indent}{_COLOR_OFFSET}{offset:04x}{_RESET}  "

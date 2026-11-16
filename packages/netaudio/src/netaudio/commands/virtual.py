@@ -506,8 +506,8 @@ async def _run_virtual_device(
 ) -> None:
     from netaudio.dante.virtual_device import VirtualDevice, VirtualDeviceConfig
 
-    tx_channels = [f"Ch {index + 1}" for index in range(tx)]
-    rx_channels = [f"Ch {index + 1}" for index in range(rx)]
+    transmitter_channels = [f"Ch {index + 1}" for index in range(tx)]
+    receiver_channels = [f"Ch {index + 1}" for index in range(rx)]
     devices = []
     for index in range(count):
         ports = {}
@@ -519,8 +519,8 @@ async def _run_virtual_device(
                 VirtualDeviceConfig(
                     name=name if index == 0 else f"{name}-{index + 1}",
                     model=model,
-                    tx_channels=tx_channels,
-                    rx_channels=rx_channels,
+                    tx_channels=transmitter_channels,
+                    rx_channels=receiver_channels,
                     sample_rate=sample_rate,
                     interface_ip=interface,
                     process_id=index,

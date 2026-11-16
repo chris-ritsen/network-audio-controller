@@ -14,21 +14,21 @@ from netaudio.commands.firmware.parser import _parse_sections
 PAGE_SIZE = 4096
 
 
-def _le32(data, off):
-    return struct.unpack("<I", data[off : off + 4])[0]
+def _le32(data, offset):
+    return struct.unpack("<I", data[offset : offset + 4])[0]
 
 
 class _CramfsInode:
     def __init__(self, data, offset):
-        w0 = _le32(data, offset)
-        w1 = _le32(data, offset + 4)
-        w2 = _le32(data, offset + 8)
-        self.mode = w0 & 0xFFFF
-        self.uid = (w0 >> 16) & 0xFFFF
-        self.size = w1 & 0xFFFFFF
-        self.gid = (w1 >> 24) & 0xFF
-        self.namelen = w2 & 0x3F
-        self.offset = (w2 >> 6) & 0x3FFFFFF
+        first_word = _le32(data, offset)
+        second_word = _le32(data, offset + 4)
+        third_word = _le32(data, offset + 8)
+        self.mode = first_word & 0xFFFF
+        self.uid = (first_word >> 16) & 0xFFFF
+        self.size = second_word & 0xFFFFFF
+        self.gid = (second_word >> 24) & 0xFF
+        self.namelen = third_word & 0x3F
+        self.offset = (third_word >> 6) & 0x3FFFFFF
         self.data_offset = self.offset * 4
 
     def is_dir(self):
@@ -138,22 +138,22 @@ def _safe_cramfs_symlink_target(root: Path, destination: Path, target: str) -> s
 def _cramfs_extract_file(data, inode):
     if inode.size == 0:
         return b""
-    num_blocks = (inode.size + PAGE_SIZE - 1) // PAGE_SIZE
-    ptr_start = inode.data_offset
-    if ptr_start + num_blocks * 4 > len(data):
+    block_count = (inode.size + PAGE_SIZE - 1) // PAGE_SIZE
+    pointer_start = inode.data_offset
+    if pointer_start + block_count * 4 > len(data):
         return None
-    block_ends = [_le32(data, ptr_start + index * 4) for index in range(num_blocks)]
-    prev = ptr_start + num_blocks * 4
+    block_ends = [_le32(data, pointer_start + index * 4) for index in range(block_count)]
+    previous_end = pointer_start + block_count * 4
     result = b""
-    for bend in block_ends:
-        if bend > len(data) or bend <= prev:
+    for block_end in block_ends:
+        if block_end > len(data) or block_end <= previous_end:
             break
-        chunk = data[prev:bend]
+        chunk = data[previous_end:block_end]
         try:
             result += zlib.decompress(chunk)
         except zlib.error:
             result += chunk
-        prev = bend
+        previous_end = block_end
     return result[: inode.size]
 
 
@@ -167,23 +167,23 @@ def _read_cramfs_directory_entry(data, position, end, inode):
     raise _CramfsExtractionError(f"invalid inode name length at directory offset 0x{inode.data_offset:X}")
 
 
-def _require_unused_cramfs_destination(dest, full):
-    if os.path.lexists(dest):
+def _require_unused_cramfs_destination(destination, full):
+    if os.path.lexists(destination):
         raise _CramfsExtractionError(f"duplicate inode path: {full}")
 
 
-def _extract_cramfs_directory(data, child, child_components, full, dest, root, verbose, visited):
+def _extract_cramfs_directory(data, child, child_components, full, destination, root, verbose, visited):
     if verbose:
         typer.echo(f"{child.mode_str()} {full}/")
-    _require_unused_cramfs_destination(dest, full)
+    _require_unused_cramfs_destination(destination, full)
     try:
-        dest.mkdir()
+        destination.mkdir()
     except OSError as exception:
         raise _CramfsExtractionError(f"could not create directory {full}: {exception}") from exception
     _cramfs_walk_directory(data, child, child_components, root, verbose, visited)
 
 
-def _extract_cramfs_symlink(data, child, full, dest, root, verbose):
+def _extract_cramfs_symlink(data, child, full, destination, root, verbose):
     target_data = _cramfs_extract_file(data, child)
     if target_data is None or len(target_data) != child.size:
         raise _CramfsExtractionError(f"invalid symlink data for {full}")
@@ -191,28 +191,28 @@ def _extract_cramfs_symlink(data, child, full, dest, root, verbose):
         target = target_data.decode("ascii")
     except UnicodeDecodeError as exception:
         raise _CramfsExtractionError(f"symlink target is not valid ASCII: {full}") from exception
-    safe_target = _safe_cramfs_symlink_target(root, dest, target)
+    safe_target = _safe_cramfs_symlink_target(root, destination, target)
     if verbose:
         typer.echo(f"{child.mode_str()} {full} -> {safe_target}")
-    _require_unused_cramfs_destination(dest, full)
+    _require_unused_cramfs_destination(destination, full)
     try:
-        os.symlink(safe_target, dest)
+        os.symlink(safe_target, destination)
     except OSError as exception:
         raise _CramfsExtractionError(f"could not create symlink {full}: {exception}") from exception
 
 
-def _extract_cramfs_regular_file(data, child, full, dest, verbose):
+def _extract_cramfs_regular_file(data, child, full, destination, verbose):
     file_data = _cramfs_extract_file(data, child)
     if file_data is None or len(file_data) != child.size:
         raise _CramfsExtractionError(f"invalid file data for {full}")
     if verbose:
         typer.echo(f"{child.mode_str()} {full}  ({child.size} -> {len(file_data)} bytes)")
-    _require_unused_cramfs_destination(dest, full)
+    _require_unused_cramfs_destination(destination, full)
     try:
-        with open(dest, "xb") as output_file:
+        with open(destination, "xb") as output_file:
             output_file.write(file_data)
         if child.mode & 0o111:
-            os.chmod(dest, child.mode & 0o7777)
+            os.chmod(destination, child.mode & 0o7777)
     except OSError as exception:
         raise _CramfsExtractionError(f"could not write file {full}: {exception}") from exception
 
@@ -232,22 +232,22 @@ def _cramfs_walk_directory(data, inode, components, root, verbose, visited):
         child, name, position = _read_cramfs_directory_entry(data, position, end, inode)
         child_components = (*components, name)
         full = "/" + "/".join(child_components)
-        dest = _safe_cramfs_destination(root, child_components)
+        destination = _safe_cramfs_destination(root, child_components)
 
         if child.is_dir():
-            _extract_cramfs_directory(data, child, child_components, full, dest, root, verbose, visited)
+            _extract_cramfs_directory(data, child, child_components, full, destination, root, verbose, visited)
         elif child.is_lnk():
-            _extract_cramfs_symlink(data, child, full, dest, root, verbose)
+            _extract_cramfs_symlink(data, child, full, destination, root, verbose)
         elif child.is_reg():
-            _extract_cramfs_regular_file(data, child, full, dest, verbose)
+            _extract_cramfs_regular_file(data, child, full, destination, verbose)
         elif verbose:
             typer.echo(f"{child.type_char()} {full}  (special)")
 
     visited.remove(directory_key)
 
 
-def _cramfs_walk(data, inode, path, outdir, verbose=False):
-    output = Path(outdir)
+def _cramfs_walk(data, inode, path, output_directory, verbose=False):
+    output = Path(output_directory)
     if output.is_symlink():
         raise _CramfsExtractionError(f"extraction root must not be a symlink: {output}")
     try:
@@ -271,16 +271,16 @@ def _cramfs_find_file(data, root_inode, target_path):
     for index, part in enumerate(parts):
         if not current.is_dir():
             return None
-        pos = current.data_offset
-        end = pos + current.size
+        position = current.data_offset
+        end = position + current.size
         found = False
-        while pos + 12 <= end and pos + 12 <= len(data):
-            child = _CramfsInode(data, pos)
-            pos += 12
+        while position + 12 <= end and position + 12 <= len(data):
+            child = _CramfsInode(data, position)
+            position += 12
             name_bytes = child.namelen * 4
-            if name_bytes > 0 and pos + name_bytes <= len(data):
-                name = data[pos : pos + name_bytes].rstrip(b"\x00").decode("ascii", errors="replace")
-                pos += name_bytes
+            if name_bytes > 0 and position + name_bytes <= len(data):
+                name = data[position : position + name_bytes].rstrip(b"\x00").decode("ascii", errors="replace")
+                position += name_bytes
             else:
                 break
             if name == part:
@@ -297,33 +297,33 @@ def _cramfs_find_file(data, root_inode, target_path):
 def _find_cramfs_in_dnt(data):
     sections = []
     if len(data) >= 0x50 and data[:4] == b"AUDI":
-        hdr_len = struct.unpack(">I", data[4:8])[0]
-        sections = _parse_sections(data, hdr_len)
+        header_length = struct.unpack(">I", data[4:8])[0]
+        sections = _parse_sections(data, header_length)
 
-    for sec in sections:
-        blob = data[sec["file_offset"] : sec["file_offset"] + sec["size"]]
+    for section in sections:
+        blob = data[section["file_offset"] : section["file_offset"] + section["size"]]
         for magic_bytes in (CRAMFS_MAGIC_LE, CRAMFS_MAGIC_BE):
-            pos = blob.find(magic_bytes)
-            if pos != -1:
-                abs_off = sec["file_offset"] + pos
-                is_be = magic_bytes == CRAMFS_MAGIC_BE
-                endian = ">" if is_be else "<"
-                fs_size = struct.unpack(f"{endian}I", data[abs_off + 4 : abs_off + 8])[0]
-                return abs_off, fs_size, is_be
+            position = blob.find(magic_bytes)
+            if position != -1:
+                absolute_offset = section["file_offset"] + position
+                is_big_endian = magic_bytes == CRAMFS_MAGIC_BE
+                endian = ">" if is_big_endian else "<"
+                filesystem_size = struct.unpack(f"{endian}I", data[absolute_offset + 4 : absolute_offset + 8])[0]
+                return absolute_offset, filesystem_size, is_big_endian
 
-    for magic_bytes, is_be in [(CRAMFS_MAGIC_LE, False), (CRAMFS_MAGIC_BE, True)]:
-        pos = data.find(magic_bytes)
-        if pos != -1:
-            endian = ">" if is_be else "<"
-            fs_size = struct.unpack(f"{endian}I", data[pos + 4 : pos + 8])[0]
-            return pos, fs_size, is_be
+    for magic_bytes, is_big_endian in [(CRAMFS_MAGIC_LE, False), (CRAMFS_MAGIC_BE, True)]:
+        position = data.find(magic_bytes)
+        if position != -1:
+            endian = ">" if is_big_endian else "<"
+            filesystem_size = struct.unpack(f"{endian}I", data[position + 4 : position + 8])[0]
+            return position, filesystem_size, is_big_endian
 
     return None, None, None
 
 
-def _cramfs_to_le(data, cramfs_off, cramfs_size, is_be):
-    blob = bytearray(data[cramfs_off : cramfs_off + cramfs_size])
-    if is_be:
+def _cramfs_to_le(data, cramfs_offset, cramfs_size, is_big_endian):
+    blob = bytearray(data[cramfs_offset : cramfs_offset + cramfs_size])
+    if is_big_endian:
         for offset in range(0, len(blob) - 3, 4):
             blob[offset], blob[offset + 1], blob[offset + 2], blob[offset + 3] = (
                 blob[offset + 3],
@@ -346,13 +346,13 @@ def _prepare_rootfs_output(output: Path, force: bool = False) -> None:
     if output_exists:
         resolved = output.expanduser().resolve()
         home = Path.home().resolve()
-        cwd = Path.cwd().resolve()
+        working_directory = Path.cwd().resolve()
         protected_paths = {
             Path(resolved.anchor),
             home,
-            cwd,
+            working_directory,
             *home.parents,
-            *cwd.parents,
+            *working_directory.parents,
         }
         if resolved in protected_paths:
             typer.echo(f"Error: refusing to replace unsafe output path: {resolved}", err=True)
@@ -379,30 +379,30 @@ def firmware_rootfs(
     ),
 ):
     """Extract the Linux root filesystem from a .dnt firmware image."""
-    with open(path, "rb") as f:
-        data = f.read()
+    with open(path, "rb") as file:
+        data = file.read()
 
-    cramfs_off, cramfs_size, is_be = _find_cramfs_in_dnt(data)
-    if cramfs_off is None:
+    cramfs_offset, cramfs_size, is_big_endian = _find_cramfs_in_dnt(data)
+    if cramfs_offset is None:
         typer.echo("No CramFS filesystem found in this firmware.", err=True)
         raise typer.Exit(code=1)
 
-    endian_str = "big-endian" if is_be else "little-endian"
+    endian_description = "big-endian" if is_big_endian else "little-endian"
     typer.echo(
-        f"CramFS at offset 0x{cramfs_off:X}, {cramfs_size:,} bytes ({endian_str})",
+        f"CramFS at offset 0x{cramfs_offset:X}, {cramfs_size:,} bytes ({endian_description})",
         err=True,
     )
 
-    cramfs_data = _cramfs_to_le(data, cramfs_off, cramfs_size, is_be)
+    cramfs_data = _cramfs_to_le(data, cramfs_offset, cramfs_size, is_big_endian)
 
     magic = _le32(cramfs_data, 0)
     if magic != 0x28CD3D45:
         typer.echo(f"CramFS magic mismatch after conversion: 0x{magic:08X}", err=True)
         raise typer.Exit(code=1)
 
-    fs_size = _le32(cramfs_data, 4)
+    filesystem_size = _le32(cramfs_data, 4)
     file_count = _le32(cramfs_data, 44)
-    typer.echo(f"Filesystem: {fs_size:,} bytes, {file_count} files", err=True)
+    typer.echo(f"Filesystem: {filesystem_size:,} bytes, {file_count} files", err=True)
 
     root = _CramfsInode(cramfs_data, 0x40)
 
@@ -424,27 +424,27 @@ def firmware_password(
     Reads /etc/passwd and /etc/shadow from the embedded CramFS filesystem.
     Brooklyn II devices use DES crypt (hashcat mode 1500, max 8 characters).
     """
-    with open(path, "rb") as f:
-        data = f.read()
+    with open(path, "rb") as file:
+        data = file.read()
 
-    cramfs_off, cramfs_size, is_be = _find_cramfs_in_dnt(data)
-    if cramfs_off is None:
+    cramfs_offset, cramfs_size, is_big_endian = _find_cramfs_in_dnt(data)
+    if cramfs_offset is None:
         typer.echo("No CramFS filesystem found.", err=True)
         raise typer.Exit(code=1)
 
-    cramfs_data = _cramfs_to_le(data, cramfs_off, cramfs_size, is_be)
+    cramfs_data = _cramfs_to_le(data, cramfs_offset, cramfs_size, is_big_endian)
     root = _CramfsInode(cramfs_data, 0x40)
 
-    for passwd_path in ("etc/passwd", "etc/shadow"):
-        content = _cramfs_find_file(cramfs_data, root, passwd_path)
+    for account_file_path in ("etc/passwd", "etc/shadow"):
+        content = _cramfs_find_file(cramfs_data, root, account_file_path)
         if content is None:
             continue
         for line in content.decode("ascii", errors="replace").splitlines():
             if line.startswith("root:"):
                 fields = line.split(":")
-                pw_hash = fields[1]
-                if pw_hash and pw_hash not in ("*", "!", "x", "!!"):
-                    typer.echo(pw_hash)
+                password_hash = fields[1]
+                if password_hash and password_hash not in ("*", "!", "x", "!!"):
+                    typer.echo(password_hash)
                     return
 
     typer.echo("No root password hash found.", err=True)

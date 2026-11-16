@@ -71,9 +71,9 @@ class PacketStoreQueries:
         pairs = []
         for row in self._conn.execute(query, params).fetchall():
             request = self._decode_packet_row(row)
-            resp_row = self._conn.execute("SELECT * FROM packets WHERE id = ?", (request["resp_id"],)).fetchone()
-            if resp_row:
-                pairs.append((request, self._decode_packet_row(resp_row)))
+            response_row = self._conn.execute("SELECT * FROM packets WHERE id = ?", (request["resp_id"],)).fetchone()
+            if response_row:
+                pairs.append((request, self._decode_packet_row(response_row)))
 
         return pairs
 
@@ -245,8 +245,8 @@ class PacketStoreQueries:
         row = self._decode_packet_row(row)
         os.makedirs(output_dir, exist_ok=True)
 
-        ts = datetime.datetime.fromtimestamp(row["timestamp_ns"] / 1e9)
-        timestamp_str = ts.strftime("%Y%m%d_%H%M%S_%f")
+        timestamp = datetime.datetime.fromtimestamp(row["timestamp_ns"] / 1e9)
+        timestamp_text = timestamp.strftime("%Y%m%d_%H%M%S_%f")
 
         device_id = row["device_name"] or row["device_ip"] or "unknown"
         safe_device = _safe_name(device_id)
@@ -255,11 +255,11 @@ class PacketStoreQueries:
         safe_opcode = _safe_name(opcode_name.lower().removeprefix("opcode_"))
 
         suffix = f"_{row['direction']}" if row["direction"] else ""
-        filename = f"{timestamp_str}_{safe_device}_{safe_opcode}{suffix}.bin"
+        filename = f"{timestamp_text}_{safe_device}_{safe_opcode}{suffix}.bin"
         filepath = os.path.join(output_dir, filename)
 
-        with open(filepath, "wb") as f:
-            f.write(row["payload"])
+        with open(filepath, "wb") as file_handle:
+            file_handle.write(row["payload"])
 
         return filepath
 
@@ -268,9 +268,9 @@ class PacketStoreQueries:
         if not row or not row["correlated_packet_id"]:
             return None
 
-        req_path = self.export_fixture(request_id, output_dir)
-        resp_path = self.export_fixture(row["correlated_packet_id"], output_dir)
-        return (req_path, resp_path)
+        request_path = self.export_fixture(request_id, output_dir)
+        response_path = self.export_fixture(row["correlated_packet_id"], output_dir)
+        return (request_path, response_path)
 
     def query_packets(self, query: PacketQuery) -> list[dict]:
         sql = "SELECT * FROM packets WHERE 1=1"
@@ -336,19 +336,19 @@ class PacketStoreQueries:
         return self._decode_packet_rows(rows)
 
     def get_stats(self):
-        stats = {}
+        statistics = {}
 
         row = self._conn.execute("SELECT COUNT(*) as total FROM packets").fetchone()
-        stats["total"] = row["total"]
+        statistics["total"] = row["total"]
 
         rows = self._conn.execute("SELECT source_type, COUNT(*) as count FROM packets GROUP BY source_type").fetchall()
-        stats["by_source"] = {source_row["source_type"]: source_row["count"] for source_row in rows}
+        statistics["by_source"] = {source_row["source_type"]: source_row["count"] for source_row in rows}
 
         rows = self._conn.execute(
             "SELECT opcode_name, direction, COUNT(*) as count FROM packets "
             "GROUP BY opcode_name, direction ORDER BY count DESC"
         ).fetchall()
-        stats["by_opcode"] = [
+        statistics["by_opcode"] = [
             {
                 "opcode_name": opcode_row["opcode_name"],
                 "direction": opcode_row["direction"],
@@ -360,17 +360,17 @@ class PacketStoreQueries:
         row = self._conn.execute(
             "SELECT COUNT(*) as count FROM packets WHERE correlated_packet_id IS NOT NULL"
         ).fetchone()
-        stats["correlated"] = row["count"]
+        statistics["correlated"] = row["count"]
 
         row = self._conn.execute("SELECT COUNT(*) as count FROM packets WHERE correlated_packet_id IS NULL").fetchone()
-        stats["uncorrelated"] = row["count"]
+        statistics["uncorrelated"] = row["count"]
 
         row = self._conn.execute(
             "SELECT COUNT(*) as count FROM packets WHERE correlation_kind = 'transaction'"
         ).fetchone()
-        stats["correlated_by_transaction"] = row["count"]
+        statistics["correlated_by_transaction"] = row["count"]
 
         row = self._conn.execute("SELECT COUNT(*) as count FROM packet_status_request_candidates").fetchone()
-        stats["status_request_candidates"] = row["count"]
+        statistics["status_request_candidates"] = row["count"]
 
-        return stats
+        return statistics

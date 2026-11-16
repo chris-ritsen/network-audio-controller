@@ -70,23 +70,23 @@ def provenance_seed(
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
     _require_positive_session_id(id, "--id")
-    profile_cfg, _ = _load_capture_profile(config, profile)
-    resolved_db = _resolve_db_from_config(db, profile_cfg)
-    db_path = Path(resolved_db).expanduser().resolve()
-    if not db_path.exists():
-        raise typer.Exit(f"capture database not found: {db_path}")
+    profile_config, _ = _load_capture_profile(config, profile)
+    resolved_database = _resolve_db_from_config(db, profile_config)
+    database_path = Path(resolved_database).expanduser().resolve()
+    if not database_path.exists():
+        raise typer.Exit(f"capture database not found: {database_path}")
 
-    output_dir = Path(out).expanduser().resolve() if out else _default_provenance_output_dir().resolve()
-    if clean and output_dir.exists():
-        for fixture in output_dir.glob("*.bin"):
+    output_directory = Path(out).expanduser().resolve() if out else _default_provenance_output_dir().resolve()
+    if clean and output_directory.exists():
+        for fixture in output_directory.glob("*.bin"):
             fixture.unlink()
-        manifest_path = output_dir / "manifest.json"
+        manifest_path = output_directory / "manifest.json"
         if manifest_path.exists():
             manifest_path.unlink()
 
-    store = PacketStore(db_path=resolved_db)
+    store = PacketStore(db_path=resolved_database)
     try:
-        resolved_session_id, start_ns, end_ns = _resolve_provenance_scope(
+        resolved_session_id, start_nanoseconds, end_nanoseconds = _resolve_provenance_scope(
             store,
             id=id,
             session=session,
@@ -95,18 +95,18 @@ def provenance_seed(
         )
     finally:
         store.close()
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    connection = sqlite3.connect(database_path)
+    connection.row_factory = sqlite3.Row
     try:
         rows, status_samples = _extract_seed_samples(
-            conn,
+            connection,
             session_id=resolved_session_id,
-            start_ns=start_ns,
-            end_ns=end_ns,
+            start_ns=start_nanoseconds,
+            end_ns=end_nanoseconds,
             device_ip=device_ip,
         )
     finally:
-        conn.close()
+        connection.close()
 
     if not rows and not status_samples:
         raise typer.Exit("no packets matched scope in capture database. capture traffic first, or loosen filters.")
@@ -114,8 +114,8 @@ def provenance_seed(
     manifest_path = _write_seed_samples(
         rows,
         status_samples,
-        output_dir,
-        db_path=db_path,
+        output_directory,
+        db_path=database_path,
         session_id=resolved_session_id,
         from_label=_normalize_marker_label(from_label) if from_label else None,
         to_label=_normalize_marker_label(to_label) if to_label else None,
@@ -123,7 +123,7 @@ def provenance_seed(
     )
 
     print(f"Capture: Seeded fixtures: {len(rows) + len(status_samples)}")
-    print(f"Capture: Output: {output_dir}")
+    print(f"Capture: Output: {output_directory}")
     print(f"Capture: Manifest: {manifest_path}")
 
 
@@ -149,16 +149,16 @@ def provenance_label(
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
     _require_positive_session_id(id, "--id")
-    profile_cfg, _ = _load_capture_profile(config, profile)
-    resolved_db = _resolve_db_from_config(db, profile_cfg)
-    db_path = Path(resolved_db).expanduser().resolve()
-    if not db_path.exists():
-        raise typer.Exit(f"capture database not found: {db_path}")
+    profile_config, _ = _load_capture_profile(config, profile)
+    resolved_database = _resolve_db_from_config(db, profile_config)
+    database_path = Path(resolved_database).expanduser().resolve()
+    if not database_path.exists():
+        raise typer.Exit(f"capture database not found: {database_path}")
 
     labels_path = resolve_clean_labels_path(labels)
-    store = PacketStore(db_path=resolved_db)
+    store = PacketStore(db_path=resolved_database)
     try:
-        resolved_session_id, start_ns, end_ns = _resolve_provenance_scope(
+        resolved_session_id, start_nanoseconds, end_nanoseconds = _resolve_provenance_scope(
             store,
             id=id,
             session=session,
@@ -167,32 +167,32 @@ def provenance_label(
         )
     finally:
         store.close()
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    connection = sqlite3.connect(database_path)
+    connection.row_factory = sqlite3.Row
     try:
         opcode_rows = _query_observed_opcodes(
-            conn,
+            connection,
             session_id=resolved_session_id,
-            start_ns=start_ns,
-            end_ns=end_ns,
+            start_ns=start_nanoseconds,
+            end_ns=end_nanoseconds,
             device_ip=device_ip,
         )
         message_rows = _query_observed_messages(
-            conn,
+            connection,
             session_id=resolved_session_id,
-            start_ns=start_ns,
-            end_ns=end_ns,
+            start_ns=start_nanoseconds,
+            end_ns=end_nanoseconds,
             device_ip=device_ip,
         )
         status_rows = _query_observed_subscription_statuses(
-            conn,
+            connection,
             session_id=resolved_session_id,
-            start_ns=start_ns,
-            end_ns=end_ns,
+            start_ns=start_nanoseconds,
+            end_ns=end_nanoseconds,
             device_ip=device_ip,
         )
     finally:
-        conn.close()
+        connection.close()
 
     if not opcode_rows and not message_rows and not status_rows:
         raise typer.Exit("no observed opcodes/messages/status values matched scope")
@@ -234,7 +234,7 @@ def provenance_label(
     unlabeled_messages = [row for row in message_rows if int(row["message_type"]) not in message_labels]
     unlabeled_statuses = [row for row in status_rows if int(row["status_code"]) not in status_labels]
 
-    print(f"db: {db_path}")
+    print(f"db: {database_path}")
     print(f"labels: {labels_path}")
     print(
         "observed opcodes/messages/statuses: "
@@ -344,16 +344,16 @@ def _discover_bundle_paths(bundle: str | None, fixtures_root: str | None) -> lis
     if bundle:
         return [Path(bundle).expanduser().resolve()]
     root = Path(fixtures_root).expanduser().resolve() if fixtures_root else _default_fixture_root().resolve()
-    provenance_dir = root / "provenance" if root.name != "provenance" else root
-    if not provenance_dir.exists():
-        raise typer.Exit(f"Provenance directory not found: {provenance_dir}")
+    provenance_directory = root / "provenance" if root.name != "provenance" else root
+    if not provenance_directory.exists():
+        raise typer.Exit(f"Provenance directory not found: {provenance_directory}")
     bundle_paths = sorted(
-        [path for path in provenance_dir.iterdir() if path.is_dir() and (path / "manifest.json").exists()]
-        + list(provenance_dir.glob("*.tar.gz"))
-        + list(provenance_dir.glob("*.zip"))
+        [path for path in provenance_directory.iterdir() if path.is_dir() and (path / "manifest.json").exists()]
+        + list(provenance_directory.glob("*.tar.gz"))
+        + list(provenance_directory.glob("*.zip"))
     )
     if not bundle_paths:
-        raise typer.Exit(f"No session bundles found in {provenance_dir}")
+        raise typer.Exit(f"No session bundles found in {provenance_directory}")
     return bundle_paths
 
 
@@ -524,12 +524,12 @@ def provenance_export(
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
     _require_positive_session_id(session_id, "--session-id")
-    profile_cfg, _ = _load_capture_profile(config, profile)
-    resolved_db = _resolve_db_from_config(db, profile_cfg)
+    profile_config, _ = _load_capture_profile(config, profile)
+    resolved_database = _resolve_db_from_config(db, profile_config)
 
     from netaudio.dante.protocol_verifier import export_session_bundle
 
-    store = PacketStore(db_path=resolved_db)
+    store = PacketStore(db_path=resolved_database)
     try:
         resolved_session_id, _ = _resolve_session_reference(
             store,

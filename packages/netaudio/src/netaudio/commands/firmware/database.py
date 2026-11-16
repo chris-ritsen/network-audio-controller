@@ -13,23 +13,23 @@ from netaudio.commands.firmware.constants import FIRMWARE_DATABASE_SCHEMA_VERSIO
 from netaudio.commands.firmware.parser import _collect_dnt_files, parse_dnt
 
 
-def _init_db(db_path):
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
+def _init_db(database_path):
+    connection = sqlite3.connect(database_path)
+    connection.execute("PRAGMA journal_mode=WAL")
     existing_tables = {
         row[0]
-        for row in conn.execute(
+        for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('firmware', 'sections')"
         ).fetchall()
     }
-    schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+    schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
     if existing_tables and schema_version != FIRMWARE_DATABASE_SCHEMA_VERSION:
-        conn.close()
+        connection.close()
         raise RuntimeError(
             f"Firmware database schema version {schema_version} is incompatible with version "
             f"{FIRMWARE_DATABASE_SCHEMA_VERSION}; create a new database"
         )
-    conn.execute(
+    connection.execute(
         """
         CREATE TABLE IF NOT EXISTS firmware (
             sha256          TEXT PRIMARY KEY,
@@ -50,7 +50,7 @@ def _init_db(db_path):
         )
     """
     )
-    conn.execute(
+    connection.execute(
         """
         CREATE TABLE IF NOT EXISTS sections (
             sha256      TEXT NOT NULL,
@@ -66,7 +66,7 @@ def _init_db(db_path):
         )
     """
     )
-    section_columns = {row[1] for row in conn.execute("PRAGMA table_info(sections)").fetchall()}
+    section_columns = {row[1] for row in connection.execute("PRAGMA table_info(sections)").fetchall()}
     required_section_columns = {
         "sha256",
         "idx",
@@ -78,11 +78,11 @@ def _init_db(db_path):
         "size",
     }
     if not required_section_columns.issubset(section_columns):
-        conn.close()
+        connection.close()
         raise RuntimeError("Firmware database sections schema is invalid; create a new database")
-    conn.execute(f"PRAGMA user_version = {FIRMWARE_DATABASE_SCHEMA_VERSION}")
-    conn.commit()
-    return conn
+    connection.execute(f"PRAGMA user_version = {FIRMWARE_DATABASE_SCHEMA_VERSION}")
+    connection.commit()
+    return connection
 
 
 def firmware_db(
@@ -95,9 +95,9 @@ def firmware_db(
         typer.echo("No .dnt files found.", err=True)
         raise typer.Exit(code=1)
 
-    conn = _init_db(db)
+    connection = _init_db(db)
 
-    existing = {row[0] for row in conn.execute("SELECT sha256 FROM firmware").fetchall()}
+    existing = {row[0] for row in connection.execute("SELECT sha256 FROM firmware").fetchall()}
     typer.echo(f"{len(existing)} already in db, {len(dnt_files)} files to scan", err=True)
 
     total = len(dnt_files)
@@ -109,11 +109,11 @@ def firmware_db(
         report_progress(index, total, path)
 
         try:
-            with open(path, "rb") as f:
-                raw = f.read()
-            sha = hashlib.sha256(raw).hexdigest()
+            with open(path, "rb") as file:
+                raw = file.read()
+            digest = hashlib.sha256(raw).hexdigest()
 
-            if sha in existing:
+            if digest in existing:
                 skipped += 1
                 continue
 
@@ -122,7 +122,7 @@ def firmware_db(
                 errors += 1
                 continue
 
-            conn.execute(
+            connection.execute(
                 """INSERT OR REPLACE INTO firmware
                    (sha256, file_size, device_type_id, firmware_version,
                     manufacturer_header, capability_partition_id, board_name,
@@ -131,7 +131,7 @@ def firmware_db(
                     tx_channel_names, rx_channel_names)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    sha,
+                    digest,
                     result.get("file_size"),
                     result.get("device_type_id"),
                     result.get("firmware_version"),
@@ -150,36 +150,36 @@ def firmware_db(
             )
 
             sections = result.get("sections", [])
-            for idx, sec in enumerate(sections):
-                conn.execute(
+            for section_index, section in enumerate(sections):
+                connection.execute(
                     """INSERT OR REPLACE INTO sections
                        (sha256, idx, partition_id, partition_name, version, body_offset,
                         file_offset, size)
                        VALUES (?,?,?,?,?,?,?,?)""",
                     (
-                        sha,
-                        idx,
-                        sec["partition_id"],
-                        sec["partition_name"],
-                        sec["version"],
-                        sec["body_offset"],
-                        sec["file_offset"],
-                        sec["size"],
+                        digest,
+                        section_index,
+                        section["partition_id"],
+                        section["partition_name"],
+                        section["version"],
+                        section["body_offset"],
+                        section["file_offset"],
+                        section["size"],
                     ),
                 )
 
-            existing.add(sha)
+            existing.add(digest)
             inserted += 1
 
             if inserted % 50 == 0:
-                conn.commit()
+                connection.commit()
 
         except Exception as error:
             errors += 1
             typer.echo(f"\n  ERROR: {path}: {error}", err=True)
 
-    conn.commit()
-    conn.close()
+    connection.commit()
+    connection.close()
 
     if progress_visible():
         typer.echo("", err=True)

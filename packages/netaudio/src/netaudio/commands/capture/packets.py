@@ -81,8 +81,8 @@ def packet_list(
         descending = True
         limit = tail
 
-    profile_cfg, _ = _load_capture_profile(config, profile)
-    resolved_db = _resolve_db_from_config(db, profile_cfg)
+    profile_config, _ = _load_capture_profile(config, profile)
+    resolved_database = _resolve_db_from_config(db, profile_config)
     resolved_opcode = _parse_int_option(opcode, "--opcode")
     resolved_protocol = _parse_int_option(protocol, "--protocol")
 
@@ -90,7 +90,7 @@ def packet_list(
     if resolved_direction == "multicast":
         resolved_direction = "__null__"
 
-    store = PacketStore(db_path=resolved_db)
+    store = PacketStore(db_path=resolved_database)
     try:
         session_id = None
         session_row = None
@@ -235,9 +235,9 @@ def _packet_detail_lines(packet_id: int, packet: dict, payload: bytes, raw: bool
     lines.append(f"  Session:   {packet.get('session_id') or '?'}")
     lines.append(f"  Type:      {packet.get('source_type') or '?'}")
     lines.append(f"  Size:      {len(payload)}B")
-    info_str = _label_packet(payload, include_code=True)
-    if info_str:
-        lines.append(f"  Label:     {info_str}")
+    label = _label_packet(payload, include_code=True)
+    if label:
+        lines.append(f"  Label:     {label}")
     if raw:
         if len(payload) >= 2:
             lines.append(f"  Protocol:  0x{struct.unpack('>H', payload[0:2])[0]:04X}")
@@ -262,23 +262,23 @@ def packet_show(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    profile_cfg, _ = _load_capture_profile(config, profile)
-    resolved_db = _resolve_db_from_config(db, profile_cfg)
+    profile_config, _ = _load_capture_profile(config, profile)
+    resolved_database = _resolve_db_from_config(db, profile_config)
 
     lines = []
     packets = []
-    store = PacketStore(db_path=resolved_db)
+    store = PacketStore(db_path=resolved_database)
     try:
-        for pid in packet_id:
-            pkt = store.get_packet(pid)
-            if not pkt:
-                typer.echo(f"Packet #{pid}: not found", err=True)
+        for requested_packet_id in packet_id:
+            packet = store.get_packet(requested_packet_id)
+            if not packet:
+                typer.echo(f"Packet #{requested_packet_id}: not found", err=True)
                 continue
-            payload = pkt.get("payload") or b""
+            payload = packet.get("payload") or b""
             if isinstance(payload, str):
                 payload = bytes.fromhex(payload)
-            lines.extend(_packet_detail_lines(pid, pkt, payload, raw))
-            packets.append(packet_row_data(pkt))
+            lines.extend(_packet_detail_lines(requested_packet_id, packet, payload, raw))
+            packets.append(packet_row_data(packet))
     finally:
         store.close()
     emit_report(lines, packets)
@@ -298,31 +298,31 @@ def packet_diff(
         typer.echo("Need at least 2 packet IDs to diff.", err=True)
         raise typer.Exit(1)
 
-    profile_cfg, _ = _load_capture_profile(config, profile)
-    resolved_db = _resolve_db_from_config(db, profile_cfg)
+    profile_config, _ = _load_capture_profile(config, profile)
+    resolved_database = _resolve_db_from_config(db, profile_config)
 
-    store = PacketStore(db_path=resolved_db)
+    store = PacketStore(db_path=resolved_database)
     try:
         packets = []
-        for pid in packet_ids:
-            pkt = store.get_packet(pid)
-            if not pkt:
-                typer.echo(f"Packet #{pid}: not found", err=True)
+        for packet_id in packet_ids:
+            packet = store.get_packet(packet_id)
+            if not packet:
+                typer.echo(f"Packet #{packet_id}: not found", err=True)
                 raise typer.Exit(1)
-            payload = pkt.get("payload") or b""
+            payload = packet.get("payload") or b""
             if isinstance(payload, str):
                 payload = bytes.fromhex(payload)
-            packets.append((pid, pkt, payload))
+            packets.append((packet_id, packet, payload))
 
-        for pid, pkt, payload in packets:
-            timestamp_ns = int(pkt.get("timestamp_ns") or 0)
+        for packet_id, packet, payload in packets:
+            timestamp_ns = int(packet.get("timestamp_ns") or 0)
             timestamp = datetime.datetime.fromtimestamp(timestamp_ns / 1e9)
-            timestamp_str = timestamp.strftime("%H:%M:%S.%f")[:-3]
-            src = _format_endpoint(pkt.get("src_ip"), pkt.get("src_port"))
-            dst = _format_endpoint(pkt.get("dst_ip"), pkt.get("dst_port"))
-            direction = pkt.get("direction") or "multicast"
+            timestamp_text = timestamp.strftime("%H:%M:%S.%f")[:-3]
+            source = _format_endpoint(packet.get("src_ip"), packet.get("src_port"))
+            destination = _format_endpoint(packet.get("dst_ip"), packet.get("dst_port"))
+            direction = packet.get("direction") or "multicast"
             label = _label_packet(payload, include_code=True)
-            print(f"  #{pid}  {timestamp_str}  {src} -> {dst}  {direction}  {len(payload)}B  {label}")
+            print(f"  #{packet_id}  {timestamp_text}  {source} -> {destination}  {direction}  {len(payload)}B  {label}")
 
         max_length = max(len(payload) for _, _, payload in packets)
         reference_payload = packets[0][2]
@@ -399,15 +399,15 @@ def packet_state_diff(
     between consecutive same-state packets.
     """
     before_ns, after_ns = _state_diff_window(before_time, after_time)
-    profile_cfg, _ = _load_capture_profile(config, profile)
-    resolved_db = _resolve_db_from_config(db, profile_cfg)
+    profile_config, _ = _load_capture_profile(config, profile)
+    resolved_database = _resolve_db_from_config(db, profile_config)
     resolved_opcode = _parse_int_option(opcode, "--opcode")
 
     resolved_direction = direction
     if resolved_direction == "multicast":
         resolved_direction = "__null__"
 
-    store = PacketStore(db_path=resolved_db)
+    store = PacketStore(db_path=resolved_database)
     try:
         session_id = None
         if session is not None:
@@ -460,15 +460,15 @@ def packet_state_diff(
 
         common_opcodes = sorted(set(before_by_opcode.keys()) & set(after_by_opcode.keys()))
 
-        before_ts = datetime.datetime.fromtimestamp(before_ns / 1e9).strftime("%H:%M:%S")
-        after_ts = datetime.datetime.fromtimestamp(after_ns / 1e9).strftime("%H:%M:%S")
+        before_timestamp = datetime.datetime.fromtimestamp(before_ns / 1e9).strftime("%H:%M:%S")
+        after_timestamp = datetime.datetime.fromtimestamp(after_ns / 1e9).strftime("%H:%M:%S")
 
         print(f"State diff for {device_ip}")
         print(
-            f"  before window: ≤ {before_ts} ({sum(len(opcode_packets) for opcode_packets in before_by_opcode.values())} packets, {len(before_by_opcode)} opcodes)"
+            f"  before window: ≤ {before_timestamp} ({sum(len(opcode_packets) for opcode_packets in before_by_opcode.values())} packets, {len(before_by_opcode)} opcodes)"
         )
         print(
-            f"  after  window: ≥ {after_ts} ({sum(len(opcode_packets) for opcode_packets in after_by_opcode.values())} packets, {len(after_by_opcode)} opcodes)"
+            f"  after  window: ≥ {after_timestamp} ({sum(len(opcode_packets) for opcode_packets in after_by_opcode.values())} packets, {len(after_by_opcode)} opcodes)"
         )
         print(f"  common opcodes: {len(common_opcodes)}")
 
@@ -528,13 +528,13 @@ def clear(
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
     """Delete the capture database."""
-    profile_cfg, _ = _load_capture_profile(config, profile)
-    resolved_db = _resolve_db_from_config(db, profile_cfg)
-    db_path = Path(resolved_db)
+    profile_config, _ = _load_capture_profile(config, profile)
+    resolved_database = _resolve_db_from_config(db, profile_config)
+    database_path = Path(resolved_database)
 
     for suffix in ("", "-shm", "-wal"):
-        target = Path(str(db_path) + suffix)
+        target = Path(str(database_path) + suffix)
         if target.exists():
             target.unlink()
 
-    typer.echo(f"Deleted {db_path}", err=True)
+    typer.echo(f"Deleted {database_path}", err=True)

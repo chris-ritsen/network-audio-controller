@@ -23,20 +23,20 @@ def firmware_hexdump(
     ),
 ):
     """Hex dump a region of a .dnt file."""
-    with open(path, "rb") as f:
-        data = f.read()
+    with open(path, "rb") as file:
+        data = file.read()
 
     if section is not None:
         if len(data) < 0x50 or data[:4] != b"AUDI":
             typer.echo(f"Not a .dnt file: {path}", err=True)
             raise typer.Exit(code=1)
-        hdr_len = struct.unpack(">I", data[4:8])[0]
-        sections = _parse_sections(data, hdr_len)
+        header_length = struct.unpack(">I", data[4:8])[0]
+        sections = _parse_sections(data, header_length)
         if section < 0 or section >= len(sections):
             typer.echo(f"Section {section} out of range.", err=True)
             raise typer.Exit(code=1)
-        sec = sections[section]
-        data = data[sec["file_offset"] : sec["file_offset"] + sec["size"]]
+        selected_section = sections[section]
+        data = data[selected_section["file_offset"] : selected_section["file_offset"] + selected_section["size"]]
 
     start = offset
     end = min(start + length, len(data))
@@ -44,8 +44,8 @@ def firmware_hexdump(
 
     for row_offset in range(0, len(chunk), 16):
         row = chunk[row_offset : row_offset + 16]
-        hex_part = " ".join(f"{b:02x}" for b in row)
-        ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
+        hex_part = " ".join(f"{byte:02x}" for byte in row)
+        ascii_part = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in row)
         typer.echo(f"{start + row_offset:08x}  {hex_part:<48}  {ascii_part}")
 
 
@@ -130,24 +130,24 @@ def _format_value(chunk, kind, endian=">"):
     return ""
 
 
-def _span_lines(data, file_offset, length, kind, name, dtype, endian=">", field_idx=0):
+def _span_lines(data, file_offset, length, kind, name, data_type, endian=">", field_index=0):
     field_bytes = data[file_offset : file_offset + length]
     display_value = _format_value(field_bytes, kind, endian)
-    field_color = _FIELD_PALETTE[field_idx % len(_FIELD_PALETTE)]
+    field_color = _FIELD_PALETTE[field_index % len(_FIELD_PALETTE)]
     lines = []
 
     if kind == "string" and length > 8:
-        null_pos = field_bytes.find(b"\x00")
-        string_byte_count = null_pos if null_pos != -1 else length
+        null_offset = field_bytes.find(b"\x00")
+        string_byte_count = null_offset if null_offset != -1 else length
     else:
         string_byte_count = length
 
     if length <= 8:
-        hex_str = " ".join(f"{byte:02x}" for byte in field_bytes)
+        hex_text = " ".join(f"{byte:02x}" for byte in field_bytes)
         lines.append(
             f"  {_COLOR_OFFSET}{file_offset:08x}{_RESET}  "
-            f"{field_color}{hex_str:<24s}{_RESET} "
-            f"{_COLOR_TYPE}{dtype:<10s}{_RESET} "
+            f"{field_color}{hex_text:<24s}{_RESET} "
+            f"{_COLOR_TYPE}{data_type:<10s}{_RESET} "
             f"{_COLOR_FIELD}{name:<24s}{_RESET}"
             f"{f' = {field_color}{display_value}{_RESET}' if display_value else ''}"
         )
@@ -164,7 +164,7 @@ def _span_lines(data, file_offset, length, kind, name, dtype, endian=">", field_
         lines.append(
             f"  {_COLOR_OFFSET}{file_offset:08x}{_RESET}  "
             f"{combined_hex}{' ' * max(padding, 0)} "
-            f"{_COLOR_TYPE}{dtype:<10s}{_RESET} "
+            f"{_COLOR_TYPE}{data_type:<10s}{_RESET} "
             f"{_COLOR_FIELD}{name:<24s}{_RESET}"
             f"{f' = {field_color}{display_value}{_RESET}' if display_value else ''}"
         )
@@ -188,13 +188,13 @@ def _section_header(title):
     return f"{_COLOR_SECTION}{title}{_RESET}\n{_COLOR_SEPARATOR}{'─' * 90}{_RESET}"
 
 
-def _dissect_uimage(data, abs_off, lines, fi):
-    if abs_off + 64 > len(data):
-        return fi
-    magic = struct.unpack(">I", data[abs_off : abs_off + 4])[0]
+def _dissect_uimage(data, absolute_offset, lines, field_index):
+    if absolute_offset + 64 > len(data):
+        return field_index
+    magic = struct.unpack(">I", data[absolute_offset : absolute_offset + 4])[0]
     if magic != 0x27051956:
-        return fi
-    lines.append(_section_header(f"uImage Header (0x{abs_off:X})"))
+        return field_index
+    lines.append(_section_header(f"uImage Header (0x{absolute_offset:X})"))
     fields = [
         (0, 4, "magic", "magic", "u32 BE"),
         (4, 4, "crc", "header_crc32", "u32 BE"),
@@ -209,24 +209,25 @@ def _dissect_uimage(data, abs_off, lines, fi):
         (31, 1, "type", "compression", "u8"),
         (32, 32, "string", "image_name", "char[32]"),
     ]
-    for off, length, kind, name, dtype in fields:
-        lines.extend(_span_lines(data, abs_off + off, length, kind, name, dtype, field_idx=fi))
-        fi += 1
-    return fi
+    for field_offset, length, kind, name, data_type in fields:
+        lines.extend(
+            _span_lines(data, absolute_offset + field_offset, length, kind, name, data_type, field_index=field_index)
+        )
+        field_index += 1
+    return field_index
 
 
-def _dissect_cramfs_super(data, abs_off, lines, fi):
-    if abs_off + 64 > len(data):
-        return fi
-    magic_bytes = data[abs_off : abs_off + 4]
+def _dissect_cramfs_super(data, absolute_offset, lines, field_index):
+    if absolute_offset + 64 > len(data):
+        return field_index
+    magic_bytes = data[absolute_offset : absolute_offset + 4]
     if magic_bytes == CRAMFS_MAGIC_LE:
-        endian, endian_str = "<", "little-endian"
+        endian, endian_name = "<", "little-endian"
     elif magic_bytes == CRAMFS_MAGIC_BE:
-        endian, endian_str = ">", "big-endian"
+        endian, endian_name = ">", "big-endian"
     else:
-        return fi
-    e = endian
-    lines.append(_section_header(f"CramFS Superblock (0x{abs_off:X}, {endian_str})"))
+        return field_index
+    lines.append(_section_header(f"CramFS Superblock (0x{absolute_offset:X}, {endian_name})"))
     fields = [
         (0, 4, "magic", "magic", f"u32 {('LE' if endian == '<' else 'BE')}"),
         (4, 4, "u32", "filesystem_size", f"u32 {('LE' if endian == '<' else 'BE')}"),
@@ -239,42 +240,53 @@ def _dissect_cramfs_super(data, abs_off, lines, fi):
         (44, 4, "u32", "files", f"u32 {('LE' if endian == '<' else 'BE')}"),
         (48, 12, "raw", "root_inode", "inode[12]"),
     ]
-    for off, length, kind, name, dtype in fields:
-        lines.extend(_span_lines(data, abs_off + off, length, kind, name, dtype, endian=e, field_idx=fi))
-        fi += 1
-    return fi
-
-
-def _dissect_channel_range(data, sec_off, sec_size, base_off, stride, label, lines, fi):
-    idx = 0
-    off = base_off
-    while off + stride <= sec_size:
-        end = data[sec_off + off : sec_off + off + stride].find(b"\x00")
-        if end <= 0:
-            break
-        try:
-            s = data[sec_off + off : sec_off + off + end].decode("ascii")
-        except UnicodeDecodeError:
-            break
-        if not _is_printable(s):
-            break
-        idx += 1
-        name = f"{label}_{idx:02d}"
-        show_len = min(stride, 32)
+    for field_offset, length, kind, name, data_type in fields:
         lines.extend(
             _span_lines(
                 data,
-                sec_off + off,
-                show_len,
+                absolute_offset + field_offset,
+                length,
+                kind,
+                name,
+                data_type,
+                endian=endian,
+                field_index=field_index,
+            )
+        )
+        field_index += 1
+    return field_index
+
+
+def _dissect_channel_range(data, section_offset, section_size, base_offset, stride, label, lines, field_index):
+    channel_number = 0
+    channel_offset = base_offset
+    while channel_offset + stride <= section_size:
+        end = data[section_offset + channel_offset : section_offset + channel_offset + stride].find(b"\x00")
+        if end <= 0:
+            break
+        try:
+            channel_text = data[section_offset + channel_offset : section_offset + channel_offset + end].decode("ascii")
+        except UnicodeDecodeError:
+            break
+        if not _is_printable(channel_text):
+            break
+        channel_number += 1
+        name = f"{label}_{channel_number:02d}"
+        display_length = min(stride, 32)
+        lines.extend(
+            _span_lines(
+                data,
+                section_offset + channel_offset,
+                display_length,
                 "string",
                 name,
                 f"char[{stride}]",
-                field_idx=fi,
+                field_index=field_index,
             )
         )
-        fi += 1
-        off += stride
-    return fi
+        field_index += 1
+        channel_offset += stride
+    return field_index
 
 
 BROOKLYN2_CAPABILITY_HEAD_FIELDS = [
@@ -302,85 +314,113 @@ ULTIMO_RECEIVER_CHANNEL_BASES = [0x080C, 0x0834, 0x081C, 0x0844]
 ULTIMO_TRANSMITTER_CHANNEL_BASES = [0x060C, 0x0634, 0x061C, 0x0644]
 
 
-def _dissect_string_field(data, sec_off, off, maxlen, show_len, name, lines, fi):
-    lines.extend(_span_lines(data, sec_off + off, show_len, "string", name, f"char[{maxlen}]", field_idx=fi))
-    return fi + 1
+def _dissect_string_field(data, section_offset, field_offset, maximum_length, display_length, name, lines, field_index):
+    lines.extend(
+        _span_lines(
+            data,
+            section_offset + field_offset,
+            display_length,
+            "string",
+            name,
+            f"char[{maximum_length}]",
+            field_index=field_index,
+        )
+    )
+    return field_index + 1
 
 
-def _dissect_fixed_string_fields(data, sec_off, sec_size, fields, lines, fi):
-    for off, maxlen, name in fields:
-        if off + maxlen > sec_size:
+def _dissect_fixed_string_fields(data, section_offset, section_size, fields, lines, field_index):
+    for field_offset, maximum_length, name in fields:
+        if field_offset + maximum_length > section_size:
             continue
-        fi = _dissect_string_field(data, sec_off, off, maxlen, min(maxlen, 32), name, lines, fi)
-    return fi
+        field_index = _dissect_string_field(
+            data, section_offset, field_offset, maximum_length, min(maximum_length, 32), name, lines, field_index
+        )
+    return field_index
 
 
-def _dissect_candidate_string_fields(data, sec_off, sec_size, cfg, fields, lines, fi):
-    for name, maxlen, candidates in fields:
-        for off in candidates:
-            if off + maxlen <= sec_size and _is_printable_string(cfg, off, maxlen):
-                fi = _dissect_string_field(data, sec_off, off, maxlen, maxlen, name, lines, fi)
+def _dissect_candidate_string_fields(data, section_offset, section_size, payload, fields, lines, field_index):
+    for name, maximum_length, candidates in fields:
+        for field_offset in candidates:
+            if field_offset + maximum_length <= section_size and _is_printable_string(
+                payload, field_offset, maximum_length
+            ):
+                field_index = _dissect_string_field(
+                    data, section_offset, field_offset, maximum_length, maximum_length, name, lines, field_index
+                )
                 break
-    return fi
+    return field_index
 
 
-def _is_printable_string(cfg, off, maxlen):
-    text = _read_str(cfg, off, maxlen)
+def _is_printable_string(payload, offset, maximum_length):
+    text = _read_str(payload, offset, maximum_length)
     return _is_printable(text) and len(text) >= 2
 
 
-def _dissect_candidate_channel_range(data, sec_off, sec_size, cfg, bases, name, lines, fi):
+def _dissect_candidate_channel_range(data, section_offset, section_size, payload, bases, name, lines, field_index):
     for base in bases:
-        if _is_printable_string(cfg, base, 32):
-            return _dissect_channel_range(data, sec_off, sec_size, base, 32, name, lines, fi)
-    return fi
+        if _is_printable_string(payload, base, 32):
+            return _dissect_channel_range(data, section_offset, section_size, base, 32, name, lines, field_index)
+    return field_index
 
 
-def _dissect_brooklyn2_capability(data, sec_off, sec_size, lines, fi):
-    fi = _dissect_fixed_string_fields(data, sec_off, sec_size, BROOKLYN2_CAPABILITY_HEAD_FIELDS, lines, fi)
-    fi = _dissect_channel_range(data, sec_off, sec_size, 0x053C, 32, "tx_channels", lines, fi)
-    fi = _dissect_channel_range(data, sec_off, sec_size, 0x453C, 32, "rx_channels", lines, fi)
-    return _dissect_fixed_string_fields(data, sec_off, sec_size, BROOKLYN2_CAPABILITY_TAIL_FIELDS, lines, fi)
-
-
-def _dissect_ultimo_capability(data, sec_off, sec_size, lines, fi):
-    cfg = data[sec_off : sec_off + sec_size]
-    fi = _dissect_candidate_string_fields(data, sec_off, sec_size, cfg, ULTIMO_CAPABILITY_HEAD_FIELDS, lines, fi)
-    fi = _dissect_candidate_channel_range(
-        data, sec_off, sec_size, cfg, ULTIMO_TRANSMITTER_CHANNEL_BASES, "tx_channels", lines, fi
+def _dissect_brooklyn2_capability(data, section_offset, section_size, lines, field_index):
+    field_index = _dissect_fixed_string_fields(
+        data, section_offset, section_size, BROOKLYN2_CAPABILITY_HEAD_FIELDS, lines, field_index
     )
-    fi = _dissect_candidate_channel_range(
-        data, sec_off, sec_size, cfg, ULTIMO_RECEIVER_CHANNEL_BASES, "rx_channels", lines, fi
+    field_index = _dissect_channel_range(
+        data, section_offset, section_size, 0x053C, 32, "tx_channels", lines, field_index
     )
-    return _dissect_candidate_string_fields(data, sec_off, sec_size, cfg, ULTIMO_CAPABILITY_TAIL_FIELDS, lines, fi)
+    field_index = _dissect_channel_range(
+        data, section_offset, section_size, 0x453C, 32, "rx_channels", lines, field_index
+    )
+    return _dissect_fixed_string_fields(
+        data, section_offset, section_size, BROOKLYN2_CAPABILITY_TAIL_FIELDS, lines, field_index
+    )
 
 
-def _dissect_capability_partition(data, sec_off, sec_size, partition_id, lines, fi):
+def _dissect_ultimo_capability(data, section_offset, section_size, lines, field_index):
+    payload = data[section_offset : section_offset + section_size]
+    field_index = _dissect_candidate_string_fields(
+        data, section_offset, section_size, payload, ULTIMO_CAPABILITY_HEAD_FIELDS, lines, field_index
+    )
+    field_index = _dissect_candidate_channel_range(
+        data, section_offset, section_size, payload, ULTIMO_TRANSMITTER_CHANNEL_BASES, "tx_channels", lines, field_index
+    )
+    field_index = _dissect_candidate_channel_range(
+        data, section_offset, section_size, payload, ULTIMO_RECEIVER_CHANNEL_BASES, "rx_channels", lines, field_index
+    )
+    return _dissect_candidate_string_fields(
+        data, section_offset, section_size, payload, ULTIMO_CAPABILITY_TAIL_FIELDS, lines, field_index
+    )
+
+
+def _dissect_capability_partition(data, section_offset, section_size, partition_id, lines, field_index):
     platform_name = "Brooklyn II" if partition_id == 9 else "Ultimo"
     partition_name = PARTITION_NAMES[partition_id]
-    lines.append(_section_header(f"Capability Payload ({partition_name}, {platform_name}, 0x{sec_off:X})"))
+    lines.append(_section_header(f"Capability Payload ({partition_name}, {platform_name}, 0x{section_offset:X})"))
 
     if partition_id == 9:
-        return _dissect_brooklyn2_capability(data, sec_off, sec_size, lines, fi)
+        return _dissect_brooklyn2_capability(data, section_offset, section_size, lines, field_index)
     if partition_id == 14:
-        return _dissect_ultimo_capability(data, sec_off, sec_size, lines, fi)
-    return fi
+        return _dissect_ultimo_capability(data, section_offset, section_size, lines, field_index)
+    return field_index
 
 
 def _dissect_header(data):
     lines = []
-    fi = 0
+    field_index = 0
 
     lines.append(_section_header("AUDI Header"))
-    for off, length, kind, name, dtype in HEADER_FIELDS:
-        if off + length > len(data):
+    for header_field_offset, length, kind, name, data_type in HEADER_FIELDS:
+        if header_field_offset + length > len(data):
             break
-        lines.extend(_span_lines(data, off, length, kind, name, dtype, field_idx=fi))
-        fi += 1
+        lines.extend(_span_lines(data, header_field_offset, length, kind, name, data_type, field_index=field_index))
+        field_index += 1
 
-    hdr_len = struct.unpack(">I", data[4:8])[0]
-    section_table_offset, _, section_entry_size = _section_table_layout(data, hdr_len)
-    parsed_sections = _parse_sections(data, hdr_len)
+    header_length = struct.unpack(">I", data[4:8])[0]
+    section_table_offset, _, section_entry_size = _section_table_layout(data, header_length)
+    parsed_sections = _parse_sections(data, header_length)
     lines.append("")
     lines.append(_section_header("Section Table"))
 
@@ -388,9 +428,13 @@ def _dissect_header(data):
     for section_index, section in enumerate(parsed_sections):
         base = section_table_offset + section_index * section_entry_size
         lines.append(f"  {_COLOR_TYPE}── section {section_index} ({section['partition_name']}) ──{_RESET}")
-        for field_off, field_len, kind, name, dtype in SECTION_ENTRY_FIELDS:
-            lines.extend(_span_lines(data, base + field_off, field_len, kind, name, dtype, field_idx=fi))
-            fi += 1
+        for entry_field_offset, entry_field_length, kind, name, data_type in SECTION_ENTRY_FIELDS:
+            lines.extend(
+                _span_lines(
+                    data, base + entry_field_offset, entry_field_length, kind, name, data_type, field_index=field_index
+                )
+            )
+            field_index += 1
         sections.append(
             (
                 section_index,
@@ -400,32 +444,34 @@ def _dissect_header(data):
             )
         )
 
-    for sec_idx, s_type, s_off, s_size in sections:
-        if s_off + s_size > len(data):
+    for entry_index, partition_id, section_offset, section_size in sections:
+        if section_offset + section_size > len(data):
             continue
 
-        if s_type == 1:
+        if partition_id == 1:
             lines.append("")
-            sec_data = data[s_off : s_off + s_size]
-            uimage_off = sec_data.find(b"\x27\x05\x19\x56")
-            if uimage_off != -1:
-                fi = _dissect_uimage(data, s_off + uimage_off, lines, fi)
+            section_data = data[section_offset : section_offset + section_size]
+            uimage_offset = section_data.find(b"\x27\x05\x19\x56")
+            if uimage_offset != -1:
+                field_index = _dissect_uimage(data, section_offset + uimage_offset, lines, field_index)
 
             for magic_bytes in (CRAMFS_MAGIC_LE, CRAMFS_MAGIC_BE):
-                pos = sec_data.find(magic_bytes)
-                if pos != -1:
+                cramfs_offset = section_data.find(magic_bytes)
+                if cramfs_offset != -1:
                     lines.append("")
-                    fi = _dissect_cramfs_super(data, s_off + pos, lines, fi)
+                    field_index = _dissect_cramfs_super(data, section_offset + cramfs_offset, lines, field_index)
                     break
 
-        elif s_type in (9, 14):
+        elif partition_id in (9, 14):
             lines.append("")
-            fi = _dissect_capability_partition(data, s_off, s_size, s_type, lines, fi)
+            field_index = _dissect_capability_partition(
+                data, section_offset, section_size, partition_id, lines, field_index
+            )
 
-        elif s_type == 6:
-            if data[s_off : s_off + 4] == b"AUDI":
+        elif partition_id == 6:
+            if data[section_offset : section_offset + 4] == b"AUDI":
                 lines.append("")
-                lines.append(_section_header(f"Nested AUDI (boot, 0x{s_off:X})"))
+                lines.append(_section_header(f"Nested AUDI (boot, 0x{section_offset:X})"))
                 nested_fields = [
                     (0, 4, "magic", "magic", "char[4]"),
                     (4, 4, "u32", "header_length", "u32 BE"),
@@ -433,8 +479,18 @@ def _dissect_header(data):
                     (20, 4, "version", "firmware_version", "u8[4]"),
                     (24, 4, "crc", "crc32", "u32 BE"),
                 ]
-                for off, length, kind, name, dtype in nested_fields:
-                    lines.extend(_span_lines(data, s_off + off, length, kind, name, dtype, field_idx=fi))
-                    fi += 1
+                for nested_field_offset, length, kind, name, data_type in nested_fields:
+                    lines.extend(
+                        _span_lines(
+                            data,
+                            section_offset + nested_field_offset,
+                            length,
+                            kind,
+                            name,
+                            data_type,
+                            field_index=field_index,
+                        )
+                    )
+                    field_index += 1
 
     return "\n".join(lines)
