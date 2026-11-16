@@ -133,51 +133,60 @@ pub fn build_clock_control(
     mac: [u8; 6],
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    let c = control;
-    let rev = c.control_profile;
+    let clock_control = control;
+    let rev = clock_control.control_profile;
     let reject = NetaudioError::UnsupportedProtocolOperation;
     if !matches!(rev, 0x0734 | 0x073a)
-        || (rev == 0x0734 && c.has_extended_changes())
-        || c.multicast_dscp.is_some_and(|value| value > 63)
-        || (!c.advanced
-            && (c.ptpv1_enabled.is_some()
-                || c.ptpv2_enabled.is_some()
-                || c.aggregate_ptpv2_unicast_delay_requests.is_some()))
+        || (rev == 0x0734 && clock_control.has_extended_changes())
+        || clock_control.multicast_dscp.is_some_and(|value| value > 63)
+        || (!clock_control.advanced
+            && (clock_control.ptpv1_enabled.is_some()
+                || clock_control.ptpv2_enabled.is_some()
+                || clock_control
+                    .aggregate_ptpv2_unicast_delay_requests
+                    .is_some()))
     {
         return Err(reject);
     }
 
-    let allowed = c.availability();
-    if c.clock_source.is_some() && !c.advanced && !allowed.clock_source {
+    let allowed = clock_control.availability();
+    if clock_control.clock_source.is_some() && !clock_control.advanced && !allowed.clock_source {
         return Err(reject);
     }
-    if c.preferred_leader.is_some() && !c.advanced && !allowed.preferred_leader {
+    if clock_control.preferred_leader.is_some()
+        && !clock_control.advanced
+        && !allowed.preferred_leader
+    {
         return Err(reject);
     }
-    if c.subdomain.is_some() && !c.advanced && !allowed.subdomain {
+    if clock_control.subdomain.is_some() && !clock_control.advanced && !allowed.subdomain {
         return Err(reject);
     }
-    if c.global_unicast_delay_requests.is_some()
-        && !c.advanced
+    if clock_control.global_unicast_delay_requests.is_some()
+        && !clock_control.advanced
         && !allowed.global_unicast_delay_requests
     {
         return Err(reject);
     }
-    if c.aggregate_ptpv1_unicast_delay_requests.is_some()
-        && !c.advanced
+    if clock_control
+        .aggregate_ptpv1_unicast_delay_requests
+        .is_some()
+        && !clock_control.advanced
         && !allowed.aggregate_ptpv1_unicast_delay_requests
     {
         return Err(reject);
     }
-    if let Some(source) = c.clock_source {
+    if let Some(source) = clock_control.clock_source {
         if crate::clock_configuration::clock_source_name(source).is_none()
-            || (!c.advanced && source != 0 && !c.supported_clock_sources.contains(&source))
+            || (!clock_control.advanced
+                && source != 0
+                && !clock_control.supported_clock_sources.contains(&source))
         {
             return Err(reject);
         }
     }
     let mut ports = std::collections::BTreeMap::new();
-    for port in &c.ports {
+    for port in &clock_control.ports {
         if !(1..=64).contains(&port.port_id) || ports.insert(port.port_id, port).is_some() {
             return Err(reject);
         }
@@ -198,15 +207,15 @@ pub fn build_clock_control(
     let mut primary = 0u16;
     let mut extended = 0u16;
     let mut values = 0u16;
-    if let Some(source) = c.clock_source {
+    if let Some(source) = clock_control.clock_source {
         primary |= 1;
         record[10..12].copy_from_slice(&source.to_be_bytes());
     }
-    if let Some(preferred) = c.preferred_leader {
+    if let Some(preferred) = clock_control.preferred_leader {
         primary |= 2;
         record[12] = u8::from(preferred);
     }
-    if let Some(name) = &c.subdomain {
+    if let Some(name) = &clock_control.subdomain {
         if name.len() > 16 || (name.len() == 16 && !name.contains(&0)) {
             return Err(reject);
         }
@@ -221,12 +230,12 @@ pub fn build_clock_control(
         record[16..16 + name.len()].copy_from_slice(name);
     }
     for (bit, value) in [
-        (1, c.global_unicast_delay_requests),
-        (0x0200, c.aggregate_ptpv1_unicast_delay_requests),
-        (0x0400, c.aggregate_ptpv2_unicast_delay_requests),
-        (0x0004, c.follower_only),
-        (0x0008, c.ptpv1_enabled),
-        (0x0010, c.ptpv2_enabled),
+        (1, clock_control.global_unicast_delay_requests),
+        (0x0200, clock_control.aggregate_ptpv1_unicast_delay_requests),
+        (0x0400, clock_control.aggregate_ptpv2_unicast_delay_requests),
+        (0x0004, clock_control.follower_only),
+        (0x0008, clock_control.ptpv1_enabled),
+        (0x0010, clock_control.ptpv2_enabled),
     ] {
         if let Some(value) = value {
             extended |= bit;
@@ -242,13 +251,13 @@ pub fn build_clock_control(
     if rev == 0x073a {
         let mut mask = 0u32;
         for (bit, offset, value) in [
-            (0, 52, c.priority_mapping),
-            (1, 53, c.preferred_protocol),
-            (2, 55, c.ptpv2_clock_class),
-            (3, 54, c.ptpv2_domain),
-            (4, 56, c.ptpv2_priority1),
-            (5, 57, c.ptpv2_priority2),
-            (6, 64, c.multicast_dscp),
+            (0, 52, clock_control.priority_mapping),
+            (1, 53, clock_control.preferred_protocol),
+            (2, 55, clock_control.ptpv2_clock_class),
+            (3, 54, clock_control.ptpv2_domain),
+            (4, 56, clock_control.ptpv2_priority1),
+            (5, 57, clock_control.ptpv2_priority2),
+            (6, 64, clock_control.multicast_dscp),
         ] {
             if let Some(value) = value {
                 mask |= 1 << bit;
@@ -264,9 +273,9 @@ pub fn build_clock_control(
         }
 
         for (index, port) in ports.values().enumerate() {
-            let p = 68 + index * 12;
+            let port_offset = 68 + index * 12;
             let mut mask = 1u16;
-            record[p + 2..p + 4].copy_from_slice(&port.port_id.to_be_bytes());
+            record[port_offset + 2..port_offset + 4].copy_from_slice(&port.port_id.to_be_bytes());
             for (bit, offset, value) in [
                 (2, 4, port.ttl),
                 (4, 5, port.sync_interval.map(|interval| interval as u8)),
@@ -285,14 +294,14 @@ pub fn build_clock_control(
             ] {
                 if let Some(value) = value {
                     mask |= bit;
-                    record[p + offset] = value;
+                    record[port_offset + offset] = value;
                 }
             }
             if let Some(value) = port.follower_only {
-                record[p + 10] = u8::from(value);
-                record[p + 11] = 1;
+                record[port_offset + 10] = u8::from(value);
+                record[port_offset + 11] = 1;
             }
-            record[p..p + 2].copy_from_slice(&mask.to_be_bytes());
+            record[port_offset..port_offset + 2].copy_from_slice(&mask.to_be_bytes());
         }
     }
     let mut body = vec![0, 0];

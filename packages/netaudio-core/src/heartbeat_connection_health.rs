@@ -225,8 +225,8 @@ impl ReceiverPath {
 
     fn resolve(&mut self, topology: &Topology, evidence: &mut Value) {
         let capacity = topology.capacity.as_ref().unwrap_or(&Value::Null);
-        let f = capacity["base_receive_flow_capacity"].as_u64().unwrap_or(0);
-        let n = capacity["network_interface_count"].as_u64().unwrap_or(0);
+        let flow_capacity = capacity["base_receive_flow_capacity"].as_u64().unwrap_or(0);
+        let interface_count = capacity["network_interface_count"].as_u64().unwrap_or(0);
         self.network_interface_index = None;
         self.audio_receiver_flow_id = None;
         self.media_type = None;
@@ -234,10 +234,10 @@ impl ReceiverPath {
         self.attribution_status = "unresolved".into();
         self.attribution_reason = Some("Audio capacity or network topology is unavailable".into());
         *evidence = json!({"capacity": capacity, "inventory_complete": topology.complete});
-        if f == 0
-            || n == 0
-            || f > 65535
-            || n > 65535
+        if flow_capacity == 0
+            || interface_count == 0
+            || flow_capacity > 65535
+            || interface_count > 65535
             || capacity["resource_extension_offset"].as_u64() != Some(0)
             || !topology.complete
             || topology.flows.iter().any(|flow| {
@@ -248,12 +248,12 @@ impl ReceiverPath {
             return;
         }
         let index = u64::from(self.telemetry_index);
-        if index >= f * n {
+        if index >= flow_capacity * interface_count {
             self.attribution_reason = Some("Telemetry index exceeds advertised topology".into());
             return;
         }
-        let local_id = (index % f + 1) as u16;
-        self.network_interface_index = Some((index / f) as u16);
+        let local_id = (index % flow_capacity + 1) as u16;
+        self.network_interface_index = Some((index / flow_capacity) as u16);
         self.audio_receiver_flow_id = Some(local_id);
         self.media_type = Some("audio".into());
         let matches: Vec<_> = topology
@@ -283,7 +283,7 @@ impl ReceiverPath {
         evidence["network_interface_index"] = json!(self.network_interface_index);
         evidence["audio_receiver_flow_id"] = json!(local_id);
         let flow = evidence["flow"].clone();
-        evidence["comparison_key"] = json!({"capacity": f, "networks": n,
+        evidence["comparison_key"] = json!({"capacity": flow_capacity, "networks": interface_count,
             "network": self.network_interface_index, "local_id": local_id,
             "global_id": self.global_flow_id, "source": flow["source"], "flow_name": flow["flow_name"],
             "endpoint": flow["endpoint_descriptor_hexadecimal"],

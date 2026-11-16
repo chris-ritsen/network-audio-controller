@@ -201,39 +201,39 @@ fn claim(
     Some(())
 }
 fn vector(data: &[u8], used: &mut Vec<std::ops::Range<usize>>, offset: u16) -> Option<ClockVector> {
-    let p = usize::from(offset);
-    if p == 0 {
+    let position = usize::from(offset);
+    if position == 0 {
         return None;
     }
-    claim(data, used, p, 8)?;
+    claim(data, used, position, 8)?;
     Some(ClockVector {
         offset,
-        count: read_u16(data, p)?,
-        unknown: read_u16(data, p + 2)?,
-        first_record: read_u16(data, p + 4)?,
-        stride: read_u16(data, p + 6)?,
+        count: read_u16(data, position)?,
+        unknown: read_u16(data, position + 2)?,
+        first_record: read_u16(data, position + 4)?,
+        stride: read_u16(data, position + 6)?,
     })
 }
 
 pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
     validate_conmon_envelope(data, 0x0020)?;
-    let r = data.get(24..)?;
-    let rev = read_u16(r, 0)?;
-    let clock_state_code = read_u16(r, 8)?;
-    let servo_state_code = read_u16(r, 10)?;
-    let source = read_u16(r, 12)?;
-    let preferred = match *r.get(14)? {
+    let record = data.get(24..)?;
+    let rev = read_u16(record, 0)?;
+    let clock_state_code = read_u16(record, 8)?;
+    let servo_state_code = read_u16(record, 10)?;
+    let source = read_u16(record, 12)?;
+    let preferred = match *record.get(14)? {
         0 => Some(false),
         1 => Some(true),
         _ => None,
     };
-    let stratum = *r.get(15)?;
+    let stratum = *record.get(15)?;
     let supported = rev == 0x0100 || rev >= 0x0200;
-    let mut s = PtpClockStatus {
+    let mut status = PtpClockStatus {
         record_revision: rev,
-        raw_record: r.to_vec(),
+        raw_record: record.to_vec(),
         status_supported: supported,
-        congestion_delay_microseconds: read_u32(r, 4)?,
+        congestion_delay_microseconds: read_u32(record, 4)?,
         clock_state_code,
         clock_state: label(
             clock_state_code,
@@ -283,7 +283,7 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
         port_vector: None,
         extension_descriptor: None,
         global_block: None,
-        clock_frequency_offset_parts_per_billion: read_u32(r, 16)? as i32,
+        clock_frequency_offset_parts_per_billion: read_u32(record, 16)? as i32,
         clock_port_state_code: None,
         clock_role: None,
         clock_port_records: None,
@@ -306,37 +306,42 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
         multicast_dscp: None,
     };
     if !supported {
-        return Some(s);
+        return Some(status);
     }
     let (count_at, ports_at) = if rev == 0x0100 {
         (0x14, 0x18)
     } else {
-        s.ptpv1_device_uuid = Some(r.get(0x14..0x1a)?.try_into().ok()?);
-        s.ptpv1_master_uuid = Some(r.get(0x1c..0x22)?.try_into().ok()?);
-        s.ptpv1_grandmaster_uuid = Some(r.get(0x24..0x2a)?.try_into().ok()?);
-        s.uuid_reserved = [r.get(0x1a..0x1c)?, r.get(0x22..0x24)?, r.get(0x2a..0x2c)?].concat();
-        s.extension_offset = Some(read_u16(r, 0x2e)?);
+        status.ptpv1_device_uuid = Some(record.get(0x14..0x1a)?.try_into().ok()?);
+        status.ptpv1_master_uuid = Some(record.get(0x1c..0x22)?.try_into().ok()?);
+        status.ptpv1_grandmaster_uuid = Some(record.get(0x24..0x2a)?.try_into().ok()?);
+        status.uuid_reserved = [
+            record.get(0x1a..0x1c)?,
+            record.get(0x22..0x24)?,
+            record.get(0x2a..0x2c)?,
+        ]
+        .concat();
+        status.extension_offset = Some(read_u16(record, 0x2e)?);
         (0x2c, 0x30)
     };
-    let count = usize::from(read_u16(r, count_at)?);
+    let count = usize::from(read_u16(record, count_at)?);
     let mut used = vec![];
-    claim(r, &mut used, 0, ports_at + count.checked_mul(4)?)?;
-    for i in 0..count {
-        let p = ports_at + i * 4;
-        let state = read_u16(r, p)?;
-        s.base_ports.push(ClockBasePort {
+    claim(record, &mut used, 0, ports_at + count.checked_mul(4)?)?;
+    for index in 0..count {
+        let position = ports_at + index * 4;
+        let state = read_u16(record, position)?;
+        status.base_ports.push(ClockBasePort {
             state_code: state,
             state: port_label(state),
-            unknown: read_u16(r, p + 2)?,
+            unknown: read_u16(record, position + 2)?,
             role: role(state),
         });
     }
-    s.clock_port_state_code = s.base_ports.first().map(|port| port.state_code);
-    s.clock_role = s.clock_port_state_code.and_then(role);
-    s.synchronization = if servo_state_code == 3 {
+    status.clock_port_state_code = status.base_ports.first().map(|port| port.state_code);
+    status.clock_role = status.clock_port_state_code.and_then(role);
+    status.synchronization = if servo_state_code == 3 {
         "synchronized"
     } else if clock_state_code == 3
-        || (stratum == 255 && s.base_ports.iter().any(|port| port.state_code == 4))
+        || (stratum == 255 && status.base_ports.iter().any(|port| port.state_code == 4))
     {
         "lost"
     } else if servo_state_code == 2 {
@@ -345,9 +350,9 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
         "unknown"
     }
     .into();
-    let e = usize::from(s.extension_offset.unwrap_or(0));
-    if rev < 0x0400 || e == 0 {
-        return Some(s);
+    let extension = usize::from(status.extension_offset.unwrap_or(0));
+    if rev < 0x0400 || extension == 0 {
+        return Some(status);
     }
     let size = if rev >= 0x0726 {
         44
@@ -360,27 +365,28 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
     } else {
         28
     };
-    claim(r, &mut used, e, size)?;
-    s.clock_capabilities = Some(read_u16(r, e)?);
-    s.extension_unknown_word = Some(read_u16(r, e + 2)?);
-    s.maximum_drift_parts_per_billion = Some(read_u32(r, e + 4)? as i32);
-    s.extension_unknown_byte = Some(r[e + 8]);
-    s.domain_raw = Some(r[e + 9]);
-    let flags = read_u16(r, e + 10)?;
-    s.extension_flags = Some(flags);
-    s.follower_only = (rev >= 0x0717).then_some(flags & 4 != 0);
-    s.preferred_leader_locked = (rev >= 0x072e).then_some(flags & 0x1000 != 0);
-    s.ptpv2_domain = (rev >= 0x0728 && flags & 0x0800 != 0).then_some(r[e + 9]);
-    s.global_unicast_delay_requests = (0x0603..0x071f).contains(&rev).then_some(flags & 1 != 0);
-    let subdomain = r.get(e + 12..e + 28)?;
+    claim(record, &mut used, extension, size)?;
+    status.clock_capabilities = Some(read_u16(record, extension)?);
+    status.extension_unknown_word = Some(read_u16(record, extension + 2)?);
+    status.maximum_drift_parts_per_billion = Some(read_u32(record, extension + 4)? as i32);
+    status.extension_unknown_byte = Some(record[extension + 8]);
+    status.domain_raw = Some(record[extension + 9]);
+    let flags = read_u16(record, extension + 10)?;
+    status.extension_flags = Some(flags);
+    status.follower_only = (rev >= 0x0717).then_some(flags & 4 != 0);
+    status.preferred_leader_locked = (rev >= 0x072e).then_some(flags & 0x1000 != 0);
+    status.ptpv2_domain = (rev >= 0x0728 && flags & 0x0800 != 0).then_some(record[extension + 9]);
+    status.global_unicast_delay_requests =
+        (0x0603..0x071f).contains(&rev).then_some(flags & 1 != 0);
+    let subdomain = record.get(extension + 12..extension + 28)?;
     if !subdomain.contains(&0) {
         return None;
     }
-    s.clock_subdomain = Some(subdomain.try_into().ok()?);
+    status.clock_subdomain = Some(subdomain.try_into().ok()?);
     if rev >= 0x0704 {
-        let mute = read_u16(r, e + 28)?;
-        s.mute_flags = Some(mute);
-        s.mute_state = Some(if mute == 0 { "unmuted" } else { "muted" });
+        let mute = read_u16(record, extension + 28)?;
+        status.mute_flags = Some(mute);
+        status.mute_state = Some(if mute == 0 { "unmuted" } else { "muted" });
         let mut unknown = mute;
         for (bit, name) in [
             (1, "synchronization loss"),
@@ -390,54 +396,54 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
             (16, "user mute"),
         ] {
             if mute & bit != 0 {
-                s.mute_reasons.push(name.into());
+                status.mute_reasons.push(name.into());
             }
             unknown &= !bit;
         }
 
         if unknown != 0 {
-            s.mute_reasons.push("unknown reason".into());
+            status.mute_reasons.push("unknown reason".into());
         }
     }
     if rev >= 0x0705 {
-        let word = read_u16(r, e + 30)?;
-        s.word_clock_state_code = Some(word);
-        s.word_clock_state = label(word, &["unknown", "none", "invalid", "valid", "missing"]);
+        let word = read_u16(record, extension + 30)?;
+        status.word_clock_state_code = Some(word);
+        status.word_clock_state = label(word, &["unknown", "none", "invalid", "valid", "missing"]);
     }
     if rev < 0x071c {
-        return Some(s);
+        return Some(status);
     }
-    s.descriptor_bytes = r[e + 32..e + size].to_vec();
+    status.descriptor_bytes = record[extension + 32..extension + size].to_vec();
     let mut ports = vec![];
-    let base_vector = read_u16(r, e + 34)? != 0;
+    let base_vector = read_u16(record, extension + 34)? != 0;
     if base_vector {
-        let v = vector(r, &mut used, read_u16(r, e + 32)?)?;
-        if v.stride != 16 && !(rev >= 0x0726 && v.stride == 0x1000) {
+        let port_vector = vector(record, &mut used, read_u16(record, extension + 32)?)?;
+        if port_vector.stride != 16 && !(rev >= 0x0726 && port_vector.stride == 0x1000) {
             return None;
         }
-        let start = usize::from(v.first_record);
-        let count = usize::from(v.count);
-        claim(r, &mut used, start, count.checked_mul(16)?)?;
-        for i in 0..count {
-            let p = start + i * 16;
-            let values = read_u16(r, p)?;
-            let valid = read_u16(r, p + 14)?;
+        let start = usize::from(port_vector.first_record);
+        let count = usize::from(port_vector.count);
+        claim(record, &mut used, start, count.checked_mul(16)?)?;
+        for index in 0..count {
+            let position = start + index * 16;
+            let values = read_u16(record, position)?;
+            let valid = read_u16(record, position + 14)?;
             let available = |bit| (rev < 0x071f || valid & bit != 0).then_some(values & bit != 0);
-            let state = read_u16(r, p + 12)?;
-            let path = r[p + 6];
+            let state = read_u16(record, position + 12)?;
+            let path = record[position + 6];
             ports.push(PtpClockPortRecord {
                 record_flags: values,
                 user_disabled: available(1),
                 link_down: available(2),
                 unicast_delay_requests: (rev >= 0x071f && valid & 4 != 0)
                     .then_some(values & 4 != 0),
-                record_number: read_u16(r, p + 2)?,
-                ptp_version: r[p + 4],
-                record_format_code: r[p + 5],
+                record_number: read_u16(record, position + 2)?,
+                ptp_version: record[position + 4],
+                record_format_code: record[position + 5],
                 transport_path_code: path,
                 transport_path: label(u16::from(path), &["unknown", "multicast", "unicast"]),
-                reserved_byte: r[p + 7],
-                unknown_word: read_u32(r, p + 8)?,
+                reserved_byte: record[position + 7],
+                unknown_word: read_u32(record, position + 8)?,
                 network_interface_index: None,
                 interface_flags: None,
                 interface_record: None,
@@ -447,18 +453,18 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
                 status_flags: valid,
             });
         }
-        s.port_vector = Some(v);
+        status.port_vector = Some(port_vector);
     }
     if rev >= 0x0726 {
-        let descriptor = r.get(e + 32..e + 44)?;
-        s.extended_port_descriptor = Some(descriptor.to_vec());
+        let descriptor = record.get(extension + 32..extension + 44)?;
+        status.extended_port_descriptor = Some(descriptor.to_vec());
         let extent = read_u16(descriptor, 6)?;
         let (global_offset, global_length) = if extent >= 12 {
             (read_u16(descriptor, 8), read_u16(descriptor, 10))
         } else {
             (None, None)
         };
-        s.extension_descriptor = Some(ClockExtensionDescriptor {
+        status.extension_descriptor = Some(ClockExtensionDescriptor {
             base_vector_offset: read_u16(descriptor, 0)?,
             base_vector_metadata: read_u16(descriptor, 2)?,
             unresolved_metadata: read_u16(descriptor, 4)?,
@@ -468,19 +474,19 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
         });
         if let (Some(offset), Some(length)) = (global_offset, global_length) {
             if offset != 0 {
-                global_block(r, &mut used, rev, offset, length, &mut s)?;
+                global_block(record, &mut used, rev, offset, length, &mut status)?;
             }
         }
     }
 
     let mut port_ids = std::collections::HashSet::new();
-    if !s.extended_ports.is_empty()
-        && ports.len() == s.extended_ports.len()
+    if !status.extended_ports.is_empty()
+        && ports.len() == status.extended_ports.len()
         && ports.iter().all(|port| {
             (1..=64).contains(&port.record_number) && port_ids.insert(port.record_number)
         })
     {
-        for (port, properties) in ports.iter_mut().zip(&mut s.extended_ports) {
+        for (port, properties) in ports.iter_mut().zip(&mut status.extended_ports) {
             properties.port_id = Some(port.record_number);
             port.network_interface_index = properties.network_interface_index;
             port.interface_flags = Some(properties.validity);
@@ -498,33 +504,33 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
             .iter()
             .all(|port| port.unicast_delay_requests == first)
         {
-            s.aggregate_ptpv1_unicast_delay_requests = first;
+            status.aggregate_ptpv1_unicast_delay_requests = first;
         }
     }
-    s.clock_port_records = base_vector.then_some(ports);
-    Some(s)
+    status.clock_port_records = base_vector.then_some(ports);
+    Some(status)
 }
 
 fn global_block(
-    r: &[u8],
+    record: &[u8],
     used: &mut Vec<std::ops::Range<usize>>,
     rev: u16,
     offset: u16,
     length: u16,
-    s: &mut PtpClockStatus,
+    status: &mut PtpClockStatus,
 ) -> Option<()> {
-    let x = usize::from(offset);
+    let block_start = usize::from(offset);
     let length_bytes = usize::from(length);
     if length_bytes < 8 {
         return None;
     }
-    claim(r, used, x, length_bytes)?;
-    let block = &r[x..x + length_bytes];
+    claim(record, used, block_start, length_bytes)?;
+    let block = &record[block_start..block_start + length_bytes];
     let port_count = read_u16(block, 0)?;
     let identity_validity = read_u16(block, 2)?;
     let port_offset = read_u16(block, 4)?;
     let port_stride = read_u16(block, 6)?;
-    s.global_block = Some(ClockGlobalBlock {
+    status.global_block = Some(ClockGlobalBlock {
         offset,
         length,
         extended_port_count: port_count,
@@ -539,28 +545,28 @@ fn global_block(
             .flatten()
             .map(crate::bytes::hexadecimal)
     };
-    s.ptpv2_device_identity = identity(1, 8);
-    s.ptpv2_master_identity = identity(2, 16);
-    s.ptpv2_grandmaster_identity = identity(4, 24);
-    s.extended_capabilities = read_u32(block, 32);
-    s.extended_validity = if rev >= 0x0739 {
+    status.ptpv2_device_identity = identity(1, 8);
+    status.ptpv2_master_identity = identity(2, 16);
+    status.ptpv2_grandmaster_identity = identity(4, 24);
+    status.extended_capabilities = read_u32(block, 32);
+    status.extended_validity = if rev >= 0x0739 {
         read_u32(block, 36)
     } else {
         None
     };
-    s.extended_value_word = read_u16(block, 40);
-    s.extended_value_validity_word = read_u16(block, 42);
-    if let Some(valid) = s.extended_validity {
+    status.extended_value_word = read_u16(block, 40);
+    status.extended_value_validity_word = read_u16(block, 42);
+    if let Some(valid) = status.extended_validity {
         let parameter =
             |bit: u32, at: usize| (valid & bit != 0).then(|| block.get(at).copied()).flatten();
-        s.priority_mapping = parameter(0x01, 48);
-        s.preferred_protocol = parameter(0x02, 49);
-        s.extended_ptpv2_domain = parameter(0x08, 50);
-        s.ptpv2_clock_class = parameter(0x04, 51);
-        s.ptpv2_priority1 = parameter(0x10, 52);
-        s.ptpv2_priority2 = parameter(0x20, 53);
+        status.priority_mapping = parameter(0x01, 48);
+        status.preferred_protocol = parameter(0x02, 49);
+        status.extended_ptpv2_domain = parameter(0x08, 50);
+        status.ptpv2_clock_class = parameter(0x04, 51);
+        status.ptpv2_priority1 = parameter(0x10, 52);
+        status.ptpv2_priority2 = parameter(0x20, 53);
         if rev >= 0x073a {
-            s.multicast_dscp = parameter(0x40, 60);
+            status.multicast_dscp = parameter(0x40, 60);
         }
     }
 
@@ -573,10 +579,10 @@ fn global_block(
     if start == 0 || stride < 4 {
         return None;
     }
-    claim(r, used, start, count.checked_mul(stride)?)?;
+    claim(record, used, start, count.checked_mul(stride)?)?;
     for index in 0..count {
-        let p = start + index * stride;
-        let raw = &r[p..p + stride];
+        let position = start + index * stride;
+        let raw = &record[position..position + stride];
         let validity = read_u16(raw, 0)?;
         let byte = |bit: u16, at: usize| {
             (rev >= 0x0739 && validity & bit != 0)
@@ -588,7 +594,7 @@ fn global_block(
         let delay = byte(0x08, 10);
         let peer = byte(0x10, 11);
         let follower_valid = rev >= 0x0739 && raw.get(6).is_some_and(|value| value & 1 != 0);
-        s.extended_ports.push(ExtendedClockPort {
+        status.extended_ports.push(ExtendedClockPort {
             port_id: None,
             network_interface_index: (validity & 1 != 0).then(|| read_u16(raw, 2)).flatten(),
             record_index: index,

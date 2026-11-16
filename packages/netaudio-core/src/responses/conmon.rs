@@ -617,15 +617,15 @@ pub struct ClockUnicastStatus {
 
 pub fn parse_clock_unicast_status(data: &[u8]) -> Option<ClockUnicastStatus> {
     validate_conmon_envelope(data, 0x0024)?;
-    let r = data.get(24..)?;
+    let record = data.get(24..)?;
     Some(ClockUnicastStatus {
-        record_revision: read_u16(r, 0)?,
-        raw_record: r.to_vec(),
+        record_revision: read_u16(record, 0)?,
+        raw_record: record.to_vec(),
         raw_words: [
-            read_u32(r, 8)?,
-            read_u32(r, 12)?,
-            read_u32(r, 16)?,
-            read_u32(r, 20)?,
+            read_u32(record, 8)?,
+            read_u32(record, 12)?,
+            read_u32(record, 16)?,
+            read_u32(record, 20)?,
         ],
     })
 }
@@ -642,25 +642,25 @@ pub struct ClockMasterStatus {
 
 pub fn parse_clock_master_status(data: &[u8]) -> Option<ClockMasterStatus> {
     validate_conmon_envelope(data, 0x0022)?;
-    let r = data.get(24..)?;
-    let count = read_u16(r, 8)?;
-    let length = read_u16(r, 10)?;
+    let record = data.get(24..)?;
+    let count = read_u16(record, 8)?;
+    let length = read_u16(record, 10)?;
     let block_end = 8usize.checked_add(usize::from(length))?;
     let codes_end = 12usize.checked_add(usize::from(count).checked_mul(2)?)?;
     if codes_end > block_end {
         return None;
     }
-    r.get(..block_end)?;
+    record.get(..block_end)?;
     let codes = (0..usize::from(count))
-        .map(|index| read_u16(r, 12 + index * 2))
+        .map(|index| read_u16(record, 12 + index * 2))
         .collect::<Option<Vec<_>>>()?;
     Some(ClockMasterStatus {
-        record_revision: read_u16(r, 0)?,
-        raw_record: r.to_vec(),
+        record_revision: read_u16(record, 0)?,
+        raw_record: record.to_vec(),
         record_count: count,
         block_length: length,
         status_codes: codes,
-        block_padding: r[codes_end..block_end].to_vec(),
+        block_padding: record[codes_end..block_end].to_vec(),
     })
 }
 
@@ -681,14 +681,14 @@ pub struct ClockIdentifierStatus {
 
 pub fn parse_clock_identifier_status(data: &[u8]) -> Option<ClockIdentifierStatus> {
     validate_conmon_envelope(data, 0x0026)?;
-    let r = data.get(24..)?;
-    let region_size = read_u16(r, 8)?;
-    let bounded = r.get(..usize::from(region_size))?;
-    let width = read_u16(r, 12)?;
-    let length = read_u16(r, 14)?;
-    let name = read_u16(r, 16)?;
-    let first = usize::from(read_u16(r, 20)?);
-    let second = usize::from(read_u16(r, 24)?);
+    let record = data.get(24..)?;
+    let region_size = read_u16(record, 8)?;
+    let bounded = record.get(..usize::from(region_size))?;
+    let width = read_u16(record, 12)?;
+    let length = read_u16(record, 14)?;
+    let name = read_u16(record, 16)?;
+    let first = usize::from(read_u16(record, 20)?);
+    let second = usize::from(read_u16(record, 24)?);
     let start = usize::from(name);
     let end = start.checked_add(usize::from(length))?;
     if length >= width || start < 26 || first < 26 || second < 26 || *bounded.get(end)? != 0 {
@@ -699,11 +699,11 @@ pub fn parse_clock_identifier_status(data: &[u8]) -> Option<ClockIdentifierStatu
         first..first.checked_add(6)?,
         second..second.checked_add(6)?,
     ];
-    for (i, a) in ranges.iter().enumerate() {
-        bounded.get(a.clone())?;
-        if ranges[i + 1..]
+    for (index, range) in ranges.iter().enumerate() {
+        bounded.get(range.clone())?;
+        if ranges[index + 1..]
             .iter()
-            .any(|other_range| a.start < other_range.end && other_range.start < a.end)
+            .any(|other_range| range.start < other_range.end && other_range.start < range.end)
         {
             return None;
         }
@@ -713,10 +713,10 @@ pub fn parse_clock_identifier_status(data: &[u8]) -> Option<ClockIdentifierStatu
         return None;
     }
     Some(ClockIdentifierStatus {
-        record_revision: read_u16(r, 0)?,
-        raw_record: r.to_vec(),
+        record_revision: read_u16(record, 0)?,
+        raw_record: record.to_vec(),
         region_size,
-        item_count: read_u16(r, 10)?,
+        item_count: read_u16(record, 10)?,
         maximum_name_width: width,
         name_length: length,
         name_pointer: name,

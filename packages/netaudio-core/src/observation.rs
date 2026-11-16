@@ -198,10 +198,11 @@ impl Series {
             if elapsed < 0.0 {
                 return false;
             }
-            let evidence_key = |e: &Value| {
-                e.get("comparison_key")
+            let evidence_key = |evidence: &Value| {
+                evidence
+                    .get("comparison_key")
                     .cloned()
-                    .unwrap_or_else(|| e.clone())
+                    .unwrap_or_else(|| evidence.clone())
             };
             let continuity = elapsed < freshness
                 && evidence_key(&previous.evidence) == evidence_key(&sample.evidence)
@@ -285,14 +286,18 @@ impl Series {
             .collect();
         let values: Vec<_> = window.iter().filter_map(|sample| sample.value).collect();
         let mean = (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64);
-        let deviation = mean.map(|m| {
-            (values.iter().map(|value| (value - m).powi(2)).sum::<f64>() / values.len() as f64)
+        let deviation = mean.map(|average| {
+            (values
+                .iter()
+                .map(|value| (value - average).powi(2))
+                .sum::<f64>()
+                / values.len() as f64)
                 .sqrt()
         });
         let peak = window
             .iter()
             .filter(|sample| sample.value.is_some())
-            .max_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+            .max_by(|left, right| left.value.partial_cmp(&right.value).unwrap());
         self.statistics = json!({"count": window.len(), "finite_count": values.len(), "mean": mean,
             "minimum": values.iter().copied().reduce(f64::min), "maximum": values.iter().copied().reduce(f64::max),
             "population_standard_deviation": deviation, "peak_observed_at": peak.map(|sample| &sample.observed_at),
@@ -302,7 +307,7 @@ impl Series {
         if current.source == "receiver_latency" {
             if let Some(budget) = current.evidence["configured_latency_nanoseconds"]
                 .as_u64()
-                .filter(|b| *b > 0)
+                .filter(|latency| *latency > 0)
             {
                 let mut counts = vec![0u64; 20];
                 let mut overflow = 0;

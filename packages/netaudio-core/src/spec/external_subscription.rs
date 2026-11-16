@@ -56,19 +56,22 @@ impl ExternalSubscriptionSpec {
                     port: value.port,
                 })
             };
-        let p = &self.parameters;
+        let parameters = &self.parameters;
         Ok(crate::commands::build_external_receiver_subscription(
             &ExternalReceiverSubscription {
-                device_protocol: p.device_protocol,
-                receiver_channel_ids: &p.receiver_channel_ids,
-                flow_slot_assignments: &p.flow_slot_assignments,
-                advertised_flow_slot_count: p.advertised_flow_slot_count,
+                device_protocol: parameters.device_protocol,
+                receiver_channel_ids: &parameters.receiver_channel_ids,
+                flow_slot_assignments: &parameters.flow_slot_assignments,
+                advertised_flow_slot_count: parameters.advertised_flow_slot_count,
                 flow_identity: ExternalFlowIdentity {
-                    source_address: p.source_address.parse().map_err(|_| SpecError::InvalidIp)?,
-                    session_id: p.session_id,
+                    source_address: parameters
+                        .source_address
+                        .parse()
+                        .map_err(|_| SpecError::InvalidIp)?,
+                    session_id: parameters.session_id,
                 },
-                clock_offset: p.clock_offset.unwrap_or(0),
-                primary_destination: destination(&p.primary_destination)?,
+                clock_offset: parameters.clock_offset.unwrap_or(0),
+                primary_destination: destination(&parameters.primary_destination)?,
                 secondary_destination: self
                     .secondary_destination
                     .as_ref()
@@ -78,7 +81,7 @@ impl ExternalSubscriptionSpec {
                     .advertisement_supports_multiple_interfaces,
                 receiver_supports_multiple_interfaces: self.receiver_supports_multiple_interfaces,
             },
-            p.message_id,
+            parameters.message_id,
         )?)
     }
 }

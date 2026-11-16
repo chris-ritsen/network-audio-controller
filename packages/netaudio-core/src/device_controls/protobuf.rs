@@ -56,28 +56,28 @@ pub fn parse(data: &[u8]) -> Option<Message<'_>> {
     }
     Some(fields)
 }
-pub fn uint(m: &Message<'_>, n: u32) -> Option<u32> {
+pub fn uint(fields: &Message<'_>, number: u32) -> Option<u32> {
     let mut result = 0;
-    for f in m.iter().filter(|f| f.number == n) {
-        let Value::Varint(v) = f.value else {
+    for field in fields.iter().filter(|candidate| candidate.number == number) {
+        let Value::Varint(value) = field.value else {
             return None;
         };
-        result = u32::try_from(v).ok()?;
+        result = u32::try_from(value).ok()?;
     }
     Some(result)
 }
-pub fn bytes<'a>(m: &Message<'a>, n: u32) -> Option<Option<&'a [u8]>> {
+pub fn bytes<'a>(fields: &Message<'a>, number: u32) -> Option<Option<&'a [u8]>> {
     let mut result = None;
-    for f in m.iter().filter(|f| f.number == n) {
-        let Value::Bytes(v) = f.value else {
+    for field in fields.iter().filter(|candidate| candidate.number == number) {
+        let Value::Bytes(payload) = field.value else {
             return None;
         };
-        result = Some(v);
+        result = Some(payload);
     }
     Some(result)
 }
-pub fn nested<'a>(m: &Message<'a>, n: u32) -> Option<Option<Message<'a>>> {
-    bytes(m, n)?.map(parse).transpose_option()
+pub fn nested<'a>(fields: &Message<'a>, number: u32) -> Option<Option<Message<'a>>> {
+    bytes(fields, number)?.map(parse).transpose_option()
 }
 trait Transpose<T> {
     fn transpose_option(self) -> Option<Option<T>>;
@@ -86,26 +86,26 @@ impl<T> Transpose<T> for Option<Option<T>> {
     fn transpose_option(self) -> Option<Option<T>> {
         match self {
             None => Some(None),
-            Some(v) => v.map(Some),
+            Some(inner) => inner.map(Some),
         }
     }
 }
-pub fn string(m: &Message<'_>, n: u32) -> Option<String> {
+pub fn string(fields: &Message<'_>, number: u32) -> Option<String> {
     Some(
-        std::str::from_utf8(bytes(m, n)?.unwrap_or_default())
+        std::str::from_utf8(bytes(fields, number)?.unwrap_or_default())
             .ok()?
             .to_owned(),
     )
 }
-pub fn repeated_uint(m: &Message<'_>, n: u32) -> Option<Vec<u32>> {
+pub fn repeated_uint(fields: &Message<'_>, number: u32) -> Option<Vec<u32>> {
     let mut result = Vec::new();
-    for f in m.iter().filter(|f| f.number == n) {
-        match f.value {
-            Value::Varint(v) => result.push(u32::try_from(v).ok()?),
-            Value::Bytes(b) => {
-                let mut p = 0;
-                while p < b.len() {
-                    result.push(u32::try_from(varint(b, &mut p)?).ok()?);
+    for field in fields.iter().filter(|candidate| candidate.number == number) {
+        match field.value {
+            Value::Varint(value) => result.push(u32::try_from(value).ok()?),
+            Value::Bytes(packed) => {
+                let mut position = 0;
+                while position < packed.len() {
+                    result.push(u32::try_from(varint(packed, &mut position)?).ok()?);
                 }
             }
             _ => return None,
@@ -120,30 +120,30 @@ pub fn put_varint(out: &mut Vec<u8>, mut value: u64) {
     }
     out.push(value as u8);
 }
-pub fn put_uint(out: &mut Vec<u8>, n: u32, v: u32) {
-    if v == 0 {
+pub fn put_uint(out: &mut Vec<u8>, number: u32, value: u32) {
+    if value == 0 {
         return;
     }
-    put_varint(out, u64::from(n) << 3);
-    put_varint(out, u64::from(v));
+    put_varint(out, u64::from(number) << 3);
+    put_varint(out, u64::from(value));
 }
-pub fn put_bytes(out: &mut Vec<u8>, n: u32, v: &[u8]) {
-    put_varint(out, (u64::from(n) << 3) | 2);
-    put_varint(out, v.len() as u64);
-    out.extend_from_slice(v);
+pub fn put_bytes(out: &mut Vec<u8>, number: u32, value: &[u8]) {
+    put_varint(out, (u64::from(number) << 3) | 2);
+    put_varint(out, value.len() as u64);
+    out.extend_from_slice(value);
 }
-pub fn message(n: u32, value: &[u8]) -> Vec<u8> {
+pub fn message(number: u32, value: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    put_bytes(&mut out, n, value);
+    put_bytes(&mut out, number, value);
     out
 }
-pub fn scalar(n: u32, value: u32) -> Vec<u8> {
+pub fn scalar(number: u32, value: u32) -> Vec<u8> {
     let mut out = Vec::new();
-    put_uint(&mut out, n, value);
+    put_uint(&mut out, number, value);
     out
 }
 
-pub fn put_uint_explicit(out: &mut Vec<u8>, n: u32, v: u32) {
-    put_varint(out, u64::from(n) << 3);
-    put_varint(out, u64::from(v));
+pub fn put_uint_explicit(out: &mut Vec<u8>, number: u32, value: u32) {
+    put_varint(out, u64::from(number) << 3);
+    put_varint(out, u64::from(value));
 }

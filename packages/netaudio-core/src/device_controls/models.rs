@@ -1,7 +1,7 @@
 use super::protobuf::{self as pb, Message, Value};
 use serde::{Deserialize, Serialize};
 pub trait Wire: Sized {
-    fn decode(m: &Message<'_>) -> Option<Self>;
+    fn decode(message: &Message<'_>) -> Option<Self>;
     fn encode(&self) -> Vec<u8>;
 }
 macro_rules! numbers {
@@ -11,8 +11,8 @@ macro_rules! numbers {
         #[serde(deny_unknown_fields)]
         pub struct $name { $(pub $field:u32,)* }
         impl Wire for $name {
-            fn decode(m:&Message<'_>)->Option<Self> { Some(Self { $($field:pb::uint(m,$n)?,)* }) }
-            fn encode(&self)->Vec<u8> { let mut b=Vec::new(); $(pb::put_uint(&mut b,$n,self.$field);)* b }
+            fn decode(message:&Message<'_>)->Option<Self> { Some(Self { $($field:pb::uint(message,$n)?,)* }) }
+            fn encode(&self)->Vec<u8> { let mut encoded=Vec::new(); $(pb::put_uint(&mut encoded,$n,self.$field);)* encoded }
         }
     }
 }
@@ -49,39 +49,40 @@ pub struct SelectionMode {
     pub manual_color_space: bool,
 }
 impl Wire for SelectionMode {
-    fn decode(m: &Message<'_>) -> Option<Self> {
+    fn decode(message: &Message<'_>) -> Option<Self> {
         Some(Self {
-            manual_resolution: pb::uint(m, 1)? != 0,
-            manual_bit_depth: pb::uint(m, 2)? != 0,
-            manual_color_space: pb::uint(m, 3)? != 0,
+            manual_resolution: pb::uint(message, 1)? != 0,
+            manual_bit_depth: pb::uint(message, 2)? != 0,
+            manual_color_space: pb::uint(message, 3)? != 0,
         })
     }
     fn encode(&self) -> Vec<u8> {
-        let mut b = Vec::new();
-        for (n, v) in [
+        let mut encoded = Vec::new();
+        for (number, value) in [
             (1, self.manual_resolution),
             (2, self.manual_bit_depth),
             (3, self.manual_color_space),
         ] {
-            pb::put_uint(&mut b, n, v.into());
+            pb::put_uint(&mut encoded, number, value.into());
         }
-        b
+        encoded
     }
 }
-pub fn child<T: Wire>(m: &Message<'_>, n: u32) -> Option<Option<T>> {
-    match pb::nested(m, n)? {
-        Some(v) => Some(Some(T::decode(&v)?)),
+pub fn child<T: Wire>(message: &Message<'_>, number: u32) -> Option<Option<T>> {
+    match pb::nested(message, number)? {
+        Some(child_message) => Some(Some(T::decode(&child_message)?)),
         None => Some(None),
     }
 }
-fn repeated<T: Wire>(m: &Message<'_>, n: u32) -> Option<Vec<T>> {
-    m.iter()
-        .filter(|f| f.number == n)
-        .map(|f| {
-            let Value::Bytes(b) = f.value else {
+fn repeated<T: Wire>(message: &Message<'_>, number: u32) -> Option<Vec<T>> {
+    message
+        .iter()
+        .filter(|field| field.number == number)
+        .map(|field| {
+            let Value::Bytes(encoded) = field.value else {
                 return None;
             };
-            T::decode(&pb::parse(b)?)
+            T::decode(&pb::parse(encoded)?)
         })
         .collect()
 }
@@ -94,13 +95,13 @@ pub struct VideoFormatStatus {
     pub direction: u32,
 }
 impl VideoFormatStatus {
-    pub fn decode(m: &Message<'_>) -> Option<Self> {
+    pub fn decode(message: &Message<'_>) -> Option<Self> {
         Some(Self {
-            configured: child(m, 1)?,
-            supported: repeated(m, 2)?,
-            selection: child(m, 3)?,
-            actual: child(m, 4)?,
-            direction: pb::uint(m, 5)?,
+            configured: child(message, 1)?,
+            supported: repeated(message, 2)?,
+            selection: child(message, 3)?,
+            actual: child(message, 4)?,
+            direction: pb::uint(message, 5)?,
         })
     }
 }
@@ -158,24 +159,27 @@ pub fn decode_application(family: &str, data: &[u8]) -> Option<Vec<PanelObservat
     let root = pb::parse(data)?;
     let mut out = Vec::new();
     if family == "bluetooth" {
-        let Some(m) = pb::nested(&root, 1)? else {
+        let Some(bluetooth) = pb::nested(&root, 1)? else {
             return Some(out);
         };
-        let known: Vec<_> = m.iter().filter(|f| matches!(f.number, 1..=8)).collect();
+        let known: Vec<_> = bluetooth
+            .iter()
+            .filter(|field| matches!(field.number, 1..=8))
+            .collect();
         if known.len() > 1 {
             return None;
         }
-        for f in known {
-            let Value::Bytes(b) = f.value else {
+        for field in known {
+            let Value::Bytes(encoded) = field.value else {
                 return None;
             };
-            let v = pb::parse(b)?;
-            let observation = match f.number {
+            let message = pb::parse(encoded)?;
+            let observation = match field.number {
                 2 => {
-                    let Some(d) = pb::nested(&v, 1)? else {
+                    let Some(connection) = pb::nested(&message, 1)? else {
                         continue;
                     };
-                    let state = pb::uint(&d, 1)?;
+                    let state = pb::uint(&connection, 1)?;
                     PanelObservation::BluetoothConnection(BluetoothConnection {
                         state,
                         connected: match state {
@@ -183,14 +187,14 @@ pub fn decode_application(family: &str, data: &[u8]) -> Option<Vec<PanelObservat
                             2 => Some(false),
                             _ => None,
                         },
-                        peer_name: pb::string(&d, 2)?,
+                        peer_name: pb::string(&connection, 2)?,
                     })
                 }
                 3 => {
-                    let Some(d) = pb::nested(&v, 1)? else {
+                    let Some(identification) = pb::nested(&message, 1)? else {
                         continue;
                     };
-                    let raw = pb::bytes(&d, 2)?.unwrap_or_default();
+                    let raw = pb::bytes(&identification, 2)?.unwrap_or_default();
                     let (custom_name, custom_name_raw_hexadecimal) = match std::str::from_utf8(raw)
                     {
                         Ok(name) => (name.to_owned(), None),
@@ -200,56 +204,62 @@ pub fn decode_application(family: &str, data: &[u8]) -> Option<Vec<PanelObservat
                         ),
                     };
                     PanelObservation::BluetoothIdentification(BluetoothIdentification {
-                        name_source: pb::uint(&d, 1)?,
+                        name_source: pb::uint(&identification, 1)?,
                         custom_name,
                         custom_name_raw_hexadecimal,
                     })
                 }
                 5 => {
-                    let Some(d) = pb::nested(&v, 1)? else {
+                    let Some(discovery) = pb::nested(&message, 1)? else {
                         continue;
                     };
-                    PanelObservation::BluetoothDiscovery(pb::uint(&d, 1)?)
+                    PanelObservation::BluetoothDiscovery(pb::uint(&discovery, 1)?)
                 }
-                7 => PanelObservation::BluetoothPairing(pb::uint(&v, 1)?),
+                7 => PanelObservation::BluetoothPairing(pb::uint(&message, 1)?),
                 _ => continue,
             };
             out.push(observation);
         }
     } else if family == "dante_av" {
-        let known: Vec<_> = root.iter().filter(|f| matches!(f.number, 1..=11)).collect();
+        let known: Vec<_> = root
+            .iter()
+            .filter(|field| matches!(field.number, 1..=11))
+            .collect();
         if known.len() > 1 {
             return None;
         }
-        for f in known {
-            let Value::Bytes(b) = f.value else {
+        for field in known {
+            let Value::Bytes(encoded) = field.value else {
                 return None;
             };
-            let v = pb::parse(b)?;
-            let observation = match f.number {
-                2 => PanelObservation::VideoFormat(VideoFormatStatus::decode(&v)?),
+            let message = pb::parse(encoded)?;
+            let observation = match field.number {
+                2 => PanelObservation::VideoFormat(VideoFormatStatus::decode(&message)?),
                 4 => PanelObservation::CodecFormat(CodecFormatStatus {
-                    current: child(&v, 1)?,
-                    supported: repeated(&v, 2)?,
+                    current: child(&message, 1)?,
+                    supported: repeated(&message, 2)?,
                 }),
                 6 => PanelObservation::VideoChannel(VideoChannelStatus {
-                    direction: pb::uint(&v, 1)?,
-                    status_code: pb::uint(&v, 2)?,
-                    observed_hdcp_version: if v.iter().any(|f| f.number == 3) {
-                        Some(pb::uint(&v, 3)?)
+                    direction: pb::uint(&message, 1)?,
+                    status_code: pb::uint(&message, 2)?,
+                    observed_hdcp_version: if message
+                        .iter()
+                        .any(|message_field| message_field.number == 3)
+                    {
+                        Some(pb::uint(&message, 3)?)
                     } else {
                         None
                     },
                 }),
-                7 => PanelObservation::Serial(SerialSettings::decode(&v)?),
-                8 => PanelObservation::Bandwidth(BandwidthSettings::decode(&v)?),
+                7 => PanelObservation::Serial(SerialSettings::decode(&message)?),
+                8 => PanelObservation::Bandwidth(BandwidthSettings::decode(&message)?),
                 9 => PanelObservation::Hdcp(HdcpSettings {
-                    configured_mode: pb::uint(&v, 1)?,
-                    supported_modes: pb::repeated_uint(&v, 2)?,
+                    configured_mode: pb::uint(&message, 1)?,
+                    supported_modes: pb::repeated_uint(&message, 2)?,
                 }),
                 11 => PanelObservation::Visca(ViscaStatus {
-                    capability: pb::uint(&v, 1)?,
-                    reply: pb::bytes(&v, 2)?.unwrap_or_default().to_vec(),
+                    capability: pb::uint(&message, 1)?,
+                    reply: pb::bytes(&message, 2)?.unwrap_or_default().to_vec(),
                 }),
                 _ => continue,
             };

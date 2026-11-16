@@ -50,28 +50,28 @@ pub struct PanelStatus {
 }
 pub fn parse_panel_status(data: &[u8], family: Option<&str>) -> Option<PanelStatus> {
     validate_conmon_envelope(data, 0x100e)?;
-    let r = data.get(24..)?;
-    let len = read_u16(r, 8)?;
-    let offset = read_u16(r, 10)?;
+    let record = data.get(24..)?;
+    let len = read_u16(record, 8)?;
+    let offset = read_u16(record, 10)?;
     if offset < 12 {
         return None;
     }
     let end = usize::from(offset).checked_add(usize::from(len))?;
-    let envelope = pb::parse(r.get(usize::from(offset)..end)?)?;
+    let envelope = pb::parse(record.get(usize::from(offset)..end)?)?;
     if envelope
         .iter()
-        .filter(|f| f.number == 1 || f.number == 2)
+        .filter(|field| field.number == 1 || field.number == 2)
         .count()
         != 1
-        || envelope.iter().any(|f| f.number == 1)
+        || envelope.iter().any(|field| field.number == 1)
     {
         return None;
     }
     let status = pb::nested(&envelope, 2)??;
     let payload = pb::bytes(&status, 4)?.unwrap_or_default();
-    let decoded = family.map(|f| decode_application(f, payload));
+    let decoded = family.map(|family_name| decode_application(family_name, payload));
     let (observations, diagnostic_error) = match decoded {
-        Some(Some(v)) => (v, None),
+        Some(Some(decoded_observations)) => (decoded_observations, None),
         Some(None) => (Vec::new(), Some("Malformed application payload".to_owned())),
         None => (Vec::new(), None),
     };
@@ -87,15 +87,15 @@ pub fn parse_panel_status(data: &[u8], family: Option<&str>) -> Option<PanelStat
         })
         .collect();
     Some(PanelStatus {
-        record_revision: read_u16(r, 0)?,
-        common_word: read_u32(r, 4)?,
+        record_revision: read_u16(record, 0)?,
+        common_word: read_u32(record, 4)?,
         envelope_length: len,
         envelope_offset: offset,
         source_identifier: pb::bytes(&status, 1)?.unwrap_or_default().to_vec(),
         requester: pb::uint(&status, 2)?,
         sequence: pb::uint(&status, 3)?,
         application_payload: payload.to_vec(),
-        raw_record: r.to_vec(),
+        raw_record: record.to_vec(),
         observations,
         followup_requests,
         diagnostic_error,
@@ -147,8 +147,8 @@ pub enum PanelRequest {
 fn invalid<T>() -> Result<T, NetaudioError> {
     Err(NetaudioError::UnsupportedProtocolOperation)
 }
-fn single_bit(v: u32) -> bool {
-    v != 0 && v.is_power_of_two() && v <= 32
+fn single_bit(value: u32) -> bool {
+    value != 0 && value.is_power_of_two() && value <= 32
 }
 pub fn scoped_visca(
     format: &VideoFormat,
@@ -178,8 +178,18 @@ pub fn scoped_visca(
     } else {
         2
     };
-    let r = (format.resolution as u16).to_be_bytes();
-    Ok(vec![0x81, 1, 0x99, 1, r[0], r[1], color, depth, 0xff])
+    let resolution = (format.resolution as u16).to_be_bytes();
+    Ok(vec![
+        0x81,
+        1,
+        0x99,
+        1,
+        resolution[0],
+        resolution[1],
+        color,
+        depth,
+        0xff,
+    ])
 }
 impl PanelRequest {
     pub fn family(&self) -> &'static str {
@@ -206,9 +216,9 @@ impl PanelRequest {
                 if !matches!(name_source, 1 | 2) || custom_name.len() > BLUETOOTH_NAME_LIMIT {
                     return invalid();
                 }
-                let mut b = pb::scalar(1, *name_source);
-                pb::put_bytes(&mut b, 2, custom_name.as_bytes());
-                (4, pb::message(1, &b))
+                let mut encoded = pb::scalar(1, *name_source);
+                pb::put_bytes(&mut encoded, 2, custom_name.as_bytes());
+                (4, pb::message(1, &encoded))
             }
             Self::BluetoothDiscovery { discoverable } => (
                 6,
@@ -234,9 +244,9 @@ impl PanelRequest {
                 {
                     return invalid();
                 }
-                let mut b = pb::message(1, &format.encode());
-                pb::put_bytes(&mut b, 2, &selection.encode());
-                (3, b)
+                let mut encoded = pb::message(1, &format.encode());
+                pb::put_bytes(&mut encoded, 2, &selection.encode());
+                (3, encoded)
             }
             Self::CodecFormat { format } => {
                 if format.codec_type != 1
@@ -248,29 +258,29 @@ impl PanelRequest {
                 }
                 (5, pb::message(1, &format.encode()))
             }
-            Self::Serial { settings: s } => {
-                if !SERIAL_BAUD_RATES.contains(&s.baud_rate)
-                    || !matches!(s.data_bits, 7 | 8)
-                    || s.parity > 2
-                    || !matches!(s.stop_bits, 1 | 2)
-                    || s.data_bits == 7 && s.parity == 0
-                    || s.hardware_flow_control != 0
-                    || s.software_flow_control != 0
+            Self::Serial { settings } => {
+                if !SERIAL_BAUD_RATES.contains(&settings.baud_rate)
+                    || !matches!(settings.data_bits, 7 | 8)
+                    || settings.parity > 2
+                    || !matches!(settings.stop_bits, 1 | 2)
+                    || settings.data_bits == 7 && settings.parity == 0
+                    || settings.hardware_flow_control != 0
+                    || settings.software_flow_control != 0
                 {
                     return invalid();
                 }
-                let mut b = Vec::new();
-                for (n, v) in [
-                    (1, s.baud_rate),
-                    (2, s.hardware_flow_control),
-                    (3, s.software_flow_control),
-                    (4, s.data_bits),
-                    (5, s.parity),
-                    (6, s.stop_bits),
+                let mut encoded = Vec::new();
+                for (number, value) in [
+                    (1, settings.baud_rate),
+                    (2, settings.hardware_flow_control),
+                    (3, settings.software_flow_control),
+                    (4, settings.data_bits),
+                    (5, settings.parity),
+                    (6, settings.stop_bits),
                 ] {
-                    pb::put_uint_explicit(&mut b, n, v);
+                    pb::put_uint_explicit(&mut encoded, number, value);
                 }
-                (7, b)
+                (7, encoded)
             }
             Self::Bandwidth { target, enabled } => {
                 if *enabled && (*target == 0 || *target > BANDWIDTH_MAXIMUM)
@@ -278,10 +288,10 @@ impl PanelRequest {
                 {
                     return invalid();
                 }
-                let mut b = Vec::new();
-                pb::put_uint_explicit(&mut b, 1, *target);
-                pb::put_uint_explicit(&mut b, 4, (*enabled).into());
-                (8, b)
+                let mut encoded = Vec::new();
+                pb::put_uint_explicit(&mut encoded, 1, *target);
+                pb::put_uint_explicit(&mut encoded, 4, (*enabled).into());
+                (8, encoded)
             }
             Self::Hdcp { mode } => {
                 if !(1..=3).contains(mode) {
@@ -294,11 +304,11 @@ impl PanelRequest {
                 (10, pb::message(1, &scoped_visca(format, selection)?))
             }
         };
-        let b = pb::message(field, &body);
+        let encoded = pb::message(field, &body);
         Ok(if self.family() == "bluetooth" {
-            pb::message(1, &b)
+            pb::message(1, &encoded)
         } else {
-            b
+            encoded
         })
     }
 }
