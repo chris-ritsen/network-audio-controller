@@ -342,14 +342,19 @@ class PacketStoreQueries:
         stats["total"] = row["total"]
 
         rows = self._conn.execute("SELECT source_type, COUNT(*) as count FROM packets GROUP BY source_type").fetchall()
-        stats["by_source"] = {r["source_type"]: r["count"] for r in rows}
+        stats["by_source"] = {source_row["source_type"]: source_row["count"] for source_row in rows}
 
         rows = self._conn.execute(
             "SELECT opcode_name, direction, COUNT(*) as count FROM packets "
             "GROUP BY opcode_name, direction ORDER BY count DESC"
         ).fetchall()
         stats["by_opcode"] = [
-            {"opcode_name": r["opcode_name"], "direction": r["direction"], "count": r["count"]} for r in rows
+            {
+                "opcode_name": opcode_row["opcode_name"],
+                "direction": opcode_row["direction"],
+                "count": opcode_row["count"],
+            }
+            for opcode_row in rows
         ]
 
         row = self._conn.execute(

@@ -281,8 +281,8 @@ class VirtualDevice(VirtualDeviceRequestHandler):
 
         try:
             sock.bind(("", self._config.settings_port))
-        except OSError as e:
-            logger.warning(f"Could not bind mcast server on :{self._config.settings_port}: {e}")
+        except OSError as error:
+            logger.warning(f"Could not bind mcast server on :{self._config.settings_port}: {error}")
             sock.close()
             return
 
@@ -389,8 +389,8 @@ class VirtualDevice(VirtualDeviceRequestHandler):
                 if port == self._config.arc_port:
                     self._arc_port = port
                 logger.info(f"Responder listening on 0.0.0.0:{port}")
-            except OSError as e:
-                logger.warning(f"Could not bind port {port}: {e}")
+            except OSError as error:
+                logger.warning(f"Could not bind port {port}: {error}")
 
     async def _register_mdns(self) -> None:
         if self._local_ip is None:

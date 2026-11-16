@@ -27,8 +27,8 @@ MIN_UNIQUE_DIFFS = 8
 
 def _is_table_pattern(key_bytes: bytes) -> bool:
     diffs = set()
-    for i in range(1, len(key_bytes)):
-        diffs.add(key_bytes[i] - key_bytes[i - 1])
+    for index in range(1, len(key_bytes)):
+        diffs.add(key_bytes[index] - key_bytes[index - 1])
     return len(diffs) < MIN_UNIQUE_DIFFS
 
 

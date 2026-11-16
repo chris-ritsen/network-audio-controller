@@ -234,13 +234,13 @@ def _add_unknown_regions(result: DissectedPacket, covered: set[int]):
     uncovered_ranges = []
     start = None
 
-    for i in range(total):
-        if i not in covered:
+    for index in range(total):
+        if index not in covered:
             if start is None:
-                start = i
+                start = index
         else:
             if start is not None:
-                uncovered_ranges.append((start, i))
+                uncovered_ranges.append((start, index))
                 start = None
 
     if start is not None:

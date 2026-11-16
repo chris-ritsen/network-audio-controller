@@ -262,7 +262,7 @@ def _format_report(
 
             subscriptions = device.get("subscriptions", [])
             if subscriptions:
-                active = [s for s in subscriptions if s.get("tx_device")]
+                active = [subscription for subscription in subscriptions if subscription.get("tx_device")]
                 if active:
                     lines.append(f"  Subscriptions: {len(active)} active")
                     for subscription in active:

@@ -105,8 +105,8 @@ def firmware_db(
     skipped = 0
     errors = 0
 
-    for i, path in enumerate(dnt_files):
-        report_progress(i, total, path)
+    for index, path in enumerate(dnt_files):
+        report_progress(index, total, path)
 
         try:
             with open(path, "rb") as f:
@@ -174,9 +174,9 @@ def firmware_db(
             if inserted % 50 == 0:
                 conn.commit()
 
-        except Exception as e:
+        except Exception as error:
             errors += 1
-            typer.echo(f"\n  ERROR: {path}: {e}", err=True)
+            typer.echo(f"\n  ERROR: {path}: {error}", err=True)
 
     conn.commit()
     conn.close()

@@ -46,8 +46,8 @@ def _find_channel_names(cfg, base_candidates, max_channels=64, stride=32):
         if not first:
             continue
         names = []
-        for i in range(max_channels):
-            off = base + i * stride
+        for channel_index in range(max_channels):
+            off = base + channel_index * stride
             if off >= len(cfg):
                 break
             s = _read_str(cfg, off, stride)

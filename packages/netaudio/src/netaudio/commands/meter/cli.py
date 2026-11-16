@@ -84,7 +84,7 @@ def _render_meter_display(device_levels: list[tuple[str, str, dict]], options: M
             if not channels:
                 continue
 
-            sorted_channels = sorted(channels.items(), key=lambda x: int(x[0]))
+            sorted_channels = sorted(channels.items(), key=lambda channel_entry: int(channel_entry[0]))
 
             for channel_key, info in sorted_channels:
                 channel_number = int(channel_key)
@@ -280,7 +280,7 @@ async def run_meter_status() -> None:
     rows = []
     json_data = {}
 
-    for server_name, info in sorted(result.items(), key=lambda x: x[1].get("name", "")):
+    for server_name, info in sorted(result.items(), key=lambda server_entry: server_entry[1].get("name", "")):
         receiving = info.get("receiving", False)
         online = info.get("online", False)
         rows.append(

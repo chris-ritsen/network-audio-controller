@@ -116,8 +116,8 @@ def _compact_hexdump(data: bytes, max_lines: int = 8) -> list[str]:
     head_lines = max_lines // 2
     tail_lines = max_lines - head_lines - 1
 
-    for i in range(head_lines):
-        lines.append(_hexdump_line(data, i * 16))
+    for index in range(head_lines):
+        lines.append(_hexdump_line(data, index * 16))
 
     skipped = total_lines - head_lines - tail_lines
     lines.append(f"  ...  ({skipped} lines, {skipped * 16} bytes skipped)")

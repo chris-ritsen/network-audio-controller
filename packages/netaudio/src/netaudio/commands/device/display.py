@@ -137,7 +137,7 @@ def format_lock_state(device) -> str:
 
 def format_mac_address(mac: str | None) -> str:
     raw = (canonical_device_mac(mac) or "").upper()
-    return ":".join(raw[i : i + 2] for i in range(0, len(raw), 2))
+    return ":".join(raw[index : index + 2] for index in range(0, len(raw), 2))
 
 
 def format_on_off(value: bool | None) -> str:

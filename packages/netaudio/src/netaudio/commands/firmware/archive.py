@@ -47,27 +47,27 @@ def firmware_info(
     results = []
     if resume and resume.exists():
         results = _load_resume_results(resume)
-        already_done = {r["file"] for r in results}
+        already_done = {record["file"] for record in results}
         typer.echo(f"Resuming: {len(already_done)} already processed", err=True)
 
     total = len(dnt_files)
     processed = 0
     errors = 0
 
-    for i, path in enumerate(dnt_files):
+    for index, path in enumerate(dnt_files):
         if str(path) in already_done:
             continue
 
-        report_progress(i, total, path)
+        report_progress(index, total, path)
 
         try:
             result = parse_dnt(path)
             if result:
                 results.append(result)
                 processed += 1
-        except Exception as e:
+        except Exception as exception:
             errors += 1
-            typer.echo(f"\n  ERROR: {path}: {e}", err=True)
+            typer.echo(f"\n  ERROR: {path}: {exception}", err=True)
 
     if progress_visible():
         msg = f"\n{processed} extracted"
@@ -82,16 +82,16 @@ def firmware_info(
 
     headers = ["dev_id", "fw_ver", "mfg", "product", "model_id", "tx", "rx"]
     rows = []
-    for r in results:
+    for record in results:
         rows.append(
             [
-                str(r.get("device_type_id", "")),
-                r.get("firmware_version", ""),
-                r.get("manufacturer_header", ""),
-                r.get("product_name", "") or "",
-                r.get("model_id", "") or "",
-                str(r.get("tx_channel_count", "")),
-                str(r.get("rx_channel_count", "")),
+                str(record.get("device_type_id", "")),
+                record.get("firmware_version", ""),
+                record.get("manufacturer_header", ""),
+                record.get("product_name", "") or "",
+                record.get("model_id", "") or "",
+                str(record.get("tx_channel_count", "")),
+                str(record.get("rx_channel_count", "")),
             ]
         )
 

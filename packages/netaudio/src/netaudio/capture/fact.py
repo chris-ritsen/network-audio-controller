@@ -122,7 +122,7 @@ def _build_spec_data(
     categories = sorted(categories, key=_category_sort_key)
 
     all_facts = list_facts(facts_path)
-    publishable_facts = [f for f in all_facts if get_confidence(f) != "disproved"]
+    publishable_facts = [listed_fact for listed_fact in all_facts if get_confidence(listed_fact) != "disproved"]
 
     confidence_counts = {"verified": 0, "observed": 0, "inferred": 0, "uncertain": 0}
     for fact in publishable_facts:
@@ -134,7 +134,9 @@ def _build_spec_data(
 
     spec_categories = []
     for cat in categories:
-        category_facts = [f for f in publishable_facts if f["category"] == cat]
+        category_facts = [
+            publishable_fact for publishable_fact in publishable_facts if publishable_fact["category"] == cat
+        ]
         if not category_facts:
             continue
 
@@ -189,7 +191,7 @@ def _build_spec_data(
     return {
         "title": "Dante Control Protocol Reference",
         "total": sum(confidence_counts.values()),
-        "confidence": {k: v for k, v in confidence_counts.items() if v},
+        "confidence": {level: count for level, count in confidence_counts.items() if count},
         "categories": spec_categories,
     }
 

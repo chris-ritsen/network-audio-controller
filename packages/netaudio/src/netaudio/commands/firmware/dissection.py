@@ -42,11 +42,11 @@ def firmware_hexdump(
     end = min(start + length, len(data))
     chunk = data[start:end]
 
-    for i in range(0, len(chunk), 16):
-        row = chunk[i : i + 16]
+    for row_offset in range(0, len(chunk), 16):
+        row = chunk[row_offset : row_offset + 16]
         hex_part = " ".join(f"{b:02x}" for b in row)
         ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
-        typer.echo(f"{start + i:08x}  {hex_part:<48}  {ascii_part}")
+        typer.echo(f"{start + row_offset:08x}  {hex_part:<48}  {ascii_part}")
 
 
 _RESET = "\033[0m"

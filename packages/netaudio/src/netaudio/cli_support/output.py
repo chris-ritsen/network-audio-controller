@@ -35,13 +35,15 @@ def readable(value: Any) -> str:
 
 def _format_text(headers: list[str], rows: list[list[str]]) -> str:
     all_rows = [headers] + [[str(value) for value in row] for row in rows]
-    widths = [max(len(row[i]) for row in all_rows) for i in range(len(headers))]
-    numeric = [all(row[i].isdigit() for row in all_rows[1:] if row[i]) for i in range(len(headers))]
+    widths = [max(len(row[index]) for row in all_rows) for index in range(len(headers))]
+    numeric = [all(row[index].isdigit() for row in all_rows[1:] if row[index]) for index in range(len(headers))]
     lines = []
     for row in all_rows:
         parts = [
-            row[i].rjust(widths[i]) if numeric[i] and row is not all_rows[0] else row[i].ljust(widths[i])
-            for i in range(len(row))
+            row[index].rjust(widths[index])
+            if numeric[index] and row is not all_rows[0]
+            else row[index].ljust(widths[index])
+            for index in range(len(row))
         ]
         lines.append("  ".join(parts).rstrip())
     return "\n".join(lines)

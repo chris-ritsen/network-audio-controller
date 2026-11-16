@@ -465,10 +465,10 @@ def packet_state_diff(
 
         print(f"State diff for {device_ip}")
         print(
-            f"  before window: ≤ {before_ts} ({sum(len(v) for v in before_by_opcode.values())} packets, {len(before_by_opcode)} opcodes)"
+            f"  before window: ≤ {before_ts} ({sum(len(opcode_packets) for opcode_packets in before_by_opcode.values())} packets, {len(before_by_opcode)} opcodes)"
         )
         print(
-            f"  after  window: ≥ {after_ts} ({sum(len(v) for v in after_by_opcode.values())} packets, {len(after_by_opcode)} opcodes)"
+            f"  after  window: ≥ {after_ts} ({sum(len(opcode_packets) for opcode_packets in after_by_opcode.values())} packets, {len(after_by_opcode)} opcodes)"
         )
         print(f"  common opcodes: {len(common_opcodes)}")
 

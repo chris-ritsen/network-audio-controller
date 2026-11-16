@@ -223,8 +223,8 @@ def _colored_hex_half(chunk: bytes, start_abs_offset: int, byte_color_map: dict[
     parts = []
     current_color = None
     current_hex = []
-    for i, byte_val in enumerate(chunk):
-        color = byte_color_map.get(start_abs_offset + i, default_color)
+    for byte_index, byte_val in enumerate(chunk):
+        color = byte_color_map.get(start_abs_offset + byte_index, default_color)
         if color != current_color:
             if current_hex:
                 parts.append(f"{current_color}{' '.join(current_hex)}{_RESET}")
@@ -243,8 +243,8 @@ def _colored_ascii(chunk: bytes, start_abs_offset: int, byte_color_map: dict[int
     parts = []
     current_color = None
     current_chars = []
-    for i, byte_val in enumerate(chunk):
-        color = byte_color_map.get(start_abs_offset + i, default_color)
+    for byte_index, byte_val in enumerate(chunk):
+        color = byte_color_map.get(start_abs_offset + byte_index, default_color)
         char = chr(byte_val) if 32 <= byte_val < 127 else "."
         if color != current_color:
             if current_chars:
@@ -350,11 +350,11 @@ def render_dissection(
         lines.append("")
 
     known_spans = sorted(
-        [s for s in dissected.spans if s.section != "unknown"],
+        [known_span for known_span in dissected.spans if known_span.section != "unknown"],
         key=lambda s: s.offset,
     )
     unknown_spans = sorted(
-        [s for s in dissected.spans if s.section == "unknown"],
+        [unknown_span for unknown_span in dissected.spans if unknown_span.section == "unknown"],
         key=lambda s: s.offset,
     )
 
@@ -416,7 +416,7 @@ def render_dissection(
             lines.append(f"{indent}{_COLOR_SEPARATOR}{'─' * 72}{_RESET}")
             lines.extend(_render_full_colored_hexdump(dissected.payload, byte_color_map, indent))
         elif unknown_spans:
-            total_unknown = sum(s.length for s in unknown_spans)
+            total_unknown = sum(unknown_span.length for unknown_span in unknown_spans)
             lines.append("")
             lines.append(f"{indent}{dump_icon}Uncharted ({total_unknown}B)")
             lines.append(f"{indent}{'─' * 72}")

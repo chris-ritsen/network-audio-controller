@@ -142,7 +142,7 @@ def _cramfs_extract_file(data, inode):
     ptr_start = inode.data_offset
     if ptr_start + num_blocks * 4 > len(data):
         return None
-    block_ends = [_le32(data, ptr_start + i * 4) for i in range(num_blocks)]
+    block_ends = [_le32(data, ptr_start + index * 4) for index in range(num_blocks)]
     prev = ptr_start + num_blocks * 4
     result = b""
     for bend in block_ends:
@@ -266,9 +266,9 @@ def _cramfs_walk(data, inode, path, outdir, verbose=False):
 
 
 def _cramfs_find_file(data, root_inode, target_path):
-    parts = [p for p in target_path.strip("/").split("/") if p]
+    parts = [part for part in target_path.strip("/").split("/") if part]
     current = root_inode
-    for i, part in enumerate(parts):
+    for index, part in enumerate(parts):
         if not current.is_dir():
             return None
         pos = current.data_offset
@@ -324,12 +324,12 @@ def _find_cramfs_in_dnt(data):
 def _cramfs_to_le(data, cramfs_off, cramfs_size, is_be):
     blob = bytearray(data[cramfs_off : cramfs_off + cramfs_size])
     if is_be:
-        for i in range(0, len(blob) - 3, 4):
-            blob[i], blob[i + 1], blob[i + 2], blob[i + 3] = (
-                blob[i + 3],
-                blob[i + 2],
-                blob[i + 1],
-                blob[i],
+        for offset in range(0, len(blob) - 3, 4):
+            blob[offset], blob[offset + 1], blob[offset + 2], blob[offset + 3] = (
+                blob[offset + 3],
+                blob[offset + 2],
+                blob[offset + 1],
+                blob[offset],
             )
     return bytes(blob)
 

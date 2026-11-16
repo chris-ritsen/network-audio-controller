@@ -70,7 +70,7 @@ def _query_observed_opcodes(
     end_ns: int | None = None,
     device_ip: str | None = None,
 ) -> list[sqlite3.Row]:
-    protocol_csv = ",".join(str(v) for v in CAPTURE_PROTOCOL_IDS if v != 0xFFFF)
+    protocol_csv = ",".join(str(protocol_id) for protocol_id in CAPTURE_PROTOCOL_IDS if protocol_id != 0xFFFF)
     scope_sql, scope_params = _build_packet_scope(
         session_id=session_id,
         start_ns=start_ns,
@@ -121,7 +121,7 @@ def _query_observed_subscription_statuses(
     end_ns: int | None = None,
     device_ip: str | None = None,
 ) -> list[dict[str, int]]:
-    arc_protocol_csv = ",".join(str(v) for v in ARC_PROTOCOL_IDS)
+    arc_protocol_csv = ",".join(str(protocol_id) for protocol_id in ARC_PROTOCOL_IDS)
     scope_sql, scope_params = _build_packet_scope(
         session_id=session_id,
         start_ns=start_ns,
@@ -174,7 +174,7 @@ def _extract_seed_samples(
     end_ns: int | None = None,
     device_ip: str | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    protocol_csv = ",".join(str(p) for p in CAPTURE_PROTOCOL_IDS)
+    protocol_csv = ",".join(str(protocol_id) for protocol_id in CAPTURE_PROTOCOL_IDS)
     scope_sql, scope_params = _build_packet_scope(
         session_id=session_id,
         start_ns=start_ns,
@@ -201,7 +201,7 @@ def _extract_seed_samples(
         sample["payload"] = decompress_payload(sample["payload"])
         rows.append(sample)
 
-    arc_protocol_csv = ",".join(str(p) for p in ARC_PROTOCOL_IDS)
+    arc_protocol_csv = ",".join(str(protocol_id) for protocol_id in ARC_PROTOCOL_IDS)
     status_rows = conn.execute(
         f"""
         SELECT id, protocol_id, opcode, opcode_name, timestamp_iso, payload
@@ -358,8 +358,8 @@ def _load_label_overrides(overrides_path: Path) -> tuple[set[tuple[int, int]], s
         protocol_hex, opcode_hex = key.split(":")
         opcode_overrides.add((int(protocol_hex, 16), int(opcode_hex, 16)))
 
-    message_overrides = {int(v, 16) for v in data.get("message_overrides", [])}
-    status_overrides = {int(v, 16) for v in data.get("subscription_status_overrides", [])}
+    message_overrides = {int(message_hex, 16) for message_hex in data.get("message_overrides", [])}
+    status_overrides = {int(status_hex, 16) for status_hex in data.get("subscription_status_overrides", [])}
     return opcode_overrides, message_overrides, status_overrides
 
 

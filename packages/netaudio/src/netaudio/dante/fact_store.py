@@ -183,7 +183,7 @@ def list_facts(path: Path, category: str | None = None) -> list[dict]:
     facts = list(data["facts"].values())
 
     if category:
-        facts = [f for f in facts if f["category"] == category]
+        facts = [fact for fact in facts if fact["category"] == category]
 
     facts.sort(key=lambda f: (f["category"], f["key"]))
     return facts
@@ -191,7 +191,7 @@ def list_facts(path: Path, category: str | None = None) -> list[dict]:
 
 def get_categories(path: Path) -> list[str]:
     data = _load_facts(path)
-    categories = sorted(set(f["category"] for f in data["facts"].values()))
+    categories = sorted(set(fact["category"] for fact in data["facts"].values()))
     return categories
 
 
@@ -405,7 +405,9 @@ def check_facts(path: Path, provenance_dir: Path | None = None) -> list[dict]:
                 result["errors"].append(f"invalid packet ID in evidence ref: {ref}")
                 continue
             manifest, files = _load_bundle(bundle_path)
-            sample_by_id = {s.get("packet_id"): s for s in manifest.get("samples", [])}
+            sample_by_id = {
+                manifest_sample.get("packet_id"): manifest_sample for manifest_sample in manifest.get("samples", [])
+            }
             sample = sample_by_id.get(packet_id)
 
             if sample is None:

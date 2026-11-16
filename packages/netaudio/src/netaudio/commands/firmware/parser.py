@@ -186,12 +186,12 @@ def _load_resume_results(path):
 
 def _collect_dnt_files(paths):
     dnt_files = []
-    for p in paths:
-        p = Path(p)
-        if p.is_file() and p.suffix == ".dnt":
-            dnt_files.append(p)
-        elif p.is_dir():
-            dnt_files.extend(sorted(p.rglob("*.dnt")))
+    for path in paths:
+        path = Path(path)
+        if path.is_file() and path.suffix == ".dnt":
+            dnt_files.append(path)
+        elif path.is_dir():
+            dnt_files.extend(sorted(path.rglob("*.dnt")))
     return dnt_files
 
 

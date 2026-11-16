@@ -298,9 +298,6 @@ class MeterViewModel:
         )
         self.devices[server_name] = replacement
         if previous_counts != replacement_counts:
-            # Meter values are scoped to the channel topology that produced
-            # them.  Never carry a pre-rate-change sample into a new active
-            # inventory; wait for the next passive or detailed frame.
             self.samples.pop(server_name, None)
         return True
 

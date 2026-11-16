@@ -127,8 +127,6 @@ class _MeteringState:
         )
 
     def issue_initial_starts(self) -> None:
-        # Once these requests are issued, balance every one with a stop even
-        # if the local daemon response is lost.
         self.issued_devices = list(self.attempted_devices)
         self._schedule_starts(self.attempted_devices)
 
@@ -384,7 +382,6 @@ class _MeterRuntime:
 
     async def run(self) -> None:
         with self.terminal:
-            # Let an immediately available SSE snapshot land before the first draw.
             await asyncio.sleep(0)
             if self.metering.attempted_devices:
                 _draw_meter_frame(
@@ -394,12 +391,8 @@ class _MeterRuntime:
                     no_color=self.no_color,
                 )
                 self.metering.issue_initial_starts()
-                # Start the local daemon requests, but never make the UI wait
-                # for their response before accepting input.
                 await asyncio.sleep(0)
 
-            # The original loop always refreshed once after the optional
-            # pre-request frame.
             self.interaction.invalidate()
             while True:
                 self.metering.collect_completed_starts()

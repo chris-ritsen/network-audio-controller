@@ -63,7 +63,7 @@ def provenance_analysis(
                     raise typer.Exit(1)
                 resolved_packet_ids.append(pid)
 
-        fields_parsed = [_parse_field_spec(f) for f in field] if field else []
+        fields_parsed = [_parse_field_spec(field_spec) for field_spec in field] if field else []
 
         normalized_label = _normalize_marker_label(label)
         marker_id = store.add_marker(
@@ -85,7 +85,9 @@ def provenance_analysis(
         f"Capture: Label: {normalized_label}",
     ]
     if resolved_packet_ids:
-        lines.append(f"Capture: Packets referenced: {', '.join(f'#{p}' for p in resolved_packet_ids)}")
+        lines.append(
+            f"Capture: Packets referenced: {', '.join(f'#{identifier}' for identifier in resolved_packet_ids)}"
+        )
     for field_entry in fields_parsed:
         value_str = f" value={field_entry['value']}" if "value" in field_entry else ""
         lines.append(

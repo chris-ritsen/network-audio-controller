@@ -359,7 +359,7 @@ class ProtocolVerifier:
                         "protocol_id": query.protocol_id,
                     },
                     "packet_count": len(packets),
-                    "packet_ids": [p["id"] for p in packets],
+                    "packet_ids": [evidence_packet["id"] for evidence_packet in packets],
                 },
             )
 
@@ -510,7 +510,7 @@ class ProtocolVerifier:
             PacketQuery(session_id=self._session_id, limit=10000, ascending=True)
         )
 
-        session_packet_ids = {p["id"] for p in session_packets}
+        session_packet_ids = {session_packet["id"] for session_packet in session_packets}
 
         evidence_packets = []
         for packet_id in self._evidence_packet_ids:

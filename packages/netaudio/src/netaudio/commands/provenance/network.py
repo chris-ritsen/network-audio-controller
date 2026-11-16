@@ -281,7 +281,9 @@ def provenance_replay(
         raise typer.Exit(1)
 
     samples = manifest.get("samples", [])
-    requests = [s for s in samples if s.get("direction") == "request" and not s.get("evidence", False)]
+    requests = [
+        sample for sample in samples if sample.get("direction") == "request" and not sample.get("evidence", False)
+    ]
     responses_by_request_index = _responses_by_request_index(samples)
 
     if not requests:
@@ -424,10 +426,10 @@ async def _run_replay(
                 )
 
         print()
-        match_count = sum(1 for r in results if r["status"] == "match")
-        diff_count = sum(1 for r in results if r["status"] in ("diff", "size_diff"))
-        timeout_count = sum(1 for r in results if r["status"] == "timeout")
-        no_baseline = sum(1 for r in results if r["status"] == "ok_no_baseline")
+        match_count = sum(1 for result in results if result["status"] == "match")
+        diff_count = sum(1 for result in results if result["status"] in ("diff", "size_diff"))
+        timeout_count = sum(1 for result in results if result["status"] == "timeout")
+        no_baseline = sum(1 for result in results if result["status"] == "ok_no_baseline")
 
         summary_parts = []
         if match_count:
