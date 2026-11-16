@@ -92,12 +92,12 @@ pub fn parse_heartbeat_connection_health_packet(
                 sequence,
                 sample_rate_hertz: read_u32(record.bytes, payload + 8)?,
                 entries: (0..count)
-                    .map(|i| {
+                    .map(|index| {
                         Some(HeartbeatFlowLatencyEntry {
-                            telemetry_index: first.checked_add(i)?,
+                            telemetry_index: first.checked_add(index)?,
                             latency_sample_count: read_u32(
                                 record.bytes,
-                                offset + usize::from(i) * 4,
+                                offset + usize::from(index) * 4,
                             )?,
                         })
                     })
@@ -108,10 +108,13 @@ pub fn parse_heartbeat_connection_health_packet(
                 raw_record: record.bytes.to_vec(),
                 sequence,
                 entries: (0..count)
-                    .map(|i| {
+                    .map(|index| {
                         Some(HeartbeatLatePacketEntry {
-                            telemetry_index: first.checked_add(i)?,
-                            late_packet_count: read_u32(record.bytes, offset + usize::from(i) * 4)?,
+                            telemetry_index: first.checked_add(index)?,
+                            late_packet_count: read_u32(
+                                record.bytes,
+                                offset + usize::from(index) * 4,
+                            )?,
                         })
                     })
                     .collect::<Option<_>>()?,
@@ -270,7 +273,7 @@ impl ReceiverPath {
             self.global_flow_id = matches[0]["global_flow_id"]
                 .as_u64()
                 .or_else(|| matches[0]["flow_number"].as_u64())
-                .and_then(|v| u16::try_from(v).ok());
+                .and_then(|flow_identifier| u16::try_from(flow_identifier).ok());
             evidence["flow"] = matches[0].clone();
             evidence["source"] = matches[0]["source"].clone();
             evidence["configured_latency_nanoseconds"] = matches[0]["latency_nanoseconds"].clone();
@@ -405,8 +408,8 @@ pub fn update_in_place(
     )?;
     let identity = &request.records.device_extended_unique_identifier;
     if identity.len() != 16
-        || !identity.bytes().all(|c| c.is_ascii_hexdigit())
-        || identity.bytes().all(|c| c == b'0')
+        || !identity.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || identity.bytes().all(|byte| byte == b'0')
     {
         return Err("Invalid monitoring identity".into());
     }
@@ -468,7 +471,7 @@ pub fn update_in_place(
         let position = state
             .paths
             .iter()
-            .position(|p| p.telemetry_index == index)
+            .position(|path| path.telemetry_index == index)
             .unwrap_or_else(|| {
                 state.paths.push(ReceiverPath::new(index));
                 state.paths.len() - 1
@@ -516,8 +519,8 @@ pub fn update_in_place(
     state.fresh = state
         .paths
         .iter()
-        .any(|p| p.latency.fresh || p.late_packets.fresh);
-    state.paths.sort_by_key(|p| p.telemetry_index);
+        .any(|path| path.latency.fresh || path.late_packets.fresh);
+    state.paths.sort_by_key(|path| path.telemetry_index);
     changed |= state.diagnostics.len() != diagnostic_count;
     if state.diagnostics.len() > request.history_limit {
         state

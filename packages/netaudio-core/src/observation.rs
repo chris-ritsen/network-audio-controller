@@ -44,8 +44,8 @@ impl Observation {
     ) -> Self {
         let value = match source {
             "receiver_latency" => rate
-                .filter(|r| *r > 0)
-                .map(|r| raw as f64 * 1_000_000_000.0 / f64::from(r)),
+                .filter(|sample_rate| *sample_rate > 0)
+                .map(|sample_rate| raw as f64 * 1_000_000_000.0 / f64::from(sample_rate)),
             "heartbeat_clock" | "conmon_clock" => Some(raw as f64 / 1000.0),
             _ => Some(raw as f64),
         };
@@ -76,11 +76,13 @@ impl Observation {
             clock_state_evidence: None,
             raw_record: bytes.into(),
             value,
-            latency_microseconds: rate.filter(|r| *r > 0).and_then(|r| {
-                u64::try_from(raw)
-                    .ok()
-                    .map(|s| s * 1_000_000 / u64::from(r))
-            }),
+            latency_microseconds: rate.filter(|sample_rate| *sample_rate > 0).and_then(
+                |sample_rate| {
+                    u64::try_from(raw)
+                        .ok()
+                        .map(|samples| samples * 1_000_000 / u64::from(sample_rate))
+                },
+            ),
         }
     }
 
@@ -255,10 +257,9 @@ impl Series {
     }
 
     pub fn refresh(&mut self, now: f64, freshness: f64) -> bool {
-        let fresh = self
-            .current
-            .as_ref()
-            .is_some_and(|s| now >= s.observed_monotonic && now - s.observed_monotonic < freshness);
+        let fresh = self.current.as_ref().is_some_and(|sample| {
+            now >= sample.observed_monotonic && now - sample.observed_monotonic < freshness
+        });
         let changed = fresh != self.fresh;
         self.fresh = fresh;
         changed
@@ -266,7 +267,7 @@ impl Series {
 
     pub fn reset(&mut self) {
         self.display_epoch += 1;
-        self.baseline = self.current.as_ref().map(|s| s.raw);
+        self.baseline = self.current.as_ref().map(|sample| sample.raw);
         self.increase_since_baseline = self.baseline.map(|_| 0);
         self.summarize();
     }
@@ -278,21 +279,24 @@ impl Series {
         let window: Vec<_> = self
             .history
             .iter()
-            .filter(|s| s.epoch == current.epoch && s.display_epoch == self.display_epoch)
+            .filter(|sample| {
+                sample.epoch == current.epoch && sample.display_epoch == self.display_epoch
+            })
             .collect();
-        let values: Vec<_> = window.iter().filter_map(|s| s.value).collect();
+        let values: Vec<_> = window.iter().filter_map(|sample| sample.value).collect();
         let mean = (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64);
         let deviation = mean.map(|m| {
-            (values.iter().map(|v| (v - m).powi(2)).sum::<f64>() / values.len() as f64).sqrt()
+            (values.iter().map(|value| (value - m).powi(2)).sum::<f64>() / values.len() as f64)
+                .sqrt()
         });
         let peak = window
             .iter()
-            .filter(|s| s.value.is_some())
+            .filter(|sample| sample.value.is_some())
             .max_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
         self.statistics = json!({"count": window.len(), "finite_count": values.len(), "mean": mean,
             "minimum": values.iter().copied().reduce(f64::min), "maximum": values.iter().copied().reduce(f64::max),
-            "population_standard_deviation": deviation, "peak_observed_at": peak.map(|s| &s.observed_at),
-            "window_start": window.first().map(|s| &s.observed_at), "window_end": window.last().map(|s| &s.observed_at),
+            "population_standard_deviation": deviation, "peak_observed_at": peak.map(|sample| &sample.observed_at),
+            "window_start": window.first().map(|sample| &sample.observed_at), "window_end": window.last().map(|sample| &sample.observed_at),
             "epoch": current.epoch});
         self.histogram = Value::Null;
         if current.source == "receiver_latency" {
@@ -306,7 +310,10 @@ impl Series {
                     if sample.raw <= 0 {
                         continue;
                     }
-                    let Some(rate) = sample.sample_rate_hertz.filter(|r| *r > 0) else {
+                    let Some(rate) = sample
+                        .sample_rate_hertz
+                        .filter(|sample_rate| *sample_rate > 0)
+                    else {
                         continue;
                     };
                     let bin = (sample.raw as u128 * 1_000_000_000 * 20)

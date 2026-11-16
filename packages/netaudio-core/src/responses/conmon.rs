@@ -652,7 +652,7 @@ pub fn parse_clock_master_status(data: &[u8]) -> Option<ClockMasterStatus> {
     }
     r.get(..block_end)?;
     let codes = (0..usize::from(count))
-        .map(|i| read_u16(r, 12 + i * 2))
+        .map(|index| read_u16(r, 12 + index * 2))
         .collect::<Option<Vec<_>>>()?;
     Some(ClockMasterStatus {
         record_revision: read_u16(r, 0)?,
@@ -703,7 +703,7 @@ pub fn parse_clock_identifier_status(data: &[u8]) -> Option<ClockIdentifierStatu
         bounded.get(a.clone())?;
         if ranges[i + 1..]
             .iter()
-            .any(|b| a.start < b.end && b.start < a.end)
+            .any(|other_range| a.start < other_range.end && other_range.start < a.end)
         {
             return None;
         }

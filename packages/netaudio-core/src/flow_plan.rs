@@ -96,12 +96,14 @@ impl FlowDeviceFacts {
         }
         for (requested, observed, label) in [
             (
-                request.sample_rate_hz.map(|v| v.get()),
+                request.sample_rate_hz.map(|sample_rate| sample_rate.get()),
                 self.sample_rate,
                 "sample rate",
             ),
             (
-                request.encoding_bits.map(|v| u32::from(v.get())),
+                request
+                    .encoding_bits
+                    .map(|encoding_bits| u32::from(encoding_bits.get())),
                 self.encoding.map(u32::from),
                 "encoding",
             ),
@@ -340,9 +342,9 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
                 "flow_slot": request.identity.global_flow_id, "channels": channels,
                 "configuration": {"sample_rate": input.device.sample_rate, "encoding": input.device.encoding,
                     "media_class": if matches!(request.media_mode, MediaMode::RtpAes67) {3} else {1},
-                    "frames_per_packet":request.frames_per_packet.map_or(0, |v| v.get()),
+                    "frames_per_packet":request.frames_per_packet.map_or(0, |frames_per_packet| frames_per_packet.get()),
                     "label":request.name,"persistent":true,"advertised":true,
-                    "destinations":destinations.iter().map(|d| json!({"address":d.address,"port":d.port})).collect::<Vec<_>>()}})
+                    "destinations":destinations.iter().map(|destination| json!({"address":destination.address,"port":destination.port})).collect::<Vec<_>>()}})
             }
         }
         (Some(true), Some(crate::protocol::PROTOCOL_ARC_2809)) => {

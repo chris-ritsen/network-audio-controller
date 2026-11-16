@@ -152,7 +152,9 @@ pub struct PtpClockStatus {
 }
 
 fn label(value: u16, labels: &[&str]) -> Option<String> {
-    labels.get(usize::from(value)).map(|v| (*v).to_owned())
+    labels
+        .get(usize::from(value))
+        .map(|text| (*text).to_owned())
 }
 fn role(value: u16) -> Option<String> {
     match value {
@@ -188,7 +190,11 @@ fn claim(
 ) -> Option<()> {
     let end = start.checked_add(size)?;
     data.get(start..end)?;
-    if size != 0 && used.iter().any(|r| start < r.end && r.start < end) {
+    if size != 0
+        && used
+            .iter()
+            .any(|range| start < range.end && range.start < end)
+    {
         return None;
     }
     used.push(start..end);
@@ -325,12 +331,12 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
             role: role(state),
         });
     }
-    s.clock_port_state_code = s.base_ports.first().map(|p| p.state_code);
+    s.clock_port_state_code = s.base_ports.first().map(|port| port.state_code);
     s.clock_role = s.clock_port_state_code.and_then(role);
     s.synchronization = if servo_state_code == 3 {
         "synchronized"
     } else if clock_state_code == 3
-        || (stratum == 255 && s.base_ports.iter().any(|p| p.state_code == 4))
+        || (stratum == 255 && s.base_ports.iter().any(|port| port.state_code == 4))
     {
         "lost"
     } else if servo_state_code == 2 {
@@ -481,10 +487,17 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
             port.interface_record = Some(properties.raw_record.clone());
         }
     }
-    let ptpv1: Vec<_> = ports.iter().filter(|p| p.ptp_version == 1).collect();
-    if !ptpv1.is_empty() && ptpv1.iter().all(|p| p.unicast_delay_requests.is_some()) {
+    let ptpv1: Vec<_> = ports.iter().filter(|port| port.ptp_version == 1).collect();
+    if !ptpv1.is_empty()
+        && ptpv1
+            .iter()
+            .all(|port| port.unicast_delay_requests.is_some())
+    {
         let first = ptpv1[0].unicast_delay_requests;
-        if ptpv1.iter().all(|p| p.unicast_delay_requests == first) {
+        if ptpv1
+            .iter()
+            .all(|port| port.unicast_delay_requests == first)
+        {
             s.aggregate_ptpv1_unicast_delay_requests = first;
         }
     }
@@ -585,13 +598,13 @@ fn global_block(
             follower_only: follower_valid
                 .then(|| raw.get(5).map(|value| value & 1 != 0))
                 .flatten(),
-            sync_interval: sync.map(|v| v as i8),
+            sync_interval: sync.map(|interval| interval as i8),
             sync_interval_raw: sync,
-            announce_interval: announce.map(|v| v as i8),
+            announce_interval: announce.map(|interval| interval as i8),
             announce_interval_raw: announce,
-            delay_request_interval: delay.map(|v| v as i8),
+            delay_request_interval: delay.map(|interval| interval as i8),
             delay_request_interval_raw: delay,
-            peer_delay_interval: peer.map(|v| v as i8),
+            peer_delay_interval: peer.map(|interval| interval as i8),
             peer_delay_interval_raw: peer,
             delay_mechanism: byte(0x20, 12),
         });

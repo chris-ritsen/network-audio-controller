@@ -214,7 +214,7 @@ impl PanelPresentationRequest {
                             .as_array()
                             .into_iter()
                             .flatten()
-                            .filter_map(|v| v["resolution"].as_u64()),
+                            .filter_map(|format| format["resolution"].as_u64()),
                     )
                     .collect();
 
@@ -336,18 +336,18 @@ pub fn presentation(input: PanelPresentationRequest) -> PanelPresentation {
             "bandwidth" => {
                 let minimum = current["minimum"]
                     .as_u64()
-                    .and_then(|v| u32::try_from(v).ok());
+                    .and_then(|minimum| u32::try_from(minimum).ok());
                 let maximum = current["maximum"]
                     .as_u64()
-                    .and_then(|v| u32::try_from(v).ok())
-                    .map(|v| v.min(BANDWIDTH_MAXIMUM));
+                    .and_then(|maximum| u32::try_from(maximum).ok())
+                    .map(|maximum| maximum.min(BANDWIDTH_MAXIMUM));
 
                 if let (Some(minimum), Some(maximum)) = (minimum, maximum) {
                     if minimum > 0 && minimum <= maximum {
                         let target = current["target"]
                             .as_u64()
-                            .and_then(|v| u32::try_from(v).ok())
-                            .filter(|v| (minimum..=maximum).contains(v))
+                            .and_then(|target| u32::try_from(target).ok())
+                            .filter(|target| (minimum..=maximum).contains(target))
                             .unwrap_or(minimum);
                         editor.bandwidth = Some(PanelBandwidth {
                             minimum,

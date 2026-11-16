@@ -85,17 +85,18 @@ pub fn build_fixed_multicast_flow(
         return Err(NetaudioError::NameTooLong);
     }
 
-    let align = |n: usize| {
-        n.checked_add(3)
-            .map(|v| v & !3)
+    let align = |offset: usize| {
+        offset
+            .checked_add(3)
+            .map(|padded| padded & !3)
             .ok_or(NetaudioError::PacketTooLarge)
     };
     let count = u16::try_from(channels.len()).map_err(|_| NetaudioError::PacketTooLarge)?;
     let record_end = channels
         .len()
         .checked_add(destinations.len())
-        .and_then(|v| v.checked_mul(2))
-        .and_then(|v| v.checked_add(34))
+        .and_then(|entry_count| entry_count.checked_mul(2))
+        .and_then(|entry_bytes| entry_bytes.checked_add(34))
         .ok_or(NetaudioError::PacketTooLarge)?;
     let extension = align(record_end)?;
     let label_offset = extension

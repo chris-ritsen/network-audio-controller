@@ -203,9 +203,10 @@ pub(crate) fn gain_adapter_from_parameters(
     });
     let (device_type, parameter) = matches.next()?;
     if matches.next().is_some()
-        || parameters
-            .iter()
-            .any(|p| matches!(p.parameter_type, 1 | 2) && gain_device_type(p).is_none())
+        || parameters.iter().any(|codec_parameter| {
+            matches!(codec_parameter.parameter_type, 1 | 2)
+                && gain_device_type(codec_parameter).is_none()
+        })
         || parameter.values.len() > 2
         || parameter.values.is_empty()
         || parameter

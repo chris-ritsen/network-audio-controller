@@ -109,7 +109,7 @@ pub fn observe_in_place(
     if let Some(status) = &request.conmon_status {
         status["clock_frequency_offset_parts_per_billion"]
             .as_i64()
-            .and_then(|v| i32::try_from(v).ok())
+            .and_then(|offset| i32::try_from(offset).ok())
             .ok_or("Missing clock offset")?;
     }
     let mut changed = false;
@@ -122,7 +122,7 @@ pub fn observe_in_place(
         let records = parse_heartbeat_records(&packet).ok_or("Malformed heartbeat envelope")?;
         for record in records
             .into_iter()
-            .filter(|r| r.record_type == CLOCK_FREQUENCY_OFFSET_RECORD_TYPE)
+            .filter(|record| record.record_type == CLOCK_FREQUENCY_OFFSET_RECORD_TYPE)
         {
             let Some(parsed) = parse_clock_frequency_offset_record(record.bytes) else {
                 state.diagnostics.push(Diagnostic {
@@ -144,7 +144,7 @@ pub fn observe_in_place(
                 .conmon
                 .current
                 .as_ref()
-                .and_then(|s| s.clock_state_evidence.clone());
+                .and_then(|conmon_sample| conmon_sample.clock_state_evidence.clone());
             changed |= state.heartbeat.accept(
                 sample,
                 request.freshness_seconds,
@@ -156,7 +156,7 @@ pub fn observe_in_place(
     if let Some(status) = request.conmon_status {
         let raw = status["clock_frequency_offset_parts_per_billion"]
             .as_i64()
-            .and_then(|v| i32::try_from(v).ok())
+            .and_then(|offset| i32::try_from(offset).ok())
             .ok_or("Missing clock offset")?;
         let mut sample = Observation::new(
             i64::from(raw),
@@ -197,12 +197,14 @@ pub fn observe_in_place(
     for (name, series) in [("heartbeat", &state.heartbeat), ("conmon", &state.conmon)] {
         let policy = state.variation.entry(name.into()).or_default();
         policy.threshold_ppb = 10000;
-        let epoch = series.current.as_ref().map(|s| s.epoch);
+        let epoch = series.current.as_ref().map(|sample| sample.epoch);
         let window: Vec<_> = series
             .history
             .iter()
             .rev()
-            .take_while(|s| Some(s.epoch) == epoch && s.display_epoch == series.display_epoch)
+            .take_while(|sample| {
+                Some(sample.epoch) == epoch && sample.display_epoch == series.display_epoch
+            })
             .take(20)
             .collect();
         let observable = series.fresh && window.len() >= 11;
@@ -210,11 +212,12 @@ pub fn observe_in_place(
         policy.observable = observable;
         policy.window_size = window.len();
         policy.deviation_ppb = if observable {
-            let mean = window.iter().map(|s| s.raw as f64).sum::<f64>() / window.len() as f64;
+            let mean =
+                window.iter().map(|sample| sample.raw as f64).sum::<f64>() / window.len() as f64;
             Some(
                 (window
                     .iter()
-                    .map(|s| (s.raw as f64 - mean).powi(2))
+                    .map(|sample| (sample.raw as f64 - mean).powi(2))
                     .sum::<f64>()
                     / window.len() as f64)
                     .sqrt(),

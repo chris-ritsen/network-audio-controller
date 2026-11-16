@@ -1073,11 +1073,11 @@ fn parse_flow_record(
         }
         let extension = object(extension_pointer, length)?;
         raw_extension = extension.to_vec();
-        frames_per_packet = read_u16(extension, 8).filter(|v| *v != 0);
+        frames_per_packet = read_u16(extension, 8).filter(|frame_count| *frame_count != 0);
         media_class = read_u16(extension, 16);
-        if let Some(pointer) = read_u16(extension, 10).filter(|p| *p != 0) {
+        if let Some(pointer) = read_u16(extension, 10).filter(|name_pointer| *name_pointer != 0) {
             let tail = body.get(usize::from(pointer)..)?;
-            let end = tail.iter().position(|v| *v == 0)?;
+            let end = tail.iter().position(|byte| *byte == 0)?;
             object(usize::from(pointer), end.checked_add(1)?)?;
             flow_name = Some(std::str::from_utf8(&tail[..end]).ok()?.to_owned());
         }

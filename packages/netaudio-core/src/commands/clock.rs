@@ -210,8 +210,11 @@ pub fn build_clock_control(
         if name.len() > 16 || (name.len() == 16 && !name.contains(&0)) {
             return Err(reject);
         }
-        let end = name.iter().position(|b| *b == 0).unwrap_or(name.len());
-        if name[end..].iter().any(|b| *b != 0) {
+        let end = name
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(name.len());
+        if name[end..].iter().any(|byte| *byte != 0) {
             return Err(reject);
         }
         primary |= 8;
@@ -266,10 +269,18 @@ pub fn build_clock_control(
             record[p + 2..p + 4].copy_from_slice(&port.port_id.to_be_bytes());
             for (bit, offset, value) in [
                 (2, 4, port.ttl),
-                (4, 5, port.sync_interval.map(|v| v as u8)),
-                (8, 6, port.announce_interval.map(|v| v as u8)),
-                (16, 7, port.delay_request_interval.map(|v| v as u8)),
-                (32, 8, port.peer_delay_interval.map(|v| v as u8)),
+                (4, 5, port.sync_interval.map(|interval| interval as u8)),
+                (8, 6, port.announce_interval.map(|interval| interval as u8)),
+                (
+                    16,
+                    7,
+                    port.delay_request_interval.map(|interval| interval as u8),
+                ),
+                (
+                    32,
+                    8,
+                    port.peer_delay_interval.map(|interval| interval as u8),
+                ),
                 (64, 9, port.delay_mechanism),
             ] {
                 if let Some(value) = value {

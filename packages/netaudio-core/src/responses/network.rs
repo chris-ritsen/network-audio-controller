@@ -79,11 +79,11 @@ pub(super) fn interface_configuration_matches_running(
                 && running
                     .gateway
                     .as_ref()
-                    .is_none_or(|v| configured.gateway.as_ref() == Some(v))
+                    .is_none_or(|gateway| configured.gateway.as_ref() == Some(gateway))
                 && running
                     .dns_server
                     .as_ref()
-                    .is_none_or(|v| configured.dns_server.as_ref() == Some(v))
+                    .is_none_or(|dns_server| configured.dns_server.as_ref() == Some(dns_server))
         }
         _ => false,
     }
@@ -205,8 +205,10 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
     Some(InterfaceStatus {
         record_protocol_identifier,
         link_speed_mbps,
-        reboot_required: interfaces.iter().any(|v| v.reboot_required)
-            || redundancy.as_ref().is_some_and(|v| v.reboot_required),
+        reboot_required: interfaces.iter().any(|interface| interface.reboot_required)
+            || redundancy
+                .as_ref()
+                .is_some_and(|redundancy_status| redundancy_status.reboot_required),
         redundancy,
         redundancy_flags,
         raw_record_hexadecimal: bytes_to_hex(data.get(CONMON_RECORD_BASE..)?),

@@ -19,7 +19,8 @@ pub fn control_availability(status: &Value) -> crate::commands::ClockControlAvai
         ..Default::default()
     }
     .availability();
-    availability.follower_only = field("record_revision").is_some_and(|r| r >= 0x0717)
+    availability.follower_only = field("record_revision")
+        .is_some_and(|revision| revision >= 0x0717)
         && status.get("follower_only").is_some_and(Value::is_boolean);
     let valid = status
         .get("extended_validity")
@@ -150,9 +151,9 @@ fn normalized_value_valid(name: &str, value: &Value) -> bool {
                     .iter()
                     .all(|byte| byte.as_u64().is_some_and(|value| value <= u8::MAX.into()))
         }),
-        "multicast_dscp" => value.as_u64().is_some_and(|v| v <= 63),
+        "multicast_dscp" => value.as_u64().is_some_and(|value| value <= 63),
         "priority_mapping" | "preferred_protocol" | "ptpv2_clock_class" | "ptpv2_domain"
-        | "ptpv2_priority1" | "ptpv2_priority2" => value.as_u64().is_some_and(|v| v <= 255),
+        | "ptpv2_priority1" | "ptpv2_priority2" => value.as_u64().is_some_and(|value| value <= 255),
         "ports" => {
             serde_json::from_value::<Vec<crate::commands::ClockPortControl>>(value.clone()).is_ok()
         }
@@ -244,7 +245,7 @@ pub fn plan_configuration(request: ClockPlanRequest) -> Result<ClockPlan, String
         control_profile: request.control_profile,
     })?;
     let available = serde_json::to_value(control_availability(&json!(request.status)))
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| error.to_string())?;
     let mut requested = Map::new();
     let mut before = Map::new();
     let mut changed = Map::new();
@@ -413,7 +414,7 @@ fn plan_ports(observed: &Value, requested: &Value) -> Result<(Value, Value), Str
             }
             let current = matching[0]
                 .get(&name)
-                .filter(|v| !v.is_null())
+                .filter(|readback| !readback.is_null())
                 .ok_or_else(|| format!("Fresh valid port readback is unavailable for {name}"))?;
             prior.insert(name.clone(), current.clone());
             if current != &desired {
