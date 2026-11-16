@@ -743,7 +743,7 @@ def mcp_public_url(
 @app.command("mcp-revoke")
 def mcp_revoke():
     """Revoke every OAuth token and registered client; assistants must connect again."""
-    from netaudio.daemon.mcp_oauth import OAuthStore
+    from netaudio.daemon.mcp_oauth import revoke_all
 
-    count = OAuthStore().revoke_all()
+    count = revoke_all()
     typer.echo(f"Revoked {count} token(s) and forgot every registered client.")
