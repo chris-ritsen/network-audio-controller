@@ -23,7 +23,6 @@ pub struct Resolver {
     deadline: Deadline,
     next_deadline: Option<u64>,
     schedule_changed: bool,
-    interface_index: u32,
 }
 
 impl Resolver {
@@ -40,7 +39,6 @@ impl Resolver {
             next_deadline: None,
             schedule_changed: true,
             time,
-            interface_index,
         })
     }
 

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
 use netaudio_core::native_audio::clock::discipline::LocalTimestamp;
-use socket2::{Domain, Protocol, SockRef, Socket, Type};
+use socket2::SockRef;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
