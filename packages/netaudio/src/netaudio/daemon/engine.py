@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import os
 import subprocess
@@ -20,6 +21,18 @@ class EngineFailure(RuntimeError):
 def executable() -> Path:
     name = "netaudio-daemon.exe" if sys.platform == "win32" else "netaudio-daemon"
     return Path(__file__).resolve().parents[1] / "bin" / name
+
+
+def describe_transport() -> dict:
+    path = executable()
+    if not path.is_file():
+        raise EngineFailure("the native engine is missing; rebuild or reinstall NetAudio")
+
+    completed = subprocess.run([str(path), "--describe-transport"], capture_output=True, text=True)
+    if completed.returncode != 0:
+        raise EngineFailure(completed.stderr.strip().removeprefix("Error: "))
+
+    return json.loads(completed.stdout)
 
 
 def log_level() -> str:

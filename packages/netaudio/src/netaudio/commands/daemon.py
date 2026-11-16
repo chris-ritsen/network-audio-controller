@@ -557,6 +557,16 @@ def logs(
                 raise typer.Exit(code=0)
 
 
+def _transport_description() -> dict:
+    from netaudio.daemon.engine import EngineFailure, describe_transport
+
+    try:
+        return describe_transport()
+    except EngineFailure as error:
+        typer.echo(f"TLS is misconfigured: {error}", err=True)
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def web(
     daemon_port: Optional[int] = typer.Option(
@@ -573,18 +583,12 @@ def web(
         raise typer.Exit(code=1)
 
     url = f"http://127.0.0.1:{effective_port}/"
-    from netaudio.daemon.http.tls import advertisement_addresses
-    from netaudio.daemon.http.tls import TLSConfigurationError, certificate_fingerprint, daemon_tls_settings
-
-    addresses = advertisement_addresses()
-    try:
-        tls = daemon_tls_settings()
-    except TLSConfigurationError as error:
-        typer.echo(f"TLS is misconfigured: {error}", err=True)
-        raise typer.Exit(code=1)
+    transport = _transport_description()
+    addresses = transport["addresses"]
+    tls = transport["tls"]
     urls = [url] if tls is not None else [url, *(f"http://{address}:{effective_port}/" for address in addresses)]
-    secure_urls = [] if tls is None else [f"https://{address}:{tls.port}/" for address in ("127.0.0.1", *addresses)]
-    fingerprint = None if tls is None else certificate_fingerprint(tls.certificate)
+    secure_urls = [] if tls is None else [f"https://{address}:{tls['port']}/" for address in ("127.0.0.1", *addresses)]
+    fingerprint = None if tls is None else tls["certificate_sha256"]
     if structured_output_selected():
         output_single({"certificate_sha256": fingerprint, "https_urls": secure_urls, "urls": urls})
     else:
@@ -603,37 +607,22 @@ def web(
 def tls():
     """Show the daemon's TLS configuration and certificate fingerprint."""
     from netaudio.common.clock_text import clock_text
-    from netaudio.daemon.http.tls import TLSConfigurationError, certificate_fingerprint, daemon_tls_settings
-    from netaudio.daemon.http.tls_named import named_certificate_status
 
-    try:
-        settings_value = daemon_tls_settings()
-    except TLSConfigurationError as error:
-        typer.echo(f"TLS is misconfigured: {error}", err=True)
-        raise typer.Exit(code=1)
+    settings_value = _transport_description()["tls"]
     if settings_value is None:
         if structured_output_selected():
             output_single(None)
         else:
             typer.echo("TLS is disabled by [daemon] no_ssl = true.")
         return
-    fingerprint = certificate_fingerprint(settings_value.certificate)
-    named = named_certificate_status(settings_value.named_certificate, settings_value.named_key)
+    named = settings_value["named_certificate"]
     if structured_output_selected():
-        output_single(
-            {
-                "certificate": str(settings_value.certificate),
-                "certificate_sha256": fingerprint,
-                "key": str(settings_value.key),
-                "named_certificate": named,
-                "port": settings_value.port,
-            }
-        )
+        output_single(settings_value)
         return
-    typer.echo(f"Port: {settings_value.port}")
-    typer.echo(f"Certificate: {settings_value.certificate}")
-    typer.echo(f"Key: {settings_value.key}")
-    typer.echo(f"Certificate SHA-256: {fingerprint}")
+    typer.echo(f"Port: {settings_value['port']}")
+    typer.echo(f"Certificate: {settings_value['certificate']}")
+    typer.echo(f"Key: {settings_value['key']}")
+    typer.echo(f"Certificate SHA-256: {settings_value['certificate_sha256']}")
     if named is None:
         return
     typer.echo(f"Named certificate: {named['certificate']}")
@@ -653,17 +642,11 @@ def mcp_token(
     ),
 ):
     """Show or rotate the bearer token that MCP clients use to reach this daemon."""
-    from netaudio.daemon.http.tls import TLSConfigurationError, daemon_tls_settings
     from netaudio.daemon.mcp_access import ensure_mcp_token, rotate_mcp_token
 
-    try:
-        settings_value = daemon_tls_settings()
-    except TLSConfigurationError as error:
-        typer.echo(f"TLS is misconfigured: {error}", err=True)
-        raise typer.Exit(code=1)
-
+    settings_value = _transport_description()["tls"]
     token = rotate_mcp_token() if rotate else ensure_mcp_token()
-    effective_port = settings_value.port if settings_value is not None else _effective_daemon_port(daemon_port)
+    effective_port = settings_value["port"] if settings_value is not None else _effective_daemon_port(daemon_port)
     scheme = "https" if settings_value is not None else "http"
     url = f"{scheme}://{socket.gethostname().removesuffix('.local')}.local:{effective_port}/mcp"
     if structured_output_selected():

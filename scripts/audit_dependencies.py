@@ -25,14 +25,7 @@ class Acceptance:
     reason: str
 
 
-ACCEPTED = {
-    ("Python", "cryptography", "48.0.1"): Acceptance(
-        frozenset({"PYSEC-2026-3552", "PYSEC-2026-3553", "PYSEC-2026-3554"}),
-        "Locked only for Intel macOS, where cryptography 49 and later publish no wheels. "
-        "NetAudio uses it only to generate its TLS certificate, not for PKCS#7 decryption "
-        "or X.509 chain verification.",
-    ),
-}
+ACCEPTED: dict[tuple[str, str, str], Acceptance] = {}
 
 
 @dataclass

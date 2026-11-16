@@ -1,6 +1,7 @@
 pub mod datagram;
 pub mod generated;
 mod listener;
+pub mod report;
 mod tls;
 
 pub use listener::{Listener, ListenerOptions};

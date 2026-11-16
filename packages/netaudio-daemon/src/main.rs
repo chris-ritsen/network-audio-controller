@@ -27,10 +27,24 @@ struct Arguments {
     dissect: bool,
     #[arg(long)]
     private: bool,
+    #[arg(
+        long,
+        help = "Print the web addresses and TLS identity as JSON, then exit"
+    )]
+    describe_transport: bool,
 }
 
 fn main() -> Result<()> {
     let arguments = Arguments::parse();
+
+    if arguments.describe_transport {
+        let configuration =
+            Configuration::load(arguments.config.as_deref(), arguments.profile.as_deref())?;
+        let description = netaudio_daemon::transport::report::describe(&configuration)?;
+        println!("{description}");
+        return Ok(());
+    }
+
     initialize_logging()?;
     #[cfg(unix)]
     raise_descriptor_limit();

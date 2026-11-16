@@ -23,7 +23,7 @@ pub struct NetworkSnapshot {
 }
 
 impl NetworkSnapshot {
-    fn read() -> Result<Self> {
+    pub fn read() -> Result<Self> {
         let mut interfaces = if_addrs::get_if_addrs()?
             .into_iter()
             .map(|interface| {
