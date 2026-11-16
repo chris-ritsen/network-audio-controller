@@ -191,6 +191,7 @@ pub(super) fn parse(content: &str) -> Result<Element, String> {
         content,
         roxmltree::ParsingOptions {
             allow_dtd: false,
+            entity_resolver: None,
             nodes_limit: 131_072,
         },
     )
