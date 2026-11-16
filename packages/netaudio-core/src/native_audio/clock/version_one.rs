@@ -84,19 +84,6 @@ impl PortIdentity {
 
         Ok(())
     }
-
-    pub fn projected_identifier(self) -> [u8; 8] {
-        [
-            self.identifier[0],
-            self.identifier[1],
-            self.identifier[2],
-            0xff,
-            0xfe,
-            self.identifier[3],
-            self.identifier[4],
-            self.identifier[5],
-        ]
-    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

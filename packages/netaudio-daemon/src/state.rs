@@ -221,14 +221,6 @@ impl ReadModel {
         Ok(state.snapshot_fields["external_flows"].get(&key).cloned())
     }
 
-    pub fn subscriber_count(&self) -> Result<usize> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| anyhow::anyhow!("device state lock poisoned"))?;
-        Ok(state.subscribers.len())
-    }
-
     pub fn device(&self, name: &str) -> Result<Option<Arc<Value>>> {
         self.device_in_context(name, None)
     }

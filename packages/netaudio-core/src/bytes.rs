@@ -31,18 +31,6 @@ pub fn read_u64(data: &[u8], offset: usize) -> Option<u64> {
     })
 }
 
-pub fn null_terminated_slice(data: &[u8], offset: usize) -> &[u8] {
-    if offset >= data.len() {
-        return &[];
-    }
-    let end = data[offset..]
-        .iter()
-        .position(|&byte| byte == 0)
-        .map(|relative| offset + relative)
-        .unwrap_or(data.len());
-    &data[offset..end]
-}
-
 pub fn string_at_pointer(data: &[u8], pointer: u16) -> Option<String> {
     if pointer == 0 || pointer as usize >= data.len() {
         return None;
@@ -52,8 +40,4 @@ pub fn string_at_pointer(data: &[u8], pointer: u16) -> Option<String> {
     std::str::from_utf8(&data[offset..offset + terminator])
         .ok()
         .map(str::to_owned)
-}
-
-pub fn null_terminated_lossy(data: &[u8], offset: usize) -> String {
-    String::from_utf8_lossy(null_terminated_slice(data, offset)).into_owned()
 }

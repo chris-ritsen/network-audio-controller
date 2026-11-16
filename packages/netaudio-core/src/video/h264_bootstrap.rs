@@ -116,19 +116,6 @@ impl Candidate {
     pub fn expires_nanoseconds(&self) -> i64 {
         self.expires_nanoseconds
     }
-
-    pub fn validate_current(&self, context: &Context, now_nanoseconds: i64) -> Result<()> {
-        ensure!(
-            context == &self.authority.context,
-            "bootstrap candidate context changed"
-        );
-        ensure!(
-            now_nanoseconds >= self.recovery.arrival_nanoseconds
-                && now_nanoseconds < self.expires_nanoseconds,
-            "bootstrap candidate expired or its clock moved backwards"
-        );
-        Ok(())
-    }
 }
 
 pub enum Progress {
@@ -282,14 +269,6 @@ impl Bootstrap {
     pub fn invalidate(&mut self) {
         self.quarantine = None;
         self.state = State::Invalidated;
-    }
-
-    pub fn observe_context(&mut self, context: &Context, now_nanoseconds: i64) -> Result<()> {
-        let result = self.check_current(context, now_nanoseconds);
-        if result.is_err() && self.quarantine.is_some() {
-            self.invalidate();
-        }
-        result
     }
 
     pub fn push(&mut self, bytes: &[u8], observation: Observation<'_>) -> Result<Progress> {

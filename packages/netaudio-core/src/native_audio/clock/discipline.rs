@@ -1204,22 +1204,6 @@ impl Follower {
         )
     }
 
-    pub fn sample_basis(&mut self, now: u64, sample_rate: u32) -> Result<SampleBasis, Error> {
-        let ticks = self
-            .reading(now)?
-            .ok_or(Error::Unavailable)?
-            .sample_tick(sample_rate)?;
-        let seconds =
-            u32::try_from(ticks / u64::from(sample_rate)).map_err(|_| Error::TimeOutsideEra)?;
-        Ok(SampleBasis {
-            generation: self.generation,
-            seconds,
-            sample_offset: (ticks % u64::from(sample_rate)) as u32,
-            sample_rate,
-            estimated_error_nanoseconds: self.estimated_error(now)?.to_string(),
-        })
-    }
-
     pub fn sample_deadline(
         &mut self,
         sample: SampleTime,

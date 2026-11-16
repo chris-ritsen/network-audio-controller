@@ -170,13 +170,6 @@ fn flow_create_opcode(flow_protocol_id: u16) -> Result<u16, NetaudioError> {
     }
 }
 
-pub fn build_query_tx_flows(
-    flow_protocol_id: u16,
-    message_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
-    build_query_tx_flows_from(flow_protocol_id, 1, message_id)
-}
-
 pub fn build_query_tx_flows_from(
     flow_protocol_id: u16,
     starting_flow: u16,
@@ -445,10 +438,6 @@ pub fn build_query_transmit_channel_capabilities(
         &body,
         message_id,
     )
-}
-
-pub fn build_query_receiver_port_ranges(message_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_query_receiver_port_ranges_for_protocol(PROTOCOL_DANTE_FLOW, message_id)
 }
 
 pub fn build_query_receiver_port_ranges_for_protocol(

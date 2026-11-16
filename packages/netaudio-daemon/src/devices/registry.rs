@@ -480,16 +480,6 @@ impl DeviceRegistry {
         Ok(())
     }
 
-    pub fn media_services(&self) -> Result<Vec<DiscoveredService>> {
-        Ok(self
-            .media
-            .read()
-            .map_err(|_| anyhow::anyhow!("media inventory lock poisoned"))?
-            .values()
-            .cloned()
-            .collect())
-    }
-
     pub fn control_address(&self, key: &str) -> Result<Option<DeviceAddress>> {
         let devices = self
             .devices

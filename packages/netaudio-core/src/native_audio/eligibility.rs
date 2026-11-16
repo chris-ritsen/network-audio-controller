@@ -27,25 +27,6 @@ pub struct SourceFormat {
     pub receive_latency_nanoseconds: u32,
 }
 
-pub fn qualify(
-    capabilities: &ChannelCount,
-    properties: &AudioProperties,
-    channels: &[&TransmitChannel],
-    selected: &[(&str, &Source)],
-    requested_frames_per_packet: u16,
-    receiver_domain: NamedDomain,
-) -> Result<SourceFormat, Error> {
-    qualify_with_profile(
-        capabilities,
-        properties,
-        channels,
-        selected,
-        requested_frames_per_packet,
-        receiver_domain,
-        Profile::default(),
-    )
-}
-
 pub fn qualify_with_profile(
     capabilities: &ChannelCount,
     properties: &AudioProperties,

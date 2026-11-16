@@ -300,11 +300,6 @@ impl<'a> Packet<'a> {
                 }
             })
     }
-
-    pub fn next_time(&self) -> Result<SampleTime, Error> {
-        self.time
-            .advance(self.frame_count() as u64, self.format.sample_rate())
-    }
 }
 
 pub fn encode(format: Format, time: SampleTime, samples: &[i32]) -> Result<Vec<u8>, Error> {

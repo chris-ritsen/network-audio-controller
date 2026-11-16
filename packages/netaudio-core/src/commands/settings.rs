@@ -53,17 +53,6 @@ pub fn parse_set_latency_request(data: &[u8]) -> Option<u32> {
     (canonical == data).then_some(latency_ns)
 }
 
-pub fn build_set_latency(
-    latency_milliseconds: f64,
-    message_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
-    build_set_latency_for_protocol(
-        crate::protocol::PROTOCOL_ID,
-        latency_milliseconds,
-        message_id,
-    )
-}
-
 pub(crate) fn require_latency_protocol(protocol_id: u16) -> Result<(), NetaudioError> {
     if !matches!(
         protocol_id,

@@ -60,32 +60,6 @@ impl Timestamp {
     }
 }
 
-pub fn split_sample_relation(
-    buffer_time: Timestamp,
-    offset_nanoseconds: i64,
-    sample_rate: u32,
-) -> Result<SampleTime, Error> {
-    buffer_time.total_nanoseconds()?;
-    if sample_rate == 0 {
-        return Err(Error::InvalidSampleRate);
-    }
-
-    let rate = i128::from(sample_rate);
-    let second = i128::from(NANOSECONDS_PER_SECOND);
-    let base = i128::from(buffer_time.seconds) * rate
-        + i128::from(buffer_time.nanoseconds) * rate / second;
-    let offset = i128::from(offset_nanoseconds);
-    let adjustment = (offset / second) * rate + (offset % second) * rate / second;
-    let ticks = base + adjustment;
-    if ticks < 0 {
-        return Err(Error::TimeOutsideEra);
-    }
-
-    let seconds = u32::try_from(ticks / rate).map_err(|_| Error::TimeOutsideEra)?;
-    SampleTime::new(seconds, (ticks % rate) as u32, sample_rate)
-        .map_err(|_| Error::InvalidTimestamp)
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     InvalidTimestamp,

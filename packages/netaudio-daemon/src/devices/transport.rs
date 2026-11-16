@@ -165,22 +165,6 @@ impl DeviceTransport {
         }
     }
 
-    pub fn set_request_policy(
-        &mut self,
-        timeout: Duration,
-        read_attempts: u32,
-    ) -> Result<(), TransportError> {
-        if timeout.is_zero() || read_attempts == 0 {
-            return Err(TransportError::InvalidCommand(
-                "request timeout and read attempts must be positive".to_owned(),
-            ));
-        }
-
-        self.request_timeout = timeout;
-        self.read_attempts = read_attempts;
-        Ok(())
-    }
-
     pub fn address(&self) -> DeviceAddress {
         self.address
     }

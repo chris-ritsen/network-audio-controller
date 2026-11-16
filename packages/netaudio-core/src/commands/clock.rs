@@ -103,15 +103,6 @@ impl ClockControl {
         }
     }
 
-    pub fn is_query(&self) -> bool {
-        self.clock_source.is_none()
-            && self.preferred_leader.is_none()
-            && self.subdomain.is_none()
-            && self.global_unicast_delay_requests.is_none()
-            && self.aggregate_ptpv1_unicast_delay_requests.is_none()
-            && !self.has_extended_changes()
-    }
-
     fn has_extended_changes(&self) -> bool {
         self.aggregate_ptpv2_unicast_delay_requests.is_some()
             || self.follower_only.is_some()

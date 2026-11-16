@@ -77,10 +77,6 @@ impl Subscriptions {
         });
     }
 
-    pub fn listener_count(&self) -> usize {
-        self.changes.receiver_count()
-    }
-
     pub fn listen(
         &self,
         identifier: Value,
