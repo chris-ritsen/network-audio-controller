@@ -5,7 +5,6 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use url::Url;
 
-pub const SECRET_SALT_BYTES: usize = 16;
 pub const SECRET_DIGEST_BYTES: usize = 32;
 pub const SECRET_ITERATIONS: u32 = 600_000;
 pub const TOKEN_BYTES: usize = 32;
@@ -61,22 +60,6 @@ pub fn secret_digest(secret: &str, salt: &[u8]) -> [u8; SECRET_DIGEST_BYTES] {
         salt,
         SECRET_ITERATIONS,
     )
-}
-
-pub fn secret_record(secret: &str) -> Result<serde_json::Value, AuthorizationError> {
-    if secret.chars().count() < 12 {
-        return Err(AuthorizationError::new(
-            "invalid_request",
-            "The login secret must be at least 12 characters",
-        ));
-    }
-
-    let mut salt = [0; SECRET_SALT_BYTES];
-    OsRng.fill_bytes(&mut salt);
-    Ok(serde_json::json!({
-        "salt": hexadecimal(&salt),
-        "hash": hexadecimal(&secret_digest(secret, &salt)),
-    }))
 }
 
 pub fn verify_challenge(verifier: &str, challenge: &str) -> bool {

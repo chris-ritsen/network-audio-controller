@@ -50,7 +50,5 @@ pub mod sdp;
 pub mod shure;
 pub mod signal_presence;
 pub mod spec;
-pub mod subscription_readback;
-pub mod subscription_reconciliation;
 pub mod subscription_status;
 pub mod video;

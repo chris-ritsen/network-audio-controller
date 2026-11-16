@@ -152,29 +152,6 @@ impl ClockSocket {
         Ok(identifier)
     }
 
-    pub async fn send(&mut self, bytes: &[u8], destination: SocketAddrV4) -> Result<u32> {
-        let identifier = self
-            .next_transmit_identifier
-            .context("clock socket transmit identifier space is exhausted")?;
-
-        loop {
-            let mut ready = self.socket.writable().await?;
-            let written =
-                match ready.try_io(|socket| socket.get_ref().send_to(bytes, &destination.into())) {
-                    Ok(result) => result?,
-                    Err(_) => continue,
-                };
-
-            self.next_transmit_identifier = identifier.checked_add(1);
-
-            if written != bytes.len() {
-                bail!("clock socket submitted an incomplete datagram");
-            }
-
-            return Ok(identifier);
-        }
-    }
-
     pub fn try_send(&mut self, bytes: &[u8], destination: SocketAddrV4) -> Result<u32> {
         let identifier = self
             .next_transmit_identifier

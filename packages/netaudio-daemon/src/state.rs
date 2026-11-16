@@ -406,25 +406,6 @@ impl ReadModel {
         state.publish(event)
     }
 
-    pub fn managed(&self, mut managed: Value) -> Result<bool> {
-        crate::representation::browser_values(&mut managed);
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| anyhow::anyhow!("device state lock poisoned"))?;
-
-        if state.snapshot_fields.get("managed") == Some(&managed) {
-            return Ok(false);
-        }
-
-        state
-            .snapshot_fields
-            .insert("managed".to_owned(), managed.clone());
-        state.snapshot = None;
-        state.publish(json!({"event": MANAGED_STATUS, "managed": managed}))?;
-        Ok(true)
-    }
-
     pub(crate) fn managed_inventory(
         &self,
         mut managed: Value,

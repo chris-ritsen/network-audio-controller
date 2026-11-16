@@ -70,13 +70,6 @@ impl Default for Subscriptions {
 }
 
 impl Subscriptions {
-    pub fn notify(&self, notification: Notification) {
-        self.changes.send_modify(|revisions| {
-            let revision = &mut revisions[notification.index()];
-            *revision = revision.wrapping_add(1);
-        });
-    }
-
     pub fn listen(
         &self,
         identifier: Value,

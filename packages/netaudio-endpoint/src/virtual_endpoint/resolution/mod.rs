@@ -50,10 +50,6 @@ impl Resolver {
         Ok(())
     }
 
-    pub fn interface_index(&self) -> u32 {
-        self.interface_index
-    }
-
     pub fn resolve(&self, name: &Name) -> Result<ResolvedService> {
         self.cache.resolve(name, self.time.now())
     }

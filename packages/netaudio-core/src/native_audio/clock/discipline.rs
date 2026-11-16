@@ -1177,42 +1177,11 @@ impl Follower {
         })
     }
 
-    pub fn reading(&mut self, now: u64) -> Result<Option<Reading<'_>>, Error> {
-        self.evaluate(now)?;
-
-        Ok(self.output.as_ref().map(|segment| Reading {
-            generation: self.generation,
-            local_nanoseconds: now,
-            segment,
-        }))
-    }
-
     fn network_timestamp(&self, now: u64) -> Result<Timestamp, Error> {
         let time = self.output.as_ref().ok_or(Error::Unavailable)?.time(now)?;
         Timestamp::from_total_nanoseconds(
             u64::try_from(time / FRACTIONAL_NANOSECONDS_PER_NANOSECOND)
                 .map_err(|_| Error::TimeOutsideEra)?,
         )
-    }
-
-    pub fn sample_deadline(
-        &mut self,
-        sample: SampleTime,
-        sample_rate: u32,
-        now: u64,
-    ) -> Result<u64, Error> {
-        self.reading(now)?
-            .ok_or(Error::Unavailable)?
-            .sample_deadline(sample, sample_rate)
-    }
-
-    pub fn instant(&mut self, now: u64) -> Result<NetworkInstant, Error> {
-        self.reading(now)?.ok_or(Error::Unavailable)?.instant()
-    }
-
-    pub fn instant_deadline(&mut self, instant: &NetworkInstant, now: u64) -> Result<u64, Error> {
-        self.reading(now)?
-            .ok_or(Error::Unavailable)?
-            .instant_deadline(instant)
     }
 }

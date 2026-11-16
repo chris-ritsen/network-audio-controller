@@ -107,20 +107,9 @@ impl Manager {
         })
     }
 
-    pub fn identity(&self) -> Identity {
-        self.identity
-    }
-
     pub fn expire(&mut self, now: u64) {
         self.subscriptions
             .retain(|entry| entry.expires_at.is_none_or(|deadline| now < deadline));
-    }
-
-    pub fn next_expiry(&self) -> Option<u64> {
-        self.subscriptions
-            .iter()
-            .filter_map(|entry| entry.expires_at)
-            .min()
     }
 
     fn response(&self, request: Header, length: usize, result: u16) -> Result<Writer, Error> {

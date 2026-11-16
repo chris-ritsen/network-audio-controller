@@ -199,30 +199,6 @@ pub struct SettingsExchangeResult {
     pub complete: bool,
 }
 
-pub fn advance_settings_exchange(
-    request: SettingsExchangeRequest,
-) -> Result<SettingsExchangeResult, &'static str> {
-    let initial = SettingsExchange::new(
-        &request.device_id,
-        request.wrapper_id,
-        request.response_opcode,
-    )?;
-    let mut state = request.state.unwrap_or_else(|| initial.clone());
-
-    if state.device_id != initial.device_id
-        || state.wrapper_id != initial.wrapper_id
-        || state.response_opcode != initial.response_opcode
-    {
-        return Err("managed settings evidence belongs to a different exchange");
-    }
-
-    state.accept(&request.frame);
-    Ok(SettingsExchangeResult {
-        complete: state.complete(),
-        state,
-    })
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SettingsRequest {
     pub target_selector: u16,

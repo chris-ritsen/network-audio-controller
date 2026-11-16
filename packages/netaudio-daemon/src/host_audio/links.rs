@@ -51,10 +51,6 @@ impl Configuration {
         self.observations.subscribe()
     }
 
-    pub fn snapshot(&self) -> Snapshot {
-        self.observations.borrow().clone()
-    }
-
     fn publish(&self, snapshot: Snapshot) {
         self.observations.send_if_modified(|previous| {
             if *previous == snapshot {

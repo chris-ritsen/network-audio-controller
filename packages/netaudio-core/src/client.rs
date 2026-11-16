@@ -280,17 +280,6 @@ impl Client {
         })
     }
 
-    pub fn execute(&mut self, json: &str) -> Result<Vec<u8>, ClientError> {
-        let prepared = self.prepare_command(json)?;
-        match prepared.io {
-            IoMode::Fire {
-                repeat,
-                interval_ms,
-            } => fire_repeated(repeat, interval_ms, || self.send_prepared(&prepared)),
-            IoMode::Request => self.request_prepared(&prepared),
-        }
-    }
-
     pub fn send_prepared(&mut self, prepared: &PreparedCommand) -> Result<(), ClientError> {
         self.send_datagram(&prepared.packet, prepared.address)
     }
@@ -406,33 +395,6 @@ impl Client {
         let packet = commands::build_channel_count(message_id)?;
         let response = self.request(&packet, message_id)?;
         parse_channel_count(&response).ok_or(ClientError::MalformedResponse)
-    }
-
-    pub fn get_channel_audio_metadata(
-        &mut self,
-        tx_count: u16,
-        rx_count: u16,
-    ) -> Result<Option<ChannelAudioMetadata>, ClientError> {
-        for (count, transmitter) in [(tx_count, true), (rx_count, false)] {
-            if count == 0 {
-                continue;
-            }
-
-            let message_id = self.next_message_id();
-            let packet = if transmitter {
-                commands::build_transmitters(0, false, message_id)?
-            } else {
-                commands::build_receivers(0, message_id)?
-            };
-
-            if let Ok(response) = self.request(&packet, message_id) {
-                if let Some(metadata) = parse_channel_audio_metadata(&response) {
-                    return Ok(Some(metadata));
-                }
-            }
-        }
-
-        Ok(None)
     }
 
     pub fn get_rx_channels(&mut self) -> Result<Vec<RxChannel>, ClientError> {

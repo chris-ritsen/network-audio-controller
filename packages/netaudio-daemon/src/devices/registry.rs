@@ -3,7 +3,7 @@ use super::inventory;
 use super::operations::ControlError;
 use super::presence::{Lapses, Returned};
 use super::record::DeviceRecord;
-use super::transport::{DeviceAddress, DeviceTransport};
+use super::transport::DeviceTransport;
 use crate::monitoring::diagnostics::Diagnostics;
 use crate::monitoring::journal::service::Journal;
 use crate::monitoring::metering::Metering;
@@ -478,20 +478,5 @@ impl DeviceRegistry {
         self.model
             .replace_device(record.key.clone(), record.presentation()?)?;
         Ok(())
-    }
-
-    pub fn control_address(&self, key: &str) -> Result<Option<DeviceAddress>> {
-        let devices = self
-            .devices
-            .read()
-            .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
-        let Some(device) = devices.get(key) else {
-            return Ok(None);
-        };
-        let state = device
-            .state
-            .lock()
-            .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
-        Ok(state.record.control_address())
     }
 }

@@ -185,10 +185,6 @@ impl Engine {
         Ok(())
     }
 
-    pub fn statistics(&self) -> Statistics {
-        self.state.statistics()
-    }
-
     pub fn close(self) -> Result<Statistics> {
         match self.streams {
             Streams::Device(streams) => streams.close(),

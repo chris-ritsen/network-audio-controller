@@ -589,22 +589,6 @@ fn receiver_flow(writer: &mut Writer, value: &ReceiverFlow<'_>) -> Result<usize,
     Ok(start)
 }
 
-pub fn page(
-    context: Context,
-    table: Table,
-    capacity: u8,
-    row: Option<&Row<'_>>,
-    partial: bool,
-) -> Result<Vec<u8>, Error> {
-    page_rows(
-        context,
-        table,
-        capacity,
-        row.map(std::slice::from_ref).unwrap_or_default(),
-        partial,
-    )
-}
-
 pub fn page_rows(
     context: Context,
     table: Table,

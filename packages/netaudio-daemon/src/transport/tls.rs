@@ -234,15 +234,6 @@ impl TlsIdentity {
         TlsAcceptor::from(Arc::clone(&self.configuration))
     }
 
-    pub fn fingerprint(&self) -> Result<String> {
-        let certificates = self
-            .resolver
-            .certificates
-            .read()
-            .map_err(|_| anyhow::anyhow!("TLS certificate lock poisoned"))?;
-        Ok(certificates.primary.fingerprint.clone())
-    }
-
     pub fn subscribe_fingerprint(&self) -> watch::Receiver<String> {
         self.resolver.fingerprints.subscribe()
     }

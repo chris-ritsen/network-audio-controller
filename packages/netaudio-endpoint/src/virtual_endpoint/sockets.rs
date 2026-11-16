@@ -98,18 +98,6 @@ pub fn enable_multicast_publication(socket: &UdpSocket, address: Ipv4Addr) -> Re
     Ok(())
 }
 
-pub fn multicast(address: Ipv4Addr, group: Ipv4Addr, port: u16) -> Result<Arc<UdpSocket>> {
-    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-    socket.set_reuse_address(true)?;
-    socket.set_nonblocking(true)?;
-    socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into())?;
-    socket.set_multicast_all_v4(false)?;
-    socket.set_multicast_if_v4(&address)?;
-    socket.set_multicast_loop_v4(false)?;
-    socket.join_multicast_v4(&group, &address)?;
-    Ok(Arc::new(UdpSocket::from_std(socket.into())?))
-}
-
 pub async fn receive(
     socket: Arc<UdpSocket>,
     channel: Channel,

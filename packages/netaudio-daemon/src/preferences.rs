@@ -157,10 +157,6 @@ impl Preferences {
             Ok(())
         })
     }
-
-    pub fn reload(&self) -> Result<()> {
-        self.inner.reload()
-    }
 }
 
 impl Inner {

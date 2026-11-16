@@ -221,10 +221,6 @@ impl JournalDatabase {
         })
     }
 
-    pub fn append(&mut self, events: Vec<JournalEvent>) -> Result<Vec<JournalEvent>> {
-        self.append_observation(events, &[])
-    }
-
     pub fn restore_issues(&mut self) -> Result<Vec<issues::model::Issue>> {
         let transaction = self.connection.transaction()?;
         let restored = issues::store::restore(&transaction)?;

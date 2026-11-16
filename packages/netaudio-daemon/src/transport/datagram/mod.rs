@@ -67,10 +67,6 @@ impl DatagramSocket {
         })
     }
 
-    pub fn local_address(&self) -> io::Result<SocketAddr> {
-        self.socket.local_addr()
-    }
-
     pub fn join(&self, group: Ipv4Addr, interface: MulticastInterface) -> io::Result<()> {
         SockRef::from(&self.socket).join_multicast_v4_n(&group, &interface.selector())
     }

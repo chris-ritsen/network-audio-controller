@@ -9,20 +9,6 @@ use crate::flow_specification::{
     ProtocolRequirements, RedundancyConstraint, TransmitFlowSpecification,
 };
 
-pub fn format_precondition(
-    request: crate::responses::AudioCapabilityReadback,
-) -> crate::responses::AudioReadbackResult {
-    let mut result = request.resolve();
-
-    if result.current_value == Some(0) {
-        result.current_value = None;
-        result.state = crate::responses::AudioReadbackState::Unavailable;
-        result.effective_state_confirmed = false;
-    }
-
-    result
-}
-
 #[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]

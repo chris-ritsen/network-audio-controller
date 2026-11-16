@@ -265,18 +265,6 @@ impl std::fmt::Display for ExchangeError {
 impl std::error::Error for ExchangeError {}
 
 impl Session {
-    pub async fn exchange(
-        &mut self,
-        credential: &Credential,
-        operation: ManagedOperation,
-        expected_domain: Option<String>,
-    ) -> Result<Option<Vec<u8>>, Error> {
-        self.exchange_with_receipt(credential, operation, expected_domain)
-            .await
-            .map(|exchange| exchange.packet)
-            .map_err(|failure| failure.error)
-    }
-
     pub async fn exchange_with_receipt(
         &mut self,
         credential: &Credential,

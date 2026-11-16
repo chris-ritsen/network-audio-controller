@@ -13,7 +13,6 @@ mod managed;
 mod subscription_plan;
 
 pub use command_spec::plan_performance_command;
-pub(crate) use command_spec::SubscriptionPageEntry;
 pub use external_subscription::{
     external_subscription_readback, plan_external_subscription, ExternalReadbackRequest,
     ExternalSubscriptionCommand, ExternalSubscriptionPlanRequest, ExternalSubscriptionReadback,
@@ -23,7 +22,6 @@ pub use managed::{build_managed_command, ManagedCommand, ManagedCommandRequest};
 pub use subscription_plan::{
     plan_subscription_command_groups, plan_subscription_commands, Receiver, SubscriptionCommand,
 };
-pub(crate) use subscription_plan::{plan_subscription_request, SubscriptionPlanRequest};
 
 #[derive(Debug)]
 pub enum SpecError {

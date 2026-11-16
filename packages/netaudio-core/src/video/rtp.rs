@@ -62,18 +62,6 @@ impl<'a> Packet<'a> {
 }
 
 impl<'a> StructuralPacket<'a> {
-    pub fn parse(bytes: &'a [u8]) -> Result<Self, Error> {
-        if bytes.len() < HEADER_BYTES || bytes.len() > MAXIMUM_DATAGRAM_BYTES {
-            return Err(Error("invalid RTP datagram extent"));
-        }
-        if bytes[0] >> 6 != VERSION || bytes[0] & (PADDING_FLAG | CONTRIBUTING_SOURCE_MASK) != 0 {
-            return Err(Error(
-                "unsupported RTP version, padding or contributing sources",
-            ));
-        }
-        Self::parse_payload(bytes)
-    }
-
     fn parse_payload(bytes: &'a [u8]) -> Result<Self, Error> {
         let mut payload_offset = HEADER_BYTES;
 

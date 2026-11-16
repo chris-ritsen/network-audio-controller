@@ -10,9 +10,6 @@ pub struct Parameters {
     context: h264_reader::Context,
     sequence: Vec<u8>,
     picture: Vec<u8>,
-    format: Format,
-    interpretation: Interpretation,
-    coded_dimensions: (u32, u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,9 +52,6 @@ impl Parameters {
         let SequenceParameters {
             bytes: sequence,
             parsed: parsed_sequence,
-            format,
-            interpretation,
-            coded_dimensions,
         } = sequence;
         let mut context = h264_reader::Context::new();
         context.put_seq_param_set(parsed_sequence);
@@ -98,9 +92,6 @@ impl Parameters {
             context,
             sequence,
             picture,
-            format,
-            interpretation,
-            coded_dimensions,
         })
     }
 
@@ -208,26 +199,6 @@ impl Parameters {
         Ok(())
     }
 
-    pub fn format(&self) -> Format {
-        self.format
-    }
-
-    pub fn coded_dimensions(&self) -> (u32, u32) {
-        self.coded_dimensions
-    }
-
-    pub fn interpretation(&self) -> Interpretation {
-        self.interpretation
-    }
-
-    pub fn sequence(&self) -> &[u8] {
-        &self.sequence
-    }
-
-    pub fn picture(&self) -> &[u8] {
-        &self.picture
-    }
-
     pub fn prefix(&self) -> Vec<u8> {
         [
             START_CODE.as_slice(),
@@ -239,40 +210,12 @@ impl Parameters {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ColorDescription {
-    pub primaries: u8,
-    pub transfer: u8,
-    pub matrix: u8,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Timing {
-    pub units_in_tick: u32,
-    pub time_scale: u32,
-    pub fixed_frame_rate: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Interpretation {
-    pub timing: Option<Timing>,
-    pub full_range: Option<bool>,
-    pub color: Option<ColorDescription>,
-}
-
 pub struct SequenceParameters {
     bytes: Vec<u8>,
     parsed: SeqParameterSet,
-    format: Format,
-    interpretation: Interpretation,
-    coded_dimensions: (u32, u32),
 }
 
 impl SequenceParameters {
-    pub fn parse(sequence: Vec<u8>, maximum_reference_frames: u32) -> Result<Self> {
-        Self::parse_with_format(sequence, maximum_reference_frames, None)
-    }
-
     fn parse_with_format(
         sequence: Vec<u8>,
         maximum_reference_frames: u32,
@@ -314,67 +257,11 @@ impl SequenceParameters {
             "SPS reference pictures exceed the configured decoder bound"
         );
 
-        let (width, height) = checked_dimensions(&parsed_sequence, expected.is_none())?;
-        let coded_dimensions = (
-            (parsed_sequence.pic_width_in_mbs_minus1 + 1) * 16,
-            (parsed_sequence.pic_height_in_map_units_minus1 + 1) * 16,
-        );
-        let format = Format {
-            width,
-            height,
-            profile_identifier: parsed_sequence.profile().profile_idc(),
-            level_identifier: parsed_sequence.level_idc,
-            maximum_reference_frames: parsed_sequence.max_num_ref_frames,
-        };
-        let mut interpretation = Interpretation {
-            timing: None,
-            full_range: None,
-            color: None,
-        };
-        if let Some(information) = &parsed_sequence.vui_parameters {
-            if let Some(timing) = &information.timing_info {
-                interpretation.timing = Some(Timing {
-                    units_in_tick: timing.num_units_in_tick,
-                    time_scale: timing.time_scale,
-                    fixed_frame_rate: timing.fixed_frame_rate_flag,
-                });
-            }
-            if let Some(signal) = &information.video_signal_type {
-                interpretation.full_range = Some(signal.video_full_range_flag);
-                interpretation.color =
-                    signal
-                        .colour_description
-                        .as_ref()
-                        .map(|color| ColorDescription {
-                            primaries: color.colour_primaries,
-                            transfer: color.transfer_characteristics,
-                            matrix: color.matrix_coefficients,
-                        });
-            }
-        }
+        checked_dimensions(&parsed_sequence, expected.is_none())?;
         Ok(Self {
             bytes: sequence,
             parsed: parsed_sequence,
-            format,
-            interpretation,
-            coded_dimensions,
         })
-    }
-
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    pub fn format(&self) -> Format {
-        self.format
-    }
-
-    pub fn coded_dimensions(&self) -> (u32, u32) {
-        self.coded_dimensions
-    }
-
-    pub fn interpretation(&self) -> Interpretation {
-        self.interpretation
     }
 }
 

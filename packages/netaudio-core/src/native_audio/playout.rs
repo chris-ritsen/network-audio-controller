@@ -105,15 +105,6 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    pub fn new(
-        owner: Owner,
-        format: Format,
-        frames_per_packet: u16,
-        slots: &[Vec<u16>],
-    ) -> Result<Self, Error> {
-        Self::with_profile(owner, format, frames_per_packet, slots, Profile::default())
-    }
-
     pub fn with_profile(
         owner: Owner,
         format: Format,
@@ -189,10 +180,6 @@ impl Buffer {
             aligned: false,
             consecutive_missing: 0,
         })
-    }
-
-    pub fn owner(&self) -> Owner {
-        self.owner
     }
 
     pub fn reset(&mut self, owner: Owner) -> Result<(), Error> {

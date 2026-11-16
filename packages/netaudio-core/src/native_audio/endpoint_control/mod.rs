@@ -223,10 +223,6 @@ pub struct Answer {
 }
 
 impl Endpoint {
-    pub fn new(name: String) -> Result<Self, Error> {
-        Self::with_profile(name, Profile::default())
-    }
-
     pub fn with_profile(name: String, profile: Profile) -> Result<Self, Error> {
         profile.validate()?;
         if name.is_empty()

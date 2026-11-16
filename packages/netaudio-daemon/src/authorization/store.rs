@@ -1,6 +1,6 @@
 use super::credentials::{
-    constant_time_equal, decode_hexadecimal, digest, secret_digest, secret_record, token,
-    valid_redirect_uri, verify_challenge, CLIENT_IDENTIFIER_BYTES, TOKEN_BYTES,
+    constant_time_equal, decode_hexadecimal, digest, secret_digest, token, valid_redirect_uri,
+    verify_challenge, CLIENT_IDENTIFIER_BYTES, TOKEN_BYTES,
 };
 use super::{
     AuthorizationError, Grant, ACCESS_TOKEN_LIFETIME_SECONDS, AUTHORIZATION_CODE_LIFETIME_SECONDS,
@@ -172,12 +172,6 @@ impl AuthorizationStore {
             .get(LOGIN_SECRET_PREFERENCE)
             .and_then(|record| record.get("hash"))
             .is_some_and(Value::is_string))
-    }
-
-    pub fn set_login_secret(&self, secret: &str) -> Result<(), AuthorizationError> {
-        self.preferences
-            .set(LOGIN_SECRET_PREFERENCE.to_owned(), secret_record(secret)?)?;
-        Ok(())
     }
 
     pub fn verify_login_secret(&self, secret: &str) -> Result<bool, AuthorizationError> {
@@ -366,15 +360,6 @@ impl AuthorizationStore {
         Ok(())
     }
 
-    pub fn revoke_all(&self) -> Result<usize, AuthorizationError> {
-        Ok(self.preferences.update(|document| {
-            let count = table(document, TOKENS_PREFERENCE)?.len();
-            document.insert(TOKENS_PREFERENCE.to_owned(), json!({}));
-            document.insert(CLIENTS_PREFERENCE.to_owned(), json!({}));
-            Ok(count)
-        })?)
-    }
-
     pub fn grant(&self, header: Option<&str>) -> Result<Option<Grant>, AuthorizationError> {
         let Some((scheme, presented)) = header.and_then(|value| value.trim().split_once(' '))
         else {
@@ -419,22 +404,6 @@ impl AuthorizationStore {
         let grant =
             serde_json::from_value(record.clone()).context("stored access grant is invalid")?;
         Ok(Some(grant))
-    }
-
-    pub fn ensure_static_token(&self) -> Result<String, AuthorizationError> {
-        Ok(self.preferences.update(|document| {
-            if let Some(existing) = document
-                .get(STATIC_TOKEN_PREFERENCE)
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-            {
-                return Ok(existing.to_owned());
-            }
-
-            let value = token(TOKEN_BYTES);
-            document.insert(STATIC_TOKEN_PREFERENCE.to_owned(), json!(value));
-            Ok(value)
-        })?)
     }
 }
 

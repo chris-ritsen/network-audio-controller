@@ -5,8 +5,6 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::SampleTime;
-
 pub const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -46,17 +44,6 @@ impl Timestamp {
     pub fn total_nanoseconds(self) -> Result<u64, Error> {
         Self::new(self.seconds, self.nanoseconds)?;
         Ok(u64::from(self.seconds) * NANOSECONDS_PER_SECOND + u64::from(self.nanoseconds))
-    }
-
-    pub fn sample_time(self, sample_rate: u32) -> Result<SampleTime, Error> {
-        self.total_nanoseconds()?;
-        if sample_rate == 0 {
-            return Err(Error::InvalidSampleRate);
-        }
-
-        let offset = u64::from(self.nanoseconds) * u64::from(sample_rate) / NANOSECONDS_PER_SECOND;
-        SampleTime::new(self.seconds, offset as u32, sample_rate)
-            .map_err(|_| Error::InvalidSampleRate)
     }
 }
 

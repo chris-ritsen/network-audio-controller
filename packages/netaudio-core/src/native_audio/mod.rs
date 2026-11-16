@@ -176,20 +176,6 @@ impl SampleTime {
         Self::new(self.seconds, self.sample_offset, sample_rate)?;
         Ok(u64::from(self.seconds) * u64::from(sample_rate) + u64::from(self.sample_offset))
     }
-
-    pub fn advance(self, frames: u64, sample_rate: u32) -> Result<Self, Error> {
-        let ticks = self
-            .ticks(sample_rate)?
-            .checked_add(frames)
-            .ok_or(Error::TimestampOverflow)?;
-        let seconds =
-            u32::try_from(ticks / u64::from(sample_rate)).map_err(|_| Error::TimestampOverflow)?;
-        Self::new(
-            seconds,
-            (ticks % u64::from(sample_rate)) as u32,
-            sample_rate,
-        )
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
