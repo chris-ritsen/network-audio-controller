@@ -1,42 +1,30 @@
 use std::net::Ipv4Addr;
 
-use serde::Deserialize;
-
 use crate::protocol::{ConmonHeader, NetaudioError};
 
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum ChannelDirection {
+pub enum ChannelDirection {
     Rx,
     Tx,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ChannelSource {
-    channel: String,
-    device: String,
+pub struct ChannelSource {
+    pub channel: String,
+    pub device: String,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PublishedChannel {
-    name: String,
-    source: Option<ChannelSource>,
+pub struct PublishedChannel {
+    pub name: String,
+    pub source: Option<ChannelSource>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ArcResponse {
-    protocol_id: u16,
-    transaction_id: u16,
-    result_code: u16,
-    response: ArcResponseBody,
+    pub protocol_id: u16,
+    pub transaction_id: u16,
+    pub result_code: u16,
+    pub response: ArcResponseBody,
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum ArcResponseBody {
+pub enum ArcResponseBody {
     Acknowledgement {
         request: Vec<u8>,
         accepted: bool,
@@ -55,7 +43,6 @@ enum ArcResponseBody {
     },
     CmcRegistration {
         device_ip: Ipv4Addr,
-        #[serde(default)]
         instance: Option<u64>,
         settings_port: std::num::NonZeroU16,
     },
@@ -479,35 +466,29 @@ fn channel_status_body(
     Ok(Some(body))
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug)]
 pub enum AudioCapabilityKind {
     Encoding,
     SampleRate,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug)]
 pub struct Publication {
-    #[serde(default)]
-    device_id: Option<[u8; 8]>,
-    message_id: u16,
-    #[serde(default)]
-    process: u16,
-    publication: PublicationBody,
-    source_ip: Ipv4Addr,
+    pub device_id: Option<[u8; 8]>,
+    pub message_id: u16,
+    pub process: u16,
+    pub publication: PublicationBody,
+    pub source_ip: Ipv4Addr,
 }
 
 pub fn next_publication_id(previous: u16) -> u16 {
     previous.wrapping_add(1)
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum PublicationBody {
+#[derive(Debug)]
+pub enum PublicationBody {
     BoardInfo {
         name: String,
-        #[serde(default)]
         detailed_metering: bool,
     },
     ProductInfo {

@@ -34,26 +34,9 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
                 .map_err(|message| FfiError::new(NetaudioStatus::MalformedResponse, message))?;
             serialize_optional(kind, Some(announcement))
         }
-        "device_request" => {
-            serialize_optional(kind, crate::device_requests::parse_device_request(bytes))
-        }
         "packet_header" => {
             serialize_optional(kind, crate::protocol::diagnostic_packet_header(bytes))
         }
-        "set_channel_name_request" => {
-            serialize_optional(kind, crate::commands::parse_set_channel_name_request(bytes))
-        }
-        "set_latency_request" => {
-            serialize_optional(kind, crate::commands::parse_set_latency_request(bytes))
-        }
-        "add_subscriptions_request" => serialize_optional(
-            kind,
-            crate::commands::parse_add_subscriptions_request(bytes),
-        ),
-        "remove_subscriptions_request" => serialize_optional(
-            kind,
-            crate::commands::parse_remove_subscriptions_request(bytes),
-        ),
         "panel_status" => serialize_optional(
             kind,
             crate::device_controls::parse_panel_status(bytes, None),

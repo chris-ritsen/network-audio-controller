@@ -2,6 +2,7 @@ mod inspect;
 mod receive;
 mod recording;
 mod recording_intake;
+mod simulated;
 mod unicast;
 #[cfg(all(feature = "video", target_os = "linux"))]
 mod video;
@@ -165,6 +166,31 @@ enum Command {
         duration: NonZeroU64,
         #[arg(long)]
         output: PathBuf,
+    },
+    #[command(about = "Answer discovery and control requests as simulated devices without audio")]
+    Simulate {
+        #[arg(long, default_value_t = 1)]
+        count: u16,
+        #[arg(long)]
+        detailed_metering: bool,
+        #[arg(long)]
+        interface_address: Option<Ipv4Addr>,
+        #[arg(long, default_value = "netaudio")]
+        manufacturer: String,
+        #[arg(long, default_value = "netaudio")]
+        model: String,
+        #[arg(long, default_value = "netaudio-virtual")]
+        name: String,
+        #[arg(long, hide = true, requires = "readiness_port")]
+        ownership_token: Option<String>,
+        #[arg(long, hide = true, requires = "ownership_token")]
+        readiness_port: Option<u16>,
+        #[arg(long, default_value_t = 2)]
+        receive_channels: u16,
+        #[arg(long, default_value_t = 48000)]
+        sample_rate: u32,
+        #[arg(long, default_value_t = 2)]
+        transmit_channels: u16,
     },
     #[command(about = "Decode one native-v2 datagram under an explicitly configured format")]
     Decode {
@@ -542,6 +568,34 @@ async fn execute(arguments: Arguments) -> Result<()> {
             }
 
             Ok(())
+        }
+        Command::Simulate {
+            count,
+            detailed_metering,
+            interface_address,
+            manufacturer,
+            model,
+            name,
+            ownership_token,
+            readiness_port,
+            receive_channels,
+            sample_rate,
+            transmit_channels,
+        } => {
+            simulated::run(simulated::Options {
+                address: interface_address,
+                count,
+                detailed_metering,
+                manufacturer,
+                model,
+                name,
+                ownership_token,
+                readiness_port,
+                receive_channels,
+                sample_rate,
+                transmit_channels,
+            })
+            .await
         }
         Command::Decode {
             input,

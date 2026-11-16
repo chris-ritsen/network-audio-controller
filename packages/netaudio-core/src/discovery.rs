@@ -1,22 +1,15 @@
 use std::{collections::BTreeMap, net::Ipv4Addr};
 
-use serde::{Deserialize, Serialize};
-
 use crate::parser::{channel_audio_publication, ChannelAudioConfiguration};
 use crate::protocol::{NetaudioPort, SERVICE_ARC, SERVICE_CHAN, SERVICE_CMC};
 
-#[derive(Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(deny_unknown_fields)]
 pub struct VirtualDeviceAdvertisement {
     pub name: String,
     pub model: String,
     pub manufacturer: String,
     pub address: Ipv4Addr,
     pub arc_port: u16,
-    #[serde(default)]
     pub control_port: Option<u16>,
-    #[serde(default)]
     pub process_id: u16,
     pub tx_channels: Vec<String>,
     pub sample_rate: u32,
@@ -25,8 +18,6 @@ pub struct VirtualDeviceAdvertisement {
     pub configured_latency_ns: u32,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ServiceAdvertisement {
     pub service_type: String,
     pub name: String,

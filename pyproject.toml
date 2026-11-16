@@ -11,7 +11,6 @@ dependencies = [
     "cryptography>=43.0.0,<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "cryptography>=43.0.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "click>=8.1.7",
-    "zeroconf>=0.38.3",
     "ifaddr>=0.2.0",
     "typer>=0.15.0",
     "rich>=13.0.0",
@@ -123,7 +122,6 @@ include = [
     "packages/netaudio/src/netaudio/dante/metering.py",
     "packages/netaudio/src/netaudio/dante/ptpv1_uuid.py",
     "packages/netaudio/src/netaudio/dante/sample_rate_pullup.py",
-    "packages/netaudio/src/netaudio/dante/virtual_device.py",
 ]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"

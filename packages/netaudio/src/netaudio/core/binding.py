@@ -204,13 +204,6 @@ def next_message_id() -> int:
     return require().netaudio_next_message_id()
 
 
-def next_publication_id(previous: int) -> int:
-    if isinstance(previous, bool) or not isinstance(previous, int) or not 0 <= previous <= 65535:
-        raise ValueError("previous publication ID must be an unsigned 16-bit integer")
-
-    return require().netaudio_next_publication_id(previous)
-
-
 def _call_json(function, value, context):
     status, data = _call_buffer(function, _encode_command_spec(value))
 
@@ -253,15 +246,6 @@ def metering_scale() -> _types.MeteringScales:
     return _decode_json_output(data, "metering scale")
 
 
-def build_response(spec: dict) -> bytes:
-    status, data = _call_buffer(require().netaudio_build_response, _encode_command_spec(spec))
-
-    if status != STATUS_OK:
-        raise NetaudioCoreError(status, "build response")
-
-    return data
-
-
 def build_command(spec: dict) -> bytes:
     lib = require()
     status, data = _call_buffer(lib.netaudio_build_command, _encode_command_spec(spec))
@@ -279,19 +263,6 @@ def canonical_device_mac(value: str | None) -> str | None:
 
 def device_identity(request: _requests.DeviceIdentityRequest) -> str | None:
     return _call_json(require().netaudio_device_identity, request, "device identity")
-
-
-def virtual_device_advertisements(spec: _requests.VirtualDeviceAdvertisement) -> list[_types.ServiceAdvertisement]:
-    return _call_json(require().netaudio_virtual_device_advertisements, spec, "virtual device advertisements")
-
-
-def build_publication(spec: dict) -> bytes:
-    status, data = _call_buffer(require().netaudio_build_publication, _encode_command_spec(spec))
-
-    if status != STATUS_OK:
-        raise NetaudioCoreError(status, "build publication")
-
-    return data
 
 
 def parse_response(kind: str, data: bytes):

@@ -2,8 +2,6 @@ from netaudio.core.binding import (
     ABI_VERSION,
     available,
     build_command,
-    build_publication,
-    build_response,
     canonical_device_mac,
     clock_control_availability,
     clock_control_profile,
@@ -18,7 +16,6 @@ from netaudio.core.binding import (
     NetaudioCoreError,
     NetaudioCoreJsonError,
     NetaudioCoreLibraryMissing,
-    next_publication_id,
     normalize_clock_subdomain,
     operation_availability,
     parse_page,
@@ -27,15 +24,12 @@ from netaudio.core.binding import (
     require,
     STATUS_TIMEOUT,
     subscription_status,
-    virtual_device_advertisements,
 )
 
 __all__ = [
     "ABI_VERSION",
     "available",
     "build_command",
-    "build_publication",
-    "build_response",
     "canonical_device_mac",
     "clock_control_availability",
     "clock_control_profile",
@@ -50,7 +44,6 @@ __all__ = [
     "NetaudioCoreError",
     "NetaudioCoreJsonError",
     "NetaudioCoreLibraryMissing",
-    "next_publication_id",
     "normalize_clock_subdomain",
     "operation_availability",
     "parse_page",
@@ -59,5 +52,4 @@ __all__ = [
     "require",
     "STATUS_TIMEOUT",
     "subscription_status",
-    "virtual_device_advertisements",
 ]

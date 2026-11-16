@@ -1268,15 +1268,6 @@ class SdpDocument(_extensions.TypedDict):
     version: int
 
 
-class ServiceAdvertisement(_extensions.TypedDict):
-    address: list[int]
-    name: str
-    port: int
-    properties: dict[str, str]
-    server: str
-    service_type: str
-
-
 class SettingsCapabilities(_extensions.TypedDict):
     aes67_multicast_prefix: bool
 

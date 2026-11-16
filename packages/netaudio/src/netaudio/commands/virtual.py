@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import json
 import logging
@@ -21,6 +20,7 @@ import typer
 
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.output import output_single, structured_output_selected
+from netaudio.commands import endpoint_worker
 from netaudio.commands.virtual_process import (
     ProcessRecord,
     VirtualLifecycleError,
@@ -58,8 +58,6 @@ KILL_TIMEOUT_SECONDS = 1.0
 MAX_READINESS_MESSAGE_BYTES = 65_536
 READINESS_HOST = "127.0.0.1"
 MAXIMUM_DEVICE_COUNT = 16
-CO_HOSTED_PORT_BASE = 24500
-CO_HOSTED_PORT_STRIDE = 10
 
 
 def _ensure_runtime_directory() -> None:
@@ -381,7 +379,7 @@ def _interface_address(interface: Optional[str]) -> Optional[str]:
     return addresses[0].address
 
 
-def _start_background_claimed(
+def _simulation_arguments(
     *,
     name: str,
     model: str,
@@ -389,39 +387,38 @@ def _start_background_claimed(
     rx: int,
     sample_rate: int,
     interface: Optional[str],
-    count: int = 1,
-    detailed_metering: bool = True,
-) -> None:
+    count: int,
+    detailed_metering: bool,
+) -> list[str]:
+    arguments = [
+        "simulate",
+        "--count",
+        str(count),
+        "--model",
+        model,
+        "--name",
+        name,
+        "--receive-channels",
+        str(rx),
+        "--sample-rate",
+        str(sample_rate),
+        "--transmit-channels",
+        str(tx),
+    ]
+    if detailed_metering:
+        arguments.append("--detailed-metering")
+    if interface:
+        arguments.extend(("--interface-address", interface))
+    return arguments
+
+
+def _start_background_claimed(name: str, arguments: list[str]) -> None:
     existing = _existing_managed_process()
     if existing is not None:
         raise VirtualLifecycleError(f"already running (PID {existing.pid})")
 
     token = uuid.uuid4().hex
-    command = [
-        sys.executable,
-        "-m",
-        "netaudio",
-        "virtual",
-        "start",
-        "--foreground",
-        "--ownership-token",
-        token,
-        "--name",
-        name,
-        "--model",
-        model,
-        "--tx",
-        str(tx),
-        "--rx",
-        str(rx),
-        "--sample-rate",
-        str(sample_rate),
-        "--count",
-        str(count),
-        "--detailed-metering" if detailed_metering else "--no-detailed-metering",
-    ]
-    if interface:
-        command.extend(("--interface", interface))
+    command = [str(endpoint_worker.executable()), *arguments, "--ownership-token", token]
 
     popen_options: dict[str, Any] = {}
     if os.name == "nt":
@@ -437,6 +434,7 @@ def _start_background_claimed(
             with open(LOGFILE, "w", encoding="utf-8") as log_file:
                 process = subprocess.Popen(command, stdout=log_file, stderr=log_file, **popen_options)
             message = _wait_for_startup(process, readiness_listener, token)
+            _write_process_record(ProcessRecord(pid=process.pid, token=token, name=name, started_at=time.time()))
         except BaseException:
             if process is not None:
                 _terminate_spawned_process(process)
@@ -446,160 +444,6 @@ def _start_background_claimed(
     for device in message.get("devices", []):
         typer.echo(f"  {device['name']}: MAC {device['mac']}, ports {device['ports']}")
     typer.echo(f"  Log: {LOGFILE}")
-
-
-def _start_background(
-    *,
-    name: str,
-    model: str,
-    tx: int,
-    rx: int,
-    sample_rate: int,
-    interface: Optional[str],
-    count: int = 1,
-    detailed_metering: bool = True,
-) -> None:
-    with _startup_claim():
-        _start_background_claimed(
-            name=name,
-            model=model,
-            tx=tx,
-            rx=rx,
-            sample_rate=sample_rate,
-            interface=interface,
-            count=count,
-            detailed_metering=detailed_metering,
-        )
-
-
-def _install_signal_handlers(stop_event: asyncio.Event) -> None:
-    event_loop = asyncio.get_running_loop()
-
-    def request_stop(*_ignored_arguments: object) -> None:
-        event_loop.call_soon_threadsafe(stop_event.set)
-
-    handled_signals = [signal.SIGINT, signal.SIGTERM]
-    if os.name == "nt":
-        handled_signals.append(signal.SIGBREAK)
-    for handled_signal in handled_signals:
-        try:
-            event_loop.add_signal_handler(handled_signal, stop_event.set)
-        except (NotImplementedError, RuntimeError):
-            try:
-                signal.signal(handled_signal, request_stop)
-            except (OSError, ValueError):
-                logger.debug("Signal %s is not available on this platform", handled_signal)
-
-
-async def _run_virtual_device(
-    *,
-    name: str,
-    model: str,
-    tx: int,
-    rx: int,
-    sample_rate: int,
-    interface: Optional[str],
-    count: int,
-    detailed_metering: bool,
-    ownership_token: Optional[str],
-    readiness_port: Optional[int],
-) -> None:
-    from netaudio.dante.virtual_device import VirtualDevice, VirtualDeviceConfig
-
-    transmitter_channels = [f"Ch {index + 1}" for index in range(tx)]
-    receiver_channels = [f"Ch {index + 1}" for index in range(rx)]
-    devices = []
-    for index in range(count):
-        ports = {}
-        if index:
-            base = CO_HOSTED_PORT_BASE + index * CO_HOSTED_PORT_STRIDE
-            ports = {"arc_port": base, "control_port": base + 1, "settings_port": base + 3}
-        devices.append(
-            VirtualDevice(
-                VirtualDeviceConfig(
-                    name=name if index == 0 else f"{name}-{index + 1}",
-                    model=model,
-                    tx_channels=transmitter_channels,
-                    rx_channels=receiver_channels,
-                    sample_rate=sample_rate,
-                    interface_ip=interface,
-                    process_id=index,
-                    detailed_metering=detailed_metering,
-                    **ports,
-                )
-            )
-        )
-    started = []
-    record: Optional[ProcessRecord] = None
-    readiness_reported = False
-
-    try:
-        started.extend(devices)
-        await asyncio.gather(*(device.start() for device in devices))
-        summaries = [
-            {
-                "name": device.config.name,
-                "mac": device.mac,
-                "ports": [transport.get_extra_info("sockname")[1] for transport in device._transports],
-            }
-            for device in devices
-        ]
-
-        if ownership_token is not None:
-            record = ProcessRecord(
-                pid=os.getpid(),
-                token=ownership_token,
-                name=name,
-                started_at=time.time(),
-            )
-            _write_process_record(record)
-
-        if readiness_port is not None:
-            await asyncio.to_thread(
-                _send_readiness_message,
-                readiness_port,
-                {
-                    "status": "ready",
-                    "token": ownership_token,
-                    "pid": os.getpid(),
-                    "devices": summaries,
-                },
-            )
-            readiness_reported = True
-
-        typer.echo(f"Virtual device '{name}' running ({tx} TX, {rx} RX, {sample_rate}Hz)")
-        for summary in summaries:
-            typer.echo(f"  {summary['name']}: MAC {summary['mac']}, ports {summary['ports']}")
-        if ownership_token is None:
-            typer.echo("  Foreground session; press Ctrl+C to stop")
-
-        stop_event = asyncio.Event()
-        _install_signal_handlers(stop_event)
-        await stop_event.wait()
-    except Exception as exception:
-        if readiness_port is not None and not readiness_reported:
-            try:
-                await asyncio.to_thread(
-                    _send_readiness_message,
-                    readiness_port,
-                    {
-                        "status": "error",
-                        "token": ownership_token,
-                        "pid": os.getpid(),
-                        "error": f"{type(exception).__name__}: {exception}",
-                    },
-                )
-            except (OSError, VirtualLifecycleError):
-                logger.exception("Could not report virtual-device startup failure")
-        raise
-    finally:
-        for device in reversed(started):
-            try:
-                await device.stop()
-            except Exception:
-                logger.exception("Virtual device cleanup failed")
-        if record is not None:
-            _remove_process_record(record)
 
 
 def _start_virtual(
@@ -613,48 +457,24 @@ def _start_virtual(
     foreground: bool,
     count: int = 1,
     detailed_metering: bool = True,
-    ownership_token: Optional[str] = None,
-    readiness_port: Optional[int] = None,
 ) -> None:
     _validate_configuration(tx, rx, sample_rate, count)
-    if (ownership_token is None) != (readiness_port is None):
-        raise typer.BadParameter("internal startup options must be provided together")
-    interface = _interface_address(interface)
-
-    if not foreground:
-        _start_background(
-            name=name,
-            model=model,
-            tx=tx,
-            rx=rx,
-            sample_rate=sample_rate,
-            interface=interface,
-            count=count,
-            detailed_metering=detailed_metering,
-        )
-        return
-
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        force=True,
+    arguments = _simulation_arguments(
+        name=name,
+        model=model,
+        tx=tx,
+        rx=rx,
+        sample_rate=sample_rate,
+        interface=_interface_address(interface),
+        count=count,
+        detailed_metering=detailed_metering,
     )
-    logging.getLogger("netaudio").setLevel(logging.DEBUG)
-    logging.getLogger("zeroconf").setLevel(logging.WARNING)
-    asyncio.run(
-        _run_virtual_device(
-            name=name,
-            model=model,
-            tx=tx,
-            rx=rx,
-            sample_rate=sample_rate,
-            interface=interface,
-            count=count,
-            detailed_metering=detailed_metering,
-            ownership_token=ownership_token,
-            readiness_port=readiness_port,
-        )
-    )
+
+    if foreground:
+        endpoint_worker.execute(arguments)
+
+    with _startup_claim():
+        _start_background_claimed(name, arguments)
 
 
 def _report_lifecycle_error(exception: VirtualLifecycleError) -> NoReturn:
@@ -675,12 +495,6 @@ def virtual_start(
         True, "--detailed-metering/--no-detailed-metering", help="Answer detailed metering subscriptions."
     ),
     foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in the foreground instead of detaching."),
-    ownership_token: Optional[str] = typer.Option(
-        None, "--ownership-token", hidden=True, help="Ownership token handed to the detached process."
-    ),
-    readiness_port: Optional[int] = typer.Option(
-        None, "--readiness-port", hidden=True, help="Local port the detached process reports readiness on."
-    ),
 ) -> None:
     try:
         _start_virtual(
@@ -693,16 +507,9 @@ def virtual_start(
             foreground=foreground,
             count=count,
             detailed_metering=detailed_metering,
-            ownership_token=ownership_token,
-            readiness_port=readiness_port,
         )
     except VirtualLifecycleError as exception:
         _report_lifecycle_error(exception)
-    except KeyboardInterrupt:
-        return
-    except Exception as exception:
-        typer.echo(f"Error: virtual device failed: {exception}", err=True)
-        raise typer.Exit(code=1) from exception
 
 
 def _require_owned_process(record: ProcessRecord, missing_ok: bool) -> bool:

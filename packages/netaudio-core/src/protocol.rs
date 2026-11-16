@@ -509,10 +509,10 @@ fn arc_operation(protocol: u16, opcode: u16) -> Option<ArcOperation> {
 
 #[derive(serde::Serialize)]
 pub struct ControlRequestHeader {
-    pub(crate) protocol_id: u16,
-    pub(crate) transaction_id: u16,
-    pub(crate) opcode: u16,
-    operation: ArcOperation,
+    pub protocol_id: u16,
+    pub transaction_id: u16,
+    pub opcode: u16,
+    pub operation: ArcOperation,
 }
 
 /// Validate the complete request envelope; operation-specific decoders validate its body.

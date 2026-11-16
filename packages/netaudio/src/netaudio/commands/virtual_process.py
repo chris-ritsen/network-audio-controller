@@ -124,7 +124,7 @@ def _ownership_state(record: ProcessRecord) -> str:
     command = _process_command(record.pid)
     if command is None:
         return "unknown"
-    if record.token in command and "netaudio" in command and "virtual" in command:
+    if record.token in command and "netaudio" in command and "simulate" in command:
         return "owned"
     return "different"
 

@@ -583,19 +583,6 @@ NetaudioStatus netaudio_dapi_build_service_acknowledgement(const uint8_t *announ
                                                            uintptr_t *out_length);
 
 /**
- * Advance a sender's publication counter, including zero when it wraps.
- */
-uint16_t netaudio_next_publication_id(uint16_t previous);
-
-/**
- * Construct virtual-device discovery records without registering network services.
- */
-NetaudioStatus netaudio_virtual_device_advertisements(const char *json,
-                                                      uint8_t *out_buffer,
-                                                      uintptr_t out_capacity,
-                                                      uintptr_t *out_length);
-
-/**
  * Build a managed-control packet and its transport/completion plan from {specification, host_mac, message_id}.
  * The packet is a JSON byte array; host_mac is an optional default, and explicit command identities are preserved.
  */
@@ -614,31 +601,6 @@ NetaudioStatus netaudio_channel_audio_publication(const char *json,
                                                   uint8_t *out_buffer,
                                                   uintptr_t out_capacity,
                                                   uintptr_t *out_length);
-
-/**
- * Encode {source_ip, message_id, publication} without opening a transport.
- * Publication kinds are audio (capability, current_value, supported_values),
- * heartbeat (tx_count, rx_count), and raw (protocol_id, eight-byte opcode, body).
- */
-NetaudioStatus netaudio_build_publication(const char *json,
-                                          uint8_t *out_buffer,
-                                          uintptr_t out_capacity,
-                                          uintptr_t *out_length);
-
-/**
- * Build an ARC response from protocol_id, transaction_id, result_code, and response JSON.
- * Response kinds: raw (opcode, body byte array), device_name (name),
- * channel_count (tx_count, rx_count), device_info (model_name, display_name,
- * model_code, port), device_settings (sample_rate and default, configured,
- * active, maximum, minimum latency_ns fields), transmitter_names (names array).
- * channel_status accepts channel_type (rx/tx), channels (name and optional
- * source with channel/device), and audio (sample_rate, encoding, supported_encodings).
- * Unsupported audio metadata produces a rejection reply. Layouts are for virtual devices.
- */
-NetaudioStatus netaudio_build_response(const char *json,
-                                       uint8_t *out_buffer,
-                                       uintptr_t out_capacity,
-                                       uintptr_t *out_length);
 
 NetaudioStatus netaudio_build_command(const char *json,
                                       uint8_t *out_buffer,
