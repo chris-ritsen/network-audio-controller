@@ -2405,7 +2405,6 @@ dependencies = [
  "chrono",
  "libc",
  "netaudio-core",
- "serde",
  "serde_json",
  "sha2",
 ]
