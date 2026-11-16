@@ -75,26 +75,10 @@ impl Receiver {
         })
     }
 
-    pub(super) fn bootstrap(limits: Limits) -> Result<Self, Error> {
-        let mut receiver = Self::new(limits)?;
-        receiver.parameter_units_allowed = true;
-        receiver.hunting = false;
-        Ok(receiver)
-    }
-
     pub fn invalidate(&mut self) {
         self.assembly = None;
         self.next_sequence = None;
         self.hunting = !self.parameter_units_allowed;
-    }
-
-    pub(super) fn pending_nals(&self) -> impl Iterator<Item = &[u8]> {
-        self.assembly.iter().flat_map(|assembly| {
-            assembly
-                .nal_ranges
-                .iter()
-                .map(|range| &assembly.bytes[range.clone()])
-        })
     }
 
     pub fn expiration_nanoseconds(&self) -> Option<i64> {

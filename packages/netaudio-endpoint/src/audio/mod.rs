@@ -19,7 +19,6 @@ pub use lifecycle::{Event, Fault};
 const RECOVERY_WINDOW: Duration = Duration::from_secs(10);
 const MAXIMUM_RECOVERIES: usize = 8;
 
-pub const CHANNELS: usize = 2;
 pub type Samples = Vec<i32>;
 pub type FloatSamples = Vec<f32>;
 

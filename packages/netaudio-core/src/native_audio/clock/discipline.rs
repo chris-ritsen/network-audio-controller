@@ -101,15 +101,6 @@ pub enum FitRejection {
     ErrorBudgetExceeded { nanoseconds: String },
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct SampleBasis {
-    pub generation: u64,
-    pub seconds: u32,
-    pub sample_offset: u32,
-    pub sample_rate: u32,
-    pub estimated_error_nanoseconds: String,
-}
-
 #[derive(Clone, Debug)]
 pub struct NetworkInstant {
     fractional_nanoseconds: u128,

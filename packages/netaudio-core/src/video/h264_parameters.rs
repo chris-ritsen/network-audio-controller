@@ -43,10 +43,6 @@ impl Parameters {
         Self::finish(parsed, picture, false)
     }
 
-    pub fn from_sequence(sequence: SequenceParameters, picture: Vec<u8>) -> Result<Self> {
-        Self::finish(sequence, picture, true)
-    }
-
     fn finish(
         sequence: SequenceParameters,
         picture: Vec<u8>,
@@ -110,14 +106,6 @@ impl Parameters {
 
     pub fn validate(&self, access_unit: &AccessUnit) -> Result<()> {
         self.validate_picture(access_unit, false)
-    }
-
-    pub fn validate_recovery(&self, access_unit: &AccessUnit) -> Result<()> {
-        ensure!(
-            access_unit.random_access,
-            "bootstrap recovery must be an IDR access unit"
-        );
-        self.validate_picture(access_unit, true)
     }
 
     fn validate_picture(&self, access_unit: &AccessUnit, recovery: bool) -> Result<()> {
@@ -252,22 +240,10 @@ impl Parameters {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Cadence {
-    pub numerator: u64,
-    pub denominator: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ColorDescription {
     pub primaries: u8,
     pub transfer: u8,
     pub matrix: u8,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ColorInterpretation {
-    pub full_range: bool,
-    pub description: ColorDescription,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
