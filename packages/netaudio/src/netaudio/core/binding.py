@@ -86,7 +86,7 @@ def _candidate_paths():
     for library_name in _library_names():
         yield Path(__file__).resolve().parent / library_name
         for profile in ("release", "debug"):
-            yield _REPO_ROOT / "packages" / "netaudio-core" / "target" / profile / library_name
+            yield _REPO_ROOT / "target" / profile / library_name
 
 
 _library = None

@@ -17,7 +17,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 CRATE = "packages/netaudio-core/Cargo.toml"
 ENDPOINT_CRATE = "packages/netaudio-endpoint/Cargo.toml"
-TARGET = ROOT / "packages/netaudio-core/target"
+TARGET = ROOT / "target"
 
 
 @dataclass(frozen=True)

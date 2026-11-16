@@ -30,11 +30,11 @@ core-types:
 
 CORE_PACKAGE_DIR := packages/netaudio/src/netaudio/core
 CORE_DIR := packages/netaudio-core
-CORE_RELEASE_DIR := $(CORE_DIR)/target/release
+CORE_RELEASE_DIR := target/release
 
 prune-core:
 	@cargo sweep --version >/dev/null 2>&1 || cargo install --locked cargo-sweep
-	cargo sweep --toolchains "$$(rustup show active-toolchain | cut -d' ' -f1)" $(CORE_DIR)
+	cargo sweep --toolchains "$$(rustup show active-toolchain | cut -d' ' -f1)" .
 
 core: header
 	cargo build --release --manifest-path $(CORE_DIR)/Cargo.toml
