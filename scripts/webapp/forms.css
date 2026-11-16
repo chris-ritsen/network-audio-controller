@@ -342,6 +342,11 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
+.lock-key-code {
+  width: 224px;
+  height: 224px;
+}
+
 .tabs > .tab {
   color: var(--text);
   opacity: 1;

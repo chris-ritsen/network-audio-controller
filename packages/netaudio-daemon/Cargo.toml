@@ -29,6 +29,7 @@ netaudio-core = { path = "../netaudio-core", features = ["schema"] }
 notify = "8.2"
 pbkdf2 = "0.12"
 percent-encoding = "2"
+qrcodegen = "1.8"
 rand = "0.8"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 redis = { version = "=1.7.1", default-features = false, features = ["tokio-rustls-comp"] }

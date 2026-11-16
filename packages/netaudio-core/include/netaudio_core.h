@@ -478,6 +478,11 @@ NetaudioStatus netaudio_inventory_state(NetaudioInventory *inventory,
                                         uintptr_t out_capacity,
                                         uintptr_t *out_length);
 
+NetaudioStatus netaudio_lock_key_search(const char *json,
+                                        uint8_t *out_buffer,
+                                        uintptr_t out_capacity,
+                                        uintptr_t *out_length);
+
 /**
  * Accept source-specific clock observations and compute bounded statistics.
  */

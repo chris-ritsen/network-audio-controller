@@ -30,6 +30,7 @@ pub mod host_audio;
 pub mod inventory;
 pub mod latency_configuration;
 pub mod lock;
+pub mod lock_key;
 pub mod managed_api;
 pub mod managed_session;
 pub mod metering;

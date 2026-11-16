@@ -212,6 +212,10 @@ def _call_json(function, value, context):
     return _decode_json_output(data, context)
 
 
+def lock_key_search(path: str | None) -> dict:
+    return _call_json(require().netaudio_lock_key_search, {"path": path}, "lock key search")
+
+
 def operation_availability(facts: _requests.AvailabilityRequest) -> _types.Availability:
     return _call_json(require().netaudio_operation_availability, facts, "operation availability")
 

@@ -138,37 +138,18 @@ def key_extract(
     ),
 ):
     """Extract the device lock key from a Dante Controller installation."""
-    from netaudio.common.key_extract import installation_directories, libraries_in, lock_key_candidates
+    from netaudio import core
 
-    locations = [path] if path is not None else installation_directories()
-    libraries = [library for location in locations for library in libraries_in(location)]
-    if not libraries:
-        typer.echo(
-            "Error: Dante Controller not found. Use --path with the application, its folder or its library.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    failures = []
-    key_string = None
-    for library in libraries:
-        try:
-            candidates = lock_key_candidates(library)
-        except OSError as error:
-            failures.append(f"could not read {library}: {error}")
-            continue
-        if len(candidates) == 1:
-            typer.echo(f"Binary: {library}", err=True)
-            key_string = candidates[0]
-            break
-        found = "no lock key" if not candidates else f"{len(candidates)} possible lock keys"
-        failures.append(f"{found} found in {library}")
-
+    search = core.lock_key_search(None if path is None else str(path))
+    key_string = search["key"]
     if key_string is None:
-        for failure in failures:
+        for failure in search["failures"]:
             typer.echo(f"Error: {failure}", err=True)
+        if path is None:
+            typer.echo("Use --path with the application, its folder or its library.", err=True)
         raise typer.Exit(code=1)
 
+    typer.echo(f"Binary: {search['source']}", err=True)
     typer.echo(key_string)
 
     if save:

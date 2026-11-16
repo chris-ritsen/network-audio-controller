@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { APPEARANCES, appearance, setAppearance } from "../color-scheme.js";
-import { Panel } from "../components.js";
+import { AsyncButton, Fields, Panel } from "../components.js";
 import {
   LANGUAGES,
   languagePreference,
@@ -81,7 +81,62 @@ function SettingsView() {
       ${error ? html`<div class="alert alert-error mt-3" role="alert">${t(error)}</div>` : null}
     <//>
     <${DanteNetwork} settings=${settings} />
+    <${LockKey} />
   </div>`;
+}
+
+const QUIET_ZONE = 4;
+
+function LockKeyCode({ modules }) {
+  const size = modules.length + QUIET_ZONE * 2;
+  const path = modules
+    .flatMap((row, y) =>
+      [...row].map((module, x) =>
+        module === "1" ? `M${x + QUIET_ZONE} ${y + QUIET_ZONE}h1v1h-1z` : "",
+      ),
+    )
+    .join("");
+  return html`<svg
+    class="lock-key-code"
+    role="img"
+    aria-label=${t("QR code")}
+    viewBox=${`0 0 ${size} ${size}`}
+    shape-rendering="crispEdges"
+  >
+    <rect width=${size} height=${size} fill="#ffffff" />
+    <path d=${path} fill="#000000" />
+  </svg>`;
+}
+
+function LockKey() {
+  const [found, setFound] = useState(null);
+  return html`<${Panel} title=${t("Device lock key")}>
+    <div class="flex flex-col items-start gap-4">
+      <${AsyncButton}
+        small
+        description=${t("Read from Dante Controller")}
+        onRun=${async () => {
+          setFound(null);
+          const result = await api.readInstalledLockKey();
+          setFound(result);
+          return result;
+        }}
+      >
+        ${t("Read from Dante Controller")}
+      <//>
+      ${
+        found
+          ? html`<${Fields}
+                entries=${[
+                  [t("Key"), html`<span class="font-mono">${found.key}</span>`],
+                  [t("Source"), found.source],
+                ]}
+              />
+              <${LockKeyCode} modules=${found.modules} />`
+          : null
+      }
+    </div>
+  <//>`;
 }
 
 function DanteNetwork({ settings }) {

@@ -808,6 +808,63 @@
         }
       }
     },
+    "/device-lock-key/dante-controller": {
+      "post": {
+        "operationId": "readInstalledDeviceLockKey",
+        "summary": "Read the device lock key from Dante Controller installed on this server",
+        "description": "Searches the Dante Controller installation on the server's own host and returns the key it holds, the link the mobile application imports, and that link as a QR code matrix of rows of 0 and 1. Nothing is saved. This ordinary REST route is not bearer protected; its response contains a secret and must not be logged.",
+        "tags": [
+          "Device controls"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The key, where it was found, and its import link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "import_link": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{32}$"
+                    },
+                    "modules": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[01]+$"
+                      }
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "import_link",
+                    "key",
+                    "modules",
+                    "source"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
     "/devices": {
       "get": {
         "operationId": "listDevices",
