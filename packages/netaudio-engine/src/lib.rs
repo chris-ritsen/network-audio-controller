@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 use anyhow::{Context, Result};
 use netaudio_daemon::configuration::Configuration;
 use netaudio_daemon::runtime::{self, RuntimeOptions};

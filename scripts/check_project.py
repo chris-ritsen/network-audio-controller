@@ -226,6 +226,21 @@ def project_checks(library, *, offline=False):
             ["cargo", "clippy", *cargo, "--all-targets", "--features", "schema", "--", "-D", "warnings"],
         ),
         Check(
+            "workspace-clippy",
+            "native",
+            [
+                "cargo",
+                "clippy",
+                "--locked",
+                *(["--offline"] if offline else []),
+                "--workspace",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        ),
+        Check(
             "web-format",
             "webapp",
             [

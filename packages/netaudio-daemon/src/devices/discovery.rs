@@ -113,11 +113,13 @@ pub enum DiscoveryEvent {
     NetworkChanged,
 }
 
+type Observation = (usize, &'static str, ServiceEvent);
+
 struct Browser {
     daemons: Vec<ServiceDaemon>,
     monitors: SelectAll<BoxStream<'static, Result<DaemonEvent>>>,
     resolved: BTreeMap<(String, String), BTreeSet<usize>>,
-    streams: SelectAll<BoxStream<'static, Result<(usize, &'static str, ServiceEvent)>>>,
+    streams: SelectAll<BoxStream<'static, Result<Observation>>>,
 }
 
 impl Browser {
