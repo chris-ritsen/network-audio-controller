@@ -103,7 +103,6 @@ pub fn observe_in_place(
     if request.previous.is_some() {
         return Err("A retained clock tracker cannot replace its history".into());
     }
-    // Validate all fallible inputs before changing retained state.
     if let Some(packet) = &request.packet {
         parse_heartbeat_records(packet).ok_or("Malformed heartbeat envelope")?;
     }

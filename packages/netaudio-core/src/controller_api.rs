@@ -58,7 +58,6 @@ struct Response {
 
 impl Response {
     fn parse(data: &[u8]) -> Result<Self, &'static str> {
-        // Never include response contents in errors: a login response carries a credential.
         let response: Self = serde_json::from_slice(data)
             .map_err(|_| "DDM returned invalid Controller endpoints")?;
 

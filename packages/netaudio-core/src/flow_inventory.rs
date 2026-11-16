@@ -209,7 +209,6 @@ impl FlowInventory {
             _ => unreachable!("result code checked before parsing"),
         };
 
-        // Commit only after validating the entire response and continuation.
         self.capacity = Some(page.capacity);
         self.observed_opcode = Some(envelope.opcode);
         self.observed_protocol_id = Some(envelope.protocol_id);

@@ -131,7 +131,6 @@ impl PanelPlanRequest {
                 )));
             }
         }
-        // Encoder validation applies even to no-ops; an unknown setting is not confirmed by equality.
         request.encode().map_err(unsupported)?;
         let mut extra = Vec::new();
         let expected = match &request {

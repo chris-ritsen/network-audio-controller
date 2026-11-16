@@ -184,7 +184,6 @@ pub fn arc_protocol(
     managed: bool,
 ) -> Result<Option<ArcProtocol>, &'static str> {
     let protocol_id = if managed {
-        // Managed control's observed ARC transport uses this explicit revision.
         PROTOCOL_ARC_2809
     } else {
         let Some(version) = version else {

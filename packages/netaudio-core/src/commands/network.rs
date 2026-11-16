@@ -30,8 +30,6 @@ fn build_interface_configuration(
         }
         .to_be_bytes(),
     );
-    // These preceding words also affect network mode; targeting belongs in
-    // the interface word immediately before the address-mode value.
     body.extend_from_slice(&0u32.to_be_bytes());
     body.extend_from_slice(&selector.to_be_bytes());
     body.extend_from_slice(&if configuration.is_some() { 2u16 } else { 0 }.to_be_bytes());

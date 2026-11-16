@@ -416,7 +416,6 @@ pub fn audio_capability_control(control: &AudioCapabilityControl) -> Vec<&'stati
     }
 
     if let (Some(choices), Some(requested)) = (&control.available_values, control.requested_value) {
-        // An empty advertised vector does not establish a value restriction.
         if !choices.is_empty() && !choices.contains(&requested) {
             reasons.push("value_not_advertised");
         }

@@ -186,7 +186,6 @@ pub enum ExternalReadbackRequest {
     },
 }
 
-// Compare semantic endpoint identity, not packet pointers or descriptor bytes.
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 struct Endpoint {
@@ -349,7 +348,6 @@ fn evaluate(
     scope: Scope,
     inventory: Option<Value>,
 ) -> ExternalSubscriptionReadback {
-    // Missing, partial, failed, or malformed inventories cannot prove absence.
     let inventory = inventory
         .and_then(|value| serde_json::from_value::<Inventory>(value).ok())
         .filter(|inventory| {

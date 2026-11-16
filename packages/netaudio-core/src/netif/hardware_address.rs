@@ -68,13 +68,11 @@ impl Drop for OwnedValue {
     }
 }
 
-// getifaddrs masks link addresses on recent macOS; the I/O Registry reports the controller's.
 pub(super) fn interface_mac(name: &CStr) -> Option<[u8; 6]> {
     let matching = unsafe { IOBSDNameMatching(IO_MAIN_PORT_DEFAULT, 0, name.as_ptr()) };
     if matching.is_null() {
         return None;
     }
-    // IOServiceGetMatchingService consumes the matching dictionary.
     let interface =
         RegistryEntry::new(unsafe { IOServiceGetMatchingService(IO_MAIN_PORT_DEFAULT, matching) })?;
     let mut parent = 0;

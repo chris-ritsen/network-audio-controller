@@ -180,7 +180,6 @@ fn plan_grouped_request(
         }
     }
 
-    // No command escapes the planner until every page passes the actual encoder.
     for group in &pages {
         super::build_command_from_json(&group.command.to_string())?;
     }

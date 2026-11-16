@@ -275,7 +275,6 @@ impl ManagedSessionState {
 
         let mut packet_hex = None;
 
-        // Unsolicited publications cannot complete a command that has not been sent.
         if self.sent {
             let complete = match self.operation.as_ref() {
                 Some(ManagedOperation::MonitorSignals) => false,

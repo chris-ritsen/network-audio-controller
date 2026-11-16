@@ -50,8 +50,6 @@ pub fn parse_device_request(data: &[u8]) -> Option<DeviceRequest> {
     let mac = data.get(8..14)?.try_into().ok()?;
     let device_id = data.get(8..16)?.try_into().ok()?;
 
-    // Compare complete envelopes against the same builders used by clients.
-    // Identity queries have a fixed builder ID, but callers may choose another ID.
     for (mut packet, request) in [
         (
             commands::build_dante_model(device_id).ok()?,

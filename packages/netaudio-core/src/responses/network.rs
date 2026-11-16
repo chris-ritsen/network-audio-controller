@@ -76,10 +76,14 @@ pub(super) fn interface_configuration_matches_running(
         "static" => {
             configured.ip_address.as_deref() == Some(running.ip_address.as_str())
                 && configured.netmask.as_deref() == Some(running.netmask.as_str())
-                // Secondary records omit DNS and gateway even when the stored
-                // configuration retains them after a successful reboot.
-                && running.gateway.as_ref().is_none_or(|v| configured.gateway.as_ref() == Some(v))
-                && running.dns_server.as_ref().is_none_or(|v| configured.dns_server.as_ref() == Some(v))
+                && running
+                    .gateway
+                    .as_ref()
+                    .is_none_or(|v| configured.gateway.as_ref() == Some(v))
+                && running
+                    .dns_server
+                    .as_ref()
+                    .is_none_or(|v| configured.dns_server.as_ref() == Some(v))
         }
         _ => false,
     }

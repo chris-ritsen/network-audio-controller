@@ -180,7 +180,6 @@ fn port_label(value: u16) -> Option<String> {
     )
 }
 
-// Every interpreted region owns its bytes. Pointers cannot alias headers or other vectors.
 fn claim(
     data: &[u8],
     used: &mut Vec<std::ops::Range<usize>>,

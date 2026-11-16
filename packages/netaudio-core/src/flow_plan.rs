@@ -210,8 +210,6 @@ impl FlowCommandPlan {
             return;
         };
 
-        // Validate the returned command with the real serializer without
-        // assigning a transaction identifier in the caller's session.
         let mut validation = Value::Object(command.clone());
         validation["message_id"] = json!(1);
 

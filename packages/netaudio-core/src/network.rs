@@ -54,7 +54,6 @@ impl StaticInterfaceConfiguration {
             ));
         }
 
-        // Point-to-point and host routes do not reserve network/broadcast hosts.
         if host_mask > 1 && (address & host_mask == 0 || address & host_mask == host_mask) {
             return Err(invalid("ip_address must be a host address"));
         }
@@ -166,8 +165,6 @@ fn interface_context(
 
 fn redundancy_context(mut state: Option<serde_json::Value>) -> Option<serde_json::Value> {
     if let Some(serde_json::Value::Object(ref mut state)) = state {
-        // The enclosing interface packet changes when its network configuration changes.
-        // Its bytes and observation time are evidence, not redundancy settings.
         state.remove("raw_record_hexadecimal");
 
         if let Some(serde_json::Value::Object(source)) = state.get_mut("state_source") {

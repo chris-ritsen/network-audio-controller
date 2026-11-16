@@ -105,7 +105,6 @@ impl ChannelInventory {
             return Err("device rejected channel inventory request");
         }
 
-        // Identity comes from typed, validated parser output, not caller JSON.
         let (records, page) = if self.receiver {
             let page = parse_modern_arc_receiver_channel_status_page(response)
                 .ok_or("malformed receiver channel page")?;
@@ -178,7 +177,6 @@ impl ChannelInventory {
             None
         };
 
-        // Commit only after validating the entire page and its continuation.
         for record in records {
             self.global_identities
                 .insert(record.global_id, record.identity);

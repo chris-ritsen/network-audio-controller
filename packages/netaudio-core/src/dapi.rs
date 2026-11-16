@@ -600,9 +600,6 @@ pub fn parse_device_announcement(bytes: &[u8]) -> Option<DeviceAnnouncement> {
     if !encoded_id.iter().all(u8::is_ascii_hexdigit) {
         return None;
     }
-    // The selector is part of the service record immediately preceding the
-    // service name.  It is not one of the routing/binding words in the DAPI
-    // wrapper.  Zero is a valid selector observed for a managed device.
     let target_selector_offset =
         service_name_offset.checked_sub(DEVICE_TARGET_SELECTOR_DISTANCE_FROM_SERVICE_NAME)?;
     let target_selector = read_u16(bytes, target_selector_offset)?;
@@ -768,9 +765,6 @@ pub fn parse_settings_request(bytes: &[u8]) -> Option<SettingsRequest> {
     let packet =
         bytes.get(SETTINGS_PACKET_OFFSET..SETTINGS_PACKET_OFFSET.checked_add(packet_length)?)?;
     let opcode = settings_opcode(packet)?;
-    // Restrict observation to the established envelope, including alignment.
-    // Authentication and unsupported record variants must never be classified
-    // as device settings requests.
     if build_settings_request(target_selector, wrapper_id, packet)?.as_slice() != bytes {
         return None;
     }

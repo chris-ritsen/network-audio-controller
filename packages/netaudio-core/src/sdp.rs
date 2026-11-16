@@ -233,7 +233,6 @@ fn rtp_maps(attributes: &[String]) -> Result<Vec<SdpRtpMap>, String> {
     Ok(maps)
 }
 
-// Decimal scaling stays integral: sub-microsecond values must not round into a valid packet time.
 fn packet_time(value: &str) -> Result<u64, String> {
     let invalid = || "a=ptime must resolve to a positive whole number of microseconds".to_owned();
     let value = value.trim().strip_prefix('+').unwrap_or(value.trim());

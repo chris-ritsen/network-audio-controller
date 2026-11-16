@@ -159,8 +159,6 @@ impl ExportCollector {
         } else {
             Some(identifier)
         };
-        // Identifiers are unique, positive, and bounded by the terminal, so this
-        // count also proves there are no gaps in the completed sequence.
         let complete = terminal.is_some_and(|last| self.fragments.len() + 1 == usize::from(last));
 
         if complete && received != total {

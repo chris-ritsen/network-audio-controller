@@ -87,8 +87,6 @@ pub fn plan(mut request: Request) -> Result<Plan, SpecError> {
             })
             .collect();
 
-        // Validate the entire pending intent, including the final page, before
-        // allowing the caller to execute the first batch.
         plan_subscription_request(SubscriptionPlanRequest {
             protocol_id: request.protocol_id,
             channels: request.channels,

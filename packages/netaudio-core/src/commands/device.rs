@@ -242,8 +242,6 @@ pub fn parse_set_channel_name_request(data: &[u8]) -> Option<ChannelNameChange> 
     let pointer = read_u16(data, pointer_offset)?;
     let name = string_at_pointer(data, pointer)?;
 
-    // Accept the supported single-record layout; the encoder validates the name,
-    // channel range, reserved fields, pointers, and complete frame length.
     let expected = build_set_channel_name_for_protocol(
         protocol,
         channel_type,

@@ -329,7 +329,6 @@ pub fn verify_topology(request: TopologyReadbackRequest) -> Result<(), String> {
     let mut expected_flows = BTreeMap::new();
 
     for mut flow in before.transmitter_flows {
-        // Automatic unicast flows can retire while receivers retain the old sample rate.
         if target.transmit_channel_count >= before.capacity.transmit_channel_count
             && flow.may_retire_after_sample_rate_change
             && !resulting_flows.contains_key(&flow.flow_number)

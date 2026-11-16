@@ -276,7 +276,6 @@ pub fn snapshot(facts: PerformanceSnapshotFacts) -> PerformanceSnapshot {
     let mut configuration = PerformanceSnapshot::default();
 
     for (_, operation) in OPERATIONS {
-        // Select the same control fields as writes, without software-compatibility writes.
         let Ok(properties) = operation.properties(&supported, [3, 0, 0]) else {
             continue;
         };
@@ -421,7 +420,6 @@ pub fn capabilities(facts: PerformanceFacts) -> Result<PerformanceCapabilities, 
             reasons.push("platform_software_version_unknown");
         }
 
-        // Readability concerns normal control fields, not older-software compatibility writes.
         let readable = operation
             .properties(&PERFORMANCE_PROPERTY_IDS, [3, 0, 0])?
             .iter()

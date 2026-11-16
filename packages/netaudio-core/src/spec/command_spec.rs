@@ -5,7 +5,6 @@ use super::*;
 pub fn plan_performance_command(
     json: &str,
 ) -> Result<Vec<commands::PerformanceProperty>, SpecError> {
-    // The plan must obey every validation applied when this command is encoded.
     super::build_command_from_json(json)?;
     let properties = match parse_command_spec(json)? {
         CommandSpec::SetReceiveFlowPerformance {

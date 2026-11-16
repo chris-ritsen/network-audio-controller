@@ -327,7 +327,6 @@ pub fn plan_configuration(request: ClockPlanRequest) -> Result<ClockPlan, String
     );
 
     if !changed.is_empty() {
-        // Use the same validation as the wire encoder without opening a transport.
         let command = json!({"command": "clock_control", "control": control, "message_id": 1, "host_mac": "000000000000"});
         crate::spec::build_command_from_json(&command.to_string()).map_err(|_| {
             let fields = changed

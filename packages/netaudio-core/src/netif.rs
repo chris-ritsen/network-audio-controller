@@ -31,7 +31,6 @@ pub fn source_ipv4_for(destination: Ipv4Addr) -> Option<Ipv4Addr> {
 
 pub const FALLBACK_HOST_MAC: [u8; 6] = [0x02, 0x00, 0x5E, 0x00, 0x00, 0x01];
 
-// Recent macOS and iOS releases report this for every interface through getifaddrs.
 const MASKED_INTERFACE_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x00];
 
 fn is_interface_mac(mac_address: &[u8; 6]) -> bool {

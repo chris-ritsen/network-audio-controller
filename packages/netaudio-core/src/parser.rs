@@ -343,7 +343,6 @@ pub fn parse_channel_page_start(packet: &[u8]) -> Option<Option<u16>> {
         2
     };
     let start = read_u16(envelope.body, offset).unwrap_or(0).max(1);
-    // A standalone dissection can infer its page origin, but still validates the full page.
     let count = match envelope.opcode {
         OPCODE_RX_CHANNELS => parse_rx_page(packet, start)?.len(),
         OPCODE_TX_CHANNEL_INFO => parse_tx_info_page(packet, start)?.len(),

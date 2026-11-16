@@ -25,7 +25,6 @@ struct UnicastAddress {
     address: SocketAddress,
 }
 
-// The documented prefix of IP_ADAPTER_ADDRESSES_LH. Nothing past oper_status is read.
 #[repr(C)]
 struct AdapterAddresses {
     alignment: u64,
@@ -59,8 +58,6 @@ unsafe fn holds_address(adapter: &AdapterAddresses, address: Ipv4Addr) -> bool {
     false
 }
 
-// An adapter with no data-link layer reports a zero length, and that is the answer for its
-// address: another adapter's MAC does not identify the interface carrying this IPv4 source.
 unsafe fn mac_for_address(
     first_adapter: *const AdapterAddresses,
     address: Ipv4Addr,

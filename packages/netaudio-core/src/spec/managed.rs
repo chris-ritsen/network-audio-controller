@@ -34,8 +34,6 @@ pub fn build_managed_command(request: ManagedCommandRequest) -> Result<ManagedCo
         | CommandSpec::SetChannelName { protocol_id, .. }
         | CommandSpec::SetLatency { protocol_id, .. }
         | CommandSpec::TransmitterNames { protocol_id, .. } => {
-            // This transport carries modern ARC. An explicit incompatible revision
-            // is rejected rather than being rewritten to fit the transport.
             if request.specification.get("protocol_id").is_none() {
                 *protocol_id = PROTOCOL_ARC_2809;
             }

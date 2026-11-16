@@ -14,7 +14,6 @@ pub fn format_precondition(
 ) -> crate::responses::AudioReadbackResult {
     let mut result = request.resolve();
 
-    // Unlike some audio controls, a flow's sample rate and encoding cannot be zero.
     if result.current_value == Some(0) {
         result.current_value = None;
         result.state = crate::responses::AudioReadbackState::Unavailable;
@@ -438,7 +437,6 @@ fn stable_inventory(
                 stable.insert("parsed".into(), json!(true));
             }
             Err(_) => {
-                // Unknown record payloads cannot establish durable configuration equality.
                 stable.insert("identity".into(), json!({"global_flow_id": identity}));
                 stable.insert("parsed".into(), json!(false));
             }

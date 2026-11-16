@@ -260,7 +260,6 @@ pub fn managed_status(request: ManagedStatusRequest) -> ManagedSubscriptionStatu
     }
 
     classification.detail = classification.detail.or(message);
-    // An optimistic aggregate summary cannot erase a known per-channel failure.
     classification.severity = match summary.as_deref() {
         Some("ERROR") => "error",
         Some("WARNING") if classification.severity != "error" => "warning",

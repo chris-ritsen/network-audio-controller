@@ -23,7 +23,6 @@ pub fn parse_multicast_flow_creation_2809(response: &[u8]) -> Option<MulticastFl
     }
     let record_offset = 32;
     let geometry = transmitter_flow_status_record_geometry(response, record_offset)?;
-    // All observed allocations have five segments followed by one terminal word.
     if geometry.segment_offsets.len() != 5 || geometry.record_end.checked_add(2)? != response.len()
     {
         return None;
