@@ -5,9 +5,8 @@ from fnmatch import fnmatch
 
 from netaudio.core import canonical_device_mac
 
-from netaudio.dante.clock_config import format_clock_subdomain
-from netaudio.dante.latency import nanoseconds_to_milliseconds
-from netaudio.dante.sample_rate_pullup import (
+from netaudio.cli_support.clock_config import format_clock_subdomain
+from netaudio.cli_support.sample_rate_pullup import (
     format_supported_sample_rate_pullup_values,
     sample_rate_pullup_label,
 )
@@ -107,7 +106,7 @@ def format_latency_milliseconds(latency_milliseconds: float | None) -> str:
 def format_latency_nanoseconds(latency_nanoseconds: int | None) -> str:
     if type(latency_nanoseconds) is not int or latency_nanoseconds < 0:
         return ""
-    return format_latency_milliseconds(nanoseconds_to_milliseconds(latency_nanoseconds))
+    return format_latency_milliseconds(int(latency_nanoseconds) / 1_000_000)
 
 
 def format_latency_range_milliseconds(
@@ -567,7 +566,7 @@ def _device_control_rows(device) -> list[list[str]]:
 
 def _device_clock_rows(device) -> list[list[str]]:
     rows = []
-    from netaudio.dante.clock_control import clock_status_fresh
+    from netaudio.cli_support.clock_control import clock_status_fresh
 
     status = device.clock_status or {}
     fresh = clock_status_fresh(

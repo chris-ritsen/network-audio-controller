@@ -1,6 +1,0 @@
-MICROSECONDS_PER_MILLISECOND = 1_000
-NANOSECONDS_PER_MILLISECOND = 1_000_000
-
-
-def nanoseconds_to_milliseconds(value):
-    return int(value) / NANOSECONDS_PER_MILLISECOND

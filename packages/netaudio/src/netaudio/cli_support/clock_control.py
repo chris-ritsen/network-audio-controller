@@ -2,20 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from netaudio import core
-
 CLOCK_STATUS_MAX_AGE_SECONDS = 10.0
-
-EXTENDED_CLOCK_FIELDS = (
-    "follower_only",
-    "priority_mapping",
-    "preferred_protocol",
-    "ptpv2_clock_class",
-    "ptpv2_domain",
-    "ptpv2_priority1",
-    "ptpv2_priority2",
-    "multicast_dscp",
-)
 
 
 def clock_status_fresh(snapshot, now: datetime | None = None) -> bool:
@@ -36,7 +23,3 @@ def clock_status_fresh(snapshot, now: datetime | None = None) -> bool:
         return False
 
     return 0 <= age <= CLOCK_STATUS_MAX_AGE_SECONDS
-
-
-def clock_control_profile(override: int | None = None) -> int:
-    return core.clock_control_profile({"control_profile": override})

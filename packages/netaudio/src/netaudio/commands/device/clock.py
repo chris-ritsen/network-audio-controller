@@ -3,7 +3,7 @@ import typer
 from netaudio.cli_support.execution import run_with_devices
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import filter_devices, sort_devices
-from netaudio.dante.ptpv1_uuid import canonical_ptpv1_uuid
+from netaudio.cli_support.ptpv1_uuid import canonical_ptpv1_uuid
 
 
 def _matching_leader_name(entries, follower):

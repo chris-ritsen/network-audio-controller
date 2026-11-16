@@ -9,7 +9,7 @@ from rich.cells import cell_len, set_cell_size
 
 from netaudio.commands.device.display import _channel_matches
 from netaudio.device_record import Device
-from netaudio.dante.metering import classify_signal_presence
+from netaudio.cli_support.metering import classify_signal_presence
 
 PASSIVE_SOURCE = "signal_presence"
 DETAILED_SOURCE = "detailed"

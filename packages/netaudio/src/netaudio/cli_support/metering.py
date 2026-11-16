@@ -34,7 +34,6 @@ def classify_signal_presence(value: int, source: str | None) -> str:
 
 
 def detailed_metering_targets(devices: dict) -> list[str]:
-    """Select devices that do not rule out detailed metering and do not send passive signal presence."""
     return sorted(
         server_name
         for server_name, device in devices.items()

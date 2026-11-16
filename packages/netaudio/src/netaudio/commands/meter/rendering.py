@@ -17,7 +17,7 @@ from netaudio.commands.meter.models import (
     _fit_cell,
     _fit_render_cell,
 )
-from netaudio.dante.metering import classify_signal_presence, metering_value_dbfs
+from netaudio.cli_support.metering import classify_signal_presence, metering_value_dbfs
 
 
 def _ansi(code: str, text: str, enabled: bool) -> str:

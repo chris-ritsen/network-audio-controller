@@ -15,8 +15,8 @@ from netaudio.cli_support.execution import change_devices, run_with_devices
 from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.daemon.client import DaemonRefusal, ask_daemon, call_daemon
-from netaudio.dante.clock_config import format_clock_source_code, format_clock_subdomain
-from netaudio.dante.sample_rate_pullup import format_supported_sample_rate_pullup_values, sample_rate_pullup_label
+from netaudio.cli_support.clock_config import format_clock_source_code, format_clock_subdomain
+from netaudio.cli_support.sample_rate_pullup import format_supported_sample_rate_pullup_values, sample_rate_pullup_label
 
 app = typer.Typer(help="Get or set device configuration.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 

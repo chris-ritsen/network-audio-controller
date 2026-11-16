@@ -17,7 +17,7 @@ from netaudio.commands.meter import tui
 from netaudio.commands.meter.models import METER_DISPLAY_FLOOR_DBFS, format_meter_sample
 from netaudio.commands.meter.tui import MeterViewOptions
 from netaudio.daemon import client as daemon_client
-from netaudio.dante.metering import classify_signal_presence, metering_value_dbfs
+from netaudio.cli_support.metering import classify_signal_presence, metering_value_dbfs
 from netaudio.icons import icon
 
 meter_app = typer.Typer(
