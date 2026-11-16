@@ -111,7 +111,7 @@ def key_extract(
     path: Optional[Path] = typer.Option(
         None,
         "--path",
-        help="Path to Dante Controller binary (libDanteController.dylib or .dll).",
+        help="Dante Controller application, installation folder or library.",
         exists=True,
         readable=True,
     ),
@@ -138,22 +138,37 @@ def key_extract(
     ),
 ):
     """Extract the device lock key from a Dante Controller installation."""
-    from netaudio.common.key_extract import extract_key_from_binary, find_dante_controller_binary
+    from netaudio.common.key_extract import installation_directories, libraries_in, lock_key_candidates
 
-    if path is None:
-        path = find_dante_controller_binary()
-        if path is None:
-            typer.echo("Error: Dante Controller not found. Use --path to specify the binary.", err=True)
-            raise typer.Exit(code=1)
-
-    typer.echo(f"Binary: {path}", err=True)
-
-    key = extract_key_from_binary(path)
-    if key is None:
-        typer.echo("Error: could not extract key from binary.", err=True)
+    locations = [path] if path is not None else installation_directories()
+    libraries = [library for location in locations for library in libraries_in(location)]
+    if not libraries:
+        typer.echo(
+            "Error: Dante Controller not found. Use --path with the application, its folder or its library.",
+            err=True,
+        )
         raise typer.Exit(code=1)
 
-    key_string = key.decode("ascii")
+    failures = []
+    key_string = None
+    for library in libraries:
+        try:
+            candidates = lock_key_candidates(library)
+        except OSError as error:
+            failures.append(f"could not read {library}: {error}")
+            continue
+        if len(candidates) == 1:
+            typer.echo(f"Binary: {library}", err=True)
+            key_string = candidates[0]
+            break
+        found = "no lock key" if not candidates else f"{len(candidates)} possible lock keys"
+        failures.append(f"{found} found in {library}")
+
+    if key_string is None:
+        for failure in failures:
+            typer.echo(f"Error: {failure}", err=True)
+        raise typer.Exit(code=1)
+
     typer.echo(key_string)
 
     if save:
