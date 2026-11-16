@@ -67,10 +67,3 @@ def extract_key_from_binary(binary_path: Path) -> bytes | None:
         logger.debug(f"Found {len(matches)} candidate keys in {binary_path}, cannot disambiguate")
 
     return None
-
-
-def extract_lock_key() -> bytes | None:
-    binary_path = find_dante_controller_binary()
-    if binary_path is None:
-        return None
-    return extract_key_from_binary(binary_path)

@@ -38,10 +38,6 @@ class TypeReference:
         )
 
     @property
-    def is_list(self) -> bool:
-        return self.unwrapped.kind == "LIST"
-
-    @property
     def is_required(self) -> bool:
         return self.kind == "NON_NULL"
 
@@ -203,14 +199,6 @@ class Schema:
         if schema_type.kind == "INPUT_OBJECT":
             return self._coerce_input_object(schema_type, value, path)
         raise InputValidationError(f"{path} has unsupported input type {schema_type.name}")
-
-    def describe_field(self, field: Field) -> list[str]:
-        lines = [f"{field.name}: {field.type.render()}"]
-        if field.description:
-            lines.append(f"  {field.description}")
-        for argument in field.arguments:
-            lines.append(f"  {argument.name}: {argument.type.render()}")
-        return lines
 
     def describe_type(self, name: str) -> list[str]:
         schema_type = self.type(name)

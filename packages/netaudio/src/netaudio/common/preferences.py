@@ -97,12 +97,6 @@ def update_preferences(
         return result
 
 
-def save_monitoring_port(port: int):
-    if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
-        raise ValueError("Monitoring port must be an integer between 1024 and 65535")
-    save_preference("monitoring_port", port)
-
-
 def save_preference(key: str, value):
     def update(preferences: dict[str, Any]) -> None:
         preferences[key] = value

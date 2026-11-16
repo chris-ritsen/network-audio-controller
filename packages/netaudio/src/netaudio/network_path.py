@@ -3,7 +3,6 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
-import struct
 import subprocess
 import sys
 import threading
@@ -120,71 +119,6 @@ def active_ipv4_interfaces(
                 continue
             interfaces.add(IPv4Interface(priority, adapter.nice_name, str(address), network_prefix))
     return tuple(sorted(interfaces))
-
-
-def interface_supports_multicast(name: str) -> bool | None:
-    request = INTERFACE_FLAG_REQUESTS.get(sys.platform)
-    if request is None:
-        return None
-    import fcntl
-
-    request_code, multicast_flag = request
-    interface_request = name.encode()[:15].ljust(INTERFACE_REQUEST_SIZE, b"\0")
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-        try:
-            result = fcntl.ioctl(probe.fileno(), request_code, interface_request)
-        except OSError:
-            return None
-    (flags,) = struct.unpack_from("H", result, INTERFACE_FLAGS_OFFSET)
-    return bool(flags & multicast_flag)
-
-
-def multicast_ipv4_addresses(selected_interface: str | None = None) -> list[str]:
-    addresses = []
-    for interface in active_ipv4_interfaces(selected_interface, include_loopback=True):
-        loopback = ipaddress.IPv4Address(interface.address).is_loopback
-        if not loopback and interface_supports_multicast(interface.name) is False:
-            continue
-        if interface.address not in addresses:
-            addresses.append(interface.address)
-    return addresses
-
-
-def preferred_device_address(
-    addresses: Iterable[str],
-    selected_interface: str | None = None,
-    *,
-    interfaces: Iterable[IPv4Interface] | None = None,
-) -> str | None:
-    advertised = list(addresses)
-    candidates = []
-    for address in advertised:
-        try:
-            candidates.append(ipaddress.IPv4Address(address))
-        except ipaddress.AddressValueError:
-            continue
-    if not candidates:
-        return advertised[0] if advertised else None
-    if len(candidates) == 1:
-        return str(candidates[0])
-
-    local_interfaces = tuple(active_ipv4_interfaces(selected_interface) if interfaces is None else interfaces)
-    ranked = []
-    for index, candidate in enumerate(candidates):
-        for interface in local_interfaces:
-            if candidate in interface.network:
-                ranked.append(
-                    (
-                        candidate in DANTE_SECONDARY_NETWORK,
-                        interface.priority,
-                        -interface.network_prefix,
-                        index,
-                        str(candidate),
-                    )
-                )
-    if not ranked:
-        return str(candidates[0])
-    return min(ranked)[-1]
 
 
 class NetworkPathManager:

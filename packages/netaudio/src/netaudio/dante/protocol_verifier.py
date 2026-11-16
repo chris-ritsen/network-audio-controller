@@ -5,7 +5,6 @@ import hashlib
 import logging
 import os
 import socket
-from dataclasses import replace
 from pathlib import Path
 
 from netaudio.common.config_loader import load_capture_profile, resolve_db_from_config
@@ -321,50 +320,6 @@ class ProtocolVerifier:
     def observation(self, label: str, note: str | None = None, data: dict | None = None) -> int | None:
         return self.marker(label, marker_type="observation", note=note, data=data)
 
-    def include_evidence(
-        self,
-        query: PacketQuery,
-        label: str | None = None,
-        note: str | None = None,
-        time_window: bool = False,
-    ) -> list[dict]:
-        if self._packet_store is None:
-            return []
-
-        if time_window and self._session_id is not None:
-            session = self._packet_store.get_session(self._session_id)
-            if session:
-                query = replace(
-                    query,
-                    start_ns=session["started_ns"] if query.start_ns is None else query.start_ns,
-                    end_ns=session.get("ended_ns") if query.end_ns is None else query.end_ns,
-                )
-
-        packets = self._packet_store.query_packets(query)
-
-        for packet in packets:
-            self._evidence_packet_ids.add(packet["id"])
-
-        if label and self._session_id is not None:
-            self.marker(
-                f"evidence_{label}",
-                marker_type="evidence",
-                note=note or f"Included {len(packets)} evidence packets",
-                data={
-                    "query": {
-                        "device_ip": query.device_ip,
-                        "direction": query.direction,
-                        "opcode": query.opcode,
-                        "payload_hex_contains": query.payload_hex_contains,
-                        "protocol_id": query.protocol_id,
-                    },
-                    "packet_count": len(packets),
-                    "packet_ids": [evidence_packet["id"] for evidence_packet in packets],
-                },
-            )
-
-        return packets
-
     def _observe_wire(self, payload: bytes, device_ip: str, port: int, direction: str) -> None:
         if direction == "request":
             self._packet_store.store_packet(
@@ -427,27 +382,6 @@ class ProtocolVerifier:
             )
 
         return response
-
-    async def send_command(
-        self,
-        command_tuple: tuple,
-        timeout: float = 2.0,
-        label: str | None = None,
-    ) -> bytes | None:
-        packet = command_tuple[0]
-        service_or_port = command_tuple[1] if len(command_tuple) > 1 else None
-        explicit_port = command_tuple[2] if len(command_tuple) > 2 else None
-
-        if explicit_port is not None:
-            port = explicit_port
-        elif isinstance(service_or_port, int):
-            port = service_or_port
-        elif isinstance(service_or_port, str):
-            port = SERVICE_PORT_MAP.get(service_or_port, DEVICE_ARC_PORT)
-        else:
-            port = DEVICE_ARC_PORT
-
-        return await self.send(packet, port, timeout=timeout, label=label)
 
     def _build_sample(self, packet_row, evidence=False):
         header = parse_packet_header(packet_row["payload"])

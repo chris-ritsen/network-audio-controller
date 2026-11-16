@@ -178,15 +178,6 @@ async def shutdown_daemon() -> bool:
     return status == 200 and bool(data and data.get("success"))
 
 
-async def meter_snapshot_from_daemon(server_name: str) -> dict | None:
-    status, data = await _daemon_request("GET", f"/metering/snapshot/{quote(server_name, safe='')}", timeout=6.0)
-    if status != 200 or data is None:
-        if data and data.get("error"):
-            logger.debug(f"Daemon metering error: {data['error']}")
-        return None
-    return data
-
-
 async def meter_cache_from_daemon() -> dict[str, dict] | None:
     status, data = await _daemon_request("GET", "/metering/cache")
     if status != 200 or not isinstance(data, dict):

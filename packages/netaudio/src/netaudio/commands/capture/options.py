@@ -180,12 +180,6 @@ def _parse_config_bool(value, field_name: str) -> bool | None:
     raise typer.Exit(f"Invalid boolean for {field_name} in capture config: {value!r}")
 
 
-def _default_capture_config_path() -> Path:
-    from netaudio.common.config_loader import default_config_path
-
-    return default_config_path()
-
-
 def _load_capture_profile(config: str | None, profile: str | None) -> tuple[dict, Path]:
     from netaudio.common.config_loader import load_capture_profile
 

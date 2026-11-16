@@ -87,14 +87,6 @@ def icon(key: str) -> str:
     return f"{glyph} " if glyph else ""
 
 
-def icon_only(key: str) -> str:
-    from netaudio.cli import state
-
-    if not state.icons:
-        return ""
-    return NERD_FONT_ICONS.get(key, "")
-
-
 SEVERITY_PRESENTATION = {
     "none": {"icon": None, "shape": "", "color": None},
     "ok": {"icon": "connected", "shape": "●", "color": "32"},

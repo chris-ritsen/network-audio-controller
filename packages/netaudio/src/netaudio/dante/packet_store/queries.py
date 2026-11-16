@@ -77,39 +77,6 @@ class PacketStoreQueries:
 
         return pairs
 
-    def get_status_request_candidates(self, packet_id):
-        rows = self._conn.execute(
-            """SELECT * FROM packet_status_request_candidates
-               WHERE status_packet_id = ? OR request_packet_id = ?
-               ORDER BY status_packet_id, delay_ns""",
-            (packet_id, packet_id),
-        ).fetchall()
-        return [dict(row) for row in rows]
-
-    def get_packets_by_opcode(self, opcode):
-        rows = self._conn.execute(
-            "SELECT * FROM packets WHERE opcode = ? ORDER BY timestamp_ns",
-            (opcode,),
-        ).fetchall()
-        return self._decode_packet_rows(rows)
-
-    def get_packets(self, limit=100, source_type=None, device_name=None):
-        query = "SELECT * FROM packets WHERE 1=1"
-        params = []
-
-        if source_type:
-            query += " AND source_type = ?"
-            params.append(source_type)
-        if device_name:
-            query += " AND device_name = ?"
-            params.append(device_name)
-
-        query += " ORDER BY timestamp_ns DESC LIMIT ?"
-        params.append(limit)
-
-        rows = self._conn.execute(query, params).fetchall()
-        return self._decode_packet_rows(rows)
-
     def get_session_packet_count(self, session_id: int, start_ns: int | None = None, end_ns: int | None = None) -> int:
         query = f"SELECT COUNT(*) AS count FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
         params: list = [session_id, session_id]

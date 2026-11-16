@@ -261,13 +261,6 @@ def verify_bundle(bundle_path: Path) -> BundleReport:
     return BundleReport(bundle_path=bundle_path, data=data, lines=lines, passed=passed)
 
 
-def _verify_single_bundle(bundle_path: Path) -> bool:
-    report = verify_bundle(bundle_path)
-    for line in report.lines:
-        print(line)
-    return report.passed
-
-
 def _format_audit_packet(data: bytes, indent: str = "      ", direction: str | None = None) -> str:
     decoded = _decode_packet_payload(data)
     lines = []
@@ -582,10 +575,3 @@ def audit_bundle(bundle_path: Path) -> BundleReport:
         "timeline": _audit_timeline_data(events, files),
     }
     return BundleReport(bundle_path=bundle_path, data=data, lines=lines, passed=passed)
-
-
-def _audit_single_bundle(bundle_path: Path) -> bool:
-    report = audit_bundle(bundle_path)
-    for line in report.lines:
-        print(line)
-    return report.passed

@@ -33,21 +33,6 @@ def classify_signal_presence(value: int, source: str | None) -> str:
     return normalize_metering_value(value, source)["state"]
 
 
-def metering_source_instance(data: bytes) -> str | None:
-    try:
-        return core.parse_response("metering", data)["source_eui64"]
-    except core.NetaudioCoreError:
-        return None
-
-
-def parse_metering_levels(data: bytes) -> dict:
-    parsed = core.parse_response("metering", data)
-    return {
-        "tx": {index: level for index, level in enumerate(parsed["tx_levels"], start=1)},
-        "rx": {index: level for index, level in enumerate(parsed["rx_levels"], start=1)},
-    }
-
-
 def detailed_metering_targets(devices: dict) -> list[str]:
     """Select devices that do not rule out detailed metering and do not send passive signal presence."""
     return sorted(

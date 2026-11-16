@@ -6,7 +6,7 @@ from fnmatch import fnmatch
 from netaudio.core import canonical_device_mac
 
 from netaudio.dante.clock_config import format_clock_subdomain
-from netaudio.dante.latency import nanoseconds_to_milliseconds, latency_choices
+from netaudio.dante.latency import nanoseconds_to_milliseconds
 from netaudio.dante.sample_rate_pullup import (
     format_supported_sample_rate_pullup_values,
     sample_rate_pullup_label,
@@ -164,19 +164,6 @@ def unknown_or_blank(device, query_name: str) -> str:
     if query_name in (getattr(device, "failed_queries", None) or ()):
         return "unknown"
     return ""
-
-
-def _format_latency_milliseconds(latency_milliseconds: float) -> str:
-    return _format_number(latency_milliseconds)
-
-
-def _format_standard_latency_choices(
-    minimum_latency_milliseconds: float | None,
-    maximum_latency_milliseconds: float | None,
-) -> str:
-    return format_latency_choices_milliseconds(
-        latency_choices(minimum_latency_milliseconds, maximum_latency_milliseconds)
-    )
 
 
 _format_clock_frequency_offset = format_clock_frequency_offset_parts_per_billion
@@ -385,55 +372,6 @@ def _format_channel_count(channels: dict, reported_count: int | None) -> str:
     if reported_count is not None:
         return str(reported_count)
     return "unknown"
-
-
-def _diagnostic_audio_capabilities_data(capabilities) -> dict:
-    return {
-        "current_sample_rate_hertz": capabilities["current_sample_rate_hertz"],
-        "default_sample_rate_hertz": capabilities["default_sample_rate_hertz"],
-        "diagnostic_log_export_supported": True,
-        "license_signature_length_bytes": capabilities["license_signature_length_bytes"],
-        "licensed_receive_channel_count": capabilities["licensed_receive_channel_count"],
-        "licensed_redundancy_enabled": capabilities["licensed_redundancy_enabled"],
-        "licensed_transmit_channel_count": capabilities["licensed_transmit_channel_count"],
-        "sample_rate_channel_capacities": [dict(capacity) for capacity in capabilities["channel_capacities"]],
-    }
-
-
-def _diagnostic_audio_capability_rows(capabilities) -> list[list[str]]:
-    rows = [["Diagnostic Log Export", "supported"]]
-
-    if capabilities["license_signature_length_bytes"] is not None:
-        rows.append(["License Signature", f"{capabilities['license_signature_length_bytes']} bytes"])
-
-    if (
-        capabilities["licensed_transmit_channel_count"] is not None
-        and capabilities["licensed_receive_channel_count"] is not None
-    ):
-        rows.append(
-            [
-                "Licensed Channels",
-                f"{capabilities['licensed_transmit_channel_count']} TX / {capabilities['licensed_receive_channel_count']} RX",
-            ]
-        )
-
-    if capabilities["licensed_redundancy_enabled"] is not None:
-        rows.append(["Licensed Redundancy", format_on_off(capabilities["licensed_redundancy_enabled"])])
-
-    if capabilities["default_sample_rate_hertz"] is not None:
-        rows.append(["Default Sample Rate", format_sample_rate_hertz(capabilities["default_sample_rate_hertz"])])
-
-    if capabilities["current_sample_rate_hertz"] is not None:
-        rows.append(["Current Sample Rate", format_sample_rate_hertz(capabilities["current_sample_rate_hertz"])])
-
-    for capacity in capabilities["channel_capacities"]:
-        rows.append(
-            [
-                f"Channels at {format_sample_rate_hertz(capacity['sample_rate_hertz'])}",
-                f"{capacity['transmit_channel_count']} TX / {capacity['receive_channel_count']} RX",
-            ]
-        )
-    return rows
 
 
 def _device_channel_count_labels(device) -> tuple[str, str]:

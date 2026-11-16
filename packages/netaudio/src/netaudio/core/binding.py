@@ -449,59 +449,6 @@ class CoreClient:
             raise NetaudioCoreError(status, f"execute {spec.get('command')}")
         return data if data else None
 
-    def _json_getter(self, name, *arguments):
-        out = (ctypes.c_uint8 * 262144)()
-        length = ctypes.c_size_t(0)
-        library = self._require_library()
-        with self._native_lock:
-            status = getattr(library, name)(self._handle, *arguments, out, 262144, ctypes.byref(length))
-            data = bytes(out[: length.value])
-        if status != STATUS_OK:
-            raise NetaudioCoreError(status, name)
-        return _decode_json_output(data, name)
-
-    def get_rx_channels(self):
-        return self._json_getter("netaudio_client_get_rx_channels_json")
-
-    def get_rx_inventory(self, rx_count: int):
-        out = (ctypes.c_uint8 * 262144)()
-        length = ctypes.c_size_t(0)
-        library = self._require_library()
-        with self._native_lock:
-            status = library.netaudio_client_get_rx_inventory_json(
-                self._handle,
-                rx_count,
-                out,
-                262144,
-                ctypes.byref(length),
-            )
-            data = bytes(out[: length.value])
-        if status != STATUS_OK:
-            raise NetaudioCoreError(status, "netaudio_client_get_rx_inventory_json")
-        return _decode_json_output(data, "receiver inventory")
-
-    def get_tx_channels(self):
-        return self._json_getter("netaudio_client_get_tx_channels_json")
-
-    def get_device_name(self):
-        return self._json_getter("netaudio_client_get_device_name_json")
-
-    def get_device_info(self):
-        return self._json_getter("netaudio_client_get_device_info_json")
-
-    def get_device_settings(self):
-        return self._json_getter("netaudio_client_get_device_settings_json")
-
-    def get_property_directory(self):
-        return self._json_getter("netaudio_client_get_property_directory_json")
-
-    def get_channel_audio_metadata(self, tx_count: int, rx_count: int):
-        for count in (tx_count, rx_count):
-            if type(count) is not int or not 0 <= count <= 65535:
-                raise ValueError("channel count must be an unsigned 16-bit integer")
-
-        return self._json_getter("netaudio_client_get_channel_audio_metadata_json", tx_count, rx_count)
-
     def get_channel_count(self):
         tx = ctypes.c_uint16(0)
         rx = ctypes.c_uint16(0)
