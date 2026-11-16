@@ -674,6 +674,8 @@ export default {
   "All interfaces": "அனைத்து இடைமுகங்களும்",
   "Device lock key": "சாதனப் பூட்டு விசை",
   "Read from Dante Controller": "Dante Controller-இலிருந்து படி",
+  "Read from installer": "நிறுவியிலிருந்து படி",
+  "Version": "பதிப்பு",
   "Key": "விசை",
   "QR code": "QR குறியீடு",
   "The Dante interfaces were chosen when the server was started.": "சேவையகம் தொடங்கப்பட்டபோது Dante இடைமுகங்கள் தேர்ந்தெடுக்கப்பட்டன.",

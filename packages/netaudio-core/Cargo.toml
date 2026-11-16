@@ -29,5 +29,13 @@ name = "export-schema"
 path = "src/bin/export_schema.rs"
 required-features = ["schema"]
 
+[target.'cfg(not(any(target_os = "ios", target_os = "tvos", target_os = "visionos", target_os = "watchos")))'.dependencies]
+base64 = "0.22"
+cfb = "0.16"
+flate2 = "1"
+lzxd = "0.2"
+sha2 = "0.10"
+tempfile = "3"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

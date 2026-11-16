@@ -812,7 +812,7 @@
       "post": {
         "operationId": "readInstalledDeviceLockKey",
         "summary": "Read the device lock key from Dante Controller installed on this server",
-        "description": "Searches the Dante Controller installation on the server's own host and returns the key it holds, the link the mobile application imports, and that link as a QR code matrix of rows of 0 and 1. Nothing is saved. This ordinary REST route is not bearer protected; its response contains a secret and must not be logged.",
+        "description": "Searches the Dante Controller installation on the server's own host and returns the key it holds, the link the mobile application imports, and that link as a QR code matrix of rows of 0 and 1. The version and platform are present when the file's checksum is a known release. Nothing is saved. This ordinary REST route is not bearer protected; its response contains a secret and must not be logged.",
         "tags": [
           "Device controls"
         ],
@@ -839,7 +839,13 @@
                         "pattern": "^[01]+$"
                       }
                     },
+                    "platform": {
+                      "type": "string"
+                    },
                     "source": {
+                      "type": "string"
+                    },
+                    "version": {
                       "type": "string"
                     }
                   },
@@ -855,6 +861,88 @@
           },
           "404": {
             "$ref": "#/components/responses/Error404"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/device-lock-key/installer": {
+      "post": {
+        "operationId": "readInstallerDeviceLockKey",
+        "summary": "Read the device lock key from a Dante Controller installer",
+        "description": "The request body is a Dante Controller installer: a macOS disk image or package, a Windows installer or an MSI package, at most 2 GiB. The server reads it without installing it and returns the key, the link the mobile application imports, and that link as a QR code matrix of rows of 0 and 1. The version and platform are present when the file's checksum is a known release. The file is not kept and nothing is saved. One installer is read at a time. This ordinary REST route is not bearer protected; its response contains a secret and must not be logged.",
+        "tags": [
+          "Device controls"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The key and its import link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "import_link": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{32}$"
+                    },
+                    "modules": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[01]+$"
+                      }
+                    },
+                    "platform": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "import_link",
+                    "key",
+                    "modules"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "408": {
+            "$ref": "#/components/responses/Error408"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error413"
           },
           "500": {
             "$ref": "#/components/responses/Error500"

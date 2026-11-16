@@ -690,6 +690,8 @@ export default {
   "All interfaces": "所有介面",
   "Device lock key": "裝置鎖定金鑰",
   "Read from Dante Controller": "從 Dante Controller 讀取",
+  "Read from installer": "從安裝程式讀取",
+  "Version": "版本",
   "Key": "金鑰",
   "QR code": "QR 碼",
   "The Dante interfaces were chosen when the server was started.": "Dante 介面已在伺服器啟動時指定。",

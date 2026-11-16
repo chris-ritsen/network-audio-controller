@@ -552,6 +552,12 @@ mod dapi;
 mod encoding;
 mod flows;
 mod inventory;
+#[cfg(not(any(
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "visionos",
+    target_os = "watchos"
+)))]
 mod lock_key;
 mod monitoring;
 mod network;

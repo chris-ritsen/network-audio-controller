@@ -30,6 +30,12 @@ pub mod host_audio;
 pub mod inventory;
 pub mod latency_configuration;
 pub mod lock;
+#[cfg(not(any(
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "visionos",
+    target_os = "watchos"
+)))]
 pub mod lock_key;
 pub mod managed_api;
 pub mod managed_session;

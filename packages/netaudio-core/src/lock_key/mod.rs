@@ -1,11 +1,18 @@
+mod cabinet;
+mod installer;
+mod known;
+mod scan;
+
 use std::collections::BTreeSet;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::lock::KEY_LENGTH;
+pub use installer::scratch_directory;
+pub use known::Release;
+use scan::{Found, Scanner};
 
 const CHUNK_LENGTH: usize = 1 << 20;
 const LIBRARY_NAMES: [&str; 2] = ["libDanteController.dylib", "DanteController.dll"];
@@ -17,126 +24,38 @@ const LIBRARY_PATHS: [&str; 3] = [
 const MAXIMUM_DEPTH: usize = 8;
 const MAXIMUM_FILE_LENGTH: u64 = 1 << 30;
 const MAXIMUM_FILES: usize = 50_000;
-const MINIMUM_DISTINCT_STEPS: usize = 8;
-const RUN_LENGTH: usize = KEY_LENGTH * 2;
 const WINDOWS_INSTALLATION: &str = "Audinate/Dante Controller";
 
 #[derive(Debug, Default, Serialize)]
 pub struct Search {
     pub failures: Vec<String>,
     pub key: Option<String>,
+    pub release: Option<Release>,
     pub source: Option<PathBuf>,
 }
 
-#[derive(Default)]
-struct Scanner {
-    preceded_by_terminator: bool,
-    previous: Option<u8>,
-    run: Vec<u8>,
-    run_length: usize,
-    terminated: BTreeSet<String>,
-    unterminated: BTreeSet<String>,
+#[derive(Clone, Copy)]
+enum Reading {
+    Contents,
+    Packed,
 }
 
-impl Scanner {
-    fn accept(&mut self, chunk: &[u8]) {
-        for &byte in chunk {
-            if byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) {
-                if self.run_length == 0 {
-                    self.preceded_by_terminator = self.previous == Some(0);
-                    self.run.clear();
-                }
-
-                if self.run_length < RUN_LENGTH {
-                    self.run.push(byte);
-                }
-
-                self.run_length += 1;
-            } else {
-                self.finish(byte == 0);
-            }
-
-            self.previous = Some(byte);
-        }
-    }
-
-    fn finish(&mut self, followed_by_terminator: bool) {
-        if self.run_length == RUN_LENGTH && !is_table(&self.run) {
-            let key = String::from_utf8_lossy(&self.run[..KEY_LENGTH]).into_owned();
-
-            if self.preceded_by_terminator && followed_by_terminator {
-                self.terminated.insert(key);
-            } else {
-                self.unterminated.insert(key);
-            }
-        }
-
-        self.run_length = 0;
-    }
-
-    fn found(mut self) -> Found {
-        self.finish(false);
-        Found {
-            terminated: self.terminated,
-            unterminated: self.unterminated,
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct Found {
-    pub terminated: BTreeSet<String>,
-    pub unterminated: BTreeSet<String>,
-}
-
-impl Found {
-    fn extend(&mut self, other: Found) {
-        self.terminated.extend(other.terminated);
-        self.unterminated.extend(other.unterminated);
-    }
-
-    fn is_empty(&self) -> bool {
-        self.terminated.is_empty() && self.unterminated.is_empty()
-    }
-
-    fn keys(self) -> BTreeSet<String> {
-        if self.terminated.is_empty() {
-            self.unterminated
-        } else {
-            self.terminated
-        }
-    }
-}
-
-fn is_table(run: &[u8]) -> bool {
-    let bytes: Vec<i16> = run
-        .chunks_exact(2)
-        .map(|pair| i16::from(nibble(pair[0]) << 4 | nibble(pair[1])))
-        .collect();
-    let steps: BTreeSet<i16> = bytes.windows(2).map(|pair| pair[1] - pair[0]).collect();
-    steps.len() < MINIMUM_DISTINCT_STEPS
-}
-
-fn nibble(character: u8) -> u8 {
-    match character {
-        b'0'..=b'9' => character - b'0',
-        _ => character - b'a' + 10,
-    }
-}
-
-pub fn candidates(file: &Path) -> io::Result<Found> {
+fn read(file: &Path, reading: Reading) -> io::Result<Found> {
     let mut input = File::open(file)?;
-    let mut chunk = vec![0_u8; CHUNK_LENGTH];
-    let mut scanner = Scanner::default();
 
-    loop {
-        let length = input.read(&mut chunk)?;
+    match reading {
+        Reading::Contents => {
+            let mut chunk = vec![0_u8; CHUNK_LENGTH];
+            let mut scanner = Scanner::default();
 
-        if length == 0 {
-            return Ok(scanner.found());
+            loop {
+                match input.read(&mut chunk)? {
+                    0 => return Ok(scanner.found()),
+                    length => scanner.accept(&chunk[..length]),
+                }
+            }
         }
-
-        scanner.accept(&chunk[..length]);
+        Reading::Packed => installer::scan(&mut input),
     }
 }
 
@@ -191,12 +110,13 @@ pub fn installations() -> Vec<PathBuf> {
     directories
 }
 
-fn libraries(location: &Path) -> Vec<PathBuf> {
+fn targets(location: &Path) -> Vec<(PathBuf, Reading)> {
     if location.is_dir() {
         return LIBRARY_PATHS
             .iter()
             .map(|path| location.join(path))
             .filter(|path| path.is_file())
+            .map(|path| (path, Reading::Contents))
             .collect();
     }
 
@@ -208,15 +128,21 @@ fn libraries(location: &Path) -> Vec<PathBuf> {
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| LIBRARY_NAMES.contains(&name));
-    let beside: Vec<PathBuf> = location
+
+    if named {
+        return vec![(location.to_owned(), Reading::Contents)];
+    }
+
+    let beside: Vec<(PathBuf, Reading)> = location
         .parent()
         .into_iter()
         .flat_map(|parent| LIBRARY_NAMES.iter().map(move |name| parent.join(name)))
         .filter(|path| path.is_file())
+        .map(|path| (path, Reading::Contents))
         .collect();
 
-    if named || beside.is_empty() {
-        vec![location.to_owned()]
+    if beside.is_empty() {
+        vec![(location.to_owned(), Reading::Packed)]
     } else {
         beside
     }
@@ -251,22 +177,49 @@ fn files(directory: &Path, depth: usize, found: &mut Vec<PathBuf>) {
     }
 }
 
-fn describe(count: usize, place: &Path) -> String {
+fn describe(count: usize, place: &str) -> String {
     match count {
-        0 => format!("no lock key found in {}", place.display()),
-        count => format!("{count} possible lock keys found in {}", place.display()),
+        0 => format!("no lock key found in {place}"),
+        count => format!("{count} possible lock keys found in {place}"),
     }
 }
 
-fn search_files(files: &[PathBuf], place: &Path, search: &mut Search) -> bool {
+fn settle(found: Found, place: &str, search: &mut Search) -> bool {
+    let keys = found.keys();
+
+    if keys.len() == 1 {
+        search.key = keys.iter().next().cloned();
+        return true;
+    }
+
+    search.failures.push(describe(keys.len(), place));
+    search.failures.extend(found.problems);
+    false
+}
+
+fn identify(input: &mut dyn Read, search: &mut Search) {
+    match known::identify(input) {
+        Ok(release) => search.release = release,
+        Err(error) => search
+            .failures
+            .push(format!("could not identify the version: {error}")),
+    }
+}
+
+fn search_files(files: &[(PathBuf, Reading)], place: &Path, search: &mut Search) -> bool {
     let mut all = Found::default();
     let mut sources = Vec::new();
 
-    for file in files {
-        match candidates(file) {
+    for (file, reading) in files {
+        match read(file, *reading) {
             Ok(found) => {
                 if !found.is_empty() {
-                    sources.push((file, found.terminated.clone(), found.unterminated.clone()));
+                    let keys: BTreeSet<String> = found
+                        .terminated
+                        .union(&found.unterminated)
+                        .cloned()
+                        .collect();
+                    sources.push((file, keys));
                 }
 
                 all.extend(found);
@@ -277,23 +230,24 @@ fn search_files(files: &[PathBuf], place: &Path, search: &mut Search) -> bool {
         }
     }
 
-    let keys = all.keys();
-
-    if keys.len() == 1 {
-        let key = keys.into_iter().next();
-        search.source = sources
-            .into_iter()
-            .find(|(_, terminated, unterminated)| {
-                key.as_ref()
-                    .is_some_and(|key| terminated.contains(key) || unterminated.contains(key))
-            })
-            .map(|(file, _, _)| file.clone());
-        search.key = key;
-        return true;
+    if !settle(all, &place.display().to_string(), search) {
+        return false;
     }
 
-    search.failures.push(describe(keys.len(), place));
-    false
+    search.source = sources
+        .into_iter()
+        .find(|(_, keys)| search.key.as_ref().is_some_and(|key| keys.contains(key)))
+        .map(|(file, _)| file.clone());
+
+    if let Some(mut input) = search
+        .source
+        .as_ref()
+        .and_then(|source| File::open(source).ok())
+    {
+        identify(&mut input, search);
+    }
+
+    true
 }
 
 pub fn search(location: Option<&Path>) -> Search {
@@ -311,8 +265,8 @@ pub fn search(location: Option<&Path>) -> Search {
     }
 
     for location in &locations {
-        for library in libraries(location) {
-            if search_files(std::slice::from_ref(&library), &library, &mut search) {
+        for target in targets(location) {
+            if search_files(std::slice::from_ref(&target), &target.0, &mut search) {
                 search.failures.clear();
                 return search;
             }
@@ -322,6 +276,10 @@ pub fn search(location: Option<&Path>) -> Search {
     for location in locations.iter().filter(|location| location.is_dir()) {
         let mut found = Vec::new();
         files(location, 0, &mut found);
+        let found: Vec<(PathBuf, Reading)> = found
+            .into_iter()
+            .map(|file| (file, Reading::Contents))
+            .collect();
 
         if search_files(&found, location, &mut search) {
             search.failures.clear();
@@ -333,6 +291,28 @@ pub fn search(location: Option<&Path>) -> Search {
         search
             .failures
             .push("Dante Controller is not installed".to_owned());
+    }
+
+    search
+}
+
+pub fn search_installer<R: Read + Seek>(input: &mut R, name: &str) -> Search {
+    let mut search = Search::default();
+
+    match installer::scan(input) {
+        Ok(found) => {
+            if settle(found, name, &mut search) {
+                match input.rewind() {
+                    Ok(()) => identify(input, &mut search),
+                    Err(error) => search
+                        .failures
+                        .push(format!("could not identify the version: {error}")),
+                }
+            }
+        }
+        Err(error) => search
+            .failures
+            .push(format!("could not read {name}: {error}")),
     }
 
     search

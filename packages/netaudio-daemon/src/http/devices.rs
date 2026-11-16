@@ -27,6 +27,7 @@ mod external_subscription;
 mod flow_authoring;
 mod forgetting;
 mod inspection;
+mod lock_key;
 mod locking;
 mod maintenance;
 mod metering;
@@ -87,6 +88,7 @@ pub fn router(
     let router = diagnostics::routes(router);
     let router = metering::routes(router);
     let router = inspection::routes(router);
+    let router = lock_key::routes(router);
     let router = locking::routes(router);
     let router = maintenance::routes(router);
     let router = aes67::routes(router);

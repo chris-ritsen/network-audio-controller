@@ -706,6 +706,8 @@ export default {
   "All interfaces": "Toutes les interfaces",
   "Device lock key": "Clé de verrouillage de l’appareil",
   "Read from Dante Controller": "Lire depuis Dante Controller",
+  "Read from installer": "Lire depuis le programme d’installation",
+  "Version": "Version",
   "Key": "Clé",
   "QR code": "Code QR",
   "The Dante interfaces were chosen when the server was started.": "Les interfaces Dante ont été choisies au démarrage du serveur.",

@@ -12,7 +12,10 @@ export class ApiError extends Error {
 
 async function fetchTransport(method, path, body) {
   const options = { method, headers: { Accept: "application/json" } };
-  if (body !== undefined) {
+  if (body instanceof Blob) {
+    options.headers["Content-Type"] = "application/octet-stream";
+    options.body = body;
+  } else if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
@@ -54,6 +57,7 @@ async function request(method, path, body) {
       "/ddm/context",
       "/ddm/domains",
       "/device-lock-key/dante-controller",
+      "/device-lock-key/installer",
       "/settings/monitoring",
       "/settings/network",
       "/event-journal",
@@ -139,6 +143,7 @@ export const api = {
   getConnections: () => get("/ddm/connections"),
   getSettings: () => get("/settings"),
   readInstalledLockKey: () => post("/device-lock-key/dante-controller"),
+  readInstallerLockKey: (file) => post("/device-lock-key/installer", file),
   setDanteInterfaces: (interfaces) => post("/settings/network", { interfaces }),
   setMonitoringPort: (port) => post("/settings/monitoring", { port }),
   loginDdm: (body) => post("/ddm/login", body),

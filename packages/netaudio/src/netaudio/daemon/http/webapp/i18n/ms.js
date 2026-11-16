@@ -674,6 +674,8 @@ export default {
   "All interfaces": "Semua antara muka",
   "Device lock key": "Kekunci kunci peranti",
   "Read from Dante Controller": "Baca daripada Dante Controller",
+  "Read from installer": "Baca daripada pemasang",
+  "Version": "Versi",
   "Key": "Kekunci",
   "QR code": "Kod QR",
   "The Dante interfaces were chosen when the server was started.": "Antara muka Dante telah dipilih semasa pelayan dimulakan.",

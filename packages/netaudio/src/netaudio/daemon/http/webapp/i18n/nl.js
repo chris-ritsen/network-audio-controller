@@ -698,6 +698,8 @@ export default {
   "All interfaces": "Alle interfaces",
   "Device lock key": "Sleutel voor apparaatvergrendeling",
   "Read from Dante Controller": "Uit Dante Controller lezen",
+  "Read from installer": "Uit installatieprogramma lezen",
+  "Version": "Versie",
   "Key": "Sleutel",
   "QR code": "QR-code",
   "The Dante interfaces were chosen when the server was started.": "De Dante-interfaces zijn gekozen bij het starten van de server.",

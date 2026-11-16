@@ -111,7 +111,7 @@ def key_extract(
     path: Optional[Path] = typer.Option(
         None,
         "--path",
-        help="Dante Controller application, installation folder or library.",
+        help="Dante Controller application, installation folder, library or installer.",
         exists=True,
         readable=True,
     ),
@@ -146,10 +146,13 @@ def key_extract(
         for failure in search["failures"]:
             typer.echo(f"Error: {failure}", err=True)
         if path is None:
-            typer.echo("Use --path with the application, its folder or its library.", err=True)
+            typer.echo("Use --path with the application, its folder, its library or its installer.", err=True)
         raise typer.Exit(code=1)
 
     typer.echo(f"Binary: {search['source']}", err=True)
+    release = search["release"]
+    if release is not None:
+        typer.echo(f"Version: Dante Controller {release['version']} for {release['platform']}", err=True)
     typer.echo(key_string)
 
     if save:

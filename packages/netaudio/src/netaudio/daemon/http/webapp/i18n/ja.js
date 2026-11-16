@@ -690,6 +690,8 @@ export default {
   "All interfaces": "すべてのインターフェース",
   "Device lock key": "デバイスロックキー",
   "Read from Dante Controller": "Dante Controllerから読み取る",
+  "Read from installer": "インストーラーから読み取る",
+  "Version": "バージョン",
   "Key": "キー",
   "QR code": "QRコード",
   "The Dante interfaces were chosen when the server was started.": "Danteインターフェースはサーバーの起動時に指定されています。",

@@ -108,27 +108,62 @@ function LockKeyCode({ modules }) {
   </svg>`;
 }
 
+function chooseFile(accept) {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.addEventListener("change", () => resolve(input.files[0] ?? null), {
+      once: true,
+    });
+    input.addEventListener("cancel", () => resolve(null), { once: true });
+    input.click();
+  });
+}
+
 function LockKey() {
   const [found, setFound] = useState(null);
   return html`<${Panel} title=${t("Device lock key")}>
     <div class="flex flex-col items-start gap-4">
-      <${AsyncButton}
-        small
-        description=${t("Read from Dante Controller")}
-        onRun=${async () => {
-          setFound(null);
-          const result = await api.readInstalledLockKey();
-          setFound(result);
-          return result;
-        }}
-      >
-        ${t("Read from Dante Controller")}
-      <//>
+      <div class="flex flex-wrap items-start gap-2">
+        <${AsyncButton}
+          small
+          description=${t("Read from Dante Controller")}
+          onRun=${async () => {
+            setFound(null);
+            const result = await api.readInstalledLockKey();
+            setFound(result);
+            return result;
+          }}
+        >
+          ${t("Read from Dante Controller")}
+        <//>
+        <${AsyncButton}
+          small
+          description=${t("Read from installer")}
+          onRun=${async () => {
+            const file = await chooseFile(".dmg,.exe,.msi,.pkg");
+            if (!file) return null;
+            setFound(null);
+            const result = await api.readInstallerLockKey(file);
+            setFound({ ...result, source: file.name });
+            return result;
+          }}
+        >
+          ${t("Read from installer")}
+        <//>
+      </div>
       ${
         found
           ? html`<${Fields}
                 entries=${[
                   [t("Key"), html`<span class="font-mono">${found.key}</span>`],
+                  [
+                    t("Version"),
+                    found.version
+                      ? `${found.version}, ${found.platform}`
+                      : null,
+                  ],
                   [t("Source"), found.source],
                 ]}
               />
