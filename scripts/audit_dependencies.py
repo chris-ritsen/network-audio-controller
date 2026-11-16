@@ -145,7 +145,7 @@ def _upgrade(root: Path, findings: list[Finding]) -> None:
             command += ["--upgrade-package", package]
         subprocess.run(command, cwd=root, check=True)
     if rust_packages:
-        command = ["cargo", "update", "--manifest-path", str(root / "Cargo.toml")]
+        command = ["cargo", "update", "--ignore-rust-version", "--manifest-path", str(root / "Cargo.toml")]
         for package in rust_packages:
             command += ["--package", package]
         subprocess.run(command, cwd=root, check=True)
