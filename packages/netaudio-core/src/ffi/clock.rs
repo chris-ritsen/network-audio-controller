@@ -53,48 +53,6 @@ pub unsafe extern "C" fn netaudio_clock_sources(
     }
 }
 
-/// Normalize a JSON Latin-1 string or byte array to a 16-byte JSON array.
-/// The name must have a NUL terminator followed only by zero padding.
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_normalize_clock_subdomain(
-    json: *const c_char,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    unsafe {
-        json_output((out_buffer, out_capacity, out_length), || {
-            let json = c_string(json)?;
-            let value: serde_json::Value = decode_json(json)?;
-            let normalized = crate::clock_configuration::normalize_subdomain(&value)
-                .map_err(|message| FfiError::new(NetaudioStatus::InvalidJson, message))?;
-
-            Ok(normalized)
-        })
-    }
-}
-
-/// Resolve the local control_profile, defaulting to the current serializer.
-/// Status, model, and interface revisions are not serializer selectors.
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_clock_control_profile(
-    json: *const c_char,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    unsafe {
-        json_output((out_buffer, out_capacity, out_length), || {
-            let json = c_string(json)?;
-            let facts: crate::clock_configuration::ClockProfile = decode_json(json)?;
-            let revision = crate::clock_configuration::control_profile(&facts)
-                .map_err(|message| FfiError::new(NetaudioStatus::InvalidJson, message))?;
-
-            Ok(revision)
-        })
-    }
-}
-
 /// Normalize and validate clock changes; return requested, before, changes, and control as JSON.
 /// Input: status, changes, optional control_profile and supported_clock_sources.
 /// Null changes are omitted; subdomain accepts a Latin-1 string or

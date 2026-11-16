@@ -46,36 +46,6 @@ pub unsafe extern "C" fn netaudio_client_execute(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn netaudio_lock_token(
-    pin: *const c_char,
-    nonce: *const u8,
-    nonce_len: usize,
-    key: *const u8,
-    key_len: usize,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    guard(|| {
-        unsafe { prepare_output(out_buffer, out_capacity, out_length)? };
-        if nonce.is_null() || key.is_null() {
-            return Err(NetaudioStatus::NullPointer.into());
-        }
-        let pin = unsafe { c_string(pin)? };
-        if nonce_len != crate::lock::NONCE_LENGTH {
-            return Err(crate::lock::LockError::InvalidNonce.into());
-        }
-        if key_len != crate::lock::KEY_LENGTH {
-            return Err(crate::lock::LockError::InvalidKey.into());
-        }
-        let nonce = unsafe { std::slice::from_raw_parts(nonce, nonce_len) };
-        let key = unsafe { std::slice::from_raw_parts(key, key_len) };
-        let token = crate::lock::compute_token(pin, nonce, key)?;
-        unsafe { write_bytes(&token, out_buffer, out_capacity, out_length) }
-    })
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn netaudio_client_lock(
     client: *mut NetaudioClient,
     pin: *const c_char,
@@ -259,38 +229,6 @@ pub unsafe extern "C" fn netaudio_host_mac(out_mac: *mut u8) -> NetaudioStatus {
             FfiError::new(
                 NetaudioStatus::IoError,
                 "no interface with a non-zero MAC address routes to the Dante multicast group",
-            )
-        })?;
-        unsafe {
-            ptr::copy_nonoverlapping(mac.as_ptr(), out_mac, 6);
-        }
-        Ok(())
-    })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_host_mac_for_ipv4(
-    local_ip: *const c_char,
-    out_mac: *mut u8,
-) -> NetaudioStatus {
-    guard(|| {
-        if local_ip.is_null() || out_mac.is_null() {
-            return Err(NetaudioStatus::NullPointer.into());
-        }
-        unsafe {
-            ptr::write_bytes(out_mac, 0, 6);
-        }
-        let local_ip = unsafe { c_string(local_ip)? };
-        let address = local_ip.parse::<std::net::Ipv4Addr>().map_err(|_| {
-            FfiError::new(
-                NetaudioStatus::InvalidAddress,
-                format!("local address {local_ip:?} is not an IPv4 address"),
-            )
-        })?;
-        let mac = crate::netif::host_mac_for_ipv4(address).ok_or_else(|| {
-            FfiError::new(
-                NetaudioStatus::IoError,
-                format!("no non-zero MAC address was found for local address {address}"),
             )
         })?;
         unsafe {

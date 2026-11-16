@@ -17,21 +17,6 @@ pub unsafe extern "C" fn netaudio_flow_inventory_protocol(
     }
 }
 
-/// Classify an announcement for an existing, unexpired SAP session.
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_sap_transition(
-    json: *const c_char,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    unsafe {
-        json_output((out_buffer, out_capacity, out_length), || {
-            Ok(crate::sap::transition(decode_json(c_string(json)?)?))
-        })
-    }
-}
-
 /// Normalize an explicitly identified MAC, clock, or managed identity.
 /// Returns a JSON string, or null when the supplied value is invalid for its kind.
 #[no_mangle]

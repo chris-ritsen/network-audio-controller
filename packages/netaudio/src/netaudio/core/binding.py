@@ -7,7 +7,6 @@ import logging
 import os
 import sys
 import threading
-from collections.abc import Mapping
 from pathlib import Path
 
 from . import _requests, _types
@@ -217,22 +216,6 @@ def operation_availability(facts: _requests.AvailabilityRequest) -> _types.Avail
     return _call_json(require().netaudio_operation_availability, facts, "operation availability")
 
 
-def latency_configuration(settings: Mapping[str, _requests.JsonValue]) -> _types.LatencyConfiguration:
-    return _call_json(require().netaudio_latency_configuration, dict(settings), "latency configuration")
-
-
-def latency_control(
-    requested_milliseconds: float,
-    settings: _types.LatencyState | dict[str, _requests.JsonValue] | None = None,
-    acknowledged: bool | None = None,
-) -> _types.LatencyCompletion:
-    return _call_json(
-        require().netaudio_latency_control,
-        {"requested_milliseconds": requested_milliseconds, "settings": settings, "acknowledged": acknowledged},
-        "latency control",
-    )
-
-
 def clock_sources(facts: _requests.ClockSourceFacts) -> _types.ClockSources:
     return _call_json(require().netaudio_clock_sources, facts, "clock sources")
 
@@ -301,10 +284,6 @@ def host_mac() -> bytes | None:
 
 
 FALLBACK_HOST_MAC = bytes.fromhex("02005e000001")
-
-
-def clock_control_availability(status: Mapping[str, _types.JsonValue]) -> _types.ClockControlAvailability:
-    return _call_json(require().netaudio_clock_control_availability, dict(status), "clock control availability")
 
 
 def _as_buffer(data: bytes):
@@ -505,35 +484,11 @@ class CoreClient:
         return _decode_json_output(data, "Rust API response")
 
 
-def normalize_clock_subdomain(value) -> bytes:
-    if isinstance(value, (bytes, bytearray)):
-        value = list(value)
-
-    return bytes(_call_json(require().netaudio_normalize_clock_subdomain, value, "clock subdomain"))
-
-
 def clock_subdomain_presentation(value) -> _types.ClockSubdomainPresentation:
     if isinstance(value, (bytes, bytearray)):
         value = list(value)
 
     return _call_json(require().netaudio_clock_subdomain_presentation, value, "clock subdomain presentation")
-
-
-def clock_control_profile(facts: _requests.ClockProfile) -> int:
-    return _call_json(require().netaudio_clock_control_profile, facts, "clock control profile")
-
-
-def plan_clock_configuration(spec: _requests.ClockPlanRequest) -> _types.ClockPlan:
-    payload = dict(spec)
-
-    for field in ("status", "changes"):
-        value = payload.get(field)
-        if isinstance(value, dict):
-            payload[field] = {
-                key: list(item) if isinstance(item, (bytes, bytearray)) else item for key, item in value.items()
-            }
-
-    return _call_json(require().netaudio_plan_clock_configuration, payload, "clock configuration plan")
 
 
 def subscription_status(code: int, receiver_status_code: int | None = None) -> _types.SubscriptionStatus:

@@ -149,13 +149,7 @@ typedef struct NamedDomain NamedDomain;
 
 typedef struct NetaudioClient NetaudioClient;
 
-typedef struct NetaudioClockTracker NetaudioClockTracker;
-
-typedef struct NetaudioExportCollector NetaudioExportCollector;
-
 typedef struct NetaudioInventory NetaudioInventory;
-
-typedef struct NetaudioReceiverTracker NetaudioReceiverTracker;
 
 #ifdef __cplusplus
 extern "C" {
@@ -170,22 +164,6 @@ NetaudioStatus netaudio_analog_access(const char *json,
                                       uintptr_t *out_length);
 
 /**
- * Verify a configurable audio value against applied, not merely requested, readback.
- */
-NetaudioStatus netaudio_audio_capability_readback(const char *json,
-                                                  uint8_t *out_buffer,
-                                                  uintptr_t out_capacity,
-                                                  uintptr_t *out_length);
-
-/**
- * Resolve a latency request from its acknowledgement and configured-state readback.
- */
-NetaudioStatus netaudio_latency_control(const char *json,
-                                        uint8_t *out_buffer,
-                                        uintptr_t out_capacity,
-                                        uintptr_t *out_length);
-
-/**
  * Return analog reference-level labels and channel directions.
  */
 NetaudioStatus netaudio_gain_metadata(uint8_t *out_buffer,
@@ -193,56 +171,10 @@ NetaudioStatus netaudio_gain_metadata(uint8_t *out_buffer,
                                       uintptr_t *out_length);
 
 /**
- * Interpret audio update mode, advertised choices, and host-disabled state.
- */
-NetaudioStatus netaudio_audio_capability_control(const char *json,
-                                                 uint8_t *out_buffer,
-                                                 uintptr_t out_capacity,
-                                                 uintptr_t *out_length);
-
-/**
  * Resolve an analog level request against a decoded gain adapter.
  * Input contains adapter, channel, level, and optional direction.
  */
 NetaudioStatus netaudio_analog_level_control(const char *json,
-                                             uint8_t *out_buffer,
-                                             uintptr_t out_capacity,
-                                             uintptr_t *out_length);
-
-/**
- * Project a parsed device-settings JSON object into latency state and device controls.
- * Uses active/configured/default/min/max_latency_ns fields; other settings are ignored.
- * Null bounds remain unknown. Choices and fixed-latency fallback share the native policy.
- */
-NetaudioStatus netaudio_latency_configuration(const char *json,
-                                              uint8_t *out_buffer,
-                                              uintptr_t out_capacity,
-                                              uintptr_t *out_length);
-
-/**
- * Resolve settings capabilities from observed values and advertised property entries.
- */
-NetaudioStatus netaudio_settings_capabilities(const char *json,
-                                              uint8_t *out_buffer,
-                                              uintptr_t out_capacity,
-                                              uintptr_t *out_length);
-
-/**
- * Resolve receiver self-connection evidence. Input: authority (direct, managed,
- * or observed) and channels containing direct/managed optional booleans and an
- * explicit managed_fresh boolean. Returns per-channel supported/conflict and
- * aggregate support. Observed authority is for display, not permission to write.
- */
-NetaudioStatus netaudio_receiver_self_connection_capabilities(const char *json,
-                                                              uint8_t *out_buffer,
-                                                              uintptr_t out_capacity,
-                                                              uintptr_t *out_length);
-
-/**
- * Validate sample-rate status, advertised capacities, or active receiver identities.
- * The tagged request selects evidence; malformed or conflicting reports are rejected.
- */
-NetaudioStatus netaudio_sample_rate_evidence(const char *json,
                                              uint8_t *out_buffer,
                                              uintptr_t out_capacity,
                                              uintptr_t *out_length);
@@ -268,15 +200,6 @@ NetaudioStatus netaudio_client_execute(NetaudioClient *client,
                                        uint8_t *out_buffer,
                                        uintptr_t out_capacity,
                                        uintptr_t *out_length);
-
-NetaudioStatus netaudio_lock_token(const char *pin,
-                                   const uint8_t *nonce,
-                                   uintptr_t nonce_len,
-                                   const uint8_t *key,
-                                   uintptr_t key_len,
-                                   uint8_t *out_buffer,
-                                   uintptr_t out_capacity,
-                                   uintptr_t *out_length);
 
 NetaudioStatus netaudio_client_lock(NetaudioClient *client,
                                     const char *pin,
@@ -323,8 +246,6 @@ NetaudioStatus netaudio_client_set_service_ports(NetaudioClient *client,
 
 NetaudioStatus netaudio_host_mac(uint8_t *out_mac);
 
-NetaudioStatus netaudio_host_mac_for_ipv4(const char *local_ip, uint8_t *out_mac);
-
 void netaudio_client_free(NetaudioClient *client);
 
 /**
@@ -351,13 +272,6 @@ NetaudioStatus netaudio_client_get_rx_channels_json(NetaudioClient *client,
                                                     uint8_t *out_buffer,
                                                     uintptr_t out_capacity,
                                                     uintptr_t *out_length);
-
-NetaudioStatus netaudio_client_get_channel_audio_metadata_json(NetaudioClient *client,
-                                                               uint16_t tx_count,
-                                                               uint16_t rx_count,
-                                                               uint8_t *out_buffer,
-                                                               uintptr_t out_capacity,
-                                                               uintptr_t *out_length);
 
 NetaudioStatus netaudio_client_get_rx_inventory_json(NetaudioClient *client,
                                                      uint16_t rx_count,
@@ -426,24 +340,6 @@ NetaudioStatus netaudio_clock_sources(const char *json,
                                       uintptr_t *out_length);
 
 /**
- * Normalize a JSON Latin-1 string or byte array to a 16-byte JSON array.
- * The name must have a NUL terminator followed only by zero padding.
- */
-NetaudioStatus netaudio_normalize_clock_subdomain(const char *json,
-                                                  uint8_t *out_buffer,
-                                                  uintptr_t out_capacity,
-                                                  uintptr_t *out_length);
-
-/**
- * Resolve the local control_profile, defaulting to the current serializer.
- * Status, model, and interface revisions are not serializer selectors.
- */
-NetaudioStatus netaudio_clock_control_profile(const char *json,
-                                              uint8_t *out_buffer,
-                                              uintptr_t out_capacity,
-                                              uintptr_t *out_length);
-
-/**
  * Normalize and validate clock changes; return requested, before, changes, and control as JSON.
  * Input: status, changes, optional control_profile and supported_clock_sources.
  * Null changes are omitted; subdomain accepts a Latin-1 string or
@@ -474,27 +370,6 @@ NetaudioStatus netaudio_configuration(const char *json,
                                       uintptr_t *out_length);
 
 /**
- * Create a bounded collector. The caller owns the handle and must free it once.
- */
-NetaudioStatus netaudio_export_new(const char *configuration,
-                                   NetaudioExportCollector **out_collector);
-
-/**
- * Free a collector. No concurrent calls may use it. Passing null is allowed.
- */
-void netaudio_export_free(NetaudioExportCollector *collector);
-
-/**
- * Accept a parsed fragment and return match/completion state. Repeating an
- * accepted fragment is idempotent, including output-buffer size retries.
- */
-NetaudioStatus netaudio_export_accept(NetaudioExportCollector *collector,
-                                      const char *fragment,
-                                      uint8_t *out_buffer,
-                                      uintptr_t out_capacity,
-                                      uintptr_t *out_length);
-
-/**
  * Validate a credential without echoing its contents in error messages.
  */
 NetaudioStatus netaudio_dapi_validate_credential(const char *json,
@@ -512,77 +387,6 @@ NetaudioStatus netaudio_dapi_advance_session(const char *json,
                                              uintptr_t *out_length);
 
 /**
- * Advance a session-local wrapper ID. Pass zero for the first command after initialization.
- */
-uint16_t netaudio_dapi_next_wrapper_id(uint16_t previous);
-
-/**
- * Advance settings completion using a correlated acknowledgement and optional publication.
- * A null response opcode requests acknowledgement-only completion, not device-state confirmation.
- */
-NetaudioStatus netaudio_dapi_advance_settings_exchange(const char *json,
-                                                       uint8_t *out_buffer,
-                                                       uintptr_t out_capacity,
-                                                       uintptr_t *out_length);
-
-/**
- * Match a managed ARC reply against its wrapper and complete inner request identity.
- */
-NetaudioStatus netaudio_dapi_correlate_arc_response(const char *json,
-                                                    uint8_t *out_buffer,
-                                                    uintptr_t out_capacity,
-                                                    uintptr_t *out_length);
-
-NetaudioStatus netaudio_dapi_build_session_open(uint8_t *out_buffer,
-                                                uintptr_t out_capacity,
-                                                uintptr_t *out_length);
-
-NetaudioStatus netaudio_dapi_build_authentication(const uint8_t *auth_token,
-                                                  uintptr_t auth_token_len,
-                                                  uint8_t *out_buffer,
-                                                  uintptr_t out_capacity,
-                                                  uintptr_t *out_length);
-
-NetaudioStatus netaudio_dapi_build_domain_initialization(const uint8_t *domain_id,
-                                                         uintptr_t domain_id_len,
-                                                         uint16_t first_message_id,
-                                                         uint16_t notification_port,
-                                                         const uint8_t *local_ipv4,
-                                                         uint8_t *out_buffer,
-                                                         uintptr_t out_capacity,
-                                                         uintptr_t *out_length);
-
-NetaudioStatus netaudio_dapi_build_identify(uint16_t target_selector,
-                                            uint16_t wrapper_id,
-                                            uint16_t message_id,
-                                            const uint8_t *host_mac,
-                                            uint8_t *out_buffer,
-                                            uintptr_t out_capacity,
-                                            uintptr_t *out_length);
-
-NetaudioStatus netaudio_dapi_build_arc_request(uint16_t target_selector,
-                                               uint16_t wrapper_id,
-                                               const uint8_t *arc_packet,
-                                               uintptr_t arc_packet_len,
-                                               uint8_t *out_buffer,
-                                               uintptr_t out_capacity,
-                                               uintptr_t *out_length);
-
-NetaudioStatus netaudio_dapi_build_settings_request(uint16_t target_selector,
-                                                    uint16_t wrapper_id,
-                                                    const uint8_t *settings_packet,
-                                                    uintptr_t settings_packet_len,
-                                                    uint8_t *out_buffer,
-                                                    uintptr_t out_capacity,
-                                                    uintptr_t *out_length);
-
-NetaudioStatus netaudio_dapi_build_service_acknowledgement(const uint8_t *announcement_frame,
-                                                           uintptr_t announcement_frame_len,
-                                                           uint8_t *out_buffer,
-                                                           uintptr_t out_capacity,
-                                                           uintptr_t *out_length);
-
-/**
  * Build a managed-control packet and its transport/completion plan from {specification, host_mac, message_id}.
  * The packet is a JSON byte array; host_mac is an optional default, and explicit command identities are preserved.
  */
@@ -590,17 +394,6 @@ NetaudioStatus netaudio_build_managed_command(const char *json,
                                               uint8_t *out_buffer,
                                               uintptr_t out_capacity,
                                               uintptr_t *out_length);
-
-/**
- * Derive channel metadata bytes and the discovery PCM property from one configuration.
- * Input: sample_rate, encoding, supported_encodings. Returns JSON null when the
- * encoding capabilities are unknown or inconsistent, otherwise channel_metadata
- * (byte array) and pcm_property (string).
- */
-NetaudioStatus netaudio_channel_audio_publication(const char *json,
-                                                  uint8_t *out_buffer,
-                                                  uintptr_t out_capacity,
-                                                  uintptr_t *out_length);
 
 NetaudioStatus netaudio_build_command(const char *json,
                                       uint8_t *out_buffer,
@@ -616,108 +409,12 @@ NetaudioStatus netaudio_flow_delete_preflight(const char *json,
                                               uintptr_t *out_length);
 
 /**
- * Select advertised external RTP destinations and validate the resulting command.
- */
-NetaudioStatus netaudio_plan_external_subscription(const char *json,
-                                                   uint8_t *out_buffer,
-                                                   uintptr_t out_capacity,
-                                                   uintptr_t *out_length);
-
-/**
  * Check fresh transmitter inventory before allocating a flow slot.
  */
 NetaudioStatus netaudio_flow_create_preflight(const char *json,
                                               uint8_t *out_buffer,
                                               uintptr_t out_capacity,
                                               uintptr_t *out_length);
-
-/**
- * Validate fresh sample-rate or encoding readback before creating a flow.
- */
-NetaudioStatus netaudio_flow_format_readback(const char *json,
-                                             uint8_t *out_buffer,
-                                             uintptr_t out_capacity,
-                                             uintptr_t *out_length);
-
-/**
- * Classify valid, correlated readback without treating missing evidence as contradiction.
- */
-NetaudioStatus netaudio_flow_verification(const char *json,
-                                          uint8_t *out_buffer,
-                                          uintptr_t out_capacity,
-                                          uintptr_t *out_length);
-
-/**
- * Compare stable configuration of flows other than the operation's target.
- */
-NetaudioStatus netaudio_flow_topology_change(const char *json,
-                                             uint8_t *out_buffer,
-                                             uintptr_t out_capacity,
-                                             uintptr_t *out_length);
-
-/**
- * Check whether inventory evidence is complete and has unique, usable flow identities.
- */
-NetaudioStatus netaudio_flow_inventory_complete(const char *json,
-                                                uint8_t *out_buffer,
-                                                uintptr_t out_capacity,
-                                                uintptr_t *out_length);
-
-/**
- * Correlate creation readback using complete, unambiguous before/after inventories.
- */
-NetaudioStatus netaudio_flow_creation_candidate(const char *json,
-                                                uint8_t *out_buffer,
-                                                uintptr_t out_capacity,
-                                                uintptr_t *out_length);
-
-/**
- * Compare requested and effective transmit-flow specifications, preserving unavailable readback fields.
- */
-NetaudioStatus netaudio_compare_transmit_flows(const char *json,
-                                               uint8_t *out_buffer,
-                                               uintptr_t out_capacity,
-                                               uintptr_t *out_length);
-
-/**
- * Verify sample-rate readback against the prior topology and target capacity.
- */
-NetaudioStatus netaudio_verify_sample_rate_topology(const char *json,
-                                                    uint8_t *out_buffer,
-                                                    uintptr_t out_capacity,
-                                                    uintptr_t *out_length);
-
-/**
- * Classify sample-rate topology impact from {snapshot, target_capacity}.
- */
-NetaudioStatus netaudio_sample_rate_topology_impact(const char *json,
-                                                    uint8_t *out_buffer,
-                                                    uintptr_t out_capacity,
-                                                    uintptr_t *out_length);
-
-/**
- * Interpret transmitter-flow membership for sample-rate readback.
- */
-NetaudioStatus netaudio_transmit_flow_topology(const char *json,
-                                               uint8_t *out_buffer,
-                                               uintptr_t out_capacity,
-                                               uintptr_t *out_length);
-
-/**
- * Validate a transmit-flow specification and supply canonical defaults, preserving annotations.
- */
-NetaudioStatus netaudio_normalize_transmit_flow_specification(const char *json,
-                                                              uint8_t *out_buffer,
-                                                              uintptr_t out_capacity,
-                                                              uintptr_t *out_length);
-
-/**
- * Convert an observed transmitter record into the canonical flow specification.
- */
-NetaudioStatus netaudio_transmit_flow_specification(const char *json,
-                                                    uint8_t *out_buffer,
-                                                    uintptr_t out_capacity,
-                                                    uintptr_t *out_length);
 
 /**
  * Select and validate a transmit-flow deletion command without sending it.
@@ -782,60 +479,6 @@ NetaudioStatus netaudio_inventory_state(NetaudioInventory *inventory,
                                         uintptr_t *out_length);
 
 /**
- * Create a receiver history owner. Free exactly once after all calls finish.
- */
-NetaudioStatus netaudio_receiver_tracker_new(NetaudioReceiverTracker **out_tracker);
-
-/**
- * Free retained observations. Passing null is allowed; concurrent use is not.
- */
-void netaudio_receiver_tracker_free(NetaudioReceiverTracker *tracker);
-
-/**
- * Accept an incremental receiver UpdateRequest with previous=null.
- * The accepted device identity cannot change during the tracker's lifetime.
- */
-NetaudioStatus netaudio_receiver_tracker_accept(NetaudioReceiverTracker *tracker,
-                                                const char *json,
-                                                bool *out_changed);
-
-/**
- * Read current paths, optionally including retained history. Retries are read-only.
- */
-NetaudioStatus netaudio_receiver_tracker_snapshot(NetaudioReceiverTracker *tracker,
-                                                  bool include_history,
-                                                  uint8_t *out_buffer,
-                                                  uintptr_t out_capacity,
-                                                  uintptr_t *out_length);
-
-/**
- * Create a bounded clock observation owner. Free exactly once after all calls finish.
- */
-NetaudioStatus netaudio_clock_tracker_new(NetaudioClockTracker **out_tracker);
-
-/**
- * Free retained observations. Passing null is allowed; concurrent use is not.
- */
-void netaudio_clock_tracker_free(NetaudioClockTracker *tracker);
-
-/**
- * Accept an incremental ClockObservationRequest with previous=null.
- * Mutations have no output-buffer retry; read snapshots separately.
- */
-NetaudioStatus netaudio_clock_tracker_accept(NetaudioClockTracker *tracker,
-                                             const char *json,
-                                             bool *out_changed);
-
-/**
- * Read current state, optionally including retained history. Buffer retries are read-only.
- */
-NetaudioStatus netaudio_clock_tracker_snapshot(NetaudioClockTracker *tracker,
-                                               bool include_history,
-                                               uint8_t *out_buffer,
-                                               uintptr_t out_capacity,
-                                               uintptr_t *out_length);
-
-/**
  * Accept source-specific clock observations and compute bounded statistics.
  */
 NetaudioStatus netaudio_clock_observation_update(const char *json,
@@ -862,22 +505,6 @@ NetaudioStatus netaudio_connection_health_update(const char *json,
                                                  uintptr_t *out_length);
 
 /**
- * Resolve network configuration choices, inventory completeness, and control transport availability.
- */
-NetaudioStatus netaudio_network_control_state(const char *json,
-                                              uint8_t *out_buffer,
-                                              uintptr_t out_capacity,
-                                              uintptr_t *out_length);
-
-/**
- * Merge fresh interface flags with prior switch-choice evidence without upgrading its freshness.
- */
-NetaudioStatus netaudio_interface_redundancy_status(const char *json,
-                                                    uint8_t *out_buffer,
-                                                    uintptr_t out_capacity,
-                                                    uintptr_t *out_length);
-
-/**
  * Validate interface configuration and return normalized configured-state fields.
  * Input is {mode: "dhcp"} or {mode: "static", ip_address, netmask, dns_server?, gateway?}.
  */
@@ -885,61 +512,6 @@ NetaudioStatus netaudio_interface_configuration(const char *json,
                                                 uint8_t *out_buffer,
                                                 uintptr_t out_capacity,
                                                 uintptr_t *out_length);
-
-/**
- * Verify requested interface configuration and preservation of other network state.
- * Input contains configuration, interface, before/after inventories and before/after_redundancy.
- */
-NetaudioStatus netaudio_verify_interface_configuration(const char *json,
-                                                       uint8_t *out_buffer,
-                                                       uintptr_t out_capacity,
-                                                       uintptr_t *out_length);
-
-/**
- * Resolve redundancy state availability and the serializer value for an optional requested mode.
- * Input is {state, mode}; output contains reasons, serializer_cohort, and switch_configuration_choice.
- */
-NetaudioStatus netaudio_redundancy_control(const char *json,
-                                           uint8_t *out_buffer,
-                                           uintptr_t out_capacity,
-                                           uintptr_t *out_length);
-
-/**
- * Derive panel editor choices from the command planner and observed device state.
- */
-NetaudioStatus netaudio_panel_presentation(const char *json,
-                                           uint8_t *out_buffer,
-                                           uintptr_t out_capacity,
-                                           uintptr_t *out_length);
-
-/**
- * Allocate a shared nonzero panel transaction sequence.
- */
-uint32_t netaudio_next_panel_sequence(void);
-
-/**
- * Plan a panel mutation from fresh observations and advertised capabilities.
- */
-NetaudioStatus netaudio_plan_panel(const char *json,
-                                   uint8_t *out_buffer,
-                                   uintptr_t out_capacity,
-                                   uintptr_t *out_length);
-
-/**
- * Compare panel readback with the effective values from a validated plan.
- */
-NetaudioStatus netaudio_panel_readback_matches(const char *json,
-                                               uint8_t *out_buffer,
-                                               uintptr_t out_capacity,
-                                               uintptr_t *out_length);
-
-/**
- * Resolve panel identity and ordered queries from advertised plugin identifiers.
- */
-NetaudioStatus netaudio_panel_profile(const char *json,
-                                      uint8_t *out_buffer,
-                                      uintptr_t out_capacity,
-                                      uintptr_t *out_length);
 
 NetaudioStatus netaudio_parse_response(const char *kind,
                                        const uint8_t *data,
@@ -949,55 +521,12 @@ NetaudioStatus netaudio_parse_response(const char *kind,
                                        uintptr_t *out_length);
 
 /**
- * Resolve fresh performance readback and acknowledgement independently.
- * Storage acknowledgements never establish persistence.
- */
-NetaudioStatus netaudio_performance_completion(const char *json,
-                                               uint8_t *out_buffer,
-                                               uintptr_t out_capacity,
-                                               uintptr_t *out_length);
-
-/**
- * Resolve performance capabilities from protocol_id, managed, property_ids, and platform_software_version.
- * Return normalized software version, supported property IDs, and per-operation availability.
- */
-NetaudioStatus netaudio_performance_capabilities(const char *json,
-                                                 uint8_t *out_buffer,
-                                                 uintptr_t out_capacity,
-                                                 uintptr_t *out_length);
-
-/**
- * Project advertised performance property_ids and observed values into reusable control settings.
- * values maps decimal property IDs to observed integers. Incomplete or conflicting settings are omitted.
- */
-NetaudioStatus netaudio_performance_snapshot(const char *json,
-                                             uint8_t *out_buffer,
-                                             uintptr_t out_capacity,
-                                             uintptr_t *out_length);
-
-/**
- * Validate a performance command and return its ordered property_id/value records as JSON.
- */
-NetaudioStatus netaudio_plan_performance_command(const char *json,
-                                                 uint8_t *out_buffer,
-                                                 uintptr_t out_capacity,
-                                                 uintptr_t *out_length);
-
-/**
  * Select a supported flow-inventory revision from observed or advertised evidence.
  */
 NetaudioStatus netaudio_flow_inventory_protocol(const char *json,
                                                 uint8_t *out_buffer,
                                                 uintptr_t out_capacity,
                                                 uintptr_t *out_length);
-
-/**
- * Classify an announcement for an existing, unexpired SAP session.
- */
-NetaudioStatus netaudio_sap_transition(const char *json,
-                                       uint8_t *out_buffer,
-                                       uintptr_t out_capacity,
-                                       uintptr_t *out_length);
 
 /**
  * Normalize an explicitly identified MAC, clock, or managed identity.
@@ -1035,23 +564,6 @@ NetaudioStatus netaudio_last_error_message(uint8_t *out_buffer,
                                            uintptr_t out_capacity,
                                            uintptr_t *out_length);
 
-/**
- * Classify managed subscription identifiers, messages, and aggregate summaries.
- */
-NetaudioStatus netaudio_managed_subscription_status(const char *json,
-                                                    uint8_t *out_buffer,
-                                                    uintptr_t out_capacity,
-                                                    uintptr_t *out_length);
-
-/**
- * Validate an external subscription specification and compare optional complete receiver-flow readback.
- * Returns requested/observed identities and separate ARC and SDP confirmation facts as JSON.
- */
-NetaudioStatus netaudio_external_subscription_readback(const char *json,
-                                                       uint8_t *out_buffer,
-                                                       uintptr_t out_capacity,
-                                                       uintptr_t *out_length);
-
 NetaudioStatus netaudio_subscription_status(uint16_t code,
                                             uint16_t receiver_status_code,
                                             bool has_receiver_status,
@@ -1073,29 +585,6 @@ NetaudioStatus netaudio_plan_subscription_commands(const char *json,
                                                    uint8_t *out_buffer,
                                                    uintptr_t out_capacity,
                                                    uintptr_t *out_length);
-
-/**
- * Evaluate {channels, subscriptions, expected} from a fresh receiver inventory.
- * Channels are receiver numbers. Subscriptions contain number, optional tx_channel,
- * tx_device, status_code, receiver_status_code, and managed_status. Expected entries
- * contain number and source: null for removal or [channel, device] for a subscription.
- * Returns aggregate matched/settled and per-channel source, matched, settled, and
- * connection_state. Unknown status never establishes connection completion.
- */
-NetaudioStatus netaudio_subscription_readback(const char *json,
-                                              uint8_t *out_buffer,
-                                              uintptr_t out_capacity,
-                                              uintptr_t *out_length);
-
-/**
- * Plan subscription reconciliation from a fresh receiver inventory and desired
- * sources. Returns unchanged entries and ordered clear/set batches. All direct
- * protocol commands are validated before any mutation batch is returned.
- */
-NetaudioStatus netaudio_plan_subscription_reconciliation(const char *json,
-                                                         uint8_t *out_buffer,
-                                                         uintptr_t out_capacity,
-                                                         uintptr_t *out_length);
 
 #ifdef __cplusplus
 }  // extern "C"

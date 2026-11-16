@@ -1,41 +1,5 @@
 use super::*;
 
-/// Classify managed subscription identifiers, messages, and aggregate summaries.
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_managed_subscription_status(
-    json: *const c_char,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    unsafe {
-        json_output((out_buffer, out_capacity, out_length), || {
-            Ok(crate::subscription_status::managed_status(decode_json(
-                c_string(json)?,
-            )?))
-        })
-    }
-}
-
-/// Validate an external subscription specification and compare optional complete receiver-flow readback.
-/// Returns requested/observed identities and separate ARC and SDP confirmation facts as JSON.
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_external_subscription_readback(
-    json: *const c_char,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    unsafe {
-        json_output((out_buffer, out_capacity, out_length), || {
-            let json = c_string(json)?;
-            let readback = crate::spec::external_subscription_readback(json)?;
-
-            Ok(readback)
-        })
-    }
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn netaudio_subscription_status(
     code: u16,
@@ -89,50 +53,6 @@ pub unsafe extern "C" fn netaudio_plan_subscription_commands(
             let pages = crate::spec::plan_subscription_commands(input)?;
 
             Ok(pages)
-        })
-    }
-}
-
-/// Evaluate {channels, subscriptions, expected} from a fresh receiver inventory.
-/// Channels are receiver numbers. Subscriptions contain number, optional tx_channel,
-/// tx_device, status_code, receiver_status_code, and managed_status. Expected entries
-/// contain number and source: null for removal or [channel, device] for a subscription.
-/// Returns aggregate matched/settled and per-channel source, matched, settled, and
-/// connection_state. Unknown status never establishes connection completion.
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_subscription_readback(
-    json: *const c_char,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    unsafe {
-        json_output((out_buffer, out_capacity, out_length), || {
-            let input = c_string(json)?;
-            let result = crate::subscription_readback::evaluate(input)?;
-
-            Ok(result)
-        })
-    }
-}
-
-/// Plan subscription reconciliation from a fresh receiver inventory and desired
-/// sources. Returns unchanged entries and ordered clear/set batches. All direct
-/// protocol commands are validated before any mutation batch is returned.
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_plan_subscription_reconciliation(
-    json: *const c_char,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    unsafe {
-        json_output((out_buffer, out_capacity, out_length), || {
-            let input = c_string(json)?;
-            let request = decode_json(input)?;
-            let plan = crate::subscription_reconciliation::plan(request)?;
-
-            Ok(plan)
         })
     }
 }
