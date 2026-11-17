@@ -66,7 +66,7 @@ impl Process {
                 }
                 digest.update(&bytes[..count]);
             }
-            Ok::<_, anyhow::Error>(format!("{:x}", digest.finalize()))
+            Ok::<_, anyhow::Error>(netaudio_core::bytes::hexadecimal(&digest.finalize()))
         })
         .await
         .context("host audio worker digest task failed")??;

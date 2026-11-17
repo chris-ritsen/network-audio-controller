@@ -503,7 +503,9 @@ fn extension(bytes: &[u8], pointer: u16, base: usize) -> Result<Extension, Error
 
         Some(
             bytes[details]
-                .chunks_exact(size_of::<u16>())
+                .as_chunks::<{ size_of::<u16>() }>()
+                .0
+                .iter()
                 .map(|value| u16::from_be_bytes([value[0], value[1]]))
                 .collect(),
         )
@@ -573,7 +575,9 @@ pub fn decode_allocation_reply(datagram: &[u8]) -> Result<AllocationReply, Error
     });
     reply.interface_outcomes = Some(
         directory[..count * size_of::<u16>()]
-            .chunks_exact(size_of::<u16>())
+            .as_chunks::<{ size_of::<u16>() }>()
+            .0
+            .iter()
             .map(|value| u16::from_be_bytes([value[0], value[1]]))
             .collect(),
     );

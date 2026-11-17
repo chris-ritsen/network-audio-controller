@@ -19,7 +19,7 @@ pub(super) fn parse_mac_required(text: &str) -> Result<[u8; 6], SpecError> {
         return Err(SpecError::InvalidMac);
     }
     let mut mac = [0u8; 6];
-    for (destination, pair) in mac.iter_mut().zip(cleaned.chunks_exact(2)) {
+    for (destination, pair) in mac.iter_mut().zip(cleaned.as_chunks::<2>().0) {
         let pair = std::str::from_utf8(pair).map_err(|_| SpecError::InvalidMac)?;
         *destination = u8::from_str_radix(pair, 16).map_err(|_| SpecError::InvalidMac)?;
     }
@@ -40,7 +40,7 @@ pub(super) fn parse_device_id_required(text: &str) -> Result<[u8; 8], SpecError>
     if cleaned.len() != 16 || !cleaned.iter().all(u8::is_ascii_hexdigit) {
         return Err(SpecError::InvalidMac);
     }
-    for (destination, pair) in device_id.iter_mut().zip(cleaned.chunks_exact(2)) {
+    for (destination, pair) in device_id.iter_mut().zip(cleaned.as_chunks::<2>().0) {
         let pair = std::str::from_utf8(pair).map_err(|_| SpecError::InvalidMac)?;
         *destination = u8::from_str_radix(pair, 16).map_err(|_| SpecError::InvalidMac)?;
     }

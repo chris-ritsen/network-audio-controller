@@ -123,7 +123,7 @@ fn bounded_label(value: &str, maximum: usize) -> String {
         return value.to_owned();
     }
 
-    let digest = format!("{:x}", Sha256::digest(value.as_bytes()));
+    let digest = netaudio_core::bytes::hexadecimal(&Sha256::digest(value.as_bytes()));
     let suffix = &digest[..HASH_SUFFIX_LENGTH];
     let mut boundary = maximum - HASH_SUFFIX_LENGTH - 1;
 

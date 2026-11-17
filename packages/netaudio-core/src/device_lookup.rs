@@ -303,8 +303,10 @@ fn txt_elements(txt: &[u8]) -> Option<Vec<&[u8]>> {
 fn destination_component(header: &[u8]) -> Option<u16> {
     header
         .get(8..)?
-        .chunks_exact(8)
-        .find(|block| read_u16(block, 0) == Some(DESTINATION_ADDRESS))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .find(|block| read_u16(block.as_slice(), 0) == Some(DESTINATION_ADDRESS))
         .and_then(|block| read_u16(block, 6))
 }
 

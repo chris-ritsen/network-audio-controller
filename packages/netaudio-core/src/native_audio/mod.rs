@@ -251,7 +251,7 @@ impl<'a> Packet<'a> {
             return Err(Error::EmptyPayload);
         }
 
-        if payload.len() % format.frame_bytes() != 0 {
+        if !payload.len().is_multiple_of(format.frame_bytes()) {
             return Err(Error::IncompleteFrame);
         }
 
@@ -294,7 +294,7 @@ pub fn encode(format: Format, time: SampleTime, samples: &[i32]) -> Result<Vec<u
         return Err(Error::EmptyPayload);
     }
 
-    if samples.len() % usize::from(format.slot_count) != 0 {
+    if !samples.len().is_multiple_of(usize::from(format.slot_count)) {
         return Err(Error::IncompleteFrame);
     }
 

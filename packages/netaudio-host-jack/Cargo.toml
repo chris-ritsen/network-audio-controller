@@ -13,5 +13,5 @@ serde_json.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rtrb = "0.4.0"
-jack = { version = "0.13.5", default-features = false, features = ["dynamic_loading"] }
-jack-sys = { version = "0.5.1", features = ["dynamic_loading"] }
+jack = { version = "0.14", default-features = false, features = ["dynamic_loading"] }
+jack-sys = { version = "0.7", features = ["dynamic_loading"] }

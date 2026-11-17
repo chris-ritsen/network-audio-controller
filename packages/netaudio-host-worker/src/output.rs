@@ -31,7 +31,7 @@ impl Output {
             protocol_version: VERSION,
             provider,
             purpose,
-            executable_sha256: format!("{:x}", digest.finalize()),
+            executable_sha256: netaudio_core::bytes::hexadecimal(&digest.finalize()),
             package_version: env!("CARGO_PKG_VERSION").into(),
             process_id: std::process::id(),
         })?;

@@ -425,7 +425,9 @@ pub fn parse_remove_subscriptions_request(data: &[u8]) -> Option<Vec<u32>> {
     }
 
     records
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|record| {
             let channel = read_u32(record, 0)?;
             (channel != 0).then_some(channel)

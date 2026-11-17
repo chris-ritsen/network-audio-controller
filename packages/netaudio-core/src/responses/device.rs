@@ -839,7 +839,9 @@ fn parse_cmc_control_addresses(response: &[u8]) -> Option<Vec<CmcControlAddress>
     let records = response.get(CMC_CONTROL_ADDRESS_RECORDS_OFFSET..end)?;
     Some(
         records
-            .chunks_exact(CMC_CONTROL_ADDRESS_RECORD_SIZE)
+            .as_chunks::<CMC_CONTROL_ADDRESS_RECORD_SIZE>()
+            .0
+            .iter()
             .map(|record| {
                 let ipv4 = std::net::Ipv4Addr::new(record[0], record[1], record[2], record[3]);
                 let port = u16::from_be_bytes([record[4], record[5]]);

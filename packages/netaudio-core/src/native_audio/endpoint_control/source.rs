@@ -54,7 +54,7 @@ fn checked_region(
     alignment: usize,
 ) -> Result<(), Error> {
     if offset < minimum
-        || offset % alignment != 0
+        || !offset.is_multiple_of(alignment)
         || offset
             .checked_add(length)
             .is_none_or(|end| end > bytes.len())

@@ -213,7 +213,9 @@ fn disk_image(input: &mut dyn Source, length: u64) -> io::Result<Found> {
     for table in tables {
         let count = big_endian_32(&table, 200) as usize;
         let blocks = table[TABLE_HEADER_LENGTH..]
-            .chunks_exact(TABLE_BLOCK_LENGTH)
+            .as_chunks::<TABLE_BLOCK_LENGTH>()
+            .0
+            .iter()
             .take(count);
 
         for block in blocks {

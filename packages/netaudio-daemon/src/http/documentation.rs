@@ -22,7 +22,10 @@ struct Representation {
 
 impl Representation {
     fn new(bytes: Vec<u8>) -> Result<Self> {
-        let tag = HeaderValue::from_str(&format!("\"{:x}\"", Sha256::digest(&bytes)))?;
+        let tag = HeaderValue::from_str(&format!(
+            "\"{}\"",
+            netaudio_core::bytes::hexadecimal(&Sha256::digest(&bytes))
+        ))?;
         Ok(Self {
             bytes: Bytes::from(bytes),
             tag,

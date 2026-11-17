@@ -73,7 +73,7 @@ fn measure(request: Request, input: &mut Input) -> Result<Option<Readings>> {
                     .port_by_name(&name)
                     .with_context(|| format!("JACK source {name} does not exist"))?;
                 ensure!(
-                    source.flags().contains(jack::PortFlags::IS_OUTPUT)
+                    source.flags()?.contains(jack::PortFlags::IS_OUTPUT)
                         && source.port_type()? == "32 bit float mono audio",
                     "JACK source {name} is not an audio output"
                 );

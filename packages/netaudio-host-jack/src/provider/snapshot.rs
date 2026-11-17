@@ -31,7 +31,7 @@ fn read_ports(provider: &Provider) -> Result<JackSnapshot> {
         let port = client
             .port_by_name(&name)
             .context("a JACK port disappeared while reading its graph")?;
-        let flags = port.flags();
+        let flags = port.flags()?;
         let direction = match (
             flags.contains(jack::PortFlags::IS_OUTPUT),
             flags.contains(jack::PortFlags::IS_INPUT),
@@ -62,7 +62,7 @@ fn read_ports(provider: &Provider) -> Result<JackSnapshot> {
                 )
             })
             .collect();
-        let mut connections = port.get_connections();
+        let mut connections = port.get_connections()?;
         connections.retain(|name| !name.starts_with("netaudio-meter"));
         connections.sort();
         ports.insert(

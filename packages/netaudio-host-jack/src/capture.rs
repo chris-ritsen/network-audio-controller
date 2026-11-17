@@ -158,7 +158,7 @@ pub fn verify(client: &jack::Client, connections: &Connections) -> Result<()> {
         let input = client
             .port_by_name(name)
             .context("A JACK capture input disappeared")?;
-        let mut connections = input.get_connections();
+        let mut connections = input.get_connections()?;
         connections.sort();
         let expected: Vec<_> = sources.iter().map(|(name, _)| name.clone()).collect();
         ensure!(connections == expected, "JACK capture connections changed");

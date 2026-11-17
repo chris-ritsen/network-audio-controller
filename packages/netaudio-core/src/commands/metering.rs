@@ -163,7 +163,7 @@ pub fn build_metering_start(
     validate_dante_name(device_name)?;
     let mut name_bytes = device_name.as_bytes().to_vec();
     name_bytes.push(0);
-    if name_bytes.len() % 2 != 0 {
+    if !name_bytes.len().is_multiple_of(2) {
         name_bytes.push(0);
     }
     let padded_name_len = name_bytes.len();

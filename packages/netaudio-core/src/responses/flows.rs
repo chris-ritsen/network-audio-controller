@@ -1006,11 +1006,11 @@ fn parse_receiver_flow_record(
 }
 
 pub(super) fn receiver_channel_numbers(descriptor: &[u8]) -> Option<Vec<u16>> {
-    if descriptor.is_empty() || descriptor.len() % 2 != 0 {
+    if descriptor.is_empty() || !descriptor.len().is_multiple_of(2) {
         return None;
     }
     let mut receiver_channel_numbers = Vec::new();
-    for (word_index, bytes) in descriptor.chunks_exact(2).enumerate() {
+    for (word_index, bytes) in descriptor.as_chunks::<2>().0.iter().enumerate() {
         let word = u16::from_be_bytes([bytes[0], bytes[1]]);
         for bit_index in 0..16 {
             if word & (1 << bit_index) != 0 {

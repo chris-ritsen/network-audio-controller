@@ -77,7 +77,7 @@ fn record(
         let (identifier, source_index) = identity(&client, &source)?;
         ensure!(
             identifier == *expected
-                && source.flags().contains(jack::PortFlags::IS_OUTPUT)
+                && source.flags()?.contains(jack::PortFlags::IS_OUTPUT)
                 && source.port_type()? == "32 bit float mono audio",
             "JACK recording source {name} changed identity or type"
         );

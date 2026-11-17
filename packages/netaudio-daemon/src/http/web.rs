@@ -196,7 +196,9 @@ impl WebAssets {
         let body = bounded_read(&directory.join(digest), MAXIMUM_ASSET_BYTES)
             .await?
             .context("archived web asset is missing")?;
-        if body.len() as u64 != size || format!("{:x}", Sha256::digest(&body)) != *digest {
+        if body.len() as u64 != size
+            || netaudio_core::bytes::hexadecimal(&Sha256::digest(&body)) != *digest
+        {
             return Err(anyhow::anyhow!("archived web asset is corrupt").into());
         }
         response(

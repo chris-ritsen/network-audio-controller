@@ -1,8 +1,9 @@
 use anyhow::Result;
 use netaudio_core::native_audio::SampleFormat;
 use netaudio_core::native_audio::playout::quantum_frames;
+use rubato::audioadapter_buffers::direct::SequentialSliceOfVecs;
 use rubato::{
-    Resampler, SincFixedIn, SincFixedOut, SincInterpolationParameters, SincInterpolationType,
+    Adjustable, Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
 };
 
@@ -20,7 +21,7 @@ const INTEGRAL_GAIN: f64 = 0.000_000_05;
 fn parameters() -> SincInterpolationParameters {
     SincInterpolationParameters {
         sinc_len: FILTER_LENGTH,
-        f_cutoff: FILTER_CUTOFF,
+        f_cutoff: Some(FILTER_CUTOFF),
         interpolation: SincInterpolationType::Cubic,
         oversampling_factor: FILTER_OVERSAMPLING,
         window: WindowFunction::BlackmanHarris2,
@@ -56,7 +57,7 @@ impl Correction {
 }
 
 pub struct Capture {
-    converter: Option<SincFixedOut<f32>>,
+    converter: Option<Async<f32>>,
     input: Vec<Vec<f32>>,
     output: Vec<Vec<f32>>,
     correction: Correction,
@@ -71,18 +72,19 @@ impl Capture {
         let channels = configuration.input_channels.len();
         let ratio = f64::from(network_format.sample_rate()) / f64::from(configuration.sample_rate);
         let converter = match configuration.clock_relationship {
-            ClockRelationship::Independent => Some(SincFixedOut::new(
+            ClockRelationship::Independent => Some(Async::new_sinc(
                 ratio,
                 MAXIMUM_RELATIVE_RATIO,
-                parameters(),
+                &parameters(),
                 quantum_frames,
                 channels,
+                FixedAsync::Output,
             )?),
             ClockRelationship::NetworkSynchronized => None,
         };
         let input = converter.as_ref().map_or_else(
             || vec![vec![0.0; quantum_frames]; channels],
-            |converter| converter.input_buffer_allocate(true),
+            |converter| vec![vec![0.0; converter.input_frames_max()]; channels],
         );
         let output = vec![vec![0.0; quantum_frames]; channels];
 
@@ -108,11 +110,11 @@ impl Capture {
     }
 
     pub fn needed(&self) -> usize {
-        self.converter.as_ref().map_or(self.quantum_frames, Resampler::input_frames_next)
+        self.converter.as_ref().map_or(self.quantum_frames, Async::input_frames_next)
     }
 
     pub fn maximum_input_frames(&self) -> usize {
-        self.converter.as_ref().map_or(self.quantum_frames, Resampler::input_frames_max)
+        self.converter.as_ref().map_or(self.quantum_frames, Async::input_frames_max)
     }
 
     pub fn convert(
@@ -129,7 +131,12 @@ impl Capture {
         }
 
         if let Some(converter) = &mut self.converter {
-            converter.process_into_buffer(&self.input, &mut self.output, None)?;
+            let channels = self.input.len();
+            let frames = self.input.first().map_or(0, Vec::len);
+            let input = SequentialSliceOfVecs::new(&self.input, channels, frames)?;
+            let mut output =
+                SequentialSliceOfVecs::new_mut(&mut self.output, channels, self.quantum_frames)?;
+            converter.process_into_buffer(&input, &mut output, None)?;
             converter.set_resample_ratio(self.correction.ratio(occupancy, self.ratio), true)?;
         } else {
             for channel in 0..self.input.len() {
@@ -146,7 +153,7 @@ impl Capture {
 }
 
 pub struct Playback {
-    converter: Option<SincFixedIn<f32>>,
+    converter: Option<Async<f32>>,
     input: Vec<Vec<f32>>,
     output: Vec<Vec<f32>>,
     correction: Correction,
@@ -163,18 +170,19 @@ impl Playback {
         let channels = configuration.output_channels.len();
         let ratio = f64::from(configuration.sample_rate) / f64::from(network_format.sample_rate());
         let converter = match configuration.clock_relationship {
-            ClockRelationship::Independent => Some(SincFixedIn::new(
+            ClockRelationship::Independent => Some(Async::new_sinc(
                 ratio,
                 MAXIMUM_RELATIVE_RATIO,
-                parameters(),
+                &parameters(),
                 quantum_frames,
                 channels,
+                FixedAsync::Input,
             )?),
             ClockRelationship::NetworkSynchronized => None,
         };
         let output = converter.as_ref().map_or_else(
             || vec![vec![0.0; quantum_frames]; channels],
-            |converter| converter.output_buffer_allocate(true),
+            |converter| vec![vec![0.0; converter.output_frames_max()]; channels],
         );
 
         Ok(Self {
@@ -199,7 +207,7 @@ impl Playback {
     }
 
     pub fn maximum_output_frames(&self) -> usize {
-        self.converter.as_ref().map_or(self.quantum_frames, Resampler::output_frames_max)
+        self.converter.as_ref().map_or(self.quantum_frames, Async::output_frames_max)
     }
 
     pub fn reset(&mut self) -> Result<()> {
@@ -245,7 +253,11 @@ impl Playback {
 
         let produced = if let Some(converter) = &mut self.converter {
             converter.set_resample_ratio(self.correction.ratio(occupancy, self.ratio), true)?;
-            converter.process_into_buffer(&self.input, &mut self.output, None)?.1
+            let channels = self.input.len();
+            let frames = self.output.first().map_or(0, Vec::len);
+            let input = SequentialSliceOfVecs::new(&self.input, channels, self.quantum_frames)?;
+            let mut output = SequentialSliceOfVecs::new_mut(&mut self.output, channels, frames)?;
+            converter.process_into_buffer(&input, &mut output, None)?.1
         } else {
             for channel in 0..self.input.len() {
                 self.output[channel].copy_from_slice(&self.input[channel]);

@@ -3,7 +3,8 @@ mod views;
 
 use crate::state::ReadModel;
 use anyhow::{ensure, Context, Result};
-use blake2::digest::{Update, VariableOutput};
+use blake2::digest::consts::U6;
+use blake2::{Blake2s, Digest};
 use futures_util::StreamExt;
 use interfaces::{DanteChannel, DanteDevice, Manager, ShureChannel, ShureDevice};
 use serde_json::{json, Value};
@@ -294,13 +295,8 @@ fn safe_name(name: &str) -> Result<String> {
     } else {
         readable
     };
-    let mut digest = blake2::Blake2sVar::new(6).context("Initialize D-Bus identity digest")?;
-    digest.update(name.as_bytes());
-    let mut bytes = [0; 6];
-    digest
-        .finalize_variable(&mut bytes)
-        .context("Finalize D-Bus identity digest")?;
-    Ok(format!("{readable}_{}", hex::encode(bytes)))
+    let digest = Blake2s::<U6>::digest(name.as_bytes());
+    Ok(format!("{readable}_{}", hex::encode(digest)))
 }
 
 fn status(model: &ReadModel, state: &str, error: Option<String>) -> Result<()> {

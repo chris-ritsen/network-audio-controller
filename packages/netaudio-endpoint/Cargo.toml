@@ -2,7 +2,7 @@
 name = "netaudio-endpoint"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.96"
 license = "Unlicense"
 
 [dependencies]
@@ -10,8 +10,8 @@ anyhow = "1"
 cpal = "0.18.2"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 rtrb = "0.4"
-rubato = { version = "0.16.2", default-features = false }
-jack = { version = "0.13.5", default-features = false, features = ["dynamic_loading"], optional = true }
+rubato = { version = "5.1", default-features = false }
+jack = { version = "0.14", default-features = false, features = ["dynamic_loading"], optional = true }
 hickory-proto = { version = "0.26.3", default-features = false, features = ["std"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 mdns-sd = { version = "0.22", default-features = false, features = ["async"] }
@@ -23,9 +23,9 @@ serde_json = "1"
 socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = ["macros", "net", "rt", "signal", "sync", "time", "io-util"] }
 sdl2 = { version = "0.38", optional = true }
-gstreamer = { version = "0.24", features = ["v1_22"], optional = true }
-gstreamer-app = { version = "0.24", features = ["v1_22"], optional = true }
-gstreamer-video = { version = "0.24", features = ["v1_22"], optional = true }
+gstreamer = { version = "0.25", features = ["v1_22"], optional = true }
+gstreamer-app = { version = "0.25", features = ["v1_22"], optional = true }
+gstreamer-video = { version = "0.25", features = ["v1_22"], optional = true }
 uuid = { version = "1", features = ["v4", "serde"], optional = true }
 schemars = { version = "1.2.3", features = ["chrono04"], optional = true }
 

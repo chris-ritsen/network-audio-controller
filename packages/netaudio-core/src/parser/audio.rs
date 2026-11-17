@@ -103,7 +103,7 @@ struct Object {
 }
 
 fn availability(packet: &[u8], pointer: usize) -> Option<(Availability, usize)> {
-    if pointer % DESCRIPTOR_ALIGNMENT != 0 {
+    if !pointer.is_multiple_of(DESCRIPTOR_ALIGNMENT) {
         return None;
     }
 

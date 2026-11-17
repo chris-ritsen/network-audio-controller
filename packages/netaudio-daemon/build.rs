@@ -47,11 +47,11 @@ fn main() -> Result<()> {
         digest.update(body);
     }
 
-    let generation = format!("{:x}", digest.finalize());
+    let generation = hexadecimal(&digest.finalize());
     source_digest.update(generation.as_bytes());
     println!(
-        "cargo:rustc-env=NETAUDIO_BUILD_ID={:x}",
-        source_digest.finalize()
+        "cargo:rustc-env=NETAUDIO_BUILD_ID={}",
+        hexadecimal(&source_digest.finalize())
     );
     let prefix = format!("/_assets/{generation}");
     let mut document = String::from_utf8(
@@ -77,8 +77,8 @@ fn main() -> Result<()> {
         let encoded = encoder.finish()?;
         fs::write(&identity, body)?;
         fs::write(&compressed, &encoded)?;
-        let identity_digest = format!("{:x}", Sha256::digest(body));
-        let compressed_digest = format!("{:x}", Sha256::digest(&encoded));
+        let identity_digest = hexadecimal(&Sha256::digest(body));
+        let compressed_digest = hexadecimal(&Sha256::digest(&encoded));
         let content_type = match Path::new(path)
             .extension()
             .and_then(|extension| extension.to_str())
@@ -157,4 +157,8 @@ fn collect(root: &Path, directory: &Path, files: &mut BTreeMap<String, Vec<u8>>)
     }
 
     Ok(())
+}
+
+fn hexadecimal(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
