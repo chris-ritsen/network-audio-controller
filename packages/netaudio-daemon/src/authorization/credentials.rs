@@ -1,6 +1,6 @@
 use super::{AuthorizationError, READ_SCOPE, SCOPES, WRITE_SCOPE};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use rand::{rngs::OsRng, RngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, Rng};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use url::Url;
@@ -16,7 +16,7 @@ pub fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
 
 pub fn token(length: usize) -> String {
     let mut bytes = vec![0; length];
-    OsRng.fill_bytes(&mut bytes);
+    UnwrapErr(SysRng).fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
 }
 

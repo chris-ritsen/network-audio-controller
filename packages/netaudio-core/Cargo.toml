@@ -10,7 +10,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 anyhow = "1"
-h264-reader = "0.8"
+h264-reader = "0.9"
 caseless = "0.2.2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["raw_value"] }
@@ -19,7 +19,7 @@ num-bigint = "0.4"
 num-rational = "0.4"
 num-traits = "0.2"
 roxmltree = "0.21"
-schemars = { version = "=1.2.1", features = ["raw_value"], optional = true }
+schemars = { version = "1.2.3", features = ["raw_value"], optional = true }
 
 [features]
 schema = ["dep:schemars"]
@@ -30,7 +30,7 @@ path = "src/bin/export_schema.rs"
 required-features = ["schema"]
 
 [target.'cfg(not(any(target_os = "ios", target_os = "tvos", target_os = "visionos", target_os = "watchos")))'.dependencies]
-base64 = "0.22"
+base64 = "0.23"
 cfb = "0.16"
 flate2 = "1"
 lzxd = "0.2"

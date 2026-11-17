@@ -3,7 +3,7 @@ use super::operations::ControlError;
 use crate::configuration::Configuration;
 use anyhow::{ensure, Context, Result};
 use netaudio_core::lock::{self, LockOperation, LockResult, KEY_LENGTH};
-use rand::RngCore;
+use rand::TryRng;
 use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -168,7 +168,7 @@ impl Exchange {
     ) -> Result<Self> {
         let socket = UdpSocket::bind(SocketAddr::new(local, 0)).await?;
         socket.connect((target, lock::DEVICE_LOCK_PORT)).await?;
-        let sequence = (rand::rngs::OsRng.next_u32() as u16).max(1);
+        let sequence = (rand::rngs::SysRng.try_next_u32()? as u16).max(1);
         socket
             .send(&lock::build_challenge_request(sequence))
             .await?;

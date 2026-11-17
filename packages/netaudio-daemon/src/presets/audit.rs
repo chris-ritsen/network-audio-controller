@@ -3,7 +3,7 @@ use crate::monitoring::journal::model::{
 };
 use crate::monitoring::journal::service::Journal;
 use anyhow::{Context, Result};
-use rand::RngCore;
+use rand::TryRng;
 use serde_json::json;
 
 pub struct PresetAudit {
@@ -19,7 +19,7 @@ impl PresetAudit {
         store: bool,
     ) -> Result<Self> {
         let mut identity = [0_u8; 16];
-        rand::rngs::OsRng
+        rand::rngs::SysRng
             .try_fill_bytes(&mut identity)
             .context("generate preset operation identity")?;
         let identity = hex::encode(identity);

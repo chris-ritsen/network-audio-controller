@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 axum = { version = "0.8.9", features = ["http1", "http2", "json", "query", "tokio"] }
-base64 = "0.22"
+base64 = "0.23"
 bytes.workspace = true
 caseless = "0.2.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
@@ -24,21 +24,21 @@ hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
 if-addrs = "0.15"
 ipnet = "2.12"
 jsonschema = { version = "0.61", default-features = false }
-mdns-sd = "=0.21.5"
+mdns-sd = "0.22"
 netaudio-core = { path = "../netaudio-core", features = ["schema"] }
 notify = "8.2"
 pbkdf2 = "0.12"
 percent-encoding = "2"
 qrcodegen = "1.8"
-rand = "0.8"
+rand = "0.10"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
-redis = { version = "=1.7.1", default-features = false, features = ["tokio-rustls-comp"] }
-reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls-manual-roots"] }
+redis = { version = "1.8.2", default-features = false, features = ["tokio-rustls-comp"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
 rusqlite = { version = "0.43", features = ["bundled"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 rustls-webpki = { version = "0.103", default-features = false, features = ["alloc"] }
-schemars = "=1.2.1"
+schemars = "1.2.3"
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
@@ -70,14 +70,14 @@ sha2 = "0.10"
 mimalloc = { version = "0.1", default-features = false }
 netlink-packet-core = "0.9"
 netlink-packet-route = "0.34"
-netlink-sys = "0.8.8"
+netlink-sys = "0.9"
 sd-notify = "0.5"
 tracing-journald = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 blake2 = "0.10.6"
 nix = { version = "0.32", features = ["resource"] }
-zbus = { version = "=6.2.1", default-features = false, features = ["object-manager", "tokio"] }
+zbus = { version = "6.3.0", default-features = false, features = ["object-manager", "tokio"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_System_IO"] }

@@ -1,6 +1,6 @@
 use super::{client::Client, Credential, Error, Transport};
 use base64::Engine;
-use rand::RngCore;
+use rand::TryRng;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -294,7 +294,7 @@ impl Sessions {
 
     pub fn open(&self) -> Result<(String, Arc<Session>), Error> {
         let mut bytes = [0_u8; 32];
-        rand::rngs::OsRng
+        rand::rngs::SysRng
             .try_fill_bytes(&mut bytes)
             .map_err(|_| Error::Persistence("Session identity could not be generated"))?;
         let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);

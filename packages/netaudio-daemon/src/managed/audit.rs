@@ -3,7 +3,7 @@ use crate::monitoring::journal::{
     model::{Derivation, EventKind, LifecyclePhase, OperationRequest, Severity},
     service::Journal,
 };
-use rand::RngCore;
+use rand::TryRng;
 use serde_json::{json, Value};
 
 pub(super) struct Audit {
@@ -55,7 +55,7 @@ impl Audit {
         correlation: Option<String>,
     ) -> Result<Self, Error> {
         let mut identifier = [0_u8; 16];
-        rand::rngs::OsRng
+        rand::rngs::SysRng
             .try_fill_bytes(&mut identifier)
             .map_err(|_| Error::Persistence("Managed operation identity could not be generated"))?;
         let identifier = hex::encode(identifier);

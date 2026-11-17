@@ -127,19 +127,22 @@ impl Peers {
             "Peer advertised an unsupported transport scheme"
         );
         ensure!(service.port != 0, "Peer advertised an invalid service port");
-        let mut builder = reqwest::Client::builder()
+        let configuration = if scheme == "https" {
+            let fingerprint = service
+                .property("tls_sha256")
+                .context("Peer does not advertise a TLS certificate fingerprint")?;
+            tls::configuration(fingerprint)?
+        } else {
+            tls::untrusting()?
+        };
+        let client = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
             .pool_max_idle_per_host(0)
-            .timeout(deadline);
-        if scheme == "https" {
-            let fingerprint = service
-                .property("tls_sha256")
-                .context("Peer does not advertise a TLS certificate fingerprint")?;
-            builder = builder.use_preconfigured_tls(tls::configuration(fingerprint)?);
-        }
-        let client = builder.build()?;
+            .timeout(deadline)
+            .use_preconfigured_tls(configuration)
+            .build()?;
         let (method, path, body) = match resource {
             Resource::Snapshot => (Method::GET, "/host-audio", None),
             Resource::Meter(body) => (Method::POST, "/host-audio/meter", Some(body)),

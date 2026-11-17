@@ -1,6 +1,6 @@
 use anyhow::{ensure, Context, Result};
 use netaudio_core::device_controls::{allocate_panel_sequence, PanelStatus};
-use rand::RngCore;
+use rand::TryRng;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -118,7 +118,7 @@ impl PanelRequests {
             Some(offset) => offset,
             None => {
                 let mut bytes = [0; 4];
-                rand::rngs::OsRng
+                rand::rngs::SysRng
                     .try_fill_bytes(&mut bytes)
                     .context("initialize panel request sequence")?;
                 let offset = u32::from_ne_bytes(bytes);

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rand::RngCore;
+use rand::TryRng;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -48,7 +48,7 @@ impl PreviewTokens {
         }
 
         let mut bytes = [0; TOKEN_BYTES];
-        rand::rngs::OsRng.try_fill_bytes(&mut bytes)?;
+        rand::rngs::SysRng.try_fill_bytes(&mut bytes)?;
         let token = netaudio_core::bytes::hexadecimal(&bytes);
         anyhow::ensure!(!previews.contains_key(&token), "preview token collision");
         previews.insert(

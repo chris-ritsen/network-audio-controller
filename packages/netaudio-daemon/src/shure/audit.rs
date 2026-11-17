@@ -4,7 +4,7 @@ use crate::monitoring::journal::{
 };
 use anyhow::{Context, Result};
 use netaudio_core::shure::{Change, Device};
-use rand::RngCore;
+use rand::TryRng;
 use serde_json::{json, Map, Value};
 
 pub(super) struct Audit {
@@ -14,7 +14,7 @@ pub(super) struct Audit {
 impl Audit {
     pub async fn begin(journal: &Journal, device: &Device, change: &Change) -> Result<Self> {
         let mut bytes = [0; 16];
-        rand::rngs::OsRng
+        rand::rngs::SysRng
             .try_fill_bytes(&mut bytes)
             .context("Generate wireless operation identity")?;
         let identifier = hex::encode(bytes);

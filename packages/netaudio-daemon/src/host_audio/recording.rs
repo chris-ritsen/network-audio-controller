@@ -9,7 +9,7 @@ use netaudio_core::host_audio::{
     recording::{Configuration, Record},
     snapshot::{Direction, Snapshot},
 };
-use rand::RngCore;
+use rand::TryRng;
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{watch, Notify};
@@ -166,7 +166,7 @@ impl Worker {
         cancellation: &CancellationToken,
     ) -> Result<()> {
         let mut identity = [0; 16];
-        rand::rngs::OsRng
+        rand::rngs::SysRng
             .try_fill_bytes(&mut identity)
             .context("Generate JACK recording identity")?;
         let mut session = Session {

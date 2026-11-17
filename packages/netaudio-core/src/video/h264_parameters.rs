@@ -68,10 +68,10 @@ impl Parameters {
                 .read_ue("seq_parameter_set_id")
                 .map_err(|error| anyhow!("invalid PPS syntax: {error:?}"))?;
             prefix
-                .read_bool("entropy_coding_mode_flag")
+                .read_bit("entropy_coding_mode_flag")
                 .map_err(|error| anyhow!("invalid PPS syntax: {error:?}"))?;
             prefix
-                .read_bool("bottom_field_pic_order_in_frame_present_flag")
+                .read_bit("bottom_field_pic_order_in_frame_present_flag")
                 .map_err(|error| anyhow!("invalid PPS syntax: {error:?}"))?;
             ensure!(
                 prefix
@@ -125,7 +125,7 @@ impl Parameters {
                         .header()
                         .map_err(|error| anyhow!("invalid slice NAL: {error:?}"))?;
                     let (slice, sequence, picture) =
-                        SliceHeader::from_bits(&self.context, &mut nal.rbsp_bits(), header)
+                        SliceHeader::from_bits(&self.context, &mut nal.rbsp_bits(), header, None)
                             .map_err(|error| anyhow!("invalid slice header: {error:?}"))?;
                     ensure!(
                         matches!(slice.field_pic, FieldPic::Frame)

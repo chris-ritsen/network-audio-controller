@@ -5,7 +5,7 @@ use crate::monitoring::journal::{
 };
 use anyhow::{Context, Result};
 use netaudio_core::host_audio::{control::Command, protocol::Provider};
-use rand::RngCore;
+use rand::TryRng;
 use serde_json::{json, Map, Value};
 
 pub(super) struct Audit {
@@ -49,7 +49,7 @@ impl Audit {
         command: Value,
     ) -> Result<Self> {
         let mut identity = [0; 16];
-        rand::rngs::OsRng
+        rand::rngs::SysRng
             .try_fill_bytes(&mut identity)
             .context("generate host audio operation identity")?;
         let identifier = hex::encode(identity);

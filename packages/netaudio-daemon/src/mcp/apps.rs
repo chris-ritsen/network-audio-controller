@@ -7,7 +7,7 @@ use crate::events::{EventOptions, CLIENT_QUEUE_CAPACITY, TELEMETRY_FIELDS};
 use crate::state::{ReadModel, Subscription};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use futures_util::{FutureExt, StreamExt};
-use rand::RngCore;
+use rand::TryRng;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -281,7 +281,7 @@ impl Apps {
         }
 
         let mut bytes = [0; SESSION_TOKEN_BYTES];
-        rand::rngs::OsRng
+        rand::rngs::SysRng
             .try_fill_bytes(&mut bytes)
             .map_err(anyhow::Error::from)?;
         let identifier = URL_SAFE_NO_PAD.encode(bytes);

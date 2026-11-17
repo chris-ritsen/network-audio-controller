@@ -4,7 +4,7 @@ use rustls::crypto::{
     ring, verify_tls12_signature, verify_tls13_signature, WebPkiSupportedAlgorithms,
 };
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{ClientConfig, DigitallySignedStruct, Error, SignatureScheme};
+use rustls::{ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
@@ -74,4 +74,14 @@ pub fn configuration(fingerprint: &str) -> Result<ClientConfig> {
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
         .with_no_client_auth())
+}
+
+pub fn untrusting() -> Result<ClientConfig> {
+    Ok(
+        ClientConfig::builder_with_provider(Arc::new(ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .context("Peer TLS protocols are unavailable")?
+            .with_root_certificates(RootCertStore::empty())
+            .with_no_client_auth(),
+    )
 }
