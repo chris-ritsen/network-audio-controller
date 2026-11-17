@@ -495,6 +495,8 @@ impl Server {
             interface: &self.interface,
             clock: &snapshot,
             local_clock_identity: self.configuration.local_clock_identity,
+            manufacturer: monitoring::MANUFACTURER,
+            model: monitoring::MODEL,
             statistics: statistics.as_ref(),
             software_version: SOFTWARE_VERSION,
         };

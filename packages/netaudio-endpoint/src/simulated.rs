@@ -1,48 +1,39 @@
-use std::collections::hash_map::RandomState;
-use std::collections::{BTreeMap, HashMap};
-use std::hash::{BuildHasher, Hasher};
+use std::collections::{BTreeSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket as StandardSocket};
-use std::num::NonZeroU16;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
-use netaudio_core::commands::{self, AudioConfigurationRequest, ChannelType, MeteringRequest};
-use netaudio_core::device_requests::{DeviceRequest, SettingsRequest, parse_device_request};
-use netaudio_core::discovery::{VirtualDeviceAdvertisement, virtual_device};
-use netaudio_core::parser::ChannelAudioConfiguration;
-use netaudio_core::protocol::{
-    ArcOperation, ControlRequestHeader, MULTICAST_GROUP_CONTROL_MONITORING,
-    MULTICAST_GROUP_HEARTBEAT, NetaudioPort, RESULT_CODE_SUCCESS,
+use if_addrs::IfAddr;
+use mdns_sd::{IfKind, ServiceDaemon};
+use netaudio_core::native_audio::clock::discipline::Snapshot;
+use netaudio_core::native_audio::clock::version_one::{ETHERNET_TECHNOLOGY, PortIdentity};
+use netaudio_core::native_audio::endpoint_control::monitoring::{
+    self, Identity, Interface, Manager, StatusContext, StatusQuery,
 };
-use netaudio_core::publications::{
-    ArcResponse, ArcResponseBody, AudioCapabilityKind, ChannelDirection, ChannelSource,
-    Publication, PublicationBody, PublishedChannel, next_publication_id,
-};
-use socket2::{Domain, Protocol, Socket, Type};
+use netaudio_core::native_audio::endpoint_control::source::{self, Action};
+use netaudio_core::native_audio::endpoint_control::{Endpoint, Profile};
+use netaudio_core::protocol::MULTICAST_GROUP_HEARTBEAT;
+use netaudio_endpoint::advertisement::Advertisement;
+use socket2::SockRef;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
-const CO_HOSTED_PORT_BASE: u16 = 24500;
-const CO_HOSTED_PORT_STRIDE: u16 = 10;
-const DEFAULT_LATENCY_NANOSECONDS: u32 = 1_000_000;
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+const LINK_SPEED_MEGABITS_PER_SECOND: u32 = 1000;
+const LOCAL_MULTICAST_TIME_TO_LIVE: u32 = 1;
 const MAXIMUM_DATAGRAM_BYTES: usize = 2048;
 const MAXIMUM_DEVICES: u16 = 16;
-const MAXIMUM_LATENCY_NANOSECONDS: u32 = 21_333_334;
-const METERING_INTERVAL: Duration = Duration::from_millis(100);
-const METERING_LEASE: Duration = Duration::from_secs(10);
-const MINIMUM_LATENCY_NANOSECONDS: u32 = 150_000;
+const MAXIMUM_FLOW_SLOTS: u16 = 8;
 const READINESS_TIMEOUT: Duration = Duration::from_secs(10);
-const SUPPORTED_ENCODINGS: [u16; 3] = [24, 16, 32];
+const RECEIVE_QUEUE_DATAGRAMS: usize = 256;
+const SOFTWARE_VERSION: u32 = 0x0001_0000;
+const STATUS_QUEUE_REQUESTS: usize = 64;
 
 pub struct Options {
     pub address: Option<Ipv4Addr>,
     pub count: u16,
-    pub detailed_metering: bool,
     pub manufacturer: String,
     pub model: String,
     pub name: String,
@@ -53,41 +44,45 @@ pub struct Options {
     pub transmit_channels: u16,
 }
 
-struct Ports {
-    arc: u16,
-    control: u16,
-    settings: u16,
+#[derive(Clone, Copy)]
+enum Channel {
+    Control,
+    Monitoring,
+    Routing,
+    Source,
 }
 
 struct Received {
-    data: Vec<u8>,
-    peer: SocketAddr,
-    reply: Arc<UdpSocket>,
-    settings_only: bool,
+    bytes: Vec<u8>,
+    channel: Channel,
+    peer: SocketAddrV4,
+}
+
+struct PendingStatus {
+    due: Instant,
+    request: Vec<u8>,
+}
+
+struct Sockets {
+    control: Arc<UdpSocket>,
+    monitoring: Arc<UdpSocket>,
+    routing: Arc<UdpSocket>,
+    source: Arc<UdpSocket>,
 }
 
 struct Device {
-    active_latency: u32,
-    address: Ipv4Addr,
-    configured_latency: u32,
-    detailed_metering: bool,
-    encoding: u16,
-    hardware_address: [u8; 6],
+    clock: Snapshot,
+    endpoint: Endpoint,
+    identity: Identity,
+    interface: Interface,
     manufacturer: String,
-    metering: BTreeMap<(String, u16), (SocketAddrV4, Instant)>,
-    metering_sequence: u16,
-    metering_socket: UdpSocket,
     model: String,
-    multicast: Option<Arc<UdpSocket>>,
-    name: String,
-    ports: Ports,
-    process: u16,
-    publication_sequence: u16,
-    receive_channels: Vec<String>,
-    sample_rate: u32,
+    monitoring: Manager,
+    pending_status: VecDeque<PendingStatus>,
+    readers: JoinSet<()>,
+    reported: BTreeSet<&'static str>,
+    sockets: Sockets,
     started: Instant,
-    subscriptions: BTreeMap<u16, (String, String)>,
-    transmit_channels: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -185,10 +180,21 @@ async fn start(options: &Options) -> Result<Running> {
         bail!("count must be from 1 through {MAXIMUM_DEVICES}");
     }
 
+    monitoring::validate_product(&options.manufacturer, &options.model)?;
+    let mut profile = Profile {
+        flow_slots: options.transmit_channels.max(options.receive_channels).min(MAXIMUM_FLOW_SLOTS),
+        receive_channels: options.receive_channels,
+        sample_rate: options.sample_rate,
+        transmit_channels: options.transmit_channels,
+        ..Profile::default()
+    };
+    profile.frames_per_packet = profile.minimum_frames_per_packet();
+    profile.validate()?;
     let address = match options.address {
         Some(address) => address,
         None => routed_address()?,
     };
+    let network = network(address)?;
     let discovery = ServiceDaemon::new().context("start discovery for the simulated devices")?;
     discovery.disable_interface(IfKind::All)?;
     discovery.enable_interface(IfKind::Addr(IpAddr::V4(address)))?;
@@ -196,32 +202,22 @@ async fn start(options: &Options) -> Result<Running> {
     let mut tasks = JoinSet::new();
 
     for index in 0..options.count {
-        let ports = if index == 0 {
-            Ports {
-                arc: NetaudioPort::Arc as u16,
-                control: NetaudioPort::Control as u16,
-                settings: NetaudioPort::Settings as u16,
-            }
-        } else {
-            let base = CO_HOSTED_PORT_BASE + index * CO_HOSTED_PORT_STRIDE;
-            Ports {
-                arc: base,
-                control: base + 1,
-                settings: base + 3,
-            }
-        };
         let name = if index == 0 {
             options.name.clone()
         } else {
             format!("{}-{}", options.name, index + 1)
         };
-        let (device, requests, listening) =
-            Device::open(options, name, address, index, ports).await?;
-        device.advertise(&discovery)?;
+        let (device, requests) = Device::open(options, profile, name, &network, index).await?;
+
+        for service in device.advertisement()?.services()? {
+            let name = service.get_fullname().to_owned();
+            discovery.register(service).with_context(|| format!("advertise {name}"))?;
+        }
+
         summaries.push(Summary {
-            mac: hardware_address_text(device.hardware_address),
-            name: device.name.clone(),
-            ports: listening,
+            mac: hardware_address_text(device.interface.hardware_address),
+            name: device.endpoint.name.clone(),
+            ports: device.ports()?,
         });
         tasks.spawn(device.serve(requests));
     }
@@ -280,622 +276,292 @@ fn routed_address() -> Result<Ipv4Addr> {
     }
 }
 
+fn network(address: Ipv4Addr) -> Result<Interface> {
+    for interface in if_addrs::get_if_addrs().context("enumerate network interfaces")? {
+        let IfAddr::V4(assigned) = &interface.addr else {
+            continue;
+        };
+
+        if assigned.ip == address {
+            return Ok(Interface {
+                address,
+                gateway: Ipv4Addr::UNSPECIFIED,
+                hardware_address: [0; 6],
+                index: interface.index.unwrap_or(0),
+                link_up: true,
+                name_server: Ipv4Addr::UNSPECIFIED,
+                netmask: assigned.netmask,
+                speed_megabits_per_second: Some(LINK_SPEED_MEGABITS_PER_SECOND),
+            });
+        }
+    }
+
+    bail!("{address} is not an address of this computer")
+}
+
 fn hardware_address_text(address: [u8; 6]) -> String {
     address.iter().map(|octet| format!("{octet:02x}")).collect::<Vec<_>>().join(":")
 }
 
-fn random_hardware_address() -> [u8; 6] {
-    let random = RandomState::new().build_hasher().finish().to_be_bytes();
-    [0x02, random[0], random[1], random[2], random[3], random[4]]
+async fn bind(address: Ipv4Addr) -> Result<Arc<UdpSocket>> {
+    Ok(Arc::new(
+        UdpSocket::bind(SocketAddrV4::new(address, 0))
+            .await
+            .with_context(|| format!("open a control socket on {address}"))?,
+    ))
 }
 
-fn multicast_socket(address: Ipv4Addr, port: u16) -> Result<UdpSocket> {
-    let group: Ipv4Addr = MULTICAST_GROUP_CONTROL_MONITORING.parse()?;
-    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-    socket.set_reuse_address(true)?;
-    #[cfg(unix)]
-    socket.set_reuse_port(true)?;
-    socket.set_multicast_ttl_v4(255)?;
-    socket.set_multicast_if_v4(&address)?;
-    socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into())?;
-    socket.join_multicast_v4(&group, &address)?;
-    socket.set_nonblocking(true)?;
-    Ok(UdpSocket::from_std(socket.into())?)
+fn port(socket: &UdpSocket) -> Result<u16> {
+    Ok(socket.local_addr()?.port())
 }
 
-fn metering_socket(address: Ipv4Addr) -> Result<UdpSocket> {
-    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-    socket.set_multicast_ttl_v4(1)?;
-    socket.set_multicast_if_v4(&address)?;
-    socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into())?;
-    socket.set_nonblocking(true)?;
-    Ok(UdpSocket::from_std(socket.into())?)
-}
+async fn receive(socket: Arc<UdpSocket>, channel: Channel, sender: mpsc::Sender<Received>) {
+    let mut buffer = [0; MAXIMUM_DATAGRAM_BYTES];
 
-fn listen(socket: Arc<UdpSocket>, settings_only: bool, requests: mpsc::Sender<Received>) {
-    tokio::spawn(async move {
-        let mut buffer = vec![0; MAXIMUM_DATAGRAM_BYTES];
+    loop {
+        let Ok((length, SocketAddr::V4(peer))) = socket.recv_from(&mut buffer).await else {
+            continue;
+        };
+        let received = Received {
+            bytes: buffer[..length].to_vec(),
+            channel,
+            peer,
+        };
 
-        while let Ok((length, peer)) = socket.recv_from(&mut buffer).await {
-            let received = Received {
-                data: buffer[..length].to_vec(),
-                peer,
-                reply: Arc::clone(&socket),
-                settings_only,
-            };
-
-            if requests.send(received).await.is_err() {
-                return;
-            }
+        if sender.send(received).await.is_err() {
+            return;
         }
-    });
-}
-
-fn acknowledgement(data: &[u8], accepted: bool) -> ArcResponseBody {
-    ArcResponseBody::Acknowledgement {
-        request: data.to_vec(),
-        accepted,
     }
 }
 
 impl Device {
     async fn open(
         options: &Options,
+        profile: Profile,
         name: String,
-        address: Ipv4Addr,
-        process: u16,
-        ports: Ports,
-    ) -> Result<(Self, mpsc::Receiver<Received>, Vec<u16>)> {
-        let (sender, requests) = mpsc::channel(64);
-        let mut listening = Vec::new();
-        let mut responders = vec![ports.arc];
-
-        if ports.arc == NetaudioPort::Arc as u16 {
-            responders.push(NetaudioPort::ArcSecondary as u16);
-        }
-
-        responders.push(ports.control);
-
-        for port in responders {
-            match UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).await {
-                Ok(socket) => {
-                    listening.push(port);
-                    listen(Arc::new(socket), false, sender.clone());
-                }
-                Err(error) => eprintln!("{name}: could not listen on port {port}: {error}"),
-            }
-        }
-
-        let multicast = match multicast_socket(address, ports.settings) {
-            Ok(socket) => {
-                let socket = Arc::new(socket);
-                listening.push(ports.settings);
-                listen(Arc::clone(&socket), true, sender.clone());
-                Some(socket)
-            }
-            Err(error) => {
-                eprintln!("{name}: could not open the settings port {}: {error}", ports.settings);
-                None
-            }
+        network: &Interface,
+        index: u16,
+    ) -> Result<(Self, mpsc::Receiver<Received>)> {
+        let address = network.address.octets();
+        let process = index.to_be_bytes();
+        let identity = Identity {
+            instance: [
+                0, 0, address[0], address[1], address[2], address[3], process[0], process[1],
+            ],
+            process: index,
         };
-        let channels = |count: u16| (1..=count).map(|number| format!("Ch {number}")).collect();
-        let device = Self {
-            active_latency: DEFAULT_LATENCY_NANOSECONDS,
-            address,
-            configured_latency: DEFAULT_LATENCY_NANOSECONDS,
-            detailed_metering: options.detailed_metering,
-            encoding: SUPPORTED_ENCODINGS[0],
-            hardware_address: random_hardware_address(),
-            manufacturer: options.manufacturer.clone(),
-            metering: BTreeMap::new(),
-            metering_sequence: 0,
-            metering_socket: metering_socket(address).with_context(|| {
-                format!("send from {address}; it is not an address of this computer")
-            })?,
-            model: options.model.clone(),
-            multicast,
+        let interface = Interface {
+            hardware_address: [0x02, process[1], address[0], address[1], address[2], address[3]],
+            ..network.clone()
+        };
+        let endpoint = Endpoint::with_profile(name.clone(), profile)?;
+        let sockets = Sockets {
+            control: bind(network.address).await?,
+            monitoring: bind(network.address).await?,
+            routing: bind(network.address).await?,
+            source: bind(network.address).await?,
+        };
+        let publication = SockRef::from(sockets.monitoring.as_ref());
+        publication.set_multicast_if_v4(&network.address)?;
+        publication.set_multicast_ttl_v4(LOCAL_MULTICAST_TIME_TO_LIVE)?;
+        publication.set_multicast_loop_v4(true)?;
+        let monitoring = Manager::new(
+            identity,
             name,
-            ports,
-            process,
-            publication_sequence: 1,
-            receive_channels: channels(options.receive_channels),
-            sample_rate: options.sample_rate,
+            SocketAddrV4::new(network.address, port(&sockets.control)?),
+        )?;
+        let (sender, requests) = mpsc::channel(RECEIVE_QUEUE_DATAGRAMS);
+        let mut readers = JoinSet::new();
+
+        for (channel, socket) in [
+            (Channel::Control, &sockets.control),
+            (Channel::Monitoring, &sockets.monitoring),
+            (Channel::Routing, &sockets.routing),
+            (Channel::Source, &sockets.source),
+        ] {
+            readers.spawn(receive(Arc::clone(socket), channel, sender.clone()));
+        }
+
+        let device = Self {
+            clock: Snapshot {
+                complete_observations: 0,
+                estimated_error_nanoseconds: None,
+                fitted_rate_parts_per_billion: None,
+                generation: 0,
+                last_dataset: None,
+                last_fit_rejection: None,
+                network_time: None,
+                parent_identity: PortIdentity {
+                    communication_technology: ETHERNET_TECHNOLOGY,
+                    identifier: [0; 6],
+                    port: 0,
+                },
+                reason: "a simulated device follows no clock".to_owned(),
+                usable: false,
+            },
+            endpoint,
+            identity,
+            interface,
+            manufacturer: options.manufacturer.clone(),
+            model: options.model.clone(),
+            monitoring,
+            pending_status: VecDeque::new(),
+            readers,
+            reported: BTreeSet::new(),
+            sockets,
             started: Instant::now(),
-            subscriptions: BTreeMap::new(),
-            transmit_channels: channels(options.transmit_channels),
         };
 
-        Ok((device, requests, listening))
+        Ok((device, requests))
     }
 
-    fn advertise(&self, discovery: &ServiceDaemon) -> Result<()> {
-        let advertisements = virtual_device(VirtualDeviceAdvertisement {
-            name: self.name.clone(),
-            model: self.model.clone(),
-            manufacturer: self.manufacturer.clone(),
-            address: self.address,
-            arc_port: self.ports.arc,
-            control_port: Some(self.ports.control),
-            process_id: self.process,
-            tx_channels: self.transmit_channels.clone(),
-            sample_rate: self.sample_rate,
-            encoding: self.encoding,
-            supported_encodings: SUPPORTED_ENCODINGS.to_vec(),
-            configured_latency_ns: self.configured_latency,
-        });
+    fn advertisement(&self) -> Result<Advertisement<'_>> {
+        Ok(Advertisement {
+            address: self.interface.address,
+            endpoint: &self.endpoint,
+            identity: self.identity,
+            manufacturer: &self.manufacturer,
+            model: &self.model,
+            monitoring_port: port(&self.sockets.monitoring)?,
+            routing_port: port(&self.sockets.routing)?,
+            source_port: port(&self.sockets.source)?,
+        })
+    }
 
-        for advertisement in advertisements {
-            let instance = advertisement
-                .name
-                .strip_suffix(&format!(".{}", advertisement.service_type))
-                .unwrap_or(&advertisement.name)
-                .to_owned();
-            let properties: HashMap<String, String> =
-                advertisement.properties.into_iter().collect();
-            let service = ServiceInfo::new(
-                &advertisement.service_type,
-                &instance,
-                &advertisement.server,
-                IpAddr::V4(Ipv4Addr::from(advertisement.address)),
-                advertisement.port,
-                properties,
-            )?;
-            discovery
-                .register(service)
-                .with_context(|| format!("advertise {}", advertisement.name))?;
-        }
+    fn ports(&self) -> Result<Vec<u16>> {
+        Ok(vec![
+            port(&self.sockets.routing)?,
+            port(&self.sockets.monitoring)?,
+            port(&self.sockets.control)?,
+            port(&self.sockets.source)?,
+        ])
+    }
 
-        Ok(())
+    fn now(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_nanos()).unwrap_or(u64::MAX)
     }
 
     async fn serve(mut self, mut requests: mpsc::Receiver<Received>) -> Result<()> {
-        let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
-        let mut metering = tokio::time::interval(METERING_INTERVAL);
-        self.publish_status(self.board_info()).await;
-        self.publish_status(self.product_info()).await;
-
         loop {
+            let due = self.pending_status.front().map(|pending| pending.due);
+
             tokio::select! {
                 received = requests.recv() => {
                     let Some(received) = received else {
                         return Ok(());
                     };
 
-                    if let Some(response) = self.respond(&received).await? {
-                        let _ = received.reply.send_to(&response, received.peer).await;
+                    if let Err(error) = self.respond(received).await {
+                        self.report(error);
                     }
                 }
-                _ = heartbeat.tick() => self.send_heartbeat().await,
-                _ = metering.tick(), if !self.metering.is_empty() => self.send_levels().await,
+                _ = tokio::time::sleep_until(due.unwrap_or_else(Instant::now)), if due.is_some() => {
+                    if let Err(error) = self.publish_status().await {
+                        self.report(error);
+                    }
+                }
+                Some(stopped) = self.readers.join_next() => {
+                    stopped.context("a control socket reader stopped")?;
+                    bail!("a control socket reader stopped");
+                }
             }
         }
     }
 
-    fn identity(&self) -> [u8; 8] {
-        let address = self.address.octets();
-        let process = self.process.to_be_bytes();
-        [0, 0, address[0], address[1], address[2], address[3], process[0], process[1]]
-    }
-
-    fn board_info(&self) -> PublicationBody {
-        PublicationBody::BoardInfo {
-            name: self.name.clone(),
-            detailed_metering: self.detailed_metering,
+    fn report(&mut self, error: netaudio_core::native_audio::source_control::Error) {
+        if self.reported.insert(error.0) {
+            eprintln!("{}: ignored a request: {error}", self.endpoint.name);
         }
     }
 
-    fn product_info(&self) -> PublicationBody {
-        PublicationBody::ProductInfo {
-            name: self.name.clone(),
-            manufacturer: self.manufacturer.clone(),
-            model: self.model.clone(),
-        }
-    }
+    async fn respond(
+        &mut self,
+        received: Received,
+    ) -> Result<(), netaudio_core::native_audio::source_control::Error> {
+        let (socket, reply) = match received.channel {
+            Channel::Control => {
+                if let Some(query) = StatusQuery::decode(&received.bytes)?
+                    && self.pending_status.len() < STATUS_QUEUE_REQUESTS
+                {
+                    let pending = PendingStatus {
+                        due: Instant::now() + Duration::from_nanos(query.delay_nanoseconds()),
+                        request: received.bytes,
+                    };
+                    let position =
+                        self.pending_status.partition_point(|request| request.due <= pending.due);
+                    self.pending_status.insert(position, pending);
+                }
 
-    fn publication(&mut self, body: PublicationBody) -> Option<Vec<u8>> {
-        let publication = Publication {
-            device_id: Some(self.identity()),
-            message_id: self.publication_sequence,
-            process: self.process,
-            publication: body,
-            source_ip: self.address,
-        };
-        self.publication_sequence = next_publication_id(self.publication_sequence);
-
-        match publication.packet() {
-            Ok(packet) => Some(packet),
-            Err(error) => {
-                eprintln!("{}: could not build a status message: {error:?}", self.name);
-                None
+                return Ok(());
             }
-        }
-    }
-
-    async fn publish(&mut self, body: PublicationBody, destination: SocketAddr) {
-        let Some(packet) = self.publication(body) else {
-            return;
+            Channel::Monitoring => {
+                (&self.sockets.monitoring, self.monitoring.answer(&received.bytes, self.now())?)
+            }
+            Channel::Routing => (
+                &self.sockets.routing,
+                self.endpoint.answer(&received.bytes)?.map(|answer| answer.bytes),
+            ),
+            Channel::Source => (
+                &self.sockets.source,
+                match source::admit(&self.endpoint, &received.bytes)? {
+                    Some(Action::Reply(bytes)) => Some(bytes),
+                    Some(
+                        Action::Allocate {
+                            header,
+                            ..
+                        }
+                        | Action::Remap {
+                            header,
+                            ..
+                        }
+                        | Action::Stop {
+                            header,
+                            ..
+                        },
+                    ) => Some(source::unavailable(header)?),
+                    None => None,
+                },
+            ),
         };
 
-        if let Some(multicast) = &self.multicast {
-            let _ = multicast.send_to(&packet, destination).await;
+        if let Some(reply) = reply {
+            let _ = socket.send_to(&reply, received.peer).await;
         }
+
+        Ok(())
     }
 
-    async fn publish_status(&mut self, body: PublicationBody) {
-        if let Ok(group) = MULTICAST_GROUP_CONTROL_MONITORING.parse::<Ipv4Addr>() {
-            self.publish(body, SocketAddr::from((group, NetaudioPort::Info as u16))).await;
-        }
-    }
-
-    async fn send_heartbeat(&mut self) {
-        let body = PublicationBody::Heartbeat {
-            tx_count: self.transmit_channels.len() as u16,
-            rx_count: self.receive_channels.len() as u16,
+    async fn publish_status(
+        &mut self,
+    ) -> Result<(), netaudio_core::native_audio::source_control::Error> {
+        let Some(pending) = self.pending_status.pop_front() else {
+            return Ok(());
         };
-
-        if let Ok(group) = MULTICAST_GROUP_HEARTBEAT.parse::<Ipv4Addr>() {
-            self.publish(body, SocketAddr::from((group, NetaudioPort::Heartbeat as u16))).await;
-        }
-    }
-
-    fn levels(&self, count: usize, phase: f64, seconds: f64) -> Vec<u8> {
-        (0..count)
-            .map(|index| {
-                let swing =
-                    (seconds * 2.0 + index as f64 * 0.7 + phase + f64::from(self.process) * 1.3)
-                        .sin();
-                (1.0 + (2.0 * (30.0 - 24.0 * swing)).round()) as u8
-            })
-            .collect()
-    }
-
-    async fn send_levels(&mut self) {
-        let now = Instant::now();
-        self.metering.retain(|_, (_, expires)| *expires > now);
-
-        if self.metering.is_empty() {
-            return;
-        }
-
-        let seconds = self.started.elapsed().as_secs_f64();
-        let publication = Publication {
-            device_id: Some(self.identity()),
-            message_id: self.metering_sequence,
-            process: 0,
-            publication: PublicationBody::Metering {
-                tx_levels: self.levels(self.transmit_channels.len(), 0.0, seconds),
-                rx_levels: self.levels(self.receive_channels.len(), std::f64::consts::PI, seconds),
+        let context = StatusContext {
+            clock: &self.clock,
+            interface: &self.interface,
+            local_clock_identity: PortIdentity {
+                communication_technology: ETHERNET_TECHNOLOGY,
+                identifier: self.interface.hardware_address,
+                port: 1,
             },
-            source_ip: self.address,
+            manufacturer: &self.manufacturer,
+            model: &self.model,
+            software_version: SOFTWARE_VERSION,
+            statistics: None,
         };
-        self.metering_sequence = self.metering_sequence.wrapping_add(1);
-        let Ok(packet) = publication.packet() else {
-            return;
+        let Some(body) = monitoring::answer_status_query(&pending.request, &context)? else {
+            return Ok(());
         };
-        let mut destinations: Vec<SocketAddrV4> =
-            self.metering.values().map(|(destination, _)| *destination).collect();
-        destinations.sort();
-        destinations.dedup();
+        let packet = self.monitoring.publication(&body)?;
+        let now = self.now();
+        let destinations = std::iter::once(monitoring::CLASS_TWO_MULTICAST_DESTINATION)
+            .chain(self.monitoring.destinations(now));
 
         for destination in destinations {
-            let _ = self.metering_socket.send_to(&packet, destination).await;
-        }
-    }
-
-    async fn respond(&mut self, received: &Received) -> Result<Option<Vec<u8>>> {
-        let Some(request) = parse_device_request(&received.data) else {
-            return Ok(None);
-        };
-
-        match request {
-            DeviceRequest::Metering {
-                request,
-            } => {
-                if received.settings_only || !self.detailed_metering {
-                    return Ok(None);
-                }
-
-                Ok(self.metering_reply(request, &received.data))
-            }
-            DeviceRequest::Settings {
-                request,
-            } => {
-                self.settings(request, received.peer).await;
-                Ok(None)
-            }
-            DeviceRequest::Control {
-                header,
-            } => {
-                if received.settings_only {
-                    return Ok(None);
-                }
-
-                Ok(self.control(&header, &received.data))
-            }
-        }
-    }
-
-    fn metering_reply(&mut self, request: MeteringRequest, data: &[u8]) -> Option<Vec<u8>> {
-        let key = (request.owner.clone(), request.discriminator);
-
-        match request.destination {
-            Some(destination) => {
-                self.metering.insert(
-                    key,
-                    (
-                        SocketAddrV4::new(destination.ipv4, destination.port),
-                        Instant::now() + METERING_LEASE,
-                    ),
-                );
-            }
-            None => {
-                self.metering.remove(&key);
-            }
+            let _ = self.sockets.monitoring.send_to(&packet, destination).await;
         }
 
-        self.response(
-            commands::PROTOCOL_CMC,
-            request.transaction_id,
-            ArcResponseBody::Metering {
-                request: data.to_vec(),
-                responder_process: self.process,
-                responder_identity: self.identity(),
-            },
-        )
-    }
-
-    async fn settings(&mut self, request: SettingsRequest, peer: SocketAddr) {
-        match request {
-            SettingsRequest::BoardInfo => {
-                self.publish_status(self.board_info()).await;
-                self.publish(self.board_info(), peer).await;
-            }
-            SettingsRequest::ProductInfo => {
-                self.publish_status(self.product_info()).await;
-                self.publish(self.product_info(), peer).await;
-            }
-            SettingsRequest::ClockStatus => {
-                self.publish_status(PublicationBody::ClockStatus {
-                    mac_address: self.hardware_address,
-                })
-                .await;
-            }
-            SettingsRequest::InterfaceStatus => {
-                self.publish_status(PublicationBody::InterfaceStatus {
-                    mac_address: self.hardware_address,
-                })
-                .await;
-            }
-            SettingsRequest::Audio {
-                request,
-            } => self.audio(request).await,
-        }
-    }
-
-    async fn audio(&mut self, request: AudioConfigurationRequest) {
-        let body = match request {
-            AudioConfigurationRequest::SampleRate {
-                value,
-            } => {
-                if value.is_some_and(|value| value != self.sample_rate) {
-                    return;
-                }
-
-                PublicationBody::Audio {
-                    capability: AudioCapabilityKind::SampleRate,
-                    current_value: self.sample_rate,
-                    supported_values: vec![self.sample_rate],
-                }
-            }
-            AudioConfigurationRequest::Encoding {
-                value,
-            } => {
-                if let Some(value) = value {
-                    let Some(encoding) = SUPPORTED_ENCODINGS
-                        .iter()
-                        .copied()
-                        .find(|supported| u32::from(*supported) == value)
-                    else {
-                        return;
-                    };
-                    self.encoding = encoding;
-                }
-
-                PublicationBody::Audio {
-                    capability: AudioCapabilityKind::Encoding,
-                    current_value: u32::from(self.encoding),
-                    supported_values: SUPPORTED_ENCODINGS.iter().copied().map(u32::from).collect(),
-                }
-            }
-        };
-        self.publish_status(body).await;
-    }
-
-    fn response(&self, protocol: u16, transaction: u16, body: ArcResponseBody) -> Option<Vec<u8>> {
-        let response = ArcResponse {
-            protocol_id: protocol,
-            transaction_id: transaction,
-            result_code: RESULT_CODE_SUCCESS,
-            response: body,
-        };
-
-        match response.packet() {
-            Ok(packet) => Some(packet),
-            Err(error) => {
-                eprintln!("{}: could not build a reply: {error:?}", self.name);
-                None
-            }
-        }
-    }
-
-    fn audio_configuration(&self) -> ChannelAudioConfiguration {
-        ChannelAudioConfiguration {
-            sample_rate: self.sample_rate,
-            encoding: self.encoding,
-            supported_encodings: SUPPORTED_ENCODINGS.to_vec(),
-        }
-    }
-
-    fn control(&mut self, header: &ControlRequestHeader, data: &[u8]) -> Option<Vec<u8>> {
-        let mut protocol = header.protocol_id;
-        let body = match header.operation {
-            ArcOperation::CmcRegistration => {
-                protocol = commands::PROTOCOL_CMC;
-                ArcResponseBody::CmcRegistration {
-                    device_ip: self.address,
-                    instance: Some(u64::from_be_bytes(self.identity())),
-                    settings_port: NonZeroU16::new(self.ports.settings)?,
-                }
-            }
-            ArcOperation::DeviceName => ArcResponseBody::DeviceName {
-                name: self.name.clone(),
-            },
-            ArcOperation::ChannelCount => ArcResponseBody::ChannelCount {
-                tx_count: self.transmit_channels.len() as u16,
-                rx_count: self.receive_channels.len() as u16,
-            },
-            ArcOperation::DeviceInfo => ArcResponseBody::DeviceInfo {
-                model_name: self.model.clone(),
-                display_name: self.name.clone(),
-                model_code: self.model.clone(),
-                port: String::new(),
-            },
-            ArcOperation::TransmitterChannels => ArcResponseBody::ChannelStatus {
-                channel_type: ChannelDirection::Tx,
-                channels: self
-                    .transmit_channels
-                    .iter()
-                    .map(|name| PublishedChannel {
-                        name: name.clone(),
-                        source: None,
-                    })
-                    .collect(),
-                audio: self.audio_configuration(),
-            },
-            ArcOperation::TransmitterChannelNames => ArcResponseBody::TransmitterNames {
-                names: self.transmit_channels.clone(),
-            },
-            ArcOperation::ReceiverChannels => ArcResponseBody::ChannelStatus {
-                channel_type: ChannelDirection::Rx,
-                channels: self
-                    .receive_channels
-                    .iter()
-                    .zip(1u16..)
-                    .map(|(name, number)| PublishedChannel {
-                        name: name.clone(),
-                        source: self.subscriptions.get(&number).map(|(channel, device)| {
-                            ChannelSource {
-                                channel: channel.clone(),
-                                device: device.clone(),
-                            }
-                        }),
-                    })
-                    .collect(),
-                audio: self.audio_configuration(),
-            },
-            ArcOperation::DeviceSettings => ArcResponseBody::DeviceSettings {
-                sample_rate: self.sample_rate,
-                default_latency_ns: DEFAULT_LATENCY_NANOSECONDS,
-                configured_latency_ns: self.configured_latency,
-                active_latency_ns: self.active_latency,
-                maximum_latency_ns: MAXIMUM_LATENCY_NANOSECONDS,
-                minimum_latency_ns: MINIMUM_LATENCY_NANOSECONDS,
-            },
-            ArcOperation::SetLatency => match commands::parse_set_latency_request(data) {
-                Some(latency) => {
-                    self.configured_latency = latency;
-                    self.active_latency = latency;
-                    ArcResponseBody::LatencyApplied {
-                        latency_ns: latency,
-                    }
-                }
-                None => acknowledgement(data, false),
-            },
-            ArcOperation::PropertyDirectory => ArcResponseBody::PropertyDirectory,
-            ArcOperation::TransmitterFlows => ArcResponseBody::EmptyFlows {
-                channel_type: ChannelDirection::Tx,
-            },
-            ArcOperation::ReceiverFlows => ArcResponseBody::EmptyFlows {
-                channel_type: ChannelDirection::Rx,
-            },
-            ArcOperation::TransmitterFlowLabels => ArcResponseBody::EmptyTransmitterFlowLabels,
-            ArcOperation::ReceiverPortRanges => ArcResponseBody::ReceiverPortRanges,
-            ArcOperation::SetChannelName => {
-                let accepted = self.rename_channel(data);
-                acknowledgement(data, accepted)
-            }
-            ArcOperation::AddSubscriptions => {
-                let accepted = self.subscribe(data);
-                acknowledgement(data, accepted)
-            }
-            ArcOperation::RemoveSubscriptions => {
-                let accepted = self.unsubscribe(data);
-                acknowledgement(data, accepted)
-            }
-            _ => return None,
-        };
-
-        self.response(protocol, header.transaction_id, body)
-    }
-
-    fn rename_channel(&mut self, data: &[u8]) -> bool {
-        let Some(change) = commands::parse_set_channel_name_request(data) else {
-            return false;
-        };
-        let channels = match change.channel_type {
-            ChannelType::Rx => &mut self.receive_channels,
-            ChannelType::Tx => &mut self.transmit_channels,
-        };
-        let Some(channel) = usize::from(change.channel_number)
-            .checked_sub(1)
-            .and_then(|index| channels.get_mut(index))
-        else {
-            return false;
-        };
-        *channel = change.name;
-        true
-    }
-
-    fn subscribe(&mut self, data: &[u8]) -> bool {
-        let Some(subscriptions) = commands::parse_add_subscriptions_request(data) else {
-            return false;
-        };
-
-        if subscriptions
-            .iter()
-            .any(|subscription| usize::from(subscription.rx_channel) > self.receive_channels.len())
-        {
-            return false;
-        }
-
-        for subscription in subscriptions {
-            println!(
-                "{}: receive channel {} subscribed to {}@{}",
-                self.name, subscription.rx_channel, subscription.tx_channel, subscription.tx_device
-            );
-            self.subscriptions.insert(
-                u16::from(subscription.rx_channel),
-                (subscription.tx_channel, subscription.tx_device),
-            );
-        }
-
-        true
-    }
-
-    fn unsubscribe(&mut self, data: &[u8]) -> bool {
-        let Some(channels) = commands::parse_remove_subscriptions_request(data) else {
-            return false;
-        };
-
-        if channels.iter().any(|channel| *channel as usize > self.receive_channels.len()) {
-            return false;
-        }
-
-        for channel in channels {
-            println!("{}: receive channel {channel} unsubscribed", self.name);
-            self.subscriptions.remove(&(channel as u16));
-        }
-
-        true
+        Ok(())
     }
 }

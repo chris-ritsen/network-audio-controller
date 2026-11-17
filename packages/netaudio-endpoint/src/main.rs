@@ -172,8 +172,6 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         count: u16,
         #[arg(long)]
-        detailed_metering: bool,
-        #[arg(long)]
         interface_address: Option<Ipv4Addr>,
         #[arg(long, default_value = "netaudio")]
         manufacturer: String,
@@ -571,7 +569,6 @@ async fn execute(arguments: Arguments) -> Result<()> {
         }
         Command::Simulate {
             count,
-            detailed_metering,
             interface_address,
             manufacturer,
             model,
@@ -585,7 +582,6 @@ async fn execute(arguments: Arguments) -> Result<()> {
             simulated::run(simulated::Options {
                 address: interface_address,
                 count,
-                detailed_metering,
                 manufacturer,
                 model,
                 name,

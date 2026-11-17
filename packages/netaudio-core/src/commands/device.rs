@@ -214,54 +214,6 @@ pub enum ChannelType {
     Tx,
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct ChannelNameChange {
-    pub channel_type: ChannelType,
-    pub channel_number: u16,
-    pub name: String,
-}
-
-pub fn parse_set_channel_name_request(data: &[u8]) -> Option<ChannelNameChange> {
-    use crate::bytes::{read_u16, string_at_pointer};
-
-    let protocol = read_u16(data, 0)?;
-    let opcode = read_u16(data, 6)?;
-    let (channel_type, channel_offset, pointer_offset) = match (protocol, opcode) {
-        (PROTOCOL_DANTE_FLOW, OPCODE_RX_CHANNEL_NAME_SET) => (ChannelType::Rx, 12, 14),
-        (
-            PROTOCOL_DANTE_FLOW | PROTOCOL_ARC_2809 | crate::protocol::PROTOCOL_ARC_280F,
-            OPCODE_TX_CHANNEL_NAME_SET,
-        ) => (ChannelType::Tx, 14, 16),
-        (
-            PROTOCOL_ARC_2809 | crate::protocol::PROTOCOL_ARC_280F,
-            OPCODE_SET_RECEIVER_CHANNEL_NAME_2809,
-        ) => (ChannelType::Rx, 20, 24),
-        _ => return None,
-    };
-    let channel_number = read_u16(data, channel_offset)?;
-    let pointer = read_u16(data, pointer_offset)?;
-    let name = string_at_pointer(data, pointer)?;
-
-    let expected = build_set_channel_name_for_protocol(
-        protocol,
-        channel_type,
-        channel_number,
-        &name,
-        read_u16(data, 4)?,
-    )
-    .ok()?;
-
-    if data != expected {
-        return None;
-    }
-
-    Some(ChannelNameChange {
-        channel_type,
-        channel_number,
-        name,
-    })
-}
-
 pub fn build_reset_channel_name(
     channel_type: ChannelType,
     channel_number: u8,

@@ -46,6 +46,13 @@ const CLOCK_QUERY_FIELD_SELECTOR_OFFSET: usize = 8;
 const CLOCK_QUERY_FLAG_SELECTOR_OFFSET: usize = 32;
 const CLOCK_QUERY_EXTENDED_REGION_OFFSET: usize = 40;
 const MANUFACTURER_TAG: &[u8; 8] = b"Audinate";
+const VERSION_MANUFACTURER_OFFSET: usize = 20;
+const VERSION_MODEL_OFFSET: usize = 64;
+
+pub const MANUFACTURER: &str = "NetAudio";
+pub const MAXIMUM_MANUFACTURER_BYTES: usize = 8;
+pub const MAXIMUM_MODEL_BYTES: usize = 31;
+pub const MODEL: &str = "NetAudio Virtual Endpoint";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -430,8 +437,31 @@ pub struct StatusContext<'a> {
     pub interface: &'a Interface,
     pub clock: &'a Snapshot,
     pub local_clock_identity: PortIdentity,
+    pub manufacturer: &'a str,
+    pub model: &'a str,
     pub statistics: Option<&'a Statistics>,
     pub software_version: u32,
+}
+
+pub fn validate_product(manufacturer: &str, model: &str) -> Result<(), Error> {
+    let printable = |text: &str| text.bytes().all(|byte| (0x20..0x7f).contains(&byte));
+
+    if manufacturer.is_empty()
+        || manufacturer.len() > MAXIMUM_MANUFACTURER_BYTES
+        || !printable(manufacturer)
+    {
+        return Err(Error(
+            "manufacturer must contain 1 through 8 printable ASCII characters",
+        ));
+    }
+
+    if model.is_empty() || model.len() > MAXIMUM_MODEL_BYTES || !printable(model) {
+        return Err(Error(
+            "model must contain 1 through 31 printable ASCII characters",
+        ));
+    }
+
+    Ok(())
 }
 
 fn body(kind: u16, length: usize) -> Vec<u8> {
@@ -526,13 +556,16 @@ pub fn answer_status_query(
 
     match query {
         StatusQuery::Version => {
+            validate_product(context.manufacturer, context.model)?;
             let mut status = body(VERSION_STATUS, 256);
             put_double_word(&mut status, 8, context.software_version);
-            status[20..28].copy_from_slice(b"NetAudio");
+            let manufacturer = context.manufacturer.as_bytes();
+            status[VERSION_MANUFACTURER_OFFSET..VERSION_MANUFACTURER_OFFSET + manufacturer.len()]
+                .copy_from_slice(manufacturer);
             put_double_word(&mut status, 28, PRIMARY_CAPABILITIES);
             put_double_word(&mut status, 52, 1);
-            let model = b"NetAudio Virtual Endpoint";
-            status[64..64 + model.len()].copy_from_slice(model);
+            let model = context.model.as_bytes();
+            status[VERSION_MODEL_OFFSET..VERSION_MODEL_OFFSET + model.len()].copy_from_slice(model);
             put_double_word(&mut status, 196, SECONDARY_CAPABILITIES);
             Ok(Some(status))
         }

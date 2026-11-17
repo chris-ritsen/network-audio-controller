@@ -3,56 +3,6 @@ use super::*;
 const SAMPLE_RATE_REQUEST: u16 = 0x0081;
 const ENCODING_REQUEST: u16 = 0x0083;
 
-#[derive(Debug, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AudioConfigurationRequest {
-    SampleRate { value: Option<u32> },
-    Encoding { value: Option<u32> },
-}
-
-pub fn parse_audio_configuration_request(data: &[u8]) -> Option<AudioConfigurationRequest> {
-    use crate::bytes::{read_u16, read_u32};
-
-    let message_id = read_u16(data, 4)?;
-    let host_mac: [u8; 6] = data.get(8..14)?.try_into().ok()?;
-    let kind = read_u16(data, 26)?;
-    let mode = read_u32(data, 32)?;
-    let value = read_u32(data, 36)?;
-    let canonical = match (kind, mode) {
-        (SAMPLE_RATE_REQUEST, 0) => build_probe_sample_rate(host_mac, message_id),
-        (ENCODING_REQUEST, 0) => build_probe_encoding(host_mac, message_id),
-        (SAMPLE_RATE_REQUEST, 1) => build_set_sample_rate(value, message_id),
-        (ENCODING_REQUEST, 1) => build_set_encoding(value, message_id),
-        _ => return None,
-    }
-    .ok()?;
-
-    if canonical != data {
-        return None;
-    }
-
-    let value = (mode == 1).then_some(value);
-    Some(match kind {
-        SAMPLE_RATE_REQUEST => AudioConfigurationRequest::SampleRate { value },
-        ENCODING_REQUEST => AudioConfigurationRequest::Encoding { value },
-        _ => return None,
-    })
-}
-
-pub fn parse_set_latency_request(data: &[u8]) -> Option<u32> {
-    use crate::bytes::{read_u16, read_u32};
-
-    let latency_ns = read_u32(data, 10 + LATENCY_SET_PREAMBLE.len())?;
-    let canonical = build_set_latency_for_protocol(
-        read_u16(data, 0)?,
-        f64::from(latency_ns) / 1_000_000.0,
-        read_u16(data, 4)?,
-    )
-    .ok()?;
-
-    (canonical == data).then_some(latency_ns)
-}
-
 pub(crate) fn require_latency_protocol(protocol_id: u16) -> Result<(), NetaudioError> {
     if !matches!(
         protocol_id,

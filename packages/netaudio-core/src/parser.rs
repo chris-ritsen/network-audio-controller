@@ -142,54 +142,11 @@ pub struct ChannelAudioMetadata {
     pub supported_encodings: Option<Vec<u16>>,
 }
 
-#[derive(serde::Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct ChannelAudioConfiguration {
-    pub sample_rate: u32,
-    pub encoding: u16,
-    pub supported_encodings: Vec<u16>,
-}
-
 #[derive(Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChannelAudioPublication {
     pub channel_metadata: Vec<u8>,
     pub pcm_property: String,
-}
-
-pub fn channel_audio_publication(
-    config: &ChannelAudioConfiguration,
-) -> Option<ChannelAudioPublication> {
-    if config.sample_rate == 0 || !config.supported_encodings.contains(&config.encoding) {
-        return None;
-    }
-
-    let mut bitmap = 0u16;
-
-    for encoding in &config.supported_encodings {
-        let (_, bit) = PCM_ENCODINGS.iter().find(|(known, _)| known == encoding)?;
-        bitmap |= bit;
-    }
-
-    let mut metadata = Vec::with_capacity(CHANNEL_AUDIO_METADATA_SIZE);
-    metadata.extend_from_slice(&config.sample_rate.to_be_bytes());
-
-    for value in [
-        0x0101,
-        config.encoding,
-        0x0400,
-        config.encoding,
-        config.encoding,
-        bitmap,
-    ] {
-        metadata.extend_from_slice(&value.to_be_bytes());
-    }
-
-    Some(ChannelAudioPublication {
-        channel_metadata: metadata,
-        pcm_property: format!("{} 0x{bitmap:x}", config.encoding / 8),
-    })
 }
 
 pub fn parse_channel_audio_metadata(response: &[u8]) -> Option<ChannelAudioMetadata> {

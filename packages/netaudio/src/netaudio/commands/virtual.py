@@ -359,10 +359,10 @@ def _terminate_spawned_process(process: subprocess.Popen[Any]) -> None:
 def _validate_configuration(tx: int, rx: int, sample_rate: int, count: int) -> None:
     if not 1 <= count <= MAXIMUM_DEVICE_COUNT:
         raise typer.BadParameter(f"--count must be between 1 and {MAXIMUM_DEVICE_COUNT}")
-    if tx < 0:
-        raise typer.BadParameter("--tx cannot be negative")
-    if rx < 0:
-        raise typer.BadParameter("--rx cannot be negative")
+    if tx < 1:
+        raise typer.BadParameter("--tx must be at least 1")
+    if rx < 1:
+        raise typer.BadParameter("--rx must be at least 1")
     if sample_rate <= 0:
         raise typer.BadParameter("--sample-rate must be positive")
 
@@ -388,7 +388,6 @@ def _simulation_arguments(
     sample_rate: int,
     interface: Optional[str],
     count: int,
-    detailed_metering: bool,
 ) -> list[str]:
     arguments = [
         "simulate",
@@ -405,8 +404,6 @@ def _simulation_arguments(
         "--transmit-channels",
         str(tx),
     ]
-    if detailed_metering:
-        arguments.append("--detailed-metering")
     if interface:
         arguments.extend(("--interface-address", interface))
     return arguments
@@ -456,7 +453,6 @@ def _start_virtual(
     interface: Optional[str],
     foreground: bool,
     count: int = 1,
-    detailed_metering: bool = True,
 ) -> None:
     _validate_configuration(tx, rx, sample_rate, count)
     arguments = _simulation_arguments(
@@ -467,7 +463,6 @@ def _start_virtual(
         sample_rate=sample_rate,
         interface=_interface_address(interface),
         count=count,
-        detailed_metering=detailed_metering,
     )
 
     if foreground:
@@ -491,9 +486,6 @@ def virtual_start(
     sample_rate: int = typer.Option(48000, "--sample-rate", "-r", help="Sample rate in Hz."),
     interface: Optional[str] = typer.Option(None, "--interface", "-i", help="Network interface to bind."),
     count: int = typer.Option(1, "--count", help="Number of virtual devices to run on this address."),
-    detailed_metering: bool = typer.Option(
-        True, "--detailed-metering/--no-detailed-metering", help="Answer detailed metering subscriptions."
-    ),
     foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in the foreground instead of detaching."),
 ) -> None:
     try:
@@ -506,7 +498,6 @@ def virtual_start(
             interface=interface,
             foreground=foreground,
             count=count,
-            detailed_metering=detailed_metering,
         )
     except VirtualLifecycleError as exception:
         _report_lifecycle_error(exception)
@@ -597,9 +588,6 @@ def virtual_restart(
     sample_rate: int = typer.Option(48000, "--sample-rate", "-r", help="Sample rate in Hz."),
     interface: Optional[str] = typer.Option(None, "--interface", "-i", help="Network interface to bind."),
     count: int = typer.Option(1, "--count", help="Number of virtual devices to run on this address."),
-    detailed_metering: bool = typer.Option(
-        True, "--detailed-metering/--no-detailed-metering", help="Answer detailed metering subscriptions."
-    ),
 ) -> None:
     try:
         _stop_virtual(missing_ok=True)
@@ -612,7 +600,6 @@ def virtual_restart(
             interface=interface,
             foreground=False,
             count=count,
-            detailed_metering=detailed_metering,
         )
     except VirtualLifecycleError as exception:
         _report_lifecycle_error(exception)
