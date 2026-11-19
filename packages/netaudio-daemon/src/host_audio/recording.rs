@@ -361,14 +361,10 @@ fn configuration(observation: &Observation) -> Result<Option<Configuration>> {
     let sources = snapshot
         .ports
         .iter()
-        .filter(|(name, port)| {
+        .filter(|(_, port)| {
             port.direction == Direction::Output
                 && port.port_type == "audio"
-                && !name.starts_with("netaudio-meter")
-                && port
-                    .connections
-                    .iter()
-                    .any(|name| !name.starts_with("netaudio-meter"))
+                && !port.connections.is_empty()
         })
         .map(|(name, port)| (name.clone(), port.identity))
         .collect::<std::collections::BTreeMap<_, _>>();

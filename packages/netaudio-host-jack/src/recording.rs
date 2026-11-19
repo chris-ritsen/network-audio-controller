@@ -58,7 +58,7 @@ fn record(
     configuration: Configuration,
 ) -> Result<()> {
     let (client, _) = jack::Client::new(
-        "netaudio-meter-history",
+        &format!("{}-history", crate::METER_CLIENT),
         jack::ClientOptions::NO_START_SERVER,
     )
     .context("Connect the recorder to the existing JACK server")?;

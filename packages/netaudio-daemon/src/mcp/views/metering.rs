@@ -1,14 +1,18 @@
 use super::{channel_label, channels, compact, last_seen, text, Records};
 use serde_json::{json, Map, Value};
 
-pub fn signal_text(reading: &Value) -> String {
-    let state = match reading["state"].as_str() {
+fn signal_state(reading: &Value) -> &str {
+    match reading["state"].as_str() {
         Some("signal_present") => "signal",
         Some("below_threshold") => "very quiet",
         Some("mute_or_floor" | "muted") => "silent",
         Some(state) => state,
         None => "unknown",
-    };
+    }
+}
+
+pub fn signal_text(reading: &Value) -> String {
+    let state = signal_state(reading);
 
     if let Some(level) = reading["dbfs"].as_f64() {
         if state == "signal" {
@@ -157,12 +161,10 @@ fn compact_channels(readings: &Map<String, Value>, records: &Value) -> Value {
             number.clone()
         };
         let description = signal_text(reading);
-        let group = if description == "silent" {
-            Some((&mut silent_names, &mut silent_numbers))
-        } else if description.starts_with("very quiet") {
-            Some((&mut quiet_names, &mut quiet_numbers))
-        } else {
-            None
+        let group = match signal_state(reading) {
+            "silent" => Some((&mut silent_names, &mut silent_numbers)),
+            "very quiet" => Some((&mut quiet_names, &mut quiet_numbers)),
+            _ => None,
         };
 
         if let Some((names, numbers)) = group {

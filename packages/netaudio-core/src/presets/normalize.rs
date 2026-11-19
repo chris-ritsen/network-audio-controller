@@ -158,9 +158,9 @@ pub fn normalize_configuration(value: Value) -> Result<Map<String, Value>, Strin
 
             if settings
                 .keys()
-                .any(|name| name.to_lowercase().contains("pair"))
+                .any(|name| crate::device_controls::is_action(name))
             {
-                return Err("pairing-list clearing cannot be saved or applied in a preset".into());
+                return Err(super::planning::ACTION_EXCLUDED.into());
             }
         }
     }

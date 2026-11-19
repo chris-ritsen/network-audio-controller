@@ -47,6 +47,10 @@ impl Panel {
     }
 }
 
+pub fn is_action(category: &str) -> bool {
+    category == "bluetooth_pairing"
+}
+
 pub fn category_panel(category: &str) -> Option<Panel> {
     [Panel::Bluetooth, Panel::Video, Panel::Serial]
         .into_iter()

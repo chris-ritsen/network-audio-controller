@@ -62,15 +62,7 @@ fn natural(left: &str, right: &str) -> Ordering {
 }
 
 fn label(name: &str, port: &Value) -> String {
-    let aliases = entries(&port["aliases"])
-        .filter_map(Value::as_str)
-        .filter(|alias| !alias.starts_with("alsa_pcm:"))
-        .collect::<Vec<_>>();
-    if aliases.is_empty() {
-        name.to_owned()
-    } else {
-        format!("{name} [{}]", aliases.join(", "))
-    }
+    cards::port_label(name, entries(&port["aliases"]).filter_map(Value::as_str))
 }
 
 fn hardware(

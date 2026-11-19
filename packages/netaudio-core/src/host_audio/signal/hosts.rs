@@ -122,17 +122,7 @@ fn jack(
         }
         let hardware = cards::hardware_aliases(&port.aliases, &snapshot.cards)
             .or_else(|| cards::bridge_channel(name, &snapshot.bridges));
-        let aliases = port
-            .aliases
-            .iter()
-            .filter(|alias| !alias.starts_with("alsa_pcm:"))
-            .cloned()
-            .collect::<Vec<_>>();
-        let label = if aliases.is_empty() {
-            name.clone()
-        } else {
-            format!("{name} [{}]", aliases.join(", "))
-        };
+        let label = cards::port_label(name, port.aliases.iter().map(String::as_str));
         let location = hardware.as_ref().map_or_else(
             || "JACK".to_owned(),
             |hardware| {

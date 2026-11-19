@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
 
+pub(super) const ACTION_EXCLUDED: &str = "Pairing-list clearing is excluded from presets.";
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "schema", schemars(rename = "PresetActionState"))]
@@ -136,8 +138,8 @@ pub fn requested_actions(
                 .as_object()
                 .ok_or("device_controls settings must be an object")?
             {
-                if category.to_lowercase().contains("pair") {
-                    return Err("Pairing-list clearing is excluded from presets.".into());
+                if crate::device_controls::is_action(category) {
+                    return Err(ACTION_EXCLUDED.into());
                 }
                 result.push(RequestedAction {
                     kind: ActionKind::DeviceControl,

@@ -562,7 +562,6 @@ impl DeviceRecord {
         if mac.starts_with("525400")
             || mac.starts_with("0000c0a8")
             || (mac.starts_with("0000") && mac.get(4..) == Some(encoded_address.as_str()))
-            || self.name.starts_with("netaudio-page-probe")
         {
             "emulated"
         } else {

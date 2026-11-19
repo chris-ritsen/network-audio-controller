@@ -119,6 +119,18 @@ pub fn hardware_channel(port: &JackPort, cards: &[Card]) -> Option<Channel> {
     hardware_aliases(&port.aliases, cards)
 }
 
+pub fn port_label<'a>(name: &str, aliases: impl Iterator<Item = &'a str>) -> String {
+    let aliases = aliases
+        .filter(|alias| !alias.starts_with("alsa_pcm:"))
+        .collect::<Vec<_>>();
+
+    if aliases.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{name} [{}]", aliases.join(", "))
+    }
+}
+
 pub fn hardware_aliases(aliases: &[String], cards: &[Card]) -> Option<Channel> {
     aliases.iter().find_map(|alias| {
         let alias = alias.strip_prefix("alsa_pcm:hw:")?;

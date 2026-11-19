@@ -51,7 +51,7 @@ fn measure(request: Request, input: &mut Input) -> Result<Option<Readings>> {
     if request.targets.is_empty() {
         return Ok(Some(readings));
     }
-    let (client, _) = jack::Client::new("netaudio-meter", jack::ClientOptions::NO_START_SERVER)
+    let (client, _) = jack::Client::new(crate::METER_CLIENT, jack::ClientOptions::NO_START_SERVER)
         .context("Connect the measurement worker to the existing JACK server")?;
     let sample_rate = client.sample_rate();
     ensure!(sample_rate > 0, "JACK returned an invalid sample rate");

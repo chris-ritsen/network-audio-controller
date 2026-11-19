@@ -7,6 +7,9 @@ mod provider;
 #[cfg(unix)]
 mod recording;
 
+#[cfg(unix)]
+const METER_CLIENT: &str = "netaudio-meter";
+
 fn main() -> anyhow::Result<()> {
     let purpose = match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
         [] => netaudio_core::host_audio::protocol::Purpose::Observe,

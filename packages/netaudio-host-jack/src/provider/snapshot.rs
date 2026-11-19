@@ -25,7 +25,7 @@ fn read_ports(provider: &Provider) -> Result<JackSnapshot> {
     let metadata = client.property_get_all();
     let mut ports = BTreeMap::new();
     for name in client.ports(None, None, jack::PortFlags::empty()) {
-        if name.starts_with("netaudio-meter") {
+        if name.starts_with(crate::METER_CLIENT) {
             continue;
         }
         let port = client
@@ -63,7 +63,7 @@ fn read_ports(provider: &Provider) -> Result<JackSnapshot> {
             })
             .collect();
         let mut connections = port.get_connections()?;
-        connections.retain(|name| !name.starts_with("netaudio-meter"));
+        connections.retain(|name| !name.starts_with(crate::METER_CLIENT));
         connections.sort();
         ports.insert(
             name.clone(),

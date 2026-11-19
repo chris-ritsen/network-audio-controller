@@ -4,7 +4,8 @@ pub mod planning;
 pub mod presentation;
 mod profile;
 pub use profile::{
-    category_panel, profile, Panel, PanelFamily, PanelProfile, PanelProfileRequest, PanelSelection,
+    category_panel, is_action, profile, Panel, PanelFamily, PanelProfile, PanelProfileRequest,
+    PanelSelection,
 };
 mod protobuf;
 use crate::bytes::{read_u16, read_u32};
