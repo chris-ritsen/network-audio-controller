@@ -74,6 +74,7 @@ fn transmit_flow(flow: &Value, channels: &Value, addresses: &BTreeMap<&str, &str
     compact(json!({
         "id": first(&[&flow["flow_number"], &flow["identity"]["global_flow_id"]]),
         "type": flow["flow_type"],
+        "advertised": (flow["advertised"] == false).then_some(false),
         "to": endpoint,
         "channels": labels(&numbers, channels),
         "sample_rate_hz": first(&[&flow["sample_rate_hz"], &flow["sample_rate"]]),

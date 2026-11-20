@@ -407,6 +407,8 @@ fn stable_inventory(
                     "identity",
                     "media_mode",
                     "flow_type",
+                    "advertised",
+                    "persistent",
                     "name",
                     "channel_slots",
                     "sample_rate_hz",
@@ -562,6 +564,10 @@ fn comparison_value(specification: &serde_json::Map<String, Value>, field: &str)
         return serde_json::to_value(serde_json::from_value::<FlowType>(value.clone()).ok()?).ok();
     }
 
+    if matches!(field, "advertised" | "persistent") {
+        return value.as_bool().map(Value::Bool);
+    }
+
     if field == "channel_slots" {
         let mut slots: Vec<ChannelSlot> = serde_json::from_value(value.clone()).ok()?;
         validate_slots(&slots).ok()?;
@@ -625,6 +631,8 @@ pub fn compare_transmit_flows(request: &FlowComparisonRequest) -> FlowComparison
     for (field, optional) in [
         ("media_mode", false),
         ("flow_type", false),
+        ("advertised", true),
+        ("persistent", true),
         ("name", true),
         ("channel_slots", false),
         ("sample_rate_hz", true),
@@ -697,6 +705,8 @@ struct InventoryRecord {
     inventory_layout: Option<String>,
     flow_type: FlowType,
     media_mode: Option<MediaMode>,
+    advertised: Option<bool>,
+    persistent: Option<bool>,
     flow_name: Option<String>,
     transmitter_channel_ids_by_slot: Option<Vec<u16>>,
     channels: Option<Vec<u16>>,
@@ -866,6 +876,8 @@ pub fn transmit_flow_specification(
     let observed_fields: Vec<&str> = [
         ("media_mode", !matches!(media_mode, MediaMode::Unknown)),
         ("flow_type", true),
+        ("advertised", record.advertised.is_some()),
+        ("persistent", record.persistent.is_some()),
         ("channel_slots", true),
         ("name", record.flow_name.is_some()),
         ("sample_rate_hz", record.sample_rate.is_some()),
@@ -892,6 +904,8 @@ pub fn transmit_flow_specification(
         schema_version: 1,
         media_mode,
         flow_type: record.flow_type,
+        advertised: record.advertised,
+        persistent: record.persistent,
         name: record.flow_name,
         channel_slots: populated,
         sample_rate_hz: record.sample_rate,

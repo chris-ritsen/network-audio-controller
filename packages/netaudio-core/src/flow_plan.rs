@@ -295,6 +295,8 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
                 "identity.global_flow_id",
                 "channel_slots",
                 "media_mode",
+                "advertised",
+                "persistent",
                 "name",
                 "sample_rate_hz",
                 "encoding_bits",
@@ -331,6 +333,8 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
                 && matches!(request.media_mode, MediaMode::NativeDante)
                 && request.name.is_none()
                 && request.frames_per_packet.is_none()
+                && request.advertised != Some(false)
+                && request.persistent != Some(false)
                 && destinations.is_empty()
             {
                 plan.serializer_cohort = Some("legacy_2729_explicit_slot_multicast");
@@ -343,7 +347,7 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
                 "configuration": {"sample_rate": input.device.sample_rate, "encoding": input.device.encoding,
                     "media_class": if matches!(request.media_mode, MediaMode::RtpAes67) {3} else {1},
                     "frames_per_packet":request.frames_per_packet.map_or(0, |frames_per_packet| frames_per_packet.get()),
-                    "label":request.name,"persistent":true,"advertised":true,
+                    "label":request.name,"persistent":request.persistent.unwrap_or(true),"advertised":request.advertised.unwrap_or(true),
                     "destinations":destinations.iter().map(|destination| json!({"address":destination.address,"port":destination.port})).collect::<Vec<_>>()}})
             }
         }
@@ -365,6 +369,10 @@ pub fn plan_create(input: &FlowCreateRequest) -> FlowCommandPlan {
 
             if request.identity.global_flow_id.is_some() {
                 plan.reject("ARC 2.8.9 allocation assigns the global flow identifier");
+            }
+
+            if request.advertised == Some(false) || request.persistent == Some(false) {
+                plan.reject("ARC 2.8.9 allocation creates only advertised persistent flows");
             }
 
             if !matches!(request.identity.media_type_code, None | Some(3)) {

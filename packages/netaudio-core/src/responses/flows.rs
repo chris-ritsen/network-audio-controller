@@ -349,12 +349,15 @@ fn parse_transmitter_flow_status_record(
         first_segment_end,
         TRANSMITTER_FLOW_STATUS_RECORD_FLOW_TYPE,
     )?;
+    let multicast = flow_type_code & !MULTICAST_FLOW_FLAGS == 0;
     let (flow_type, media_mode) = match flow_type_code {
-        FLOW_TYPE_MULTICAST => (Some("multicast".to_owned()), Some("native_dante")),
         FLOW_TYPE_RTP_MULTICAST => (Some("multicast".to_owned()), Some("rtp_aes67")),
         FLOW_TYPE_UNICAST => (Some("unicast".to_owned()), Some("native_dante")),
+        _ if multicast => (Some("multicast".to_owned()), Some("native_dante")),
         _ => (None, None),
     };
+    let advertised = multicast.then_some(flow_type_code & FLOW_FLAG_UNADVERTISED == 0);
+    let persistent = multicast.then_some(flow_type_code & FLOW_FLAG_PERSISTENT != 0);
 
     let flow_name_pointer = transmitter_flow_status_segment_u16(
         response,
@@ -461,6 +464,8 @@ fn parse_transmitter_flow_status_record(
         flow_type_code,
         flow_type,
         media_mode,
+        advertised,
+        persistent,
         format_pointer,
         format_descriptor_hexadecimal: bytes_to_hex(format_descriptor),
         sample_rate,

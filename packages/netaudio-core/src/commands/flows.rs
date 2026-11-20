@@ -124,13 +124,17 @@ pub fn build_fixed_multicast_flow(
     word(&mut packet, 16, flow_id);
     let flags = if configuration.persistent {
         if destinations.is_empty() {
-            2
+            FLOW_FLAG_PERSISTENT
         } else {
-            6
+            FLOW_FLAG_PERSISTENT | FLOW_FLAG_DESTINATION
         }
     } else {
         0
-    } | if configuration.advertised { 0 } else { 0x10 };
+    } | if configuration.advertised {
+        0
+    } else {
+        FLOW_FLAG_UNADVERTISED
+    };
     word(&mut packet, 18, flags);
     packet[20..24].copy_from_slice(&configuration.sample_rate.get().to_be_bytes());
     word(&mut packet, 26, configuration.encoding.get());

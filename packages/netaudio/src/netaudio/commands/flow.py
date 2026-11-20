@@ -72,6 +72,30 @@ async def _author(path: str, body: dict) -> None:
     raise DaemonRefusal(status, result)
 
 
+def _advertised(advertised: bool | None) -> str:
+    if advertised is None:
+        return ""
+    return "yes" if advertised else "no"
+
+
+def _unparsed_row(record: dict) -> list[str]:
+    flow_type_code = record.get("flow_type_code")
+    channels = record.get("transmitter_channel_ids_by_slot") or record.get("channels") or []
+    address = record.get("destination_internet_protocol_version_four_address")
+    port = record.get("destination_user_datagram_port")
+    return [
+        str(record.get("global_flow_id") or record.get("flow_number") or ""),
+        record.get("media_mode") or "",
+        f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else "unknown",
+        _advertised(record.get("advertised")),
+        record.get("flow_name") or "",
+        ", ".join(f"{slot}:{channel}" for slot, channel in enumerate(channels, start=1) if channel),
+        format_sample_rate_hertz(record.get("sample_rate")),
+        format_encoding(record.get("encoding")),
+        f"{address}:{port}" if address and port else "",
+    ]
+
+
 async def run_flow_inspect(devices) -> None:
     server_name, _ = _selected(devices)
     inventory = await call_daemon("GET", f"/transmit-flows/{server_name}")
@@ -80,6 +104,7 @@ async def run_flow_inspect(devices) -> None:
             str(flow["identity"].get("global_flow_id") or ""),
             flow["media_mode"],
             flow["flow_type"],
+            _advertised(flow.get("advertised")),
             flow.get("name") or "",
             ", ".join(f"{entry['slot']}:{entry['transmitter_channel']}" for entry in flow["channel_slots"]),
             format_sample_rate_hertz(flow.get("sample_rate_hz")),
@@ -88,8 +113,9 @@ async def run_flow_inspect(devices) -> None:
         ]
         for flow in inventory["flows"]
     ]
+    rows.extend(_unparsed_row(record["raw_record"]) for record in inventory["unparsed_records"])
     output_table(
-        ["Flow", "Media", "Type", "Name", "Slot:Channel", "Sample Rate", "Encoding", "Destination"],
+        ["Flow", "Media", "Type", "Advertised", "Name", "Slot:Channel", "Sample Rate", "Encoding", "Destination"],
         rows,
         json_data=inventory,
         empty_message="No transmitter flows are active.",

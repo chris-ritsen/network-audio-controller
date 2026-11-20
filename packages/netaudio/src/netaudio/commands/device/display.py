@@ -282,7 +282,10 @@ def _format_transmitter_flow(flow: dict) -> str:
         subscriber = f"{subscriber_device}/{subscriber_flow}"
     else:
         subscriber = subscriber_device
-    parts = [str(flow_type), channel_text]
+    parts = [str(flow_type)]
+    if flow.get("advertised") is False:
+        parts.append("unadvertised")
+    parts.append(channel_text)
     parts.extend(part for part in audio_parts if part)
     if destination:
         parts.append(f"-> {destination}")

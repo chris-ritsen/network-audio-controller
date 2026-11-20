@@ -134,6 +134,10 @@ pub struct TransmitFlowSpecification {
     pub schema_version: u32,
     pub media_mode: MediaMode,
     pub flow_type: FlowType,
+    #[serde(default)]
+    pub advertised: Option<bool>,
+    #[serde(default)]
+    pub persistent: Option<bool>,
     pub channel_slots: Vec<ChannelSlot>,
     pub name: Option<String>,
     pub sample_rate_hz: Option<NonZeroU32>,

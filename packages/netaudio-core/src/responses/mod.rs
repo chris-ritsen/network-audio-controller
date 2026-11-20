@@ -5,7 +5,8 @@ use serde::Serialize;
 
 use crate::bytes::{read_u16, read_u32, read_u64, string_at_pointer, u16_at};
 use crate::commands::{
-    FLOW_TYPE_MULTICAST, OPCODE_CREATE_TX_FLOW, OPCODE_CREATE_TX_FLOW_2809, OPCODE_DELETE_TX_FLOW,
+    FLOW_FLAG_DESTINATION, FLOW_FLAG_PERSISTENT, FLOW_FLAG_UNADVERTISED, FLOW_TYPE_MULTICAST,
+    OPCODE_CREATE_TX_FLOW, OPCODE_CREATE_TX_FLOW_2809, OPCODE_DELETE_TX_FLOW,
     OPCODE_DELETE_TX_FLOW_2809, OPCODE_DEVICE_INFO, OPCODE_DEVICE_NAME, OPCODE_DEVICE_SETTINGS,
     OPCODE_DEVICE_SETTINGS_SET, OPCODE_PROPERTY_DIRECTORY,
     OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809, OPCODE_QUERY_RECEIVER_FLOWS,
@@ -44,6 +45,8 @@ const FLOW_RECORD_SAMPLE_RATE: usize = 4;
 const FLOW_RECORD_CHANNEL_COUNT: usize = 14;
 const FLOW_TYPE_RTP_MULTICAST: u16 = 0x0006;
 const FLOW_TYPE_UNICAST: u16 = 0x0011;
+const MULTICAST_FLOW_FLAGS: u16 =
+    FLOW_FLAG_DESTINATION | FLOW_FLAG_PERSISTENT | FLOW_FLAG_UNADVERTISED;
 const MODERN_ARC_POINTER_TABLE_OFFSET: usize = 18;
 const TRANSMITTER_FLOW_STATUS_RECORD_FLOW_NUMBER: usize = 2;
 const TRANSMITTER_FLOW_STATUS_RECORD_MEDIA_TYPE: usize = 6;
@@ -329,6 +332,10 @@ pub struct TransmitterFlowStatus {
     pub flow_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub advertised: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persistent: Option<bool>,
     pub format_pointer: u16,
     pub format_descriptor_hexadecimal: String,
     pub sample_rate: Option<u32>,
