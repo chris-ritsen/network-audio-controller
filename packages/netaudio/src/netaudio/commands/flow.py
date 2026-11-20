@@ -78,21 +78,22 @@ def _advertised(advertised: bool | None) -> str:
     return "yes" if advertised else "no"
 
 
-def _unparsed_row(record: dict) -> list[str]:
-    flow_type_code = record.get("flow_type_code")
+def _unparsed_row(unparsed: dict) -> list[str]:
+    record = unparsed["raw_record"]
     channels = record.get("transmitter_channel_ids_by_slot") or record.get("channels") or []
     address = record.get("destination_internet_protocol_version_four_address")
     port = record.get("destination_user_datagram_port")
     return [
         str(record.get("global_flow_id") or record.get("flow_number") or ""),
         record.get("media_mode") or "",
-        f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else "unknown",
+        record.get("flow_type") or "unknown",
         _advertised(record.get("advertised")),
         record.get("flow_name") or "",
         ", ".join(f"{slot}:{channel}" for slot, channel in enumerate(channels, start=1) if channel),
         format_sample_rate_hertz(record.get("sample_rate")),
         format_encoding(record.get("encoding")),
         f"{address}:{port}" if address and port else "",
+        unparsed["error"],
     ]
 
 
@@ -110,14 +111,27 @@ async def run_flow_inspect(devices) -> None:
             format_sample_rate_hertz(flow.get("sample_rate_hz")),
             format_encoding(flow.get("encoding_bits")),
             _destination(flow.get("primary_destination")) or "device allocated",
+            "",
         ]
         for flow in inventory["flows"]
     ]
-    rows.extend(_unparsed_row(record["raw_record"]) for record in inventory["unparsed_records"])
+    rows.extend(_unparsed_row(unparsed) for unparsed in inventory["unparsed_records"])
     output_table(
-        ["Flow", "Media", "Type", "Advertised", "Name", "Slot:Channel", "Sample Rate", "Encoding", "Destination"],
+        [
+            "Flow",
+            "Media",
+            "Type",
+            "Advertised",
+            "Name",
+            "Slot:Channel",
+            "Sample Rate",
+            "Encoding",
+            "Destination",
+            "Problem",
+        ],
         rows,
         json_data=inventory,
+        omit_empty_columns=True,
         empty_message="No transmitter flows are active.",
     )
 

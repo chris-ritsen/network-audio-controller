@@ -516,7 +516,7 @@ pub fn build_create_tx_flow(
     body.extend_from_slice(&format_flags.to_be_bytes());
     body.extend_from_slice(&0u16.to_be_bytes());
     body.extend_from_slice(&flow_slot.to_be_bytes());
-    body.extend_from_slice(&FLOW_TYPE_MULTICAST.to_be_bytes());
+    body.extend_from_slice(&FLOW_FLAG_PERSISTENT.to_be_bytes());
     body.extend(std::iter::repeat_n(0, 10));
     body.extend_from_slice(&channel_count.to_be_bytes());
     for channel_number in channels {

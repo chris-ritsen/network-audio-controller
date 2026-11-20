@@ -255,10 +255,7 @@ def _format_aes67(device) -> str:
 
 
 def _format_transmitter_flow(flow: dict) -> str:
-    flow_type = flow.get("flow_type")
-    if flow_type is None:
-        flow_type_code = flow.get("flow_type_code")
-        flow_type = f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else "unknown"
+    flow_type = flow.get("flow_type") or "unknown"
     channel_numbers = flow.get("populated_transmitter_channel_ids", flow.get("channels"))
     if isinstance(channel_numbers, list) and channel_numbers:
         channel_text = ",".join(str(channel_number) for channel_number in channel_numbers)

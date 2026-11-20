@@ -37,7 +37,12 @@ pub fn parse_multicast_flow_creation_2809(response: &[u8]) -> Option<MulticastFl
     if !(1..=32).contains(&global_flow_id)
         || media_type_code != MEDIA_TYPE_AUDIO
         || media_local_flow_id == 0
-        || field(TRANSMITTER_FLOW_STATUS_RECORD_FLOW_TYPE)? != FLOW_TYPE_MULTICAST
+        || transmitter_flow_status_segment_u32(
+            response,
+            record_offset,
+            first_segment_end,
+            TRANSMITTER_FLOW_STATUS_RECORD_CONFIGURATION_FLAGS,
+        )? != u32::from(FLOW_FLAG_PERSISTENT)
     {
         return None;
     }
@@ -241,6 +246,35 @@ fn transmitter_flow_status_record_geometry(
     })
 }
 
+fn destination_flow_type(address: std::net::Ipv4Addr) -> Option<&'static str> {
+    if address.is_multicast() {
+        Some("multicast")
+    } else if address.is_unspecified() {
+        None
+    } else {
+        Some("unicast")
+    }
+}
+
+fn media_mode(media_class: Option<u16>) -> Option<&'static str> {
+    match media_class {
+        Some(MEDIA_CLASS_NATIVE) => Some("native_dante"),
+        Some(MEDIA_CLASS_RTP) => Some("rtp_aes67"),
+        _ => None,
+    }
+}
+
+fn transmitter_flow_status_segment_u32(
+    response: &[u8],
+    segment_start: usize,
+    segment_end: usize,
+    field_offset: usize,
+) -> Option<u32> {
+    let field_start = segment_start.checked_add(field_offset)?;
+    let field_end = field_start.checked_add(4)?;
+    (field_end <= segment_end).then(|| read_u32(response, field_start))?
+}
+
 fn transmitter_flow_status_segment_u16(
     response: &[u8],
     segment_start: usize,
@@ -343,21 +377,13 @@ fn parse_transmitter_flow_status_record(
     if global_flow_id == 0 || media_type_code == 0 || media_local_flow_id == 0 {
         return None;
     }
-    let flow_type_code = transmitter_flow_status_segment_u16(
+    let configuration_flags = transmitter_flow_status_segment_u32(
         response,
         record_offset,
         first_segment_end,
-        TRANSMITTER_FLOW_STATUS_RECORD_FLOW_TYPE,
+        TRANSMITTER_FLOW_STATUS_RECORD_CONFIGURATION_FLAGS,
     )?;
-    let multicast = flow_type_code & !MULTICAST_FLOW_FLAGS == 0;
-    let (flow_type, media_mode) = match flow_type_code {
-        FLOW_TYPE_RTP_MULTICAST => (Some("multicast".to_owned()), Some("rtp_aes67")),
-        FLOW_TYPE_UNICAST => (Some("unicast".to_owned()), Some("native_dante")),
-        _ if multicast => (Some("multicast".to_owned()), Some("native_dante")),
-        _ => (None, None),
-    };
-    let advertised = multicast.then_some(flow_type_code & FLOW_FLAG_UNADVERTISED == 0);
-    let persistent = multicast.then_some(flow_type_code & FLOW_FLAG_PERSISTENT != 0);
+    let flag = |mask: u16| configuration_flags & u32::from(mask) != 0;
 
     let flow_name_pointer = transmitter_flow_status_segment_u16(
         response,
@@ -414,6 +440,12 @@ fn parse_transmitter_flow_status_record(
         TRANSMITTER_FLOW_STATUS_SUBSCRIBER_FLOW_POINTER,
     )?;
     let subscriber_flow_name = optional_string_at_pointer(response, subscriber_flow_name_pointer)?;
+    let media_class = transmitter_flow_status_segment_u16(
+        response,
+        subscriber_segment_start,
+        subscriber_segment_end,
+        TRANSMITTER_FLOW_STATUS_MEDIA_CLASS,
+    );
 
     let endpoint_segment_start = *geometry
         .segment_offsets
@@ -441,6 +473,10 @@ fn parse_transmitter_flow_status_record(
         } else {
             (None, None)
         };
+    let flow_type = destination_address
+        .as_deref()
+        .and_then(|address| address.parse().ok())
+        .and_then(destination_flow_type);
 
     let (channel_slot_segment_header, channel_slot_count, transmitter_channel_ids_by_slot) =
         parse_audio_channel_slot_segment(response, &geometry, media_type_code)?;
@@ -461,11 +497,13 @@ fn parse_transmitter_flow_status_record(
         media_local_flow_id,
         flow_name_pointer,
         flow_name,
-        flow_type_code,
+        configuration_flags,
+        automatically_allocated: flag(FLOW_FLAG_AUTOMATIC),
+        persistent: flag(FLOW_FLAG_PERSISTENT),
+        advertised: !flag(FLOW_FLAG_UNADVERTISED),
         flow_type,
-        media_mode,
-        advertised,
-        persistent,
+        media_class,
+        media_mode: media_mode(media_class),
         format_pointer,
         format_descriptor_hexadecimal: bytes_to_hex(format_descriptor),
         sample_rate,
@@ -1114,11 +1152,7 @@ fn parse_flow_record(
         "unknown"
     }
     .to_owned();
-    let media_mode = match media_class {
-        Some(1) => Some("native_dante".into()),
-        Some(3) => Some("rtp_aes67".into()),
-        _ => None,
-    };
+    let media_mode = media_mode(media_class).map(str::to_owned);
 
     Some(TxFlow {
         channel_count,

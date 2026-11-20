@@ -703,7 +703,7 @@ pub struct FlowTopology {
 #[derive(Deserialize)]
 struct InventoryRecord {
     inventory_layout: Option<String>,
-    flow_type: FlowType,
+    flow_type: Option<String>,
     media_mode: Option<MediaMode>,
     advertised: Option<bool>,
     persistent: Option<bool>,
@@ -738,6 +738,16 @@ pub(crate) fn readback_protocol(protocol_id: u16) -> Result<(&'static str, bool)
     })
 }
 
+impl InventoryRecord {
+    fn flow_type(&self) -> Result<FlowType, String> {
+        match self.flow_type.as_deref() {
+            Some("multicast") => Ok(FlowType::Multicast),
+            Some("unicast") => Ok(FlowType::Unicast),
+            _ => Err("transmitter flow destination does not establish multicast or unicast".into()),
+        }
+    }
+}
+
 impl FlowReadbackRequest {
     fn record(&self) -> Result<InventoryRecord, String> {
         serde_json::from_value(self.record.clone())
@@ -748,6 +758,7 @@ impl FlowReadbackRequest {
 pub fn transmit_flow_topology(request: &FlowReadbackRequest) -> Result<FlowTopology, String> {
     let (_, modern) = readback_protocol(request.protocol_id)?;
     let record = request.record()?;
+    let flow_type = record.flow_type()?;
     let modern = modern && record.inventory_layout.as_deref() != Some("fixed");
     let (identifier, count, members) = if modern {
         if record.media_type_code != Some(3) {
@@ -766,7 +777,7 @@ pub fn transmit_flow_topology(request: &FlowReadbackRequest) -> Result<FlowTopol
     let count = count.ok_or("transmitter flow channel count is unavailable")?;
     let members = members.ok_or("transmitter flow members are unavailable")?;
 
-    if (modern || matches!(record.flow_type, FlowType::Multicast))
+    if (modern || matches!(flow_type, FlowType::Multicast))
         && members.len() != usize::from(count.get())
     {
         return Err("transmitter flow member count does not match its channel count".into());
@@ -800,15 +811,13 @@ pub fn transmit_flow_topology(request: &FlowReadbackRequest) -> Result<FlowTopol
 
     Ok(FlowTopology {
         flow_number: identifier,
-        flow_type: record.flow_type,
+        flow_type,
         channel_count: count,
         channel_members: members,
         sample_rate_hertz: sample_rate,
         encoding,
         frames_per_packet,
-        may_retire_after_sample_rate_change: record
-            .flow_type
-            .may_retire_after_sample_rate_change(modern),
+        may_retire_after_sample_rate_change: flow_type.may_retire_after_sample_rate_change(modern),
     })
 }
 
@@ -825,6 +834,7 @@ pub fn transmit_flow_specification(
 ) -> Result<ObservedTransmitFlowSpecification, String> {
     let (cohort, _) = readback_protocol(request.protocol_id)?;
     let record = request.record()?;
+    let flow_type = record.flow_type()?;
     let channels = record
         .transmitter_channel_ids_by_slot
         .or(record.channels)
@@ -903,7 +913,7 @@ pub fn transmit_flow_specification(
     let specification = TransmitFlowSpecification {
         schema_version: 1,
         media_mode,
-        flow_type: record.flow_type,
+        flow_type,
         advertised: record.advertised,
         persistent: record.persistent,
         name: record.flow_name,
