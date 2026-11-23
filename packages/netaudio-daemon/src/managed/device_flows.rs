@@ -49,7 +49,11 @@ impl Registry {
         let first =
             device_topology::query(&mut session, json!({"command":"channel_count"})).await?;
         let counts = device_topology::counts(&first)?;
-        let inventory = device_topology::inventory(&mut session, "tx_flows", protocol).await?;
+        let inventory = if counts.tx_count == 0 {
+            json!({"flows": [], "queried": false, "reason": "zero_channel_count"})
+        } else {
+            device_topology::inventory(&mut session, "tx_flows", protocol).await?
+        };
         let last = device_topology::query(&mut session, json!({"command":"channel_count"})).await?;
         let verified = device_topology::counts(&last)?;
         if !device_topology::same_topology(&counts, &verified) {

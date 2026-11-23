@@ -175,7 +175,7 @@ pub fn parse_transmitter_flow_status_page(response: &[u8]) -> Option<Transmitter
     }
     let maximum_flow_slots = *body.get(6)?;
     let reported_flow_count = *body.get(7)?;
-    if maximum_flow_slots > 32 || reported_flow_count > maximum_flow_slots {
+    if !(1..=32).contains(&maximum_flow_slots) || reported_flow_count > maximum_flow_slots {
         return None;
     }
 
