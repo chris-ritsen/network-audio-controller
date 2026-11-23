@@ -2336,7 +2336,7 @@ dependencies = [
 
 [[package]]
 name = "netaudio-daemon"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -2447,7 +2447,7 @@ dependencies = [
 
 [[package]]
 name = "netaudio-host-jack"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "jack",
@@ -2460,7 +2460,7 @@ dependencies = [
 
 [[package]]
 name = "netaudio-host-pulse"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "libpulse-binding",
@@ -2471,7 +2471,7 @@ dependencies = [
 
 [[package]]
 name = "netaudio-host-worker"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "chrono",
