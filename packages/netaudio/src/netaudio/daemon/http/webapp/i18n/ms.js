@@ -234,6 +234,14 @@ export default {
   "Slot:receiver channels": "Slot:saluran penerima",
   "Destination": "Destinasi",
   "Advertised": "Diiklankan",
+  "Replaces {source}": "Menggantikan {source}",
+  "Not applied": "Tidak digunakan",
+  "Connect {count} channels": {
+    "other": "Sambungkan {count} saluran"
+  },
+  "{count} connections were not made": {
+    "other": "{count} sambungan tidak dibuat"
+  },
   "Problem": "Masalah",
   "Source": "Sumber",
   "Matched": "Sepadan",

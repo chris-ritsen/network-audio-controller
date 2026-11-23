@@ -6,6 +6,7 @@ import { Icon } from "./icons.js";
 import * as format from "./format.js";
 import {
   html,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -28,6 +29,14 @@ import {
   toggleExpanded,
 } from "./matrix-model.js";
 import { draw, measureMatrixLayout, readTheme } from "./matrix-drawing.js";
+import {
+  anchorFor,
+  anchorPosition,
+  diagonalRun,
+  patchable,
+  runChanges,
+} from "./matrix-run.js";
+import { RunPreview } from "./run-preview.js";
 
 export {
   buildMatrixModel,
@@ -100,6 +109,39 @@ export function RoutingMatrix({
     header: MINIMUM_HEADER,
   });
   const busy = useRef(new Set());
+  const [anchor, setAnchor] = useState(null);
+  const [proposal, setProposal] = useState(null);
+  const [shift, setShift] = useState(false);
+
+  useEffect(() => {
+    const held = (event) => setShift(event.shiftKey);
+    const released = () => setShift(false);
+    window.addEventListener("keydown", held);
+    window.addEventListener("keyup", held);
+    window.addEventListener("blur", released);
+    return () => {
+      window.removeEventListener("keydown", held);
+      window.removeEventListener("keyup", held);
+      window.removeEventListener("blur", released);
+    };
+  }, []);
+
+  const run = useMemo(() => {
+    if (proposal) return proposal.cells;
+    if (locked || !shift) return null;
+    const start = anchorPosition(rows, columns, anchor, flipped);
+    if (!start) return null;
+    if (
+      !hover ||
+      hover.inGutter ||
+      hover.inHeader ||
+      !patchable(rows[hover.rowIndex]) ||
+      !patchable(columns[hover.columnIndex])
+    ) {
+      return [start];
+    }
+    return diagonalRun(rows, columns, start, hover);
+  }, [anchor, columns, flipped, hover, locked, proposal, rows, shift]);
 
   const contentWidth = layout.gutter + columns.length * CELL;
   const contentHeight = layout.header + rows.length * CELL;
@@ -163,6 +205,7 @@ export function RoutingMatrix({
         layout,
         pending,
         rows,
+        run,
         scroll,
         size,
         subscriptionIndex,
@@ -177,6 +220,7 @@ export function RoutingMatrix({
     layout,
     pending,
     rows,
+    run,
     scroll,
     size,
     subscriptionIndex,
@@ -282,6 +326,30 @@ export function RoutingMatrix({
     }
     if (locked) {
       return;
+    }
+
+    if (patchable(row) && patchable(column)) {
+      const start = event.shiftKey
+        ? anchorPosition(rows, columns, anchor, flipped)
+        : null;
+      const cells = start ? diagonalRun(rows, columns, start, position) : [];
+      if (cells.length > 1) {
+        setError("");
+        setProposal({
+          cells,
+          changes: runChanges(
+            cells,
+            rows,
+            columns,
+            flipped,
+            subscriptionIndex,
+            pending,
+          ),
+        });
+        return;
+      }
+      setAnchor(anchorFor(rows, columns, position, flipped));
+      if (event.shiftKey) return;
     }
 
     if (
@@ -450,13 +518,30 @@ export function RoutingMatrix({
               top: event.target.scrollTop,
             });
           }}
-          onMouseMove=${(event) => setHover(locate(event))}
+          onMouseDown=${(event) => {
+            if (event.shiftKey) event.preventDefault();
+          }}
+          onMouseMove=${(event) => {
+            setShift(event.shiftKey);
+            setHover(locate(event));
+          }}
           onMouseLeave=${() => setHover(null)}
           onClick=${onClick}
         >
           <div class="matrix-spacer" style=${`width:${contentWidth}px;height:${contentHeight}px`}></div>
         </div>
-        ${hoverText && hover ? html`<${MatrixTooltip} id="routing-matrix-tooltip" text=${hoverText} point=${hover} bounds=${size} onDismiss=${() => setHover(null)} />` : null}
+        ${
+          proposal
+            ? html`<${RunPreview}
+                changes=${proposal.changes}
+                onClose=${() => {
+                  setProposal(null);
+                  setAnchor(null);
+                }}
+              />`
+            : null
+        }
+        ${hoverText && hover && !proposal ? html`<${MatrixTooltip} id="routing-matrix-tooltip" text=${hoverText} point=${hover} bounds=${size} onDismiss=${() => setHover(null)} />` : null}
         <div class="matrix-filters" style=${`left:12px;width:${layout.gutter - CELL - 36}px;top:${Math.max(12, layout.header / 2 - 60)}px`}>
           ${["transmitters", "receivers"].map(
             (

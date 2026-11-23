@@ -234,6 +234,16 @@ export default {
   "Slot:receiver channels": "ஸ்லாட்:பெறுநர் சேனல்கள்",
   "Destination": "சேருமிடம்",
   "Advertised": "அறிவிக்கப்பட்டது",
+  "Replaces {source}": "{source} ஐ மாற்றுகிறது",
+  "Not applied": "பயன்படுத்தப்படவில்லை",
+  "Connect {count} channels": {
+    "one": "{count} சேனலை இணை",
+    "other": "{count} சேனல்களை இணை"
+  },
+  "{count} connections were not made": {
+    "one": "{count} இணைப்பு செய்யப்படவில்லை",
+    "other": "{count} இணைப்புகள் செய்யப்படவில்லை"
+  },
   "Problem": "சிக்கல்",
   "Source": "மூலம்",
   "Matched": "பொருந்தியது",

@@ -234,6 +234,18 @@ export default {
   "Slot:receiver channels": "Slot:canais de recepção",
   "Destination": "Destino",
   "Advertised": "Anunciado",
+  "Replaces {source}": "Substitui {source}",
+  "Not applied": "Não aplicado",
+  "Connect {count} channels": {
+    "one": "Conectar {count} canal",
+    "many": "Conectar {count} canais",
+    "other": "Conectar {count} canais"
+  },
+  "{count} connections were not made": {
+    "one": "{count} conexão não foi feita",
+    "many": "{count} conexões não foram feitas",
+    "other": "{count} conexões não foram feitas"
+  },
   "Problem": "Problema",
   "Source": "Origem",
   "Matched": "Correspondente",

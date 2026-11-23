@@ -234,6 +234,14 @@ export default {
   "Slot:receiver channels": "槽位:接收通道",
   "Destination": "目的地",
   "Advertised": "已通告",
+  "Replaces {source}": "取代 {source}",
+  "Not applied": "未套用",
+  "Connect {count} channels": {
+    "other": "連接 {count} 個通道"
+  },
+  "{count} connections were not made": {
+    "other": "{count} 個連線未建立"
+  },
   "Problem": "問題",
   "Source": "來源",
   "Matched": "相符",

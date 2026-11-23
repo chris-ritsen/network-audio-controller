@@ -234,6 +234,14 @@ export default {
   "Slot:receiver channels": "슬롯:수신 채널",
   "Destination": "대상",
   "Advertised": "광고됨",
+  "Replaces {source}": "{source} 대체",
+  "Not applied": "적용되지 않음",
+  "Connect {count} channels": {
+    "other": "채널 {count}개 연결"
+  },
+  "{count} connections were not made": {
+    "other": "연결 {count}개가 이루어지지 않았습니다"
+  },
   "Problem": "문제",
   "Source": "소스",
   "Matched": "일치함",

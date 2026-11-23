@@ -234,6 +234,18 @@ export default {
   "Slot:receiver channels": "Ranura:canales de recepción",
   "Destination": "Destino",
   "Advertised": "Anunciado",
+  "Replaces {source}": "Reemplaza {source}",
+  "Not applied": "No aplicado",
+  "Connect {count} channels": {
+    "one": "Conectar {count} canal",
+    "many": "Conectar {count} canales",
+    "other": "Conectar {count} canales"
+  },
+  "{count} connections were not made": {
+    "one": "No se realizó {count} conexión",
+    "many": "No se realizaron {count} conexiones",
+    "other": "No se realizaron {count} conexiones"
+  },
   "Problem": "Problema",
   "Source": "Fuente",
   "Matched": "Coincide",

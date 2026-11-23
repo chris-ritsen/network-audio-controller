@@ -100,6 +100,7 @@ function destroy(path) {
 }
 
 export const api = {
+  applyRoutes: (routes) => post("/subscriptions/apply", { routes }),
   deviceControls: (
     device,
     action,

@@ -1,7 +1,9 @@
 use super::protocol::META_CLIENT_CAPABILITIES;
 use super::service::CallError;
 use crate::authorization::Grant;
+use crate::devices::operations::ControlError;
 use crate::devices::registry::DeviceRegistry;
+use crate::devices::subscriptions::batch::BatchRequest;
 use crate::devices::subscriptions::SubscriptionRequest;
 use crate::events::{EventOptions, CLIENT_QUEUE_CAPACITY, TELEMETRY_FIELDS};
 use crate::state::{ReadModel, Subscription};
@@ -205,30 +207,15 @@ impl Apps {
 
                 let path = arguments["path"].as_str().unwrap_or_default();
                 let body = arguments.get("body").cloned().unwrap_or_else(|| json!({}));
-                let request = match path {
-                    "/subscribe" => SubscriptionRequest::set(&body),
-                    "/unsubscribe" => SubscriptionRequest::clear(&body),
+                let (status, payload) = match path {
+                    "/subscribe" => self.change(SubscriptionRequest::set(&body)).await,
+                    "/subscriptions/apply" => self.batch(&body["routes"]).await,
+                    "/unsubscribe" => self.change(SubscriptionRequest::clear(&body)).await,
                     _ => {
                         return Ok(app_error(format!(
                             "{path} is not available in this daemon build"
                         )));
                     }
-                };
-                let applied = match request {
-                    Ok(request) => request.apply(&self.registry).await,
-                    Err(error) => Err(error),
-                };
-                let (status, payload) = match applied {
-                    Ok((_, count)) => {
-                        let mut payload = json!({"success": true});
-
-                        if let Some(count) = count {
-                            payload["count"] = json!(count);
-                        }
-
-                        (axum::http::StatusCode::OK, payload)
-                    }
-                    Err(error) => crate::http::devices::control_failure(&error),
                 };
                 Ok(app_result(
                     json!({"status": status.as_u16(), "payload": payload}),
@@ -236,6 +223,44 @@ impl Apps {
                 ))
             }
             _ => Err(CallError::invalid(format!("unknown app operation {name}"))),
+        }
+    }
+
+    async fn batch(&self, routes: &Value) -> (axum::http::StatusCode, Value) {
+        let applied = match BatchRequest::parse(routes) {
+            Ok(request) => request.apply(&self.registry, &self.model).await,
+            Err(error) => Err(error),
+        };
+
+        match applied {
+            Ok(result) if result["applied"].as_u64().is_some_and(|count| count > 0) => {
+                (axum::http::StatusCode::OK, result)
+            }
+            Ok(result) => (axum::http::StatusCode::CONFLICT, result),
+            Err(error) => crate::http::devices::control_failure(&error),
+        }
+    }
+
+    async fn change(
+        &self,
+        request: Result<SubscriptionRequest, ControlError>,
+    ) -> (axum::http::StatusCode, Value) {
+        let applied = match request {
+            Ok(request) => request.apply(&self.registry).await,
+            Err(error) => Err(error),
+        };
+
+        match applied {
+            Ok((_, count)) => {
+                let mut payload = json!({"success": true});
+
+                if let Some(count) = count {
+                    payload["count"] = json!(count);
+                }
+
+                (axum::http::StatusCode::OK, payload)
+            }
+            Err(error) => crate::http::devices::control_failure(&error),
         }
     }
 

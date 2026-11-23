@@ -234,6 +234,14 @@ export default {
   "Slot:receiver channels": "スロット:受信チャンネル",
   "Destination": "宛先",
   "Advertised": "アドバタイズ",
+  "Replaces {source}": "{source} を置き換え",
+  "Not applied": "未適用",
+  "Connect {count} channels": {
+    "other": "{count} チャンネルを接続"
+  },
+  "{count} connections were not made": {
+    "other": "{count} 件の接続を確立できませんでした"
+  },
   "Problem": "問題",
   "Source": "ソース",
   "Matched": "一致",

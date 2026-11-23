@@ -265,6 +265,26 @@ export async function requestSubscriptionChange(change, perform) {
   return outcome;
 }
 
+export async function requestSubscriptionChanges(changes, perform) {
+  const entries = changes.map(markPending);
+  const release = (index) =>
+    releasePending(
+      pendingKey(changes[index].rx_device, changes[index].rx_channel),
+      entries[index],
+    );
+  let applied;
+  try {
+    applied = await perform();
+  } catch (failure) {
+    changes.forEach((_, index) => release(index));
+    throw failure;
+  }
+  changes.forEach((_, index) => {
+    if (!applied[index]) release(index);
+  });
+  return applied;
+}
+
 export function markExternalPending(receiver, channel, sourceKey, slot, clear) {
   markPending({
     rx_device: receiver,

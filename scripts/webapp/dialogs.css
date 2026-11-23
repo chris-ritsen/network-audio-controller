@@ -1,4 +1,26 @@
 @layer components {
+  .run-preview .run-preview-box {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: calc(100dvh - 32px);
+    padding: 16px;
+    overflow: hidden;
+    border-radius: 8px;
+  }
+  .run-preview-box > header,
+  .run-preview-box > .alert {
+    flex-shrink: 0;
+  }
+  .run-preview-routes {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .run-preview-routes table.data td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .source-picker .source-picker-box {
     display: flex;
     flex-direction: column;

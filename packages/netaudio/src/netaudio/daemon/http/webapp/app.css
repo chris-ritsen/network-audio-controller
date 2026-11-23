@@ -4417,6 +4417,12 @@
   .text-warning {
     color: var(--color-warning);
   }
+  .blur {
+    --tw-blur: blur(8px);
+    filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,)
+      var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,)
+      var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,);
+  }
   .filter {
     filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,)
       var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,)
@@ -6237,6 +6243,28 @@ textarea:focus-visible {
       position: sticky;
       bottom: 0;
     }
+  }
+  .run-preview .run-preview-box {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: calc(100dvh - 32px);
+    padding: 16px;
+    overflow: hidden;
+    border-radius: 8px;
+  }
+  .run-preview-box > header,
+  .run-preview-box > .alert {
+    flex-shrink: 0;
+  }
+  .run-preview-routes {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .run-preview-routes table.data td {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .source-picker .source-picker-box {
     display: flex;

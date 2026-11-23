@@ -99,6 +99,7 @@ export function draw(
     layout,
     pending,
     rows,
+    run,
     scroll,
     size,
     subscriptionIndex,
@@ -254,6 +255,19 @@ export function draw(
             : state.kind;
       drawStatusIcon(context, x + CELL / 2, y + CELL / 2, severity, theme);
     }
+  }
+  if (run?.length) {
+    context.strokeStyle = theme.text;
+    context.lineWidth = 2;
+    for (const cell of run) {
+      context.strokeRect(
+        Math.floor(columnX(cell.columnIndex)) + 3,
+        Math.floor(rowY(cell.rowIndex)) + 3,
+        CELL - 6,
+        CELL - 6,
+      );
+    }
+    context.lineWidth = 1;
   }
   context.restore();
 
