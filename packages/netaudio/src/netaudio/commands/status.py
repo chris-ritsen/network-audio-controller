@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import typer
 
+from netaudio.cli_support import coverage
 from netaudio.cli_support.output import output_single, output_table
 from netaudio.cli_support.selection import sort_devices
 from netaudio.commands.device.display import (
@@ -112,12 +114,11 @@ def _visible_shure_summaries(shure_summaries: dict) -> list[dict]:
 
 
 async def gather_status(devices, verbose: bool = False) -> tuple[list[str], list[list[str]], list[list[str]], dict]:
-    from netaudio.cli_support.selection import filter_devices
     from netaudio.daemon.client import get_shure_devices_from_daemon
 
     visible_dante = {
         server_name: device
-        for server_name, device in filter_devices(devices).items()
+        for server_name, device in coverage.listed(devices).items()
         if _has_presence(device.online, device.last_seen)
     }
     json_data: dict = {"dante": {server_name: device.record for server_name, device in visible_dante.items()}}
@@ -149,7 +150,7 @@ def status():
         return
 
     if not dante_rows and not shure_rows:
-        typer.echo("No devices found.")
+        typer.echo(asyncio.run(coverage.searched()))
         return
 
     if dante_rows:

@@ -5,6 +5,7 @@ from typing import NoReturn, Optional
 import typer
 
 from netaudio._exit_codes import ExitCode
+from netaudio.cli_support import coverage
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import ansi, run_with_devices
 from netaudio.cli_support.output import output_table
@@ -12,7 +13,6 @@ from netaudio.cli_support.selection import (
     filter_devices,
     match_device_identifier,
     parse_qualified_channel,
-    require_selected_devices,
     resolve_channel,
     select_device,
     sort_devices,
@@ -46,10 +46,10 @@ def _status_label(status: dict) -> str:
 
 
 async def run_subscription_list(devices, include_unused: bool) -> None:
-    devices = require_selected_devices(filter_devices(devices))
+    selected = coverage.listed(devices)
     subscriptions = [
         subscription
-        for _, device in sort_devices(devices)
+        for _, device in sort_devices(selected)
         for subscription in device.record.get("subscriptions") or []
         if include_unused or subscription.get("tx_device")
     ]
@@ -66,7 +66,7 @@ async def run_subscription_list(devices, include_unused: bool) -> None:
             for subscription in subscriptions
         ],
         json_data=subscriptions,
-        empty_message="No active subscriptions.",
+        empty_message=await coverage.nothing(devices, selected, "active subscriptions"),
     )
 
 

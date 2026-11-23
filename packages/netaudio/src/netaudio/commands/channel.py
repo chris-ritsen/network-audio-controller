@@ -5,6 +5,7 @@ from typing import Optional
 import typer
 
 from netaudio._exit_codes import ExitCode
+from netaudio.cli_support import coverage
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import run_with_devices
 from netaudio.cli_support.output import output_sections, output_single, structured_output_selected
@@ -13,7 +14,6 @@ from netaudio.cli_support.selection import (
     ChannelReference,
     filter_devices,
     parse_channel_reference,
-    require_selected_devices,
     resolve_channel,
     select_device,
     sort_devices,
@@ -57,7 +57,8 @@ def _channel_section(channels: dict, title: str) -> tuple[str, list[str], list[l
 
 
 async def run_channel_list(devices) -> None:
-    devices = require_selected_devices(filter_devices(devices))
+    found = devices
+    devices = coverage.listed(devices)
     json_data = {
         server_name: {
             "name": device.name,
@@ -73,6 +74,9 @@ async def run_channel_list(devices) -> None:
             sections.append(_channel_section(device.tx_channels, f"{device_label} TX Channels"))
         if device.rx_channels:
             sections.append(_channel_section(device.rx_channels, f"{device_label} RX Channels"))
+    if not sections and not structured_output_selected():
+        typer.echo(await coverage.nothing(found, devices, "channels"))
+        return
     output_sections(sections, json_data)
 
 

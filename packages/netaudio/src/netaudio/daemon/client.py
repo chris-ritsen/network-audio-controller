@@ -9,7 +9,6 @@ from urllib.parse import quote
 
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.daemon import engine
-from netaudio.device_record import Device
 
 logger = logging.getLogger("netaudio")
 
@@ -130,19 +129,6 @@ async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.
     except (DaemonUnavailable, DaemonSilent) as exception:
         logger.debug(f"Daemon request {method} {path} failed: {exception}")
         return None, None
-
-
-async def get_devices_from_daemon(context: str | None = None) -> dict[str, Device] | None:
-    path = f"/devices?context={quote(context, safe='')}" if context is not None else "/devices"
-    status, data = await _daemon_request("GET", path)
-    if status != 200 or data is None:
-        return None
-
-    devices = {}
-    for server_name, record in data.items():
-        devices[server_name] = Device(record)
-    logger.info(f"Daemon: {len(devices)} devices")
-    return devices
 
 
 async def forget_devices_on_daemon(

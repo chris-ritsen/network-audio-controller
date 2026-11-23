@@ -337,6 +337,7 @@ def interfaces(
 ):
     """Show or choose the network interfaces used for Dante. The choice is saved and applies without a restart."""
     from netaudio.common.preferences import read_preferences, save_preference
+    from netaudio.cli_support.coverage import dante_interfaces
     from netaudio.daemon.client import DaemonRefusal, call_daemon
 
     chosen = sorted({name.strip() for name in names or [] if name.strip()})
@@ -367,23 +368,7 @@ def interfaces(
         raise typer.Exit(code=1)
 
     selected = settings.get("dante_interfaces") or []
-    present = settings.get("network_interfaces") or []
-    rows = []
-    for interface in present:
-        addresses = interface.get("addresses") or []
-        used = not selected or interface.get("name") in selected or any(address in selected for address in addresses)
-        rows.append(
-            {
-                "addresses": addresses,
-                "connected": bool(interface.get("running")),
-                "name": interface.get("name"),
-                "used_for_dante": used,
-            }
-        )
-    known = {row["name"] for row in rows} | {address for row in rows for address in row["addresses"]}
-    for name in selected:
-        if name not in known:
-            rows.append({"addresses": [], "connected": False, "name": name, "used_for_dante": True})
+    rows = dante_interfaces(settings)
 
     output_table(
         ["Interface", "Addresses", "Connected", "Dante"],

@@ -7,8 +7,9 @@ from typing import Any
 import typer
 
 from netaudio._exit_codes import ExitCode
+from netaudio.cli_support import coverage
 from netaudio.common.app_config import settings
-from netaudio.daemon.client import DaemonRefusal, DaemonUnavailable, call_daemon, get_devices_from_daemon
+from netaudio.daemon.client import DaemonRefusal, call_daemon
 from netaudio.device_record import Device
 
 
@@ -19,9 +20,9 @@ def ansi(code: str, text: str) -> str:
 
 
 async def daemon_devices() -> dict[str, Device]:
-    devices = await get_devices_from_daemon()
-    if devices is None:
-        raise DaemonUnavailable()
+    records = await call_daemon("GET", "/devices", timeout=5.0)
+    devices = {server_name: Device(record) for server_name, record in records.items()}
+    coverage.warn(devices)
     return devices
 
 

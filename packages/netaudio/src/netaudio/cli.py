@@ -292,8 +292,14 @@ def error_message(exception: BaseException) -> str:
 
 
 def main():
+    from netaudio.cli_support import coverage
+
     try:
         app()
+    except SystemExit as finished:
+        if finished.code in (0, None) and coverage.cut_short():
+            raise SystemExit(int(ExitCode.ERROR)) from None
+        raise
     except Exception as exception:
         if settings.debug:
             raise
