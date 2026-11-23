@@ -359,7 +359,15 @@ pub struct TransmitterFlowStatusPage {
     pub maximum_flow_slots: u8,
     pub reported_flow_count: u8,
     pub flows: Vec<TransmitterFlowStatus>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unparsed_records: Vec<UnparsedTransmitterFlowRecord>,
     pub raw_body_hexadecimal: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnparsedTransmitterFlowRecord {
+    pub raw_record_hexadecimal: String,
+    pub record_pointer: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

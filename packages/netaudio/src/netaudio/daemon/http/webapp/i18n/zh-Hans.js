@@ -233,6 +233,8 @@ export default {
   "Type": "类型",
   "Slot:receiver channels": "插槽:接收通道",
   "Destination": "目标",
+  "Advertised": "已通告",
+  "Problem": "问题",
   "Source": "来源",
   "Matched": "匹配",
   "Not matched": "不匹配",

@@ -286,16 +286,50 @@ function flowTypeLabel(entry) {
     .join(" ");
 }
 
-function FlowRow({ entry, onDelete, requestName }) {
+function advertisedLabel(entry) {
+  if (entry.advertised == null) return "";
+  return entry.advertised ? t("Yes") : t("No");
+}
+
+function unparsedEntry(unparsed) {
+  const record = unparsed.raw_record || {};
+  const address = record.destination_internet_protocol_version_four_address;
+  const port = record.destination_user_datagram_port;
+  return {
+    advertised: record.advertised,
+    channel_slots: (
+      record.transmitter_channel_ids_by_slot ||
+      record.channels ||
+      []
+    )
+      .map((channel, index) => ({
+        slot: index + 1,
+        transmitter_channel: channel,
+      }))
+      .filter((slot) => slot.transmitter_channel),
+    encoding_bits: record.encoding,
+    flow_type: record.flow_type,
+    media_mode: record.media_mode,
+    name: record.flow_name,
+    number: record.global_flow_id ?? record.flow_number,
+    primary_destination: address && port ? { address, port } : null,
+    problem: unparsed.error,
+    sample_rate_hz: record.sample_rate,
+  };
+}
+
+function FlowRow({ advertisement, entry, onDelete, problems, requestName }) {
   const flowId = entry.identity?.global_flow_id;
   return html`<tr>
-    <td data-label=${t("Flow")}>${flowId ?? ""}</td>
-    <td data-label=${t("Type")}>${flowTypeLabel(entry)}</td>
+    <td data-label=${t("Flow")}>${flowId ?? entry.number ?? ""}</td>
+    <td data-label=${t("Type")}>${flowTypeLabel(entry) || t("Unknown")}</td>
+    ${advertisement ? html`<td data-label=${t("Advertised")}>${advertisedLabel(entry)}</td>` : null}
     <td data-label=${t("Name")}>${entry.name || ""}</td>
     <td data-label=${t("Slot:channel")}>${channelLabel(entry)}</td>
     <td data-label=${t("Sample rate")}>${format.sampleRate(entry.sample_rate_hz)}</td>
     <td data-label=${t("Encoding")}>${entry.encoding_bits == null ? "" : `PCM ${entry.encoding_bits}`}</td>
     <td data-label=${t("Destination")}>${socketLabel(entry.primary_destination)}</td>
+    ${problems ? html`<td data-label=${t("Problem")}>${entry.problem ? t(entry.problem) : ""}</td>` : null}
     <td data-label="">
       ${
         flowId == null
@@ -319,6 +353,7 @@ function FlowField({ children, label }) {
 export function TransmitFlows({ device }) {
   const requestName = deviceRequestName(device);
   const [inventory, setInventory] = useState(null);
+  const [inventoryError, setInventoryError] = useState("");
   const [error, setError] = useState("");
   const [channels, setChannels] = useState("");
   const [flowId, setFlowId] = useState("1");
@@ -352,12 +387,14 @@ export function TransmitFlows({ device }) {
   const refresh = async () => {
     try {
       setInventory(await api.getTransmitFlows(requestName));
+      setInventoryError("");
     } catch (failure) {
-      console.error(failure);
+      setInventoryError(failure.message);
     }
   };
   useEffect(() => {
     setInventory(null);
+    setInventoryError("");
     setPlan(null);
     setResult(null);
     setError("");
@@ -406,14 +443,20 @@ export function TransmitFlows({ device }) {
     setResult(response);
     await refresh();
   };
-  const flowEntries = inventory?.flows || [];
-  if (!authoring && !flowEntries.length) return null;
+  const flowEntries = [
+    ...(inventory?.flows || []),
+    ...(inventory?.unparsed_records || []).map(unparsedEntry),
+  ];
+  if (!authoring && !flowEntries.length && !inventoryError) return null;
+  const advertisement = flowEntries.some((entry) => entry.advertised === false);
+  const problems = flowEntries.some((entry) => entry.problem);
   const supportsFlowOptions = authoring?.supports_flow_options === true;
   const edit = (setter) => (event) => {
     setter(event.target.value);
     setPlan(null);
   };
   return html`<${Panel} title=${t("Transmit flows ({count})", { count: flowEntries.length })}>
+    ${inventoryError ? html`<p role="alert" class="text-error">${t(inventoryError)}</p>` : null}
     ${
       flowEntries.length
         ? html`<div class="table-wrapper">
@@ -422,16 +465,18 @@ export function TransmitFlows({ device }) {
                 <tr>
                   <th>${t("Flow")}</th>
                   <th>${t("Type")}</th>
+                  ${advertisement ? html`<th>${t("Advertised")}</th>` : null}
                   <th>${t("Name")}</th>
                   <th>${t("Slot:channel")}</th>
                   <th>${t("Sample rate")}</th>
                   <th>${t("Encoding")}</th>
                   <th>${t("Destination")}</th>
+                  ${problems ? html`<th>${t("Problem")}</th>` : null}
                   <th><span class="sr-only">${t("Actions")}</span></th>
                 </tr>
               </thead>
               <tbody>
-                ${flowEntries.map((entry) => html`<${FlowRow} key=${entry.identity?.global_flow_id} entry=${entry} onDelete=${remove} requestName=${requestName} />`)}
+                ${flowEntries.map((entry, index) => html`<${FlowRow} key=${entry.identity?.global_flow_id ?? `unparsed-${index}`} advertisement=${advertisement} entry=${entry} onDelete=${remove} problems=${problems} requestName=${requestName} />`)}
               </tbody>
             </table>
           </div>`

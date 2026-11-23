@@ -175,19 +175,59 @@ pub fn parse_transmitter_flow_status_page(response: &[u8]) -> Option<Transmitter
     }
     let maximum_flow_slots = *body.get(6)?;
     let reported_flow_count = *body.get(7)?;
-    if !(1..=32).contains(&maximum_flow_slots) || reported_flow_count > maximum_flow_slots {
+    if maximum_flow_slots > 32 || reported_flow_count > maximum_flow_slots {
         return None;
     }
 
-    let flows = parse_pointer_table_page(
-        response,
-        MODERN_ARC_POINTER_TABLE_OFFSET,
-        reported_flow_count,
-        |flow: &TransmitterFlowStatus| usize::from(flow.record_length_bytes),
-        |response, record_pointer, _| {
-            parse_transmitter_flow_status_record(response, record_pointer)
-        },
-    )?;
+    let table_end = MODERN_ARC_POINTER_TABLE_OFFSET
+        .checked_add(usize::from(reported_flow_count).checked_mul(2)?)?;
+    response.get(MODERN_ARC_POINTER_TABLE_OFFSET..table_end)?;
+    let mut record_pointers = Vec::with_capacity(usize::from(reported_flow_count));
+    for index in 0..usize::from(reported_flow_count) {
+        let record_pointer = read_u16(response, MODERN_ARC_POINTER_TABLE_OFFSET + index * 2)?;
+        if usize::from(record_pointer) < table_end
+            || usize::from(record_pointer) >= response.len()
+            || record_pointers.contains(&record_pointer)
+        {
+            return None;
+        }
+        record_pointers.push(record_pointer);
+    }
+
+    let mut flows = Vec::with_capacity(record_pointers.len());
+    let mut record_ranges = Vec::with_capacity(record_pointers.len());
+    let mut unparsed_records = Vec::new();
+    for &record_pointer in &record_pointers {
+        let record_start = usize::from(record_pointer);
+        match parse_transmitter_flow_status_record(response, record_pointer) {
+            Some(flow) => {
+                record_ranges.push((
+                    record_start,
+                    record_start.checked_add(usize::from(flow.record_length_bytes))?,
+                ));
+                flows.push(flow);
+            }
+            None => {
+                let record_end = record_pointers
+                    .iter()
+                    .map(|pointer| usize::from(*pointer))
+                    .filter(|pointer| *pointer > record_start)
+                    .min()
+                    .unwrap_or(response.len());
+                unparsed_records.push(UnparsedTransmitterFlowRecord {
+                    raw_record_hexadecimal: bytes_to_hex(response.get(record_start..record_end)?),
+                    record_pointer,
+                });
+            }
+        }
+    }
+    record_ranges.sort_unstable();
+    if record_ranges
+        .windows(2)
+        .any(|ranges| ranges[0].1 > ranges[1].0)
+    {
+        return None;
+    }
     let mut flow_numbers = HashSet::with_capacity(flows.len());
     let mut media_identities = HashSet::with_capacity(flows.len());
     for flow in &flows {
@@ -203,6 +243,7 @@ pub fn parse_transmitter_flow_status_page(response: &[u8]) -> Option<Transmitter
         maximum_flow_slots,
         reported_flow_count,
         flows,
+        unparsed_records,
         raw_body_hexadecimal: bytes_to_hex(body),
     })
 }

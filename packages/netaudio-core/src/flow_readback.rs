@@ -114,9 +114,11 @@ pub fn verification(request: FlowVerificationRequest) -> FlowVerification {
 #[derive(Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FlowInventoryEvidence {
+    pub flows: Vec<serde_json::Map<String, Value>>,
     pub page_disposition: Option<String>,
     pub reported_flow_count: Option<usize>,
-    pub flows: Vec<serde_json::Map<String, Value>>,
+    #[serde(default)]
+    pub unparsed_records: Vec<Value>,
 }
 
 fn record_identity(record: &serde_json::Map<String, Value>) -> Option<u16> {
@@ -130,9 +132,13 @@ fn record_identity(record: &serde_json::Map<String, Value>) -> Option<u16> {
 
 impl FlowInventoryEvidence {
     fn unambiguous(&self) -> bool {
+        self.unparsed_records.is_empty() && self.accounted()
+    }
+
+    fn accounted(&self) -> bool {
         if self
             .reported_flow_count
-            .is_some_and(|count| count != self.flows.len())
+            .is_some_and(|count| count != self.flows.len() + self.unparsed_records.len())
         {
             return false;
         }
@@ -148,6 +154,11 @@ impl FlowInventoryEvidence {
             .iter()
             .all(|record| record_identity(record).is_some_and(|id| identities.insert(id)))
     }
+}
+
+pub fn inventory_accounted(value: Value) -> bool {
+    serde_json::from_value::<FlowInventoryEvidence>(value)
+        .is_ok_and(|inventory| inventory.accounted())
 }
 
 pub fn inventory_complete(value: Value) -> bool {

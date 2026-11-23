@@ -233,6 +233,8 @@ export default {
   "Type": "Tipo",
   "Slot:receiver channels": "Ranura:canales de recepción",
   "Destination": "Destino",
+  "Advertised": "Anunciado",
+  "Problem": "Problema",
   "Source": "Fuente",
   "Matched": "Coincide",
   "Not matched": "Sin coincidencia",

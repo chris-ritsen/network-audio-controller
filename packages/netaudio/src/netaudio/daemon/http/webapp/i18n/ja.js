@@ -233,6 +233,8 @@ export default {
   "Type": "種類",
   "Slot:receiver channels": "スロット:受信チャンネル",
   "Destination": "宛先",
+  "Advertised": "アドバタイズ",
+  "Problem": "問題",
   "Source": "ソース",
   "Matched": "一致",
   "Not matched": "不一致",

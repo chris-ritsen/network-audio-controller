@@ -233,6 +233,8 @@ export default {
   "Type": "유형",
   "Slot:receiver channels": "슬롯:수신 채널",
   "Destination": "대상",
+  "Advertised": "광고됨",
+  "Problem": "문제",
   "Source": "소스",
   "Matched": "일치함",
   "Not matched": "일치하지 않음",

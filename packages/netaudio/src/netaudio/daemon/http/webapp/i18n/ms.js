@@ -233,6 +233,8 @@ export default {
   "Type": "Jenis",
   "Slot:receiver channels": "Slot:saluran penerima",
   "Destination": "Destinasi",
+  "Advertised": "Diiklankan",
+  "Problem": "Masalah",
   "Source": "Sumber",
   "Matched": "Sepadan",
   "Not matched": "Tidak sepadan",

@@ -233,6 +233,8 @@ export default {
   "Type": "Typ",
   "Slot:receiver channels": "Slot:Empfängerkanäle",
   "Destination": "Ziel",
+  "Advertised": "Angekündigt",
+  "Problem": "Problem",
   "Source": "Quelle",
   "Matched": "Übereinstimmend",
   "Not matched": "Nicht übereinstimmend",

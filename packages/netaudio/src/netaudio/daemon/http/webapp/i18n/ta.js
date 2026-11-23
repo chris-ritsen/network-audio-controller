@@ -233,6 +233,8 @@ export default {
   "Type": "வகை",
   "Slot:receiver channels": "ஸ்லாட்:பெறுநர் சேனல்கள்",
   "Destination": "சேருமிடம்",
+  "Advertised": "அறிவிக்கப்பட்டது",
+  "Problem": "சிக்கல்",
   "Source": "மூலம்",
   "Matched": "பொருந்தியது",
   "Not matched": "பொருந்தவில்லை",

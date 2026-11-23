@@ -2,7 +2,7 @@ use super::operations::ControlError;
 use super::record::DeviceRecord;
 use super::transport::{CommandIntent, DeviceTransport, TransportError};
 use netaudio_core::flow_readback::{
-    inventory_complete, transmit_flow_specification, FlowReadbackRequest,
+    inventory_accounted, transmit_flow_specification, FlowReadbackRequest,
 };
 use netaudio_core::inventory::{Inventory, InventoryState};
 use netaudio_core::protocol::{
@@ -124,7 +124,7 @@ fn malformed(message: &'static str) -> ControlError {
 }
 
 pub(crate) fn canonical_inventory(inventory: &Value, protocol: u16) -> Result<Value, ControlError> {
-    if !inventory_complete(inventory.clone()) {
+    if !inventory_accounted(inventory.clone()) {
         return Err(ControlError::Conflict(
             "complete flow inventory is unavailable".to_owned(),
         ));
@@ -147,6 +147,14 @@ pub(crate) fn canonical_inventory(inventory: &Value, protocol: u16) -> Result<Va
                 errors.push(json!({"record_index": index, "error": error, "raw_record": record}))
             }
         }
+    }
+
+    for record in inventory["unparsed_records"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        errors.push(json!({"error": "transmitter flow record is malformed", "raw_record": record}));
     }
 
     Ok(json!({

@@ -233,6 +233,8 @@ export default {
   "Type": "Type",
   "Slot:receiver channels": "Slot:ontvangerkanalen",
   "Destination": "Bestemming",
+  "Advertised": "Aangekondigd",
+  "Problem": "Probleem",
   "Source": "Bron",
   "Matched": "Overeenkomend",
   "Not matched": "Niet overeenkomend",
