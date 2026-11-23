@@ -2,8 +2,8 @@ use super::discovery::{DiscoveredService, DiscoveryEvent};
 use super::inventory;
 use super::operations::ControlError;
 use super::presence::{Lapses, Returned};
-use super::record::DeviceRecord;
-use super::transport::DeviceTransport;
+use super::record::{DeviceRecord, InventoryState};
+use super::transport::{DeviceTransport, TransportError};
 use crate::monitoring::diagnostics::Diagnostics;
 use crate::monitoring::journal::service::Journal;
 use crate::monitoring::metering::Metering;
@@ -29,8 +29,8 @@ use tokio_util::task::TaskTracker;
 
 const MAXIMUM_CONCURRENT_REFRESHES: usize = 16;
 const MAXIMUM_PENDING_OPERATIONS: usize = 128;
-const STATUS_ATTEMPTS: u32 = 3;
-const STATUS_RETRY_DELAY: Duration = Duration::from_secs(1);
+const READ_ATTEMPTS: u32 = 3;
+const READ_RETRY_DELAY: Duration = Duration::from_secs(1);
 const CLOCK_FRESHNESS: Duration = Duration::from_secs(5);
 const CLOCK_FRESHNESS_LIMIT: Duration = Duration::from_secs(30);
 
@@ -91,11 +91,19 @@ struct PacketObservation {
     clock: Option<ClockLease>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReadProgress {
+    pub reading: usize,
+    pub working: bool,
+}
+
 #[derive(Default, Serialize)]
 pub struct RefreshReport {
-    pub observed: Vec<&'static str>,
     pub errors: BTreeMap<&'static str, String>,
+    pub observed: Vec<&'static str>,
     pub superseded: bool,
+    #[serde(skip)]
+    pub unanswered: bool,
 }
 
 struct RefreshData {
@@ -124,7 +132,7 @@ pub struct DeviceRegistry {
     refreshes: Arc<Semaphore>,
     refresh_queue: RefreshQueue,
     refresh_ready: Notify,
-    refreshing: watch::Sender<bool>,
+    progress: watch::Sender<ReadProgress>,
     pending: Arc<Semaphore>,
     tasks: TaskTracker,
     cancellation: CancellationToken,
@@ -159,7 +167,7 @@ impl DeviceRegistry {
             refreshes: Arc::new(Semaphore::new(MAXIMUM_CONCURRENT_REFRESHES)),
             refresh_queue: RefreshQueue::default(),
             refresh_ready: Notify::new(),
-            refreshing: watch::channel(false).0,
+            progress: watch::channel(ReadProgress::default()).0,
             pending: Arc::new(Semaphore::new(MAXIMUM_PENDING_OPERATIONS)),
             tasks: TaskTracker::new(),
             cancellation: CancellationToken::new(),
@@ -174,8 +182,8 @@ impl DeviceRegistry {
         })
     }
 
-    pub fn refreshing(&self) -> watch::Receiver<bool> {
-        self.refreshing.subscribe()
+    pub fn progress(&self) -> watch::Receiver<ReadProgress> {
+        self.progress.subscribe()
     }
 
     pub fn configure_capture(&self, observer: crate::capture::Observer) -> Result<()> {
@@ -190,6 +198,8 @@ impl DeviceRegistry {
 
     pub async fn run(self: Arc<Self>, mut discovery: mpsc::Receiver<DiscoveryEvent>) -> Result<()> {
         let mut workers = JoinSet::new();
+        let mut retries = JoinSet::new();
+        let mut attempts = BTreeMap::new();
         let mut active = BTreeSet::new();
         let mut lapses = Lapses::default();
         let result = async {
@@ -201,27 +211,38 @@ impl DeviceRegistry {
                     active.insert(refresh.key.clone());
                     let registry = Arc::clone(&self);
                     workers.spawn(async move {
-                        if let Err(error) = registry
-                            .refresh_entry(refresh.device, Some(refresh.generation))
-                            .await
-                        {
-                            tracing::warn!(device = refresh.key, %error, "device inventory refresh failed");
-                        }
-
-                        refresh.key
+                        let outcome = registry
+                            .refresh_entry(Arc::clone(&refresh.device), Some(refresh.generation))
+                            .await;
+                        (refresh.key, refresh.device, outcome)
                     });
                 }
 
-                let refreshing = !workers.is_empty();
-                self.refreshing
-                    .send_if_modified(|current| std::mem::replace(current, refreshing) != refreshing);
+                let progress = ReadProgress {
+                    reading: self.reading()?,
+                    working: !workers.is_empty() || !retries.is_empty(),
+                };
+                self.progress
+                    .send_if_modified(|current| std::mem::replace(current, progress) != progress);
 
                 tokio::select! {
                     _ = self.cancellation.cancelled() => return Ok(()),
                     _ = self.refresh_ready.notified() => {}
                     completed = workers.join_next(), if !workers.is_empty() => {
-                        let key = completed.context("inventory refresh worker disappeared")??;
+                        let (key, device, outcome) =
+                            completed.context("inventory refresh worker disappeared")??;
                         active.remove(&key);
+
+                        if let Some(delay) = self.conclude(&key, &device, outcome, &mut attempts)? {
+                            retries.spawn(async move {
+                                tokio::time::sleep(delay).await;
+                                (key, device)
+                            });
+                        }
+                    }
+                    waited = retries.join_next(), if !retries.is_empty() => {
+                        let (key, device) = waited.context("inventory retry timer disappeared")??;
+                        self.reschedule(key, device)?;
                     }
                     name = lapses.withdrawn(), if !lapses.is_empty() => {
                         if let Some(name) = name {
@@ -239,7 +260,125 @@ impl DeviceRegistry {
         }
         .await;
         workers.shutdown().await;
+        retries.shutdown().await;
         result
+    }
+
+    fn reading(&self) -> Result<usize> {
+        let devices = self
+            .devices
+            .read()
+            .map_err(|_| anyhow::anyhow!("device registry lock poisoned"))?;
+        let mut reading = 0;
+
+        for device in devices.values() {
+            let state = device
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+
+            if state.record.inventory_state == Some(InventoryState::Reading) {
+                reading += 1;
+            }
+        }
+
+        Ok(reading)
+    }
+
+    fn conclude(
+        &self,
+        key: &str,
+        device: &Arc<Device>,
+        outcome: Result<RefreshReport>,
+        attempts: &mut BTreeMap<String, u32>,
+    ) -> Result<Option<Duration>> {
+        let (unanswered, failure) = match &outcome {
+            Ok(report) if report.superseded => {
+                let reading = device
+                    .state
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("device lock poisoned"))?
+                    .record
+                    .inventory_state
+                    == Some(InventoryState::Reading);
+
+                if reading && !self.refresh_queue.contains(key)? {
+                    self.reschedule(key.to_owned(), Arc::clone(device))?;
+                }
+
+                return Ok(None);
+            }
+            Ok(report) => (report.unanswered, None),
+            Err(error) => {
+                tracing::warn!(device = key, %error, "device inventory refresh failed");
+                (
+                    error
+                        .downcast_ref::<TransportError>()
+                        .is_some_and(TransportError::unanswered),
+                    Some(error.to_string()),
+                )
+            }
+        };
+
+        if unanswered {
+            let attempt = attempts.entry(key.to_owned()).or_insert(1);
+
+            if *attempt < READ_ATTEMPTS {
+                let delay = READ_RETRY_DELAY * *attempt;
+                *attempt += 1;
+                return Ok(Some(delay));
+            }
+        }
+
+        attempts.remove(key);
+        let mut state = device
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+
+        if state.record.control_address().is_none() {
+            return Ok(None);
+        }
+
+        let previous = state.record.inventory_state;
+        let mut changed = false;
+
+        if let Some(reason) = failure {
+            let errors = json!({"inventory": reason});
+            changed = state.record.properties.get("read_errors") != Some(&errors);
+            state
+                .record
+                .properties
+                .insert("read_errors".to_owned(), errors);
+
+            if previous != Some(InventoryState::Read) {
+                state.record.inventory_state = Some(InventoryState::Unread);
+            }
+        } else {
+            state.record.inventory_state = Some(InventoryState::Read);
+        }
+
+        if changed || state.record.inventory_state != previous {
+            self.publish(&state.record)?;
+        }
+
+        Ok(None)
+    }
+
+    fn reschedule(&self, key: String, device: Arc<Device>) -> Result<()> {
+        let generation = {
+            let state = device
+                .state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
+
+            if state.record.control_address().is_none() {
+                return Ok(());
+            }
+
+            state.generation
+        };
+        self.schedule_refresh(key, device, generation)
     }
 
     fn schedule_refresh(&self, key: String, device: Arc<Device>, generation: u64) -> Result<()> {
@@ -336,6 +475,7 @@ impl DeviceRegistry {
                 .map_err(|_| anyhow::anyhow!("device lock poisoned"))?;
 
             if state.record.services.remove(name).is_some() {
+                state.record.expect_inventory(false);
                 state.generation += 1;
                 state.identity_generation += 1;
                 let advertised = state.record.advertised();

@@ -13,18 +13,36 @@ use tokio::time::Instant;
 
 const NANOSECONDS_PER_MILLISECOND: f64 = 1_000_000.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InventoryState {
+    Read,
+    Reading,
+    Unread,
+}
+
+impl InventoryState {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Reading => "reading",
+            Self::Unread => "unread",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct DeviceRecord {
+    pub address: Ipv4Addr,
+    pub inventory_state: Option<InventoryState>,
     pub key: String,
     pub name: String,
-    pub address: Ipv4Addr,
     pub presence: Presence,
+    pub properties: Map<String, Value>,
+    pub receivers: BTreeMap<u16, Value>,
     pub retired: bool,
     pub services: BTreeMap<String, DiscoveredService>,
-    pub receivers: BTreeMap<u16, Value>,
-    pub transmitters: BTreeMap<u16, Value>,
     pub subscriptions: Vec<Value>,
-    pub properties: Map<String, Value>,
+    pub transmitters: BTreeMap<u16, Value>,
 }
 
 impl DeviceRecord {
@@ -34,6 +52,7 @@ impl DeviceRecord {
             name: key.trim_end_matches(".local.").to_owned(),
             key,
             address: service.ipv4,
+            inventory_state: None,
             presence: Presence::default(),
             retired: false,
             services: BTreeMap::new(),
@@ -104,7 +123,17 @@ impl DeviceRecord {
 
         self.services.insert(service.name.clone(), service);
         self.presence.advertised(self.advertised(), changed, now);
+        self.expect_inventory(changed);
         Ok(changed)
+    }
+
+    pub fn expect_inventory(&mut self, changed: bool) {
+        self.inventory_state = match (self.control_address().is_some(), self.inventory_state) {
+            (false, Some(InventoryState::Reading)) => None,
+            (true, None) => Some(InventoryState::Reading),
+            (true, Some(InventoryState::Unread)) if changed => Some(InventoryState::Reading),
+            (_, state) => state,
+        };
     }
 
     pub fn advertised(&self) -> bool {
@@ -462,6 +491,9 @@ impl DeviceRecord {
             ("subscriptions".to_owned(), json!(self.subscriptions)),
             ("kind".to_owned(), json!(self.kind())),
         ]));
+        if let Some(state) = self.inventory_state {
+            record.insert("inventory_state".to_owned(), json!(state.as_str()));
+        }
         record.insert(
             "device_controls".to_owned(),
             super::panels::snapshot(

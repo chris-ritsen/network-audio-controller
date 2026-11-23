@@ -1,9 +1,8 @@
 use super::Inspection;
-use super::{
-    Device, DeviceRegistry, RefreshData, RefreshReport, STATUS_ATTEMPTS, STATUS_RETRY_DELAY,
-};
+use super::{Device, DeviceRegistry, RefreshData, RefreshReport, READ_ATTEMPTS, READ_RETRY_DELAY};
 use crate::devices::inventory;
 use crate::devices::operations::ControlOperation;
+use crate::devices::record::InventoryState;
 use crate::devices::transport::DeviceTransport;
 use crate::monitoring::requests::{self, StatusQuery};
 use anyhow::{bail, Context, Result};
@@ -42,9 +41,8 @@ impl DeviceRegistry {
                     errors.insert("settings", completion.readback_errors.join("; "));
                 }
                 Ok(RefreshReport {
-                    observed: Vec::new(),
                     errors,
-                    superseded: false,
+                    ..RefreshReport::default()
                 })
             }
             None => bail!("device has no native control transport"),
@@ -226,9 +224,9 @@ impl DeviceRegistry {
         ];
         let mut unavailable = BTreeMap::new();
 
-        for attempt in 0..STATUS_ATTEMPTS {
+        for attempt in 0..READ_ATTEMPTS {
             if attempt > 0 {
-                tokio::time::sleep(STATUS_RETRY_DELAY * attempt).await;
+                tokio::time::sleep(READ_RETRY_DELAY * attempt).await;
             }
 
             let mut unanswered = Vec::new();
@@ -387,8 +385,13 @@ impl DeviceRegistry {
                 .insert("read_errors".to_owned(), json!(report.errors));
         }
 
+        if !report.unanswered {
+            record.inventory_state = Some(InventoryState::Read);
+        }
+
         self.publish(&record)?;
         state.record = record;
+        self.refresh_ready.notify_one();
         Ok(report)
     }
 }
@@ -447,6 +450,7 @@ pub(super) async fn read_inventory(
                     }
                 }
                 Err(error) => {
+                    data.report.unanswered |= error.unanswered();
                     data.report.errors.insert(kind, error.to_string());
                 }
             }
@@ -458,6 +462,7 @@ pub(super) async fn read_inventory(
                 data.report.observed.push("channels");
             }
             Err(error) => {
+                data.report.unanswered |= error.unanswered();
                 data.report.errors.insert("channels", error.to_string());
             }
         }
@@ -469,6 +474,7 @@ pub(super) async fn read_inventory(
             data.report.observed.push("settings");
         }
         Err(error) => {
+            data.report.unanswered |= error.unanswered();
             data.report.errors.insert("settings", error.to_string());
         }
     }
@@ -479,6 +485,7 @@ pub(super) async fn read_inventory(
             data.report.observed.push("properties");
         }
         Err(error) => {
+            data.report.unanswered |= error.unanswered();
             data.report.errors.insert("properties", error.to_string());
         }
     }
@@ -504,6 +511,7 @@ pub(super) async fn read_inventory(
             data.report.observed.push("receiver_flows");
         }
         Err(error) => {
+            data.report.unanswered |= error.unanswered();
             data.receiver_flow_error = Some(error.to_string());
         }
     }

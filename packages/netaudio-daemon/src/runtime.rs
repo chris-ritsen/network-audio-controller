@@ -1,6 +1,9 @@
 use crate::authorization::AuthorizationStore;
 use crate::configuration::{http_address, Configuration, DEFAULT_HTTP_PORT};
-use crate::devices::{discovery, registry::DeviceRegistry};
+use crate::devices::{
+    discovery,
+    registry::{DeviceRegistry, ReadProgress},
+};
 use crate::http::{inventory, ApiError, AuthorizationService, ConnectionContext};
 use crate::monitoring::multicast::MulticastReceiver;
 use crate::network::selection::Selection;
@@ -25,6 +28,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 const DISCOVERY_QUEUE_CAPACITY: usize = 128;
+const INVENTORY_DEADLINE: Duration = Duration::from_secs(60);
 const JOURNAL_OWNERSHIP_WAIT: Duration = Duration::from_secs(20);
 const MONITORING_QUEUE_CAPACITY: usize = 256;
 const SETTLE_DEADLINE: Duration = Duration::from_secs(12);
@@ -494,7 +498,7 @@ pub async fn run(
         Ok(()) if announces => {
             tokio::select! {
                 _ = cancellation.cancelled() => Ok(()),
-                _ = settle(devices.refreshing(), managed.startup_finished()) => announce(address),
+                _ = settle(devices.progress(), managed.startup_finished()) => announce(address),
             }
         }
         other => other,
@@ -574,29 +578,52 @@ async fn shutdown(
     Ok(Json(json!({"success": true})))
 }
 
-async fn settle(mut refreshing: watch::Receiver<bool>, mut managed: watch::Receiver<bool>) {
-    let settled = async {
-        if managed.wait_for(|finished| *finished).await.is_err() {
-            return;
-        }
+async fn settle(mut progress: watch::Receiver<ReadProgress>, mut managed: watch::Receiver<bool>) {
+    let started = tokio::time::Instant::now();
 
-        while refreshing.wait_for(|refreshing| !refreshing).await.is_ok() {
-            tokio::select! {
-                _ = tokio::time::sleep(SETTLE_QUIET) => return,
-                changed = refreshing.changed() => {
-                    if changed.is_err() {
-                        return;
-                    }
+    if managed.wait_for(|finished| *finished).await.is_err() {
+        return;
+    }
+
+    if tokio::time::timeout(
+        INVENTORY_DEADLINE,
+        quiet(&mut progress, |progress| progress.reading == 0),
+    )
+    .await
+    .is_err()
+    {
+        tracing::warn!(
+            "device inventories were still being read when the private engine began serving"
+        );
+        return;
+    }
+
+    if tokio::time::timeout_at(
+        started + SETTLE_DEADLINE,
+        quiet(&mut progress, |progress| {
+            progress.reading == 0 && !progress.working
+        }),
+    )
+    .await
+    .is_err()
+    {
+        tracing::warn!("device status was still being read when the private engine began serving");
+    }
+}
+
+async fn quiet(
+    progress: &mut watch::Receiver<ReadProgress>,
+    settled: impl Fn(&ReadProgress) -> bool,
+) {
+    while progress.wait_for(&settled).await.is_ok() {
+        tokio::select! {
+            _ = tokio::time::sleep(SETTLE_QUIET) => return,
+            changed = progress.changed() => {
+                if changed.is_err() {
+                    return;
                 }
             }
         }
-    };
-
-    if tokio::time::timeout(SETTLE_DEADLINE, settled)
-        .await
-        .is_err()
-    {
-        tracing::warn!("devices were still being read when the private engine began serving");
     }
 }
 

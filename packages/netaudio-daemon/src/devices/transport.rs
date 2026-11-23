@@ -57,6 +57,12 @@ pub enum TransportError {
     MalformedResponse(&'static str),
 }
 
+impl TransportError {
+    pub fn unanswered(&self) -> bool {
+        matches!(self, Self::Network(_) | Self::ReadTimeout)
+    }
+}
+
 impl std::fmt::Display for TransportError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

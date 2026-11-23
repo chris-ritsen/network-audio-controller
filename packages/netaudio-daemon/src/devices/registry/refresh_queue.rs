@@ -21,6 +21,15 @@ pub(super) struct RefreshQueue {
 }
 
 impl RefreshQueue {
+    pub fn contains(&self, key: &str) -> Result<bool> {
+        Ok(self
+            .pending
+            .lock()
+            .map_err(|_| anyhow::anyhow!("inventory refresh queue lock poisoned"))?
+            .devices
+            .contains_key(key))
+    }
+
     pub fn remove(&self, key: &str) -> Result<()> {
         let mut pending = self
             .pending
