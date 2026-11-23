@@ -92,7 +92,7 @@ def listed(devices: dict[str, Device]) -> dict[str, Device]:
 
 async def searched() -> str:
     try:
-        settings = await call_daemon("GET", "/settings", timeout=5.0)
+        settings = await call_daemon("GET", "/settings", timeout=30.0)
     except (DaemonRefusal, DaemonSilent, DaemonUnavailable):
         return "No Dante devices found."
     used = [

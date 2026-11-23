@@ -20,7 +20,7 @@ def ansi(code: str, text: str) -> str:
 
 
 async def daemon_devices() -> dict[str, Device]:
-    records = await call_daemon("GET", "/devices", timeout=5.0)
+    records = await call_daemon("GET", "/devices", timeout=30.0)
     devices = {server_name: Device(record) for server_name, record in records.items()}
     coverage.warn(devices)
     return devices
